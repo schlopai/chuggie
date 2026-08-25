@@ -11,6 +11,13 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 root="$(cd ../.. && pwd)"
 
+# The two ROMs are build artifacts; make them if a fresh checkout doesn't have them.
+if [ ! -f tones.gba ] || [ ! -f song.gba ]; then
+  tish build src/tones.tish --target gba -o tones.gba >/tmp/chiptune-vbuild.log 2>&1 \
+    && tish build src/song.tish --target gba -o song.gba >>/tmp/chiptune-vbuild.log 2>&1 \
+    || { echo "FAIL build:"; tail -20 /tmp/chiptune-vbuild.log; exit 1; }
+fi
+
 GBA_SHOT_AUDIO=/tmp/chiptune-tones.wav "$root/tools/gba-shot" tones.gba /tmp/chiptune.ppm 400 2>&1 \
   | sed -n 's/^gba-shot: audio/captured:/p'
 GBA_SHOT_AUDIO=/tmp/chiptune-song.wav "$root/tools/gba-shot" song.gba /tmp/chiptune.ppm 400 2>&1 \
