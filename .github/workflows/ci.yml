@@ -167,10 +167,27 @@ jobs:
           repository: spacedevin/agb
           ref: chuggie
           path: chuggie/agb
-      - name: Install libmgba + tooling the verifiers use
+      - name: Install tooling the verifiers use
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmgba-dev imagemagick python3-numpy python3-pil libfreetype6-dev pkg-config
+          sudo apt-get install -y imagemagick python3-numpy python3-pil libfreetype6-dev pkg-config cmake libpng-dev zlib1g-dev
+      # libmgba is built from source at the SAME version the local machines run (Ubuntu noble
+      # packages 0.10.2, and the version gap shows up as emulator-timing and capture failures).
+      - name: Cache libmgba
+        id: mgba-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/mgba-prefix
+          key: mgba-0.10.5-${{ runner.os }}
+      - name: Build libmgba 0.10.5
+        if: steps.mgba-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch 0.10.5 https://github.com/mgba-emu/mgba /tmp/mgba-src
+          cmake -S /tmp/mgba-src -B /tmp/mgba-build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$HOME/mgba-prefix" -DBUILD_QT=OFF -DBUILD_SDL=OFF \
+            -DUSE_FFMPEG=OFF -DUSE_SQLITE3=OFF -DUSE_DISCORD_RPC=OFF -DUSE_EDITLINE=OFF \
+            -DUSE_ELF=OFF -DUSE_EPOXY=OFF -DBUILD_GL=OFF -DBUILD_GLES2=OFF
+          make -C /tmp/mgba-build -j"$(nproc)" install
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
