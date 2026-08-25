@@ -104,19 +104,26 @@ shot_partial "$(( $(fx_start bars)    + 74 ))" "bars"
 shot_partial "$(( $(fx_start mosaic)  + 80 ))" "mosaic"
 shot_partial "$(( $(fx_start rain)    + 78 ))" "rain"
 shot_partial "$(( $(fx_start checker) + 76 ))" "checker"
-rm -f "$log"
 
 # ⚠️ The curtain must come OFF. This is the bug that shipped twice: the software effects only ever
 # painted more curtain, so the screen stayed black through the fade-in and through the dwell after
-# it. Frame 1090 sits in the dwell AFTER the rain crossing — it must show a full board.
+# it. The dwell AFTER the rain crossing (entry + 138) must show a full board — measured in pixels
+# like the partial checks, since PNG byte size is encoder-dependent.
 png=$(mktemp -u).png
-$ROOT/scripts/screenshot.sh $rom "$png" 1090 >/dev/null 2>&1 || true
-sz=$(stat -f%z "$png" 2>/dev/null || stat -c%s "$png" 2>/dev/null || echo 0)
+$ROOT/scripts/screenshot.sh $rom "$png" "$(( $(fx_start rain) + 138 ))" >/dev/null 2>&1 || true
+rm -f "$log"
+cov=$(python3 -c "
+from PIL import Image
+from collections import Counter
+d=list(Image.open('$png').convert('RGB').getdata())
+c=Counter(d)
+print(c.most_common(1)[0][1]*100//len(d), len([1 for _,n in c.items() if n > len(d)//100]))" 2>/dev/null || echo "100 1")
 rm -f "$png"
-if [ "$sz" -gt 5200 ]; then
-  echo "  ok   the software curtain lifts after its transition ($sz b)"
+maj=${cov%% *}; colors=${cov##* }
+if [ "$maj" -le 96 ] && [ "$colors" -ge 3 ]; then
+  echo "  ok   the software curtain lifts after its transition (majority ${maj}%, ${colors} colours)"
 else
-  echo "  FAIL the curtain is still up after the rain transition ($sz b)"; fail=1
+  echo "  FAIL the curtain is still up after the rain transition (majority ${maj}%, ${colors} colours)"; fail=1
 fi
 
 exit $fail
