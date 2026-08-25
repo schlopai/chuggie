@@ -25,14 +25,14 @@ def onset(sig, thresh=400):
     loud = np.abs(sig) > thresh
     return (int(np.argmax(loud)) / rate) if loud.any() else 0.0
 
-def dominant(seg):
+def dominant(seg, lo=40.0):
     seg = seg - seg.mean()
     if np.abs(seg).max() < 40:
         return 0.0
     win = seg * np.hanning(len(seg))
     spec = np.abs(np.fft.rfft(win))
     freqs = np.fft.rfftfreq(len(seg), 1 / rate)
-    band = (freqs > 40) & (freqs < 8000)
+    band = (freqs > lo) & (freqs < 8000)
     spec, freqs = spec[band], freqs[band]
     return float(freqs[int(np.argmax(spec))])
 
@@ -45,10 +45,11 @@ if peak < 500:
     fails += 1
 
 # Overworld lead opens on G4 (67) ≈ 392 Hz at bpm 108.
-# Keep the window short so the wave bass (~64 Hz) doesn't steal the FFT peak.
+# The wave bass (~64 Hz) can steal the FFT peak in any window, so the lead check reads the
+# spectrum above the bass register instead of hoping the slice dodges it.
 a = int((start + 0.10) * rate)
 b = int((start + 0.28) * rate)
-got = dominant(mono[a:b])
+got = dominant(mono[a:b], lo=120.0)
 want = 392.0
 if got <= 0:
     print("G4: SILENCE")
