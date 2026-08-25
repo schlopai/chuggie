@@ -108,15 +108,17 @@ fi
 rm -f "$log"
 
 # ── The per-page geometric claims ────────────────────────────────────────────────────────────────
-# Frame numbers are mid-dwell for each page, read off the cadence the log prints above (a page
-# enters roughly every 337 frames and the dwell is 300).
+# Frame numbers are mid-dwell for each page, read off the cadence the log prints above
+# (entries as of this build: cafe 22, hermann 367, ouchi 691, kanizsa 1044, ebbinghaus 1376,
+# muller 1700, lilac 2028, afterimage 2359, aftereffect 2687, barber 3025 — re-read the log and
+# re-anchor these if the cadence moves again).
 shoot() {
   $ROOT/scripts/screenshot.sh $rom "$2" "$1" >/dev/null 2>&1 || true
   [ -f "$2" ] || { echo "  FAIL no screenshot at frame $1"; fail=1; return 1; }
 }
 
 dir=$(mktemp -d)
-for f in 177 534 871 1227 1570 1906 2244 2320 2591 2700 2900 2903 3045 3060 3306 3340; do
+for f in 177 534 871 1227 1570 1906 2178 2218 2591 2600 2900 2903 2940 2955 3130 3164; do
   shoot $f "$dir/$f.png" || true
 done
 
@@ -177,12 +179,12 @@ else:                  no(f"muller-lyer shafts differ: {a} vs {b} px")
 
 # ── lilac chaser: exactly one disc blanked, and the gap MOVES. A chaser stuck on one disc is a
 # still picture that passes every static check.
-g1 = count(2244, BLANK)
-g2 = count(2320, BLANK)
+g1 = count(2178, BLANK)
+g2 = count(2218, BLANK)
 if g1 > 200 and g2 > 200: ok(f"lilac chaser blanks a disc ({g1} px)")
 else:                     no(f"lilac chaser has no blanked disc ({g1}, {g2} px)")
-im1 = Image.open(f"{d}/2244.png").convert('RGB')
-im2 = Image.open(f"{d}/2320.png").convert('RGB')
+im1 = Image.open(f"{d}/2178.png").convert('RGB')
+im2 = Image.open(f"{d}/2218.png").convert('RGB')
 def centroid(im):
     pts = [(x, y) for y in range(160) for x in range(240) if im.getpixel((x, y)) == BLANK]
     return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)) if pts else None
@@ -211,7 +213,7 @@ if blobs == 3: ok("kanizsa shows three separate inducers")
 else:          no(f"kanizsa shows {blobs} dark regions, expected 3")
 
 # ── afterimage: the screen must actually reach full white, or there is nothing to stare away from.
-w = count(2700, WHITE)
+w = count(2600, WHITE)
 if w > 36000: ok(f"afterimage flashes to full white ({w} px)")
 else:         no(f"afterimage never whited out ({w} px white)")
 
@@ -236,18 +238,18 @@ if colsig(2900) != colsig(2903):
     ok("motion aftereffect is scrolling during its run")
 else:
     no("motion aftereffect never moves — the stripes are static throughout")
-# Both frames are after the clamp at t=240 (frame ~3037) and before the page's own transition
-# starts (~3070) — the dwell counter runs from the last page CHANGE, not from enter(), so the
-# window is narrower than dwell+enter suggests.
-if full(3045) == full(3060):
-    ok("motion aftereffect stops dead after the run (frames 3045 and 3060 identical)")
+# Both frames are after the clamp at t=240 (page 8 enters ~2687, clamp ~2927) and before the
+# page's own transition starts (~2987) — the dwell counter runs from the last page CHANGE, not
+# from enter(), so the window is narrower than dwell+enter suggests.
+if full(2940) == full(2955):
+    ok("motion aftereffect stops dead after the run (frames 2940 and 2955 identical)")
 else:
     no("motion aftereffect is still moving after the clamp — there is no aftereffect without a hard stop")
 
 # ── barber pole: THE CLAIM is stripes moving behind a slot that does NOT move. If the mask scrolled
 # with them the whole illusion is gone, and a screenshot of either frame alone looks correct.
-im1 = Image.open(f"{d}/3306.png").convert('RGB')
-im2 = Image.open(f"{d}/3340.png").convert('RGB')
+im1 = Image.open(f"{d}/3130.png").convert('RGB')
+im2 = Image.open(f"{d}/3164.png").convert('RGB')
 BACKDROP = (24, 24, 41)
 def slot_edges(im):
     row = [im.getpixel((x, 100)) == BACKDROP for x in range(240)]
