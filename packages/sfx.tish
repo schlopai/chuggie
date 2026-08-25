@@ -98,7 +98,8 @@ export function sfxAt(wav: i32, x: i32, y: i32) {
   if (L[L_READY] === 0) { sound_play(wav)  return }
   let dx: i32 = x - L[L_X]
   let dy: i32 = y - L[L_Y]
-  sound_play_ex(wav, sfxVolumeAt(dist(dx, dy)), sfxPanAt(dx), 256)
+  let dd: i32 = dist(dx, dy)
+  sound_play_ex(wav, sfxVolumeAt(dd), sfxPanAt(dx), 256)
 }
 
 /// Play `wav` at the listener — full volume, centred. For UI clicks and anything the player IS.
@@ -112,5 +113,6 @@ export function sfxAtPitched(wav: i32, x: i32, y: i32, pitch: i32) {
   if (L[L_READY] === 0) { sound_play(wav)  return }
   let dx: i32 = x - L[L_X]
   let dy: i32 = y - L[L_Y]
-  sound_play_ex(wav, sfxVolumeAt(dist(dx, dy)), sfxPanAt(dx), pitch)
+  let dd: i32 = dist(dx, dy)
+  sound_play_ex(wav, sfxVolumeAt(dd), sfxPanAt(dx), pitch)
 }

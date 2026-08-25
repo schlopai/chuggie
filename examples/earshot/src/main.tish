@@ -102,13 +102,15 @@ function paint() {
   let dy: i32 = srcY() - CY
   let ady: i32 = dy
   if (ady < 0) { ady = 0 - ady }
-  let dist: i32 = d + (ady >> 1)
-  if (ady > d) { dist = ady + (d >> 1) }
+  // ⚠️ named sdist, not dist: packages/sfx.tish has a module-internal dist() and the current
+  // compiler resolves a same-named local to that function cell in call-argument position.
+  let sdist: i32 = d + (ady >> 1)
+  if (ady > d) { sdist = ady + (d >> 1) }
 
   ui_rect(0, 132, 240, 28, PANEL, 1)
   ui_rect(0, 132, 240, 1, EDGE, 1)
-  ui_text(small, 6, 136, "pan " + numStr(sfxPanAt(dx)) + "   vol " + numStr(sfxVolumeAt(dist)), INK)
-  ui_text(small, 6, 148, "dx " + numStr(dx) + "  dist " + numStr(dist), DIM)
+  ui_text(small, 6, 136, "pan " + numStr(sfxPanAt(dx)) + "   vol " + numStr(sfxVolumeAt(sdist)), INK)
+  ui_text(small, 6, 148, "dx " + numStr(dx) + "  dist " + numStr(sdist), DIM)
 }
 paint()
 
