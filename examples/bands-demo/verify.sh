@@ -57,8 +57,12 @@ except ImportError:
 
 def shot_at(frame, sch=""):
     out = "/tmp/_bands_%d_%s.png" % (frame, sch.replace(":", "").replace(",", "") or "none")
-    subprocess.run([shot, rom, out, str(frame), sch], cwd=home, env=env,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    r = subprocess.run([shot, rom, out, str(frame), sch], cwd=home, env=env,
+                       capture_output=True, text=True)
+    if not os.path.exists(out):
+        print("  FAIL screenshot at frame %d never appeared (exit %d)" % (frame, r.returncode))
+        print((r.stderr or r.stdout or "")[-2000:])
+        sys.exit(1)
     return Image.open(out).convert("RGB")
 
 def npx(a, b, y0=0, y1=160):
