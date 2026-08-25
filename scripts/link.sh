@@ -50,8 +50,11 @@ GBA_LINK_LOG=1 "$link" "$rom0" "$rom1" /tmp/gba-link-0.ppm /tmp/gba-link-1.ppm \
 link_pid=$!
 ( sleep "${LINK_TIMEOUT:-1800}"; kill "$link_pid" 2>/dev/null ) &
 watchdog=$!
-wait "$link_pid"; rc=$?
-kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null
+# ⚠️ Every step here runs under `set -e`, and each can legitimately "fail" (wait on a killed
+# process, kill on an already-finished watchdog) — none of that is the script's exit status.
+rc=0; wait "$link_pid" || rc=$?
+kill "$watchdog" 2>/dev/null || true
+wait "$watchdog" 2>/dev/null || true
 if [ "$rc" -ge 128 ]; then
   echo "gba-link: killed by the ${LINK_TIMEOUT:-1800}s watchdog — the pair deadlocked" >&2
 fi
