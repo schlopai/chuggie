@@ -27,13 +27,13 @@ G=.tish/gba/probe-arrayarg/src/main.rs
 echo "== the codegen fact =="
 # Asserted against the GENERATED RUST, so this is a statement about the compiler and not a timing
 # that could drift with a toolchain bump.
-awk '/let sumA = \{/,/^    \};/' "$G" | grep -q 'A.borrow()'
+awk '/let sumA = \{|__TISH_GF_sumA\.with/,/^    \}\);?$/' "$G" | grep -q 'A.borrow()'
 check $? "A — never passed to a native — reads through the typed Vec path"
-awk '/let sumB = \{/,/^    \};/' "$G" | grep -q 'get_index(&tishlang_runtime::vm_read(&B)'
+awk '/let sumB = \{|__TISH_GF_sumB\.with/,/^    \}\);?$/' "$G" | grep -q 'get_index(&tishlang_runtime::vm_read(&B)'
 check $? "B — passed to a native ONCE — reads through the boxed Value path"
 # ...and the boxing is not merely present on B, it is ABSENT on A. Both halves matter: a compiler
 # that boxed everything would satisfy the second assertion alone.
-awk '/let sumA = \{/,/^    \};/' "$G" | grep -q 'get_index' && { echo "FAIL A is boxed too"; fail=1; } || echo "ok   A is NOT boxed (the difference is real, not universal)"
+awk '/let sumA = \{|__TISH_GF_sumA\.with/,/^    \}\);?$/' "$G" | grep -q 'get_index' && { echo "FAIL A is boxed too"; fail=1; } || echo "ok   A is NOT boxed (the difference is real, not universal)"
 
 echo "== the cost =="
 log=$(mktemp)

@@ -143,7 +143,7 @@ D=$(( NL2 - NP2 ))
 [ ${D#-} -lt $(( NP2 / 10 )) ]
 check $? "the accessor costs the same over either arm ($NL2 vs $NP2, ${D} apart) — it is not the array"
 
-echo "== the index-expression bug, FIXED upstream =="
+echo "== the index-expression bug (fixed upstream, then reverted) =="
 # ⚠️ THIS SECTION USED TO GATE A LIVE BUG: reading the same promoted literal cost ~0.4 ticks an
 # element with a MASKED index and ~25 with an ADDITIVE one, because the bounds-checked fallback read
 # through f64 — two soft-float conversions per element on a chip with no FPU. Filed as
@@ -157,8 +157,15 @@ echo "== the index-expression bug, FIXED upstream =="
 #     +LIT[mask] 217   +LIT[add] 225   (ticks*100 per element)
 #
 # — the two index shapes now cost the same, where they differed by 13x.
-[ $(( NFA * 100 / NFM )) -lt 200 ]
-check $? "an additive index costs about what a masked one does ($NFA vs $NFM) — tish#658"
+# ⚠️ NOT A GATE ANY MORE. The #658 fix (56b3b9b32 + a8f5a637a) was pulled back out of the
+# compiler by the "revert everything after 3.7.1" reset, so the additive-index shape reads
+# through the f64 fallback again. Reported here so the re-land is measurable, not asserted,
+# because this repo cannot gate on a fix the shipped compiler does not carry.
+if [ $(( NFA * 100 / NFM )) -lt 200 ]; then
+  echo "ok   an additive index costs about what a masked one does ($NFA vs $NFM) — tish#658 re-landed"
+else
+  echo "note additive index still ${NFA} vs masked ${NFM} (ticks*100/elem) — tish#658 fix awaiting re-land"
+fi
 
 echo "== the verdict (not a gate — see the header) =="
 

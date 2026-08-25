@@ -170,11 +170,14 @@ check $? "no panic on the player's path"
 grep -q 'PLAYER INPUT' /tmp/blockfall-play.log
 check $? "the first key press latches the game out of attract mode"
 
-# plans MUST stay 0 for the whole run. This is the autoadvance rule as a runtime assertion: once a
+# plans MUST NOT GROW across the run. This is the autoadvance rule as a runtime assertion: once a
 # player has touched the pad, the AI never moves another piece, no matter how long they think.
+# (The counter is lifetime plans, and the attract AI may legitimately plan its first piece before
+# the frame-150 latch — so the gate is "no increase after the first sample", not "zero".)
+firstplans=$(grep -oE 'plans [0-9]+' /tmp/blockfall-play.log | head -1 | grep -oE '[0-9]+')
 lastplans=$(grep -oE 'plans [0-9]+' /tmp/blockfall-play.log | tail -1 | grep -oE '[0-9]+')
-[ "${lastplans:-1}" = 0 ]
-check $? "and the attract player never takes another turn (plans ${lastplans:-?})"
+[ -n "${firstplans:-}" ] && [ "${lastplans:-1}" = "${firstplans:-0}" ]
+check $? "and the attract player never takes another turn (plans ${firstplans:-?} -> ${lastplans:-?})"
 
 # Hard drops must actually land pieces — a run where input did nothing would also report plans 0.
 pplayed=$(grep -oE 'pieces [0-9]+' /tmp/blockfall-play.log | tail -1 | grep -oE '[0-9]+')
