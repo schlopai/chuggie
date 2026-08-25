@@ -26,6 +26,8 @@ rm -f "$0"   # the open fd keeps it readable; nothing on disk to edit or leave b
 
 ROM=bands-demo.gba
 SHOT=../../scripts/screenshot.sh
+[ -f "$ROM" ] || npm run build >/tmp/bands-vbuild.log 2>&1 || true
+[ -f "$ROM" ] || { echo "  FAIL $ROM missing:"; tail -20 /tmp/bands-vbuild.log; exit 1; }
 PASS=0
 FAIL=0
 ok()  { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }

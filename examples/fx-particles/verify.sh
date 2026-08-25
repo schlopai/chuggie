@@ -16,6 +16,8 @@ cd "$VERIFY_HOME"
 rm -f "$0"   # the open fd keeps it readable; nothing on disk to edit or leave behind
 
 ROM=fx-particles.gba
+[ -f "$ROM" ] || npm run build >/tmp/fxp-vbuild.log 2>&1 || true
+[ -f "$ROM" ] || { echo "  FAIL $ROM missing:"; tail -20 /tmp/fxp-vbuild.log; exit 1; }
 SHOT=../../scripts/screenshot.sh
 mkdir -p shots
 PASS=0
