@@ -228,7 +228,7 @@ function initSprites() {
 /// ⚠️ The angle comes from the shared seeded stream, in the same order on both consoles. Anything
 /// local here — a frame counter, an unseeded RNG — and the two would disagree from the first serve,
 /// which is the single easiest way to desync a lockstep game.
-function serve(toRight: i32) {
+function serveBall(toRight: i32) {
   G.bx = 120 * FX
   G.by = 88 * FX
   G.serving = SERVE_HOLD_TICKS
@@ -251,7 +251,7 @@ function resetMatch() {
   G.ry = 64
   G.over = 0
   G.phase = 1
-  serve(1)
+  serveBall(1)
 }
 
 function movePaddle(y: i32, bits: i32): i32 {
@@ -311,11 +311,11 @@ function ballTick() {
   // keep travelling for the rest of the step and score from somewhere impossible.
   if (px < -8) {
     G.s1 = G.s1 + 1
-    if (G.s1 >= WIN_SCORE) { G.over = 1 } else { serve(0) }
+    if (G.s1 >= WIN_SCORE) { G.over = 1 } else { serveBall(0) }
   }
   if (px > 248) {
     G.s0 = G.s0 + 1
-    if (G.s0 >= WIN_SCORE) { G.over = 1 } else { serve(1) }
+    if (G.s0 >= WIN_SCORE) { G.over = 1 } else { serveBall(1) }
   }
 }
 
@@ -342,7 +342,7 @@ function step(in0: i32, in1: i32) {
   if (G.phase === 0) {
     if ((in0 & IN_START) !== 0) {
       G.phase = 1
-      serve(1)
+      serveBall(1)
     }
     return
   }
