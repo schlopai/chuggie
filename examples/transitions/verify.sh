@@ -67,8 +67,6 @@ if grep -q "Ran out of video RAM" "$log"; then
 else
   echo "  ok   the tile allocator survived both software effects"
 fi
-rm -f "$log"
-
 # ── Mid-transition frames ────────────────────────────────────────────────────────────────────────
 # PARTIAL coverage, checked by PNG size: a fully-hidden frame compresses to well under 1.5KB and a
 # fully-visible board to about 5.4KB, so a real half-closed wipe lands between the two. Crude, and
@@ -89,15 +87,19 @@ shot_partial() {
     echo "  FAIL $name at frame $frame is fully hidden or fully visible ($sz b)"; fail=1
   fi
 }
-# Frames chosen from the 90-frame cadence the log prints; they are mid-close for each effect.
-shot_partial 384  "iris"
-shot_partial 576  "box"
-shot_partial 666  "wipe"
-shot_partial 756  "curtain"
-shot_partial 846  "bars"
-shot_partial 942  "mosaic"
-shot_partial 1030 "rain"
-shot_partial 1140 "checker"
+# Anchors are DERIVED from each effect's logged entry frame plus a mid-close offset, because the
+# absolute cadence shifts between builds (a fresh ROM enters its cycle a few frames off a stale
+# one, and a hardcoded frame lands fully-hidden instead of mid-close).
+fx_start() { grep "TRANSITIONS effect .* $1" "$log" | head -1 | grep -oE "frame [0-9]+" | grep -oE "[0-9]+"; }
+shot_partial "$(( $(fx_start iris)    + 62 ))" "iris"
+shot_partial "$(( $(fx_start box)     + 74 ))" "box"
+shot_partial "$(( $(fx_start wipe)    + 74 ))" "wipe"
+shot_partial "$(( $(fx_start curtain) + 74 ))" "curtain"
+shot_partial "$(( $(fx_start bars)    + 74 ))" "bars"
+shot_partial "$(( $(fx_start mosaic)  + 80 ))" "mosaic"
+shot_partial "$(( $(fx_start rain)    + 78 ))" "rain"
+shot_partial "$(( $(fx_start checker) + 76 ))" "checker"
+rm -f "$log"
 
 # ⚠️ The curtain must come OFF. This is the bug that shipped twice: the software effects only ever
 # painted more curtain, so the screen stayed black through the fade-in and through the dwell after

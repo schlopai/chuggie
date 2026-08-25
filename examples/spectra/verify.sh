@@ -23,7 +23,8 @@ check() {  # check <name> <expected> <actual>
   else printf '  FAIL %-42s expected %s, got %s\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
 }
 
-[ -f "$ROM" ] || { echo "no $ROM — run npm run build"; exit 1; }
+[ -f "$ROM" ] || npm run build >/tmp/spectra-vbuild.log 2>&1 || true
+[ -f "$ROM" ] || { echo "no $ROM — build failed:"; tail -20 /tmp/spectra-vbuild.log; exit 1; }
 echo "spectra verify"
 
 # 1. Every room loads. SELECT skips a room; sweep all twelve and count the entry markers.
