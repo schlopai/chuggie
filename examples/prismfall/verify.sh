@@ -30,7 +30,9 @@ from PIL import Image, ImageChops
 a=Image.open('/tmp/pf_v_a.png').convert('RGB'); b=Image.open('/tmp/pf_v_b.png').convert('RGB')
 d=ImageChops.difference(a,b).convert('L')
 n=sum(1 for p in d.getdata() if p>16)
-print(1 if n > a.width*a.height//10 else 0)
+# 1% of the screen: the scene is sparse dark facility, so a followed camera moves only
+# ~7% of the pixels; a stuck player diffs ~0, so 1% still separates the two cleanly.
+print(1 if n > a.width*a.height//100 else 0)
 ")
 check "player covers ground (screen changes)" 1 "$moved"
 
