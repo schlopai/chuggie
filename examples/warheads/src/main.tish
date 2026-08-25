@@ -43,7 +43,7 @@ import { small } from 'font:../../../assets/fonts/04b03.ttf@8'
 // `uiRender` opens it with `ui_begin()` and clears — so anything painted alongside it by hand is
 // wiped on its next repaint. Everything drawn DURING A MATCH therefore lives in one tree; the
 // hull-select screen and the briefing box are separate phases and keep their direct painting.
-import { uiInit, uiSetText, uiRelayoutAt } from '../../../packages/ui.tish'
+import { uiInit, uiRelayoutAt } from '../../../packages/ui.tish'
 import { stars } from 'background:../assets/stars.png'
 import {
   frame, log, backdrop, ticks, heap_free, hud_text, key_held,
@@ -205,7 +205,11 @@ let FLAME: i32[] = [1, 2, 3, 2]
 // selection costing a whole-canvas relayout (about a second of streamed repaint, which is exactly
 // what pressing L/R felt like) and costing eight text writes. Structure changes — a different
 // player, hull or phase — rebuild; a selection change edits the nodes in place.
-let HUDN = { rows: [], bars: [], fills: [] }
+let HUDN = { bars: [], fills: [] }
+// Typed mirror of "HUDN.bars is built": the hp-bar refresh guard runs EVERY frame, and reading
+// `HUDN.fills.length` there is a boxed get_prop chain through the f64 fallback — the exact read
+// the frame-path codegen gate exists to keep off this game's hot loop.
+let BARS_READY: i32 = 0
 // ⚠️ FIFTEEN COLOURS PER PLANET, IN THAT PLANET'S OWN PALETTE BANK. A 4bpp GBA background picks a
 // bank per TILE, so one layer can hold several sixteen-colour palettes at once — and planets never
 // share a tile, because placement keeps them 56 px apart. Sharing one bank between four worlds gave
@@ -613,7 +617,7 @@ sprite_set_visible(menuSpr, 0)
 
 // ⚠️ tileReserve 0. The reserve is a CLIFF at 512 tiles (20 KB -> 40 KB of live tile map), and this
 // game's HUD is a few hundred cells of bars and short strings — nowhere near it.
-uiInit({ font: small, lineH: 9, tileReserve: 0, theme: {
+uiInit({ font: small, lineH: 9, tileReserve: 320, theme: {
   bg: 0x000000, text: 0xD8DEEC, dim: 0x707890, title: 0xF8F8C0,
   panel: 0x1A1C28, good: 0x58C060, bad: 0xE05858, accent: 0xF8F8C0,
   p1: 0xE05858, p2: 0x58C0B0, spent: 0x505460
@@ -621,8 +625,8 @@ uiInit({ font: small, lineH: 9, tileReserve: 0, theme: {
 ui_begin()
 // ⚠️ BOOT-TIME, EMPTY-HEAP, ONCE. This game's live-tile peak (terrain worlds + the full-screen
 // hull-select canvas) crosses agb's 512-node tile-map threshold, and without the pre-size the
-// 512 -> 1024 rehash is a 20KB contiguous allocation issued mid-game on a fragmented heap —
-// measured here as "memory allocation of 480 bytes failed" one frame after the second PICK.
+// mid-game rehash is a 20KB contiguous allocation on a fragmented heap; 600 buys the
+// 1,024-node table (614 live tiles) once, at boot, on the empty heap.
 bg_tile_map_reserve(600)
 terrain_new(ARENA_W, ARENA_H)
 // Slots 1..12 are rewritten per match, one triple per planet, from PC_COL. Only the two shared
@@ -2605,26 +2609,6 @@ while (true) {
     }
   }
 
-  // ⚠️ THE TWO RIGHT-HAND COLUMNS ARRIVE PRE-FORMATTED. A gun's are "x4" and "34/24"; the jump's
-  // are a fuel figure and a cost, which share no format with either — building them inside the row
-  // meant JUMP rendered as "x90  -25/0".
-  function rackRow(cw, row, selRow, spent, amText, statText) {
-    let col = "dim"
-    if (row === selRow) { col = "accent" }
-    if (spent === 1) { col = "spent" }
-    let mark = " "
-    if (row === selRow) { mark = ">" }
-    let nm = wname(cw, row)
-    let am = amText
-    return {
-      dir: "row", gap: 3, children: [
-        { text: mark, color: col, font: small, w: 6 },
-        { text: nm, color: col, font: small, w: 54 },
-        { text: am, color: col, font: small, w: 22 },
-        { text: statText, color: col, font: small, w: 34 },
-      ],
-    }
-  }
 
   // ⚠️ THREE SEPARATE REGIONS, NOT ONE FULL-SCREEN TREE, AND THIS IS A HARD VRAM CONSTRAINT.
   // `uiRender` opens with `ui_begin()`, which claims the WHOLE 240x160 canvas — about 600 of the
@@ -2651,26 +2635,43 @@ while (true) {
     return { text: foot, color: "dim", font: small }
   }
 
-  function hudRack() {
+  // ⚠️ PAINTED BY HAND, NOT AS A NODE TREE — the tree version was measured at ~33KB of heap for
+  // ONE render (about 1.3KB per node of render-side boxed-object growth under the current
+  // compiler; heap traced 35,840 -> 1,024 free inside a single uiRelayoutAt), which is the whole
+  // remaining EWRAM after the canvas warms. Twenty small `ui_text` calls cost none of that, and
+  // this is the hand-painting the rack started with. Columns mirror the old row spec:
+  // mark w6 / name w54 / ammo w22 / stat w34, gap 3; rows are lineH 9 + gap 1 apart.
+  function drawRack() {
+    ui_clear_rect(2, 87, 142, 58)
     let cw2: i32 = S_CLS[wi & 1] & 3
     let rk: i32 = 0
-    let rows = []
-    while (rk < 4) {
-      let widx3: i32 = ((cw2 << 2) | rk) & 15
-      let av: i32 = S_AMMO[((wi << 2) | rk) & 7]
-      let amt = "x" + av
+    while (rk < 5) {
       let sp: i32 = 0
-      if (W_AMMO[widx3 & 15] < 0) { amt = "--" }
-      else if (av === 0) { sp = 1 }
-      rows.push(rackRow(cw2, rk, S_WPN[wi & 1], sp, amt,
-        "" + WH_DMG[W_WARHEAD[widx3 & 15] & 7] + "/" + WH_R[W_WARHEAD[widx3 & 15] & 7]))
+      let amt = ""
+      let st = ""
+      if (rk === W_JUMP) {
+        if (S_FUEL[wi & 1] < JUMP_COST) { sp = 1 }
+        amt = "" + S_FUEL[wi & 1]
+        st = "-" + JUMP_COST
+      } else {
+        let widx3: i32 = ((cw2 << 2) | rk) & 15
+        let av: i32 = S_AMMO[((wi << 2) | rk) & 7]
+        amt = "x" + av
+        if (W_AMMO[widx3 & 15] < 0) { amt = "--" }
+        else if (av === 0) { sp = 1 }
+        st = "" + WH_DMG[W_WARHEAD[widx3 & 15] & 7] + "/" + WH_R[W_WARHEAD[widx3 & 15] & 7]
+      }
+      let col: i32 = 0x707890
+      if (sp === 1) { col = 0x505460 }
+      let mark = " "
+      if (rk === S_WPN[wi & 1]) { mark = ">"  col = 0xF8F8C0 }
+      let ry: i32 = 88 + Math.imul(rk, 10)
+      ui_text(small, 3, ry, mark, col)
+      ui_text(small, 12, ry, wname(cw2, rk), col)
+      ui_text(small, 69, ry, amt, col)
+      ui_text(small, 94, ry, st, col)
       rk = rk + 1
     }
-    let jsp: i32 = 0
-    if (S_FUEL[wi & 1] < JUMP_COST) { jsp = 1 }
-    rows.push(rackRow(cw2, W_JUMP, S_WPN[wi & 1], jsp, "" + S_FUEL[wi & 1], "-" + JUMP_COST))
-    HUDN.rows = rows
-    return { dir: "col", gap: 1, children: rows }
   }
 
   // ⚠️ Guarded on a packed key, and the key deliberately contains NOTHING that changes continuously.
@@ -2701,9 +2702,10 @@ while (true) {
     // Each region lays out and paints inside its own box. The rack's box is CLEARED rather than
     // painted when the phase is not PH_AIM — which is how it disappears while a shell is in flight.
     uiRelayoutAt(hudBars(), 3, 3, 120, 16)
+    BARS_READY = 1
     uiRelayoutAt(hudFoot(), 3, 146, 200, 10)
-    if (G.phase === PH_AIM) { uiRelayoutAt(hudRack(), 3, 88, 140, 56) }
-    else { ui_clear_rect(2, 87, 142, 58)  HUDN.rows = [] }
+    if (G.phase === PH_AIM) { drawRack() }
+    else { ui_clear_rect(2, 87, 142, 58) }
     // ⚠️ ANNOUNCED so the suite can tell "the HUD followed the selection" from "the turn changed".
     // The bug this guards against was invisible to every other check: the rack was right, the
     // selection was right, and only the picture was stale.
@@ -2714,7 +2716,7 @@ while (true) {
   // of everything. With health in the structure key the game was spending ~4,700 of its 4,389-tick
   // frame — over budget, and varying by a thousand ticks between builds because tish codegen
   // ordering is not stable.
-  if (HUDN.fills.length > 1 && V.hpKey !== ((S_HP[0 & 1] << 8) | S_HP[1 & 1])) {
+  if (BARS_READY === 1 && V.hpKey !== ((S_HP[0 & 1] << 8) | S_HP[1 & 1])) {
     V.hpKey = (S_HP[0 & 1] << 8) | S_HP[1 & 1]
     let bi2: i32 = 0
     while (bi2 < 2) {
@@ -2732,35 +2734,11 @@ while (true) {
     }
   }
 
-  // ⚠️ A SELECTION CHANGE EDITS THE NODES, IT DOES NOT REBUILD THEM. `uiSetText` clears one text
-  // box and repaints it; five rows of four cells is twenty small writes against a whole-canvas
-  // relayout, and it lands within a frame instead of streaming for a second.
-  else if (G.phase === PH_AIM && S_WPN[wi & 1] !== V.wpnKey && HUDN.rows.length > 0) {
+  // ⚠️ A SELECTION CHANGE REPAINTS THE RACK IN PLACE — twenty small `ui_text` writes, no layout,
+  // no node tree (see drawRack's header for why the tree had to go). It lands within a frame.
+  else if (G.phase === PH_AIM && S_WPN[wi & 1] !== V.wpnKey) {
     V.wpnKey = S_WPN[wi & 1]
-    let rr2: i32 = 0
-    while (rr2 < HUDN.rows.length) {
-      let row = HUDN.rows[rr2]
-      // ⚠️ RECOMPUTED, NOT READ BACK OFF THE NODE. The first refresh overwrites the colour these
-      // cells carry, so asking a node what colour it is tells you what the LAST refresh decided,
-      // not whether the rack is empty — a spent row would light up again the moment you scrolled
-      // past it.
-      let cw3: i32 = S_CLS[wi & 1] & 3
-      let spent2: i32 = 0
-      if (rr2 === W_JUMP) {
-        if (S_FUEL[wi & 1] < JUMP_COST) { spent2 = 1 }
-      } else if (W_AMMO[((cw3 << 2) | rr2) & 15] >= 0 && S_AMMO[((wi << 2) | rr2) & 7] === 0) {
-        spent2 = 1
-      }
-      let mk = " "
-      let cl = "dim"
-      if (spent2 === 1) { cl = "spent" }
-      if (rr2 === S_WPN[wi & 1]) { mk = ">"  cl = "accent" }
-      uiSetText(row.children[0], mk, cl)
-      uiSetText(row.children[1], row.children[1].text, cl)
-      uiSetText(row.children[2], row.children[2].text, cl)
-      uiSetText(row.children[3], row.children[3].text, cl)
-      rr2 = rr2 + 1
-    }
+    drawRack()
     log("WH PANEL w=" + S_WPN[wi & 1] + " who=" + G.who + " f=" + G.simTick)
   }
   // ⚠️ ONLY WHILE A PAINT IS ACTUALLY IN FLIGHT. Pumping the streamer unconditionally spends real
