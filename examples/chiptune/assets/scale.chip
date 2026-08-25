@@ -1,0 +1,10 @@
+# Calibration song for the `chip:` pipeline — a C major scale, one note per half-second.
+#
+# Deliberately boring: `verify.sh` FFTs each row and asserts the pitch, so this is checking that the
+# parser, the note table, the tempo and the sequencer all agree. A song that sounds "about right" can
+# still be a semitone flat or a row behind, and neither is audible without a reference.
+tempo 30           # frames per row => 2 rows/second
+
+inst lead square duty=2 vol=15 decay=0
+
+ch1 lead | C4 D4 E4 F4 | G4 A4 B4 C5 |

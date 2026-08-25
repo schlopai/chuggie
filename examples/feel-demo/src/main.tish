@@ -1,0 +1,587 @@
+// feel-demo — every export of packages/feel.tish, on one screen.
+//
+// WHY THIS ROM EXISTS. `packages/feel.tish` is 670 lines and, until this example, NOTHING IN THIS
+// REPO COMPILED IT. It was never dead code — it had three consumers, but every one of them lived in
+// the sibling card-gba tree and reached across the repo boundary to get here:
+//
+//     card-gba/examples/fx-demo/src/main.tish  ->  ../../../../../chuggie-engine/packages/feel
+//     card-gba/packages/qb-view.tish           ->  ../../../chuggie-engine/packages/feel
+//     card-gba/packages/qb-engine.tish         ->  ../../../chuggie-engine/packages/feel
+//
+// which is the actual problem. chuggie-engine owns the file and ships it, and had no way to find out it
+// had broken it: every build that would have said so lived in another checkout. A package whose only
+// compiler is downstream is a package this repo cannot maintain.
+//
+// THIS REPLACES card-gba/examples/fx-demo, which was the original showcase and is where most of what
+// follows was worked out. Everything that ROM demonstrated is demonstrated here — the seven presets,
+// stacking bumps, hit-stop against a stalling game counter, the intensity dial from 0 to 2x, the
+// two-pass draw, `feelStop` on a scene change and the caller's erase-colour contract — plus the
+// things it never reached: the event CHANNEL, the raw primitives behind the presets, `feelPalette`,
+// and a verify.sh, which neither had. (Not to be confused with chuggie-engine's OWN examples/fx-demo,
+// which shares the name and nothing else: that one is Ninja Adventure sprite sheets and PSG
+// one-shots and never touches this file.)
+//
+// It earned its place on the first run. The first compile failed on a tish codegen bug (E0507, see
+// `paintSlots`) and the first headless run caught `feelPlay` refusing an ENTIRE preset while on
+// cooldown, when its own table says only the DRAWING is rate-limited — so a card cascade that
+// destroyed four things shook the screen once instead of four times.
+//
+// EVERY EXPORT IS EXERCISED. That is the bar for a package's own demo, and it is why the list has an
+// eighth entry that is not a preset at all:
+//
+//   the seven presets   FEEL's prefab MMF_Players. One `feelPlay` fires a whole composed row range —
+//                       PLACE is a bump and a sound; VICTORY is a flash, a bump, hit-stop, a sound,
+//                       a call-out and a burst ring, from one call and one table.
+//   CASCADE             the raw primitives with no preset in front of them — `feelChain` a semitone
+//                       higher per link, `feelBump` compounding, `feelFreeze` on the first. What a
+//                       game reaches for when the event is not one of the seven shapes.
+//   springs SUM         B plays the selected preset FOUR TIMES IN ONE FRAME. The screen shakes
+//                       harder and longer than a single play; it does not restart. FEEL's argument
+//                       for springs over tweens is exactly this — "spam them without risk of them
+//                       conflicting" — and a countdown-driven shake loses its decay instead.
+//   cooldowns           that same spam draws its call-out ONCE. The shake is allowed to stack, the
+//                       drawing is not, because four banners in one band reads as a rendering fault.
+//   hit-stop            the `f` counter in the header is incremented by the GAME, so it visibly
+//                       stalls while `feelFrozen()` is 1 — and so does the marker. The feel layer
+//                       keeps ticking throughout: that is FEEL's unscaled time, in the only form
+//                       this machine has.
+//   the channel         START broadcasts three events with `feelEmit`, and NOTHING happens that
+//                       frame. They are drained on the next one. FEEL's Channels, which this engine
+//                       needs harder than FEEL does: a cascade resolves to a stable point inside one
+//                       frame, so effects cannot be played inline, and the engine must not learn
+//                       pixel geometry.
+//   the intensity dial  SELECT cycles 1x -> 2x -> 0. At 2x every shake is bigger and every flash
+//                       wider, because `feelScale` multiplies rather than clamps; at 0 nothing
+//                       shakes, flashes or sounds, for one multiply. A two-state toggle would only
+//                       ever have tested the off arm.
+//   feelStop            moving the cursor cancels everything in flight and lands the canvas square.
+//                       A scene change that skipped it would inherit a displaced screen.
+//   the erase contract  the burst ring expands over a PANEL, is erased back to the panel colour the
+//                       caller passes in, and the caller repaints the panel when the effect ends.
+//                       With only a backdrop underneath, none of that is observable.
+//   feelPalette         the four effect colours are registered by the GAME, at boot. The UI palette
+//                       holds fifteen entries and `ui_begin` does not reset it, so a library
+//                       shipping literal colours would silently recolour a board that already spends
+//                       all fifteen.
+//
+// KEYFRAMES, NOT FRAMES. `feelTick()` returns a BITMASK of the slots that crossed into a new
+// keyframe. On most frames it is zero and this file draws nothing. That is what lets a generic
+// player exist at all: the player knows WHEN to draw, the game knows WHAT, and neither pays on a
+// quiet frame.
+//
+// CONTROLS  Up/Down pick · A play · B play x4 in one frame · L/R magnitude
+//           Select intensity · Start broadcast three channel events
+//
+// ATTRACT. Touch nothing and the ROM demonstrates itself all the way through the script in
+// `attract()`. Touch anything and it never advances on its own again — the rule the rest of this
+// repo holds to (scripts/drop_autoadvance_check.py), and what lets a headless run reach every branch
+// with no key schedule.
+
+import { body } from 'font:../../../assets/fonts/04b03.ttf@8'
+import {
+  backdrop, ui_begin, ui_text, ui_rect, ui_clear_rect, frame, keys_edge, log, heap_free
+} from 'cargo:tish_agb'
+import {
+  FP_N, FEEL_MAX,
+  FB_CALLOUT, FB_BURST, FB_FLASH,
+  // FS_X / FS_Y / FS_BANDTOP / FS_BANDH are deliberately absent: they are what a CANVAS consumer
+  // needs to place and erase a call-out by hand, and this demo no longer does that — feelCalloutDraw
+  // works those out itself. packages/drop.tish still draws call-outs on the canvas and still needs
+  // them, which is why they remain exported.
+  FS_KIND, FS_KEY, FS_BASEY, FS_DONE, FS_FLASHW,
+  FE_PLACE, FE_DESTROY, FE_BUFF,
+  SFX_CURSOR,
+  feelPlay, feelTick, feelSlot, feelColour, feelBurstDraw, feelStop, feelPalette,
+  feelCalloutAnchor, feelCalloutShadow, feelCalloutDraw, feelCalloutHide,
+  feelBump, feelFreeze, feelFrozen, feelChain,
+  feelIntensity, feelGetIntensity, feelPlaySfx,
+  feelEmit, feelPending, feelDrain, feelEvA, feelEvB
+} from '../../../packages/feel'
+
+// ── screen ───────────────────────────────────────────────────────────────────
+// The band geometry is NOT chosen here. feel.tish's preset rows are screen-anchored at oy=110 for a
+// call-out and oy=128 for a flash, and `FS_BANDTOP`/`FS_BANDH`/`FS_BASEY` report the rectangles they
+// occupy. So the list has to end above y=88 and the marker start below y=136. Laying the screen out
+// around the library rather than the other way round is the point: a game adopting this inherits the
+// same geometry without negotiating for it.
+//
+// The CALL-OUT band is a reserved rectangle only in the sense that the word travels through it — it
+// is drawn with `feelCalloutDraw`, i.e. SPRITES, so it does not own those pixels and nothing under
+// it is ever erased. The band is still declared here because the word has to be legible against
+// whatever it crosses, not because the canvas has to be kept clear for it.
+//
+// EVERY BAND IS TILE-ALIGNED, and that is not tidiness. `ui_clear_rect` blanks whole 8x8 TILES and
+// snaps OUTWARD, so a clear at y=22 actually begins at 16 — which is how the first cut of this
+// screen silently erased its own status line every time the cursor moved.
+//
+//    0..15   header: title, and the readouts that change
+//   16..79   the list, eight rows of 8
+//   88..121  call-out band (feel.tish's, not ours)
+//  128..135  flash bar
+//  136..143  the marker
+//  144..159  two hint lines
+let BG: i32 = 0x101018
+let C_TEXT: i32 = 0xC8C8D8
+let C_DIM: i32 = 0x606074
+let C_SEL: i32 = 0xF0E060
+let C_HOT: i32 = 0xFFFFFF
+// A panel under the burst, and it is not decoration. `feelBurstDraw` takes an ERASE COLOUR because
+// only the caller knows what is beneath the ring — the library will not guess. With the backdrop
+// underneath that contract is untestable, since erasing to the backdrop is indistinguishable from
+// erasing to nothing. The ring is drawn over this instead, erased back to it, and the panel is
+// repainted whole when the effect finishes.
+let C_PANEL: i32 = 0x2A2438
+let C_EDGE: i32 = 0x4A90E8
+let LIST_Y: i32 = 16
+let ROW_H: i32 = 8
+let LIST_H: i32 = 64
+let MARK_Y: i32 = 137
+// Where a play "happens". A burst is EVENT-anchored, so this is where the ring appears — right of
+// the list (which is only cleared to x=140) and above the call-out band.
+let EV_X: i32 = 186
+let EV_Y: i32 = 48
+
+// The call-out is sprite text, so it needs a `text_draw` slot of its own. ONE is enough for any
+// number of presets, because feel makes a call-out a singleton — two live banners would take turns
+// clearing the band and erasing each other, which looks exactly like an effect that randomly fails
+// to draw, so `feelPlay` retires the older one. Nothing else in this demo uses text_draw.
+let SLOT_CALLOUT: i32 = 0
+// Where the word starts its rise. This happens to be feel's own anchor (every call-out row in the
+// preset table is screen-anchored at oy=110), which is why the band above is where it is — but it
+// is passed EXPLICITLY rather than left at the `-1` default, because that is what a game with a
+// different layout has to do, and a demo that takes the default never shows you the knob exists.
+let CALLOUT_BASE_Y: i32 = 110
+
+// Eight entries: seven presets and one that is not a preset. `CASCADE` is index 7 and is handled by
+// `startCascade`, never by `feelPlay`.
+let CASCADE: i32 = 7
+let NAMES: string[] = ["PLACE", "DESTROY", "BUFF", "LANE", "ILLEGAL", "VICTORY", "DEFEAT", "CASCADE"]
+
+// One struct rather than a pile of module-level scalars: a bare captured scalar assigned from a
+// boxed call is a known tish failure mode, and a struct field is not.
+interface Demo {
+  pick: i32, mag: i32, t: i32, human: i32,
+  marker: i32, dir: i32, label: i32, gameFrames: i32, shownFrames: i32,
+  plays: i32, frozenFrames: i32, drained: i32, chain: i32
+}
+let D: Demo = {
+  pick: 0, mag: 1, t: 0, human: 0,
+  marker: 4, dir: 1, label: -1, gameFrames: 0, shownFrames: -1,
+  plays: 0, frozenFrames: 0, drained: 0, chain: 0
+}
+
+backdrop(BG)
+ui_begin()
+
+// THE GAME REGISTERS THE COLOURS. feel.tish ships defaults, but a game that already spends the UI
+// palette's fifteen entries must hand it colours it owns — everything past the fifteenth silently
+// paints as the fifteenth, so a library with literal colours of its own does not fail loudly, it
+// quietly recolours the board. Called before anything plays.
+//   0 destroy   1 buff   2 win/lane   3 lose
+feelPalette(0, 0xC03840)
+feelPalette(1, 0x50D070)
+feelPalette(2, 0xE0A030)
+feelPalette(3, 0x4A6080)
+
+// THE GAME PLACES THE CALL-OUT, for the same reason it registers the colours: feel's own anchor is
+// the card games' layout, and a screen whose action sits elsewhere gets the word in the middle of
+// its own furniture. `liftDiv` of 1 keeps feel's full travel; 2 would halve it.
+feelCalloutAnchor(CALLOUT_BASE_Y, 1)
+// A drop shadow, because a call-out is drawn OVER whatever is showing and a bright word on a bright
+// background is unreadable however well it animates — a red MISS over a red floor is the case that
+// put this knob in the library. On THIS screen it is nearly invisible, since the word crosses only
+// the backdrop and both are dark; it is set anyway because a demo that leaves it off is a demo that
+// never tells you it exists, and because the cost of finding out you needed it is a shipped screen.
+feelCalloutShadow(0x000000)
+
+// ── chrome ───────────────────────────────────────────────────────────────────
+function paintChrome() {
+  // Both hint lines live BELOW the flash bar and the marker. They used to have to: the call-out was
+  // a canvas draw that cleared its whole full-width band, so the first banner wiped anything beside
+  // the list. It is sprite text now and erases nothing, so this is layout rather than a constraint —
+  // left as it is because the flash bar at 128 still is one.
+  ui_text(body, 4, 1, "FEEL", C_TEXT)
+  ui_text(body, 8, 144, "A play   B x4 in one frame   L/R magnitude", C_DIM)
+  ui_text(body, 8, 152, "UP/DN pick   SELECT intensity   START emit", C_DIM)
+}
+
+// The header carries everything that changes but is not an effect. Repainted as one block because it
+// is one pair of tile rows — clearing part of a tile row and redrawing the rest costs more than
+// redrawing both.
+// Only the DYNAMIC half is cleared: "FEEL" is painted once by `paintChrome` and lives in tile
+// columns 0..3, so the clear starts at x=32 and never touches it.
+function paintHeader() {
+  ui_clear_rect(32, 0, 208, 16)
+  ui_text(body, 34, 1, "f" + D.gameFrames + "  x" + feelGetIntensity()
+    + "  mag" + D.mag + "  played" + D.plays, C_TEXT)
+  D.shownFrames = D.gameFrames
+}
+
+// Repainted whole rather than patched. Cheap because it happens on a KEYFRAME, not on a frame:
+// six rects once is nothing, six rects per frame is what runs a title screen at half rate.
+function paintPanel() {
+  ui_rect(160, 24, 56, 56, C_PANEL, 1)
+  ui_rect(176, 38, 20, 20, BG, 1)
+  ui_rect(176, 38, 20, 1, C_EDGE, 1)
+  ui_rect(176, 57, 20, 1, C_EDGE, 1)
+  ui_rect(176, 38, 1, 20, C_EDGE, 1)
+  ui_rect(195, 38, 1, 20, C_EDGE, 1)
+}
+
+function paintList() {
+  ui_clear_rect(0, LIST_Y, 140, LIST_H)
+  let i: i32 = 0
+  while (i < 8) {
+    let c: i32 = C_TEXT
+    let pre: string = "  "
+    if (i === D.pick) {
+      c = C_SEL
+      pre = "> "
+    }
+    ui_text(body, 8, LIST_Y + i * ROW_H, pre + NAMES[i], c)
+    i = i + 1
+  }
+}
+
+// ── the "game" the feedbacks decorate ────────────────────────────────────────
+// Two independent hit-stop tells, because one of them is easy to misread. The marker is motion, which
+// reads instantly but proves nothing in a still frame; `f` is a number the GAME increments, which
+// stalls in a screenshot and is what verify.sh can assert. Both stop together, and the feel layer
+// keeps ticking through both.
+function stepGame() {
+  D.gameFrames = D.gameFrames + 1
+  // MOVED EVERY FOURTH GAME FRAME, not every one, and for two reasons that happen to agree.
+  //
+  // The first is this package's own rule: a canvas write is the expensive kind of drawing, and a
+  // marker that repaints every frame is the demo breaking the discipline it exists to show off.
+  //
+  // The second only appeared when a golden frame was added. A per-frame animation means NO TWO
+  // CONSECUTIVE FRAMES ARE EVER IDENTICAL, so there is no plateau anywhere in the run and any
+  // reference frame sits on a transition — `scripts/drop_frame_stability.py` reported no plateau at
+  // all, which would have failed the repo-wide sweep the moment this ROM joined it. On a shared
+  // four-frame cadence with the readout, three frames in four are static.
+  if ((D.gameFrames & 3) !== 0) { return }
+  ui_rect(D.marker, MARK_Y, 6, 5, BG, 1)
+  D.marker = D.marker + D.dir * 8
+  if (D.marker > 228) {
+    D.marker = 228
+    D.dir = -1
+  }
+  if (D.marker < 4) {
+    D.marker = 4
+    D.dir = 1
+  }
+  ui_rect(D.marker, MARK_Y, 6, 5, C_SEL, 1)
+}
+
+// ── drawing what feelTick asked for ──────────────────────────────────────────
+// TWO PASSES. Rings and flashes first, call-outs second, so a ring never lands on top of a banner
+// that shares its frame — they overlap only when a preset fires both, which VICTORY does. Cheap:
+// the mask is zero on nearly every frame and never names many slots.
+function paintSlots(mask: i32) {
+  let i: i32 = 0
+  while (i < FEEL_MAX) {
+    if ((mask & (1 << i)) !== 0) {
+      let kind: i32 = feelSlot(i, FS_KIND)
+      if (kind === FB_BURST) {
+        // THE CALLER'S HALF OF THE CONTRACT. The erase colour is the panel, not the backdrop,
+        // because the panel is what the ring is covering — and when the effect finishes, the game
+        // puts back what was there. A library that guessed either of these would be wrong in every
+        // game that has anything on screen.
+        feelBurstDraw(i, C_PANEL)
+        if (feelSlot(i, FS_DONE) === 1) { paintPanel() }
+      } else if (kind === FB_FLASH) {
+        // FS_BASEY, not a constant of ours — the row's own anchor. Erased across its widest reach
+        // rather than its current one, or the previous, longer bar leaves two stubs behind.
+        let fy: i32 = feelSlot(i, FS_BASEY)
+        ui_clear_rect(0, fy, 240, 8)
+        if (feelSlot(i, FS_DONE) === 0) {
+          let w: i32 = feelSlot(i, FS_FLASHW)
+          if (w > 240) { w = 240 }
+          ui_rect(120 - ((w / 2) | 0), fy, w, 3, feelColour(i, C_HOT, C_DIM), 1)
+        }
+      }
+    }
+    i = i + 1
+  }
+  i = 0
+  while (i < FEEL_MAX) {
+    if ((mask & (1 << i)) !== 0 && feelSlot(i, FS_KIND) === FB_CALLOUT && D.label >= 0) {
+      // ONE CALL, AND NO ERASE. This used to be `ui_clear_rect` of the whole band followed by
+      // `ui_text` at FS_X/FS_Y, and the clear was not optional: the UI canvas is a single layer, so
+      // a word that moves every keyframe either erases what it floats over or leaves a trail behind
+      // the rise. That is the constraint feel.tish's own header spends a paragraph on, and the
+      // reason this band could not have anything under it.
+      //
+      // `feelCalloutDraw` builds OAM objects instead. Nothing underneath is touched, moving the word
+      // is a position change rather than an erase-and-redraw, and the band stops being a rectangle
+      // this screen has to keep empty. It also handles FS_DONE (hides the slot), the colour ramp and
+      // the re-show that a hidden slot needs, so the whole keyframe is this one line.
+      //
+      // NAMES[D.label] is indexed straight into the call. `let name: string = NAMES[i]` does NOT
+      // compile for GBA: tish lowers a string-array read to a bare `Vec<String>` index and binding
+      // it is a move out of the Vec (E0507) rather than a clone. Passing it as an argument is fine,
+      // so the workaround is free — but it is a codegen bug, not a style choice.
+      feelCalloutDraw(i, body, SLOT_CALLOUT, NAMES[D.label], C_HOT, C_DIM)
+      // Logged on the FIRST keyframe only, so the count is banners-drawn rather than repaints.
+      // This is what makes the cooldown testable: four plays in one frame must produce four bumps
+      // and exactly ONE of these.
+      if (feelSlot(i, FS_DONE) === 0 && feelSlot(i, FS_KEY) === 0) {
+        log("CALLOUT " + NAMES[D.label])
+      }
+    }
+    i = i + 1
+  }
+}
+
+// ── playing ──────────────────────────────────────────────────────────────────
+function play(p: i32, mag: i32) {
+  D.label = p
+  if (feelPlay(p, EV_X, EV_Y, mag) === 1) {
+    D.plays = D.plays + 1
+    log("PLAY " + NAMES[p] + " MAG " + mag)
+  } else {
+    // Refused, and saying so is the point: the intensity dial at 0, or every row's chance roll
+    // failing, is correct behaviour — and silently doing nothing is indistinguishable from a broken
+    // preset. A play whose DRAWING was merely rate-limited still returns 1; it still shook.
+    log("REFUSED " + NAMES[p])
+  }
+}
+
+// SPRINGS SUM. Four plays inside ONE frame — the case feel.tish was restructured around, because a
+// card cascade destroys several things before the frame ends. Every bump lands on the spring and
+// compounds; the call-out is drawn once, refused by the preset's cooldown.
+function spam(p: i32) {
+  log("SPAM 4x " + NAMES[p])
+  let i: i32 = 0
+  while (i < 4) {
+    play(p, D.mag)
+    i = i + 1
+  }
+}
+
+// THE RAW PRIMITIVES, with no preset in front of them. A five-link cascade: one semitone higher per
+// link so the chain is audible AS a chain, a bump per link so the shake builds, and hit-stop on the
+// first. Spread over frames rather than fired in one, because five notes inside a single frame are
+// one note on a PSG channel.
+function startCascade() {
+  log("CASCADE START")
+  D.chain = 5
+  feelFreeze(6)
+}
+
+function stepCascade() {
+  if (D.chain <= 0) { return }
+  let link: i32 = 6 - D.chain
+  feelChain(link)
+  let amp: i32 = 300 * link
+  if ((link % 2) === 0) { amp = 0 - amp }
+  feelBump(amp, (amp / 2) | 0)
+  log("CHAIN " + link)
+  D.chain = D.chain - 1
+}
+
+// ── the channel ──────────────────────────────────────────────────────────────
+// The emitter does not know the receiver. Three events go in on this frame and are read back on the
+// next — which is how an engine that resolves a whole cascade inside one frame hands work to a view
+// that owns the pixels.
+function emitBatch() {
+  feelEmit(FE_PLACE, EV_X, EV_Y)
+  feelEmit(FE_DESTROY, EV_X, EV_Y)
+  feelEmit(FE_BUFF, EV_X, EV_Y)
+  log("EMIT 3 PENDING " + feelPending())
+}
+
+function drainAll() {
+  while (feelPending() > 0) {
+    let kind: i32 = feelDrain()
+    if (kind < 0) { return }
+    D.drained = D.drained + 1
+    log("DRAIN KIND " + kind + " AT " + feelEvA() + "," + feelEvB())
+    // The view is the only thing that knows a semantic event's geometry. Here the mapping is
+    // trivial; in a real game this is where "the card at cell 7 died" becomes a pixel.
+    if (kind === FE_PLACE) { play(0, 1) }
+    if (kind === FE_DESTROY) { play(1, 2) }
+    if (kind === FE_BUFF) { play(2, 1) }
+  }
+}
+
+// ── selection ────────────────────────────────────────────────────────────────
+// `feelStop` on every move. FEEL treats StopFeedbacks + RestoreInitialValues as a discipline rather
+// than an afterthought, and it is one here too: a screen that changed mid-shake would inherit a
+// displaced canvas and never put it back.
+function selectRow(next: i32) {
+  D.pick = next
+  if (D.pick < 0) { D.pick = 7 }
+  if (D.pick > 7) { D.pick = 0 }
+  feelStop()
+  // feelStop retires the slots and settles the spring, but the call-out's sprite is not feel's to
+  // take down — the slot belongs to this demo, so hiding it does too. Without this the last banner
+  // stays on screen after a cursor move, which a canvas call-out could not do (the erase was part of
+  // drawing it) and a sprite one does by default.
+  feelCalloutHide(SLOT_CALLOUT)
+  D.chain = 0
+  feelPlaySfx(SFX_CURSOR)
+  paintList()
+}
+
+function fire(mag: i32) {
+  if (D.pick === CASCADE) {
+    startCascade()
+    return
+  }
+  play(D.pick, mag)
+}
+
+// ── attract ──────────────────────────────────────────────────────────────────
+// A fixed script, so a headless run reaches every branch with no key schedule and a person who
+// leaves the ROM alone sees the whole library. It runs ONLY while nobody has touched the pad —
+// `D.human` latches on the first press and never clears.
+//
+// autoadvance-ok: gated on D.human, which latches on the first key and never clears.
+function attract() {
+  let t: i32 = D.t
+  if (t < 60) { return }
+  let n: i32 = t - 60
+  // The seven presets and then the cascade, one every 100 frames.
+  if (n < 800) {
+    if ((n % 100) === 0) {
+      selectRow((n / 100) | 0)
+      fire(D.mag)
+    }
+    return
+  }
+  if (n === 860) {
+    selectRow(1)
+    spam(D.pick)
+    return
+  }
+  if (n === 940) {
+    // 2x: the arm an on/off toggle never reaches. `feelScale` MULTIPLIES by the dial, so this is a
+    // bigger shake and a wider flash, not a clamped one.
+    feelIntensity(512)
+    D.mag = 6
+    paintHeader()
+    log("INTENSITY 512")
+    return
+  }
+  if (n === 960) {
+    selectRow(5)
+    fire(D.mag)
+    return
+  }
+  if (n === 1040) {
+    // The hard-off. Everything until it comes back is silent and still.
+    feelIntensity(0)
+    paintHeader()
+    log("INTENSITY 0")
+    return
+  }
+  if (n === 1070) {
+    fire(D.mag)
+    return
+  }
+  if (n === 1120) {
+    feelIntensity(256)
+    D.mag = 1
+    paintHeader()
+    log("INTENSITY 256")
+    return
+  }
+  if (n === 1160) {
+    emitBatch()
+    return
+  }
+  if (n === 1240) {
+    D.t = 59
+    log("ATTRACT LOOP")
+  }
+}
+
+// ── input ────────────────────────────────────────────────────────────────────
+function input() {
+  let k: i32 = keys_edge()
+  if (k === 0) { return }
+  if (D.human === 0) {
+    D.human = 1
+    log("PLAYER INPUT")
+  }
+  if ((k & (1 << 6)) !== 0) { selectRow(D.pick - 1) }
+  if ((k & (1 << 7)) !== 0) { selectRow(D.pick + 1) }
+  if ((k & (1 << 4)) !== 0) {
+    D.mag = D.mag - 1
+    if (D.mag < 1) { D.mag = 1 }
+    paintHeader()
+  }
+  if ((k & (1 << 5)) !== 0) {
+    D.mag = D.mag + 1
+    if (D.mag > 8) { D.mag = 8 }
+    paintHeader()
+  }
+  if ((k & 1) !== 0) { fire(D.mag) }
+  if ((k & 2) !== 0) {
+    if (D.pick === CASCADE) { startCascade() } else { spam(D.pick) }
+  }
+  if ((k & 4) !== 0) {
+    // FEEL's FeedbacksIntensity is "1 is normal, 0.5 is half power, 0 is no effect" — a DIAL, and it
+    // runs above 1 as well.
+    let q: i32 = feelGetIntensity()
+    if (q === 0) {
+      feelIntensity(256)
+    } else if (q === 256) {
+      feelIntensity(512)
+    } else {
+      feelIntensity(0)
+    }
+    log("INTENSITY " + feelGetIntensity())
+    paintHeader()
+  }
+  if ((k & 8) !== 0) { emitBatch() }
+}
+
+paintChrome()
+paintHeader()
+paintPanel()
+paintList()
+log("FEEL DEMO START PRESETS " + FP_N + " SLOTS " + FEEL_MAX + " HEAP " + heap_free(64))
+
+while (true) {
+  D.t = D.t + 1
+
+  // DRAINED FIRST, before anything can emit this frame — so a broadcast is always read back on the
+  // frame AFTER it was made. Draining after `attract()` instead made the channel a function call
+  // with extra steps: events went in and came straight back out inside one iteration, and the
+  // deferral that is the entire point never happened. verify.sh asserts the EMIT and the DRAIN
+  // carry different frame numbers.
+  drainAll()
+
+  input()
+  if (D.human === 0) { attract() }
+
+  // ALWAYS ticked, frozen or not: hit-stop stops the GAME, not the feedback layer.
+  let mask: i32 = feelTick()
+  if (mask !== 0) { paintSlots(mask) }
+
+  if (feelFrozen() === 1) {
+    D.frozenFrames = D.frozenFrames + 1
+  } else {
+    stepCascade()
+    stepGame()
+  }
+
+  // The `f` readout only when it moved, and only every FOURTH game frame. Repainting it whenever it
+  // changed meant repainting it every frame — two text runs and a two-tile-row clear, which measured
+  // a 20% frame loss (TICK 1020 arriving at emulator frame 1270). That is exactly the per-frame
+  // canvas cost feel.tish splits its effects to avoid, and this file had no business paying it to
+  // draw a debug counter. At a quarter of the rate the stall under hit-stop is still plainly
+  // visible, because a freeze lasts 4-6 frames.
+  if (D.gameFrames !== D.shownFrames && (D.gameFrames & 3) === 0) { paintHeader() }
+
+  // One line a second. The emulator stamps each log with its own frame number, so a run at 60fps
+  // puts TICK n at frame ~60n — which is how verify.sh measures the frame rate without a profiler.
+  if ((D.t % 60) === 0) {
+    log("TICK " + D.t + " GAME " + D.gameFrames + " FROZEN " + D.frozenFrames
+      + " DRAINED " + D.drained)
+  }
+  frame()
+}

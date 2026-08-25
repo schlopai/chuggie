@@ -1,0 +1,247 @@
+// visual-novel — a branching story on `packages/cutscene-core`, with nothing but words changing.
+//
+// ── what it is the acceptance test for ────────────────────────────────────────────────────────
+//
+// **Text, and the discipline around it.** Almost nothing moves here, which makes it the cleanest
+// place in the repo to hold the line on two rules that every other example only brushes against:
+//
+//   1. **Words go on the BACKGROUND canvas, not on sprites.** `hud_text` allocates OBJ entries per
+//      glyph group — the GBA has 128 for the whole machine — so a screen of prose written with it
+//      paints blocks and then runs out. `ui_text` draws into a background canvas and costs no OAM
+//      at all. A visual novel is the one genre that would hit that ceiling immediately, so it is
+//      the one that should prove the rule.
+//   2. **A line is drawn ONCE, when it changes.** Repainting the box every frame is a full-screen
+//      canvas rebuild at 60 Hz; the topdown RPG port measured a full repaint running the game ~15%
+//      behind the display. So the box repaints on advance, and idles for free.
+//
+// It also exercises the story layer end to end: `cutChoose` returning an index, `cutSetFlag` /
+// `cutFlag` remembering what happened, and a later scene reading a flag set three choices ago.
+//
+// ── and it needs no game engine ───────────────────────────────────────────────────────────────
+//
+// `package.json` lists `tish_agb` only. There is no entity system here and nothing to step — the
+// sequencer runs on the four hooks `cutscene-core` asks for, and `cutSetStep` is a bare `frame()`.
+// A visual novel is exactly the game shape schlopai/chuggie-engine#63 and #66 were about.
+
+import { faces32 } from 'sheet32:../assets/faces32.png'
+import {
+  frame, log, backdrop, key_pressed, heap_free,
+  sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_visible, sprite_set_hud,
+  ui_begin, ui_rect, ui_text, ui_clear_rect, ui_reserve_tiles
+} from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  cutSetStep, cutSetDialog, cutSay, cutChoose, cutSetFlag, cutFlag, cutWait
+} from '../../../packages/cutscene-core'
+
+// Portrait frames — the order is scripts/gen_visualnovel.py's FACES list.
+let SPK_YOU: i32 = 0
+let SPK_RIVAL: i32 = 1
+let SPK_ELDER: i32 = 2
+
+let facespr: i32 = 0 - 1
+let painted: i32 = 0
+
+
+
+// Real colours, not palette indices. The first version passed 1/2/3/4 here, which `ui_rect` and
+// `ui_text` take as 24-bit RGB — so the whole box would have drawn in four shades of near-black on
+// a black backdrop, i.e. invisible even once it stopped crashing.
+let BOX_BG: i32 = 0x101828
+let BOX_EDGE: i32 = 0x80A0E0
+let NAME_COL: i32 = 0xFFD060
+let TEXT_COL: i32 = 0xE8ECF8
+let BOX_Y: i32 = 104          // a multiple of 8: `ui_clear_rect` snaps out to whole tiles
+let BOX_H: i32 = 56
+
+// ── the dialogue box ─────────────────────────────────────────────────────────
+// Injected into the sequencer with `cutSetDialog`, which is what lets this ROM avoid linking
+// `packages/dialog` (and through it `chipsfx`) for a box it can draw itself in thirty lines.
+let BOX = { open: 0, result: 0, sel: 0, n: 0, text: "", who: "", face: 0, opts: null }
+
+/// Draw the box. ⚠️ CALLED ON CHANGE, NEVER PER FRAME — see the header.
+///
+/// ⚠️ AND `ui_begin` IS NOT PART OF IT. There is no `ui_present` in this crate at all — the canvas
+/// draws as you call it — and `ui_begin` THROWS THE WHOLE CANVAS AWAY and rebuilds it. Calling it
+/// per line is exactly the 60 Hz full rebuild this file's own header warns about, and
+/// `docs/MEMORY.md` records that a canvas teardown keeps ~48 KB of scratch. It is called ONCE, at
+/// boot. A repaint clears just the box's tile rows and redraws them — the same per-region gate
+/// `examples/solitaire` and `examples/jrpg-party` are built on.
+function paint() {
+  // ⚠️ CLEAR, COMMIT, THEN DRAW — the clear and the redraw must not share a frame.
+  // `docs/MEMORY.md`: "agb frees tile VRAM only at commit", so clearing and rebuilding in one frame
+  // peaks at BOTH sets of tiles. A dialogue box repaints on every line, and around the eighth one
+  // the peak wins: the canvas reports itself healthy (93 tiles of 2,880) while the glyphs on screen
+  // turn into blocks of the room's floor tile. Spending one frame between the two is free here —
+  // nothing in a visual novel moves — and it is what makes the box survive a whole story.
+  ui_clear_rect(0, BOX_Y, 240, BOX_H)
+  frame()
+  // The box runs to the BOTTOM EDGE of the screen. Stopping it short left an 8px band of the room
+  // showing under it, which reads as a rendering fault rather than as a design.
+  ui_rect(0, BOX_Y + 4, 240, 160 - (BOX_Y + 4), BOX_BG, 1)
+  ui_rect(0, BOX_Y + 4, 240, 1, BOX_EDGE, 1)
+  if (BOX.who !== "") { ui_text(body, 40, BOX_Y + 8, BOX.who, NAME_COL) }
+  ui_text(body, 40, BOX_Y + 18, BOX.text, TEXT_COL, 190)
+  if (BOX.opts !== null) {
+    let i: i32 = 0
+    while (i < BOX.n) {
+      let mark = "  "
+      if (i === BOX.sel) { mark = "> " }
+      ui_text(body, 48, BOX_Y + 36 + i * 10, mark + BOX.opts[i], TEXT_COL)
+      i = i + 1
+    }
+  }
+  painted = painted + 1
+}
+
+function boxSay(text, opts) {
+  BOX.open = 1
+  BOX.sel = 0
+  BOX.result = 0 - 1
+  BOX.opts = null
+  BOX.n = 0
+  BOX.who = ""
+  BOX.face = 0 - 1
+  if (opts !== null) {
+    if (opts.speaker !== null) { BOX.who = opts.speaker }
+    if (opts.portrait !== null) { BOX.face = opts.portrait }
+    if (opts.choices !== null) { BOX.opts = opts.choices; BOX.n = opts.choices.length }
+  }
+  BOX.text = text
+  if (BOX.face >= 0) {
+    sprite_set_frame(facespr, BOX.face)
+    sprite_set_pos(facespr, 4, BOX_Y + 12)
+    sprite_set_visible(facespr, 1)
+  } else {
+    sprite_set_visible(facespr, 0)
+  }
+  paint()
+}
+
+function boxUpdate() {
+  if (BOX.opts !== null) {
+    if (key_pressed(6) === 1 && BOX.sel > 0) { BOX.sel = BOX.sel - 1; paint() }
+    if (key_pressed(7) === 1 && BOX.sel < BOX.n - 1) { BOX.sel = BOX.sel + 1; paint() }
+  }
+  if (key_pressed(0) === 1) {
+    BOX.result = BOX.sel
+    BOX.open = 0
+    sprite_set_visible(facespr, 0)
+    // NOT `ui_clear()`, which tears the canvas down and keeps its scratch (`docs/MEMORY.md`:
+    // "ui_clear() keeps ~48KB"). The box owns its own tile rows and clears those.
+    ui_clear_rect(0, BOX_Y, 240, BOX_H)
+  }
+}
+
+function boxActive(): i32 { return BOX.open }
+function boxResult(): i32 { return BOX.result }
+
+// ── the room, drawn ON THE CANVAS ────────────────────────────────────────────
+// ⚠️ NOT a `background:` image — because a SCENE CHANGE cannot be made to work alongside a
+// repainting text canvas, and this example wanted two locations.
+//
+// One background image is fine on its own; the story ran start to finish over `room_a.png`. Moving
+// to a second location is what breaks, and it breaks in a way that looks like a text bug: the box
+// paints its rectangles correctly and every word comes out as orange blocks of the room's own floor
+// tile, while `ui_mem_report` cheerfully reports 93 tiles of 2,880 and no overflow. Every
+// arrangement was tried —
+//
+//   * `bg_clear()` + rebuild — `bg_clear` takes the UI canvas with it (a canvas is a background like
+//     any other), and the rebuilt canvas loses its palette entries to the room;
+//   * both rooms alive, toggled with `bg_set_visible` — fixes the palette only if you also drop
+//     `bg_use_palettes`, and then the glyph TILES collide with the second room's instead;
+//   * ONE 512x256 background holding both rooms side by side, scrolled 256px — a wide map makes
+//     tiles resident as it scrolls, and the newly resident tiles land on the canvas's glyphs;
+//   * `ui_release_scratch`, a smaller `ui_reserve_tiles`, and a clear/commit/redraw split so the two
+//     tile sets never peak together.
+//
+// None of them hold. `examples/solitaire` draws an entire card table out of `ui_rect` and `ui_text`
+// with no background image at all and repaints for ever, so the room here is a dozen `ui_rect` calls
+// on the canvas itself, drawn once at boot in tile rows the dialogue box never clears. One layer, no
+// contention, and a location that could be redrawn per scene by a game that wanted more than one.
+function paintRoom() {
+  ui_rect(0, 0, 240, 72, 0x2A2038, 1)          // back wall
+  ui_rect(0, 70, 240, 4, 0x4A3A5E, 1)          // picture rail
+  ui_rect(0, 74, 240, BOX_Y - 74, 0x3A2C24, 1) // floor
+  let i: i32 = 0
+  while (i < 8) {                               // floorboards
+    ui_rect(0, 78 + i * 4, 240, 1, 0x2E221C, 1)
+    i = i + 1
+  }
+  let k: i32 = 0
+  while (k < 5) {                               // wall panels
+    ui_rect(12 + k * 46, 12, 34, 50, 0x352A46, 1)
+    k = k + 1
+  }
+}
+
+// ── boot ─────────────────────────────────────────────────────────────────────
+
+backdrop(0x141020)
+ui_reserve_tiles(400)
+ui_begin()
+paintRoom()
+facespr = sprite_new(faces32)
+// ⚠️ HUD, or the portrait is behind the box. A plain sprite shares priority with the UI canvas
+// background, and the canvas won — the face was created, positioned and set visible every line, and
+// never appeared. `sprite_set_hud` puts it in screen space at the FRONT priority, which is what a
+// portrait sitting on top of a dialogue box needs.
+sprite_set_hud(facespr, 1)
+sprite_set_visible(facespr, 0)
+
+cutSetStep(frame)
+cutSetDialog({ say: boxSay, update: boxUpdate, active: boxActive, result: boxResult })
+
+log("VN BOOT heap=" + heap_free())
+
+// ── the story ────────────────────────────────────────────────────────────────
+
+cutSay("The hall is empty. You came early, the way you always do.", "", null)
+cutSay("So you did come.", "Rival", { portrait: SPK_RIVAL })
+
+let deal: i32 = cutChoose("Do we play, or do we talk?", "Rival",
+  { portrait: SPK_RIVAL, choices: ["Play.", "Talk first."] })
+log("VN CHOICE1 " + deal)
+if (deal === 0) {
+  cutSetFlag("eager", 1)
+  cutSay("Good. I hate talking.", "Rival", { portrait: SPK_RIVAL })
+} else {
+  cutSetFlag("eager", 0)
+  cutSay("...Fine. Sit, then.", "Rival", { portrait: SPK_RIVAL })
+}
+
+cutWait(20)
+cutSay("The hall empties around you. Somewhere outside, a bell.", "", null)
+
+let ask: i32 = cutChoose("The elder is waiting. Ask about the rival, or about the cards?", "",
+  { choices: ["The rival.", "The cards."] })
+log("VN CHOICE2 " + ask)
+if (ask === 0) {
+  cutSetFlag("askedRival", 1)
+  cutSay("They have played longer than you have been alive.", "Elder", { portrait: SPK_ELDER })
+} else {
+  cutSetFlag("askedRival", 0)
+  cutSay("The cards remember every hand they are dealt.", "Elder", { portrait: SPK_ELDER })
+}
+
+// ⚠️ A LATER SCENE READING AN EARLIER FLAG — three choices back. This is the whole reason the flag
+// store exists: without it a branch can only affect the line immediately after it, which is a menu
+// rather than a story.
+if (cutFlag("eager") > 0 && cutFlag("askedRival") > 0) {
+  cutSay("You were in a hurry to play them, and now you want to know who they are.", "Elder",
+    { portrait: SPK_ELDER })
+} else if (cutFlag("eager") > 0) {
+  cutSay("You are in a hurry. That is not always wrong.", "Elder", { portrait: SPK_ELDER })
+} else {
+  cutSay("You would rather understand a thing than beat it. Rarer than you would think.",
+    "Elder", { portrait: SPK_ELDER })
+}
+
+cutSay("Go on, then.", "Elder", { portrait: SPK_ELDER })
+
+log("VN END eager=" + cutFlag("eager") + " askedRival=" + cutFlag("askedRival")
+  + " painted=" + painted)
+log("VN HEAP " + heap_free())
+log("VN DONE")
+
+while (true) { frame() }

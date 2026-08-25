@@ -1,0 +1,645 @@
+// illusions — what the eye gets wrong, drawn by a Game Boy Advance.
+//
+// Every page here is a classic perceptual illusion, and the point of the example is that almost all
+// of them are a NATURAL fit for this machine rather than a port of something meant for a PC. A
+// cafe wall is a tilemap. A lilac chaser is one palette write per frame. An afterimage is the BLDY
+// brightness register. The illusions that need soft gradients are the exception, not the rule —
+// which is why the hard ones here are the ones a modern engine finds trivial.
+//
+// WHAT YOU SHOULD SEE: one illusion at a time with its name in the top-left, auto-advancing every
+// few seconds through a different screen transition each time. LEFT/RIGHT pick a page by hand; A
+// crosses over now. Left alone it cycles, which is what makes it screenshot-testable headless.
+//
+// ── THE THREE SURFACES, AND WHY EACH PAGE PICKS THE ONE IT DOES ─────────────────────────────────
+//
+//   the PATTERN TILEMAP (priority 3, behind everything) — every full-screen repeating figure.
+//     A cafe wall covers 540 cells. On the UI canvas that is 540 ALLOCATED tiles, because `ui_rect`'s
+//     filled path is pixel-exact for anything <= 48px tall; on a tilemap it is 540 references to the
+//     eight distinct tiles in `assets/pat.png`. Same picture, ~40KB of VRAM apart.
+//
+//   the TERRAIN LAYER (priority 2, over the tilemap) — every figure made of circles.
+//     `terrain_disc` / `terrain_carve` are the only per-pixel primitives in the engine, and a
+//     Kanizsa triangle or an Ebbinghaus array is circles and nothing else. Its second use is
+//     subtler and is the reason two pages animate for free: terrain is 4bpp with fifteen material
+//     indices, so a disc drawn as material 7 can be shown or hidden LATER by writing its palette
+//     entry — no redraw at all. That is the whole lilac chaser.
+//
+//   the UI CANVAS (front) — the label, and thin straight lines.
+//     Muller-Lyer is four hairlines and eight arrowheads; that is exactly what the canvas is for.
+//     It is deliberately not used for anything that covers area.
+//
+// ⚠️ THERE IS NO `background:` IMAGE IN THIS ROM, ON PURPOSE. A changing background image and a
+// repainting UI canvas cannot coexist — the symptom is every word of the label rendering as blocks
+// of the page's own tile, and it is not fixable from the tish side (it was chased through
+// `bg_clear`, `bg_set_visible`, `bg_use_palettes` and a 512-wide map in examples/visual-novel, and
+// the answer was to stop mixing them). A tilemap whose IDENTITY never changes — only its cell
+// indices — is not the same thing and is safe.
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { pat } from 'bgtiles:../assets/pat.png'
+import {
+  backdrop, tilemap_new, tilemap_set8, bg_scroll,
+  terrain_new, terrain_clear, terrain_palette, terrain_disc, terrain_carve,
+  ui_begin, ui_text, ui_rect, ui_fill_cells, ui_reserve_tiles, ui_clear_rect,
+  fade_white, key_pressed, frame, ticks, log
+} from 'cargo:tish_agb'
+import { sceneStart, sceneStep, sceneGoto, sceneCur, sceneBusy,
+         sceneSetTransition } from '../../../packages/scene'
+import { trName, TR_FADE, TR_WHITE, TR_BOX, TR_WIPE, TR_CURTAIN,
+         TR_BARS, TR_MOSAIC, TR_CHECKER, TR_IRIS } from '../../../packages/transition'
+
+// ── Tile indices into assets/pat.png ────────────────────────────────────────────────────────────
+// 1-based, row-major over the image's own 8x8 grid — that is how `tilemap_set8` addresses a tile,
+// and it is why the asset is imported with `bgtiles:` rather than `background:`. `background:`
+// passes agb's `deduplicate`, which collapses identical tiles and SHORTENS the table these indices
+// point into: the flat fills below are exactly the tiles it would collapse, so every index past the
+// first few would silently draw nothing.
+//
+// Only the tiles pages actually use are named here; `assets/make_tiles.py` prints the full table
+// and is the source of truth for the order. Keep the two in step.
+let T_BLACK: i32 = 1
+let T_WHITE: i32 = 2
+let T_GREY: i32 = 3
+let T_LIGHT: i32 = 5
+let T_BACK: i32 = 8
+let T_MORTAR_B: i32 = 9
+let T_MORTAR_W: i32 = 10
+let T_DIAG: i32 = 12
+let T_HSTRIPE: i32 = 13
+let T_MAGENTA: i32 = 24
+let T_CYAN: i32 = 25
+let T_YELLOW: i32 = 26
+
+// Screen in 8px tiles, and the two rows the label owns. Pages paint from LABEL_ROWS down, so the
+// name is never drawn over — the canvas is in front, but a page that repainted under it every
+// frame would make the text shimmer.
+let COLS: i32 = 30
+let ROWS: i32 = 20
+let LABEL_ROWS: i32 = 2
+
+// Button ordinals, not bitmasks — `key_pressed` takes an ordinal, and a mask compiles, runs, and
+// quietly reads the wrong button.
+let KEY_A: i32 = 0
+let KEY_LEFT: i32 = 5
+let KEY_RIGHT: i32 = 4
+
+let PAGES: i32 = 10
+let P_CAFE: i32 = 0
+let P_HERMANN: i32 = 1
+let P_OUCHI: i32 = 2
+let P_KANIZSA: i32 = 3
+let P_EBBING: i32 = 4
+let P_MULLER: i32 = 5
+let P_LILAC: i32 = 6
+let P_AFTER: i32 = 7
+let P_WATERFALL: i32 = 8
+let P_BARBER: i32 = 9
+
+// 0 = dwell counter, 1 = last label painted, 2 = edge latch, 3 = per-page animation clock.
+let S: i32[] = [0, 0 - 1, 0, 0]
+
+// Long enough to actually SEE an illusion — several of these need a few seconds of steady fixation
+// before they do anything, which is the opposite of what a normal demo wants. The lilac chaser in
+// particular does not exist below about four seconds of staring.
+let DWELL: i32 = 300
+let LEN: i32 = 24
+
+// The transition used to reach each page, indexed by page. Rotating them is free showmanship —
+// several of the engine's transitions (mosaic, checker, bars) are illusions in their own right, so
+// the chrome is part of the content rather than a wrapper around it.
+//
+// ⚠️ TR_CHECKER IS ON PAGE 2 BECAUSE PAGE 2 DRAWS NOTHING ON THE UI CANVAS. It is a SOFTWARE
+// transition: it paints the canvas and clears those cells again as it opens, so anything a page
+// drew there during `enter()` — which happens at the black midpoint, before the curtain lifts — is
+// wiped on the way out. It cost an hour on the lilac chaser's fixation cross, which simply was not
+// there and left no other trace. Pages that draw on the canvas (kanizsa's white field is a tilemap,
+// but muller-lyer and lilac are canvas) get a HARDWARE transition.
+let FX: i32[] = [TR_FADE, TR_MOSAIC, TR_CHECKER, TR_WIPE, TR_BOX,
+                 TR_CURTAIN, TR_BARS, TR_WHITE, TR_IRIS, TR_BOX]
+
+let NAMES: string[] = [
+  "cafe wall", "hermann grid", "ouchi", "kanizsa triangle",
+  "ebbinghaus", "muller-lyer", "lilac chaser", "afterimage",
+  "motion aftereffect", "barber pole"
+]
+
+// ── Boot ────────────────────────────────────────────────────────────────────────────────────────
+// ⚠️ ORDER IS LOAD-BEARING. `tilemap_new` uploads its asset's palettes to ALL SIXTEEN background
+// banks and re-derives the backdrop colour from entry 0, so anything that owns a bank has to claim
+// it afterwards: terrain takes bank 14 through `terrain_palette`, and the UI canvas takes bank 15
+// lazily the first time it draws. Booting in the other order loses both.
+//
+// `w = h = 0` skips tilemap_new's own paint loop — every cell in this ROM is written by
+// `tilemap_set8`, which indexes 8px tiles directly instead of 16px 2x2 blocks.
+let EMPTY: i32[] = []
+let BG: i32 = tilemap_new(pat, 4, 0, 0, EMPTY, 3)
+
+terrain_new(240, 160)
+ui_reserve_tiles(192)
+ui_begin()
+
+// ── Tilemap helpers ─────────────────────────────────────────────────────────────────────────────
+// ⚠️ A `tilemap_set8` COSTS ROUGHLY 250-300 TICKS ON DEVICE, so a full-screen repaint is ~540 of
+// them — about half a second. That is affordable ONLY because `scene.tish` holds at full black
+// across `enter()`, and it is the reason `bandFill` exists rather than a per-cell loop at each call
+// site: the cheapest write is the one not made, and every page below paints in bands.
+function fillTiles(c0: i32, r0: i32, w: i32, h: i32, t: i32) {
+  let r: i32 = 0
+  while (r < h) {
+    let c: i32 = 0
+    while (c < w) {
+      tilemap_set8(BG, pat, c0 + c, r0 + r, t)
+      c = c + 1
+    }
+    r = r + 1
+  }
+}
+
+// Blank the page area back to the backdrop tile. Every page's `leave()` calls this, so no page can
+// inherit half of the one before it — the failure that looks like a corrupt tilemap and is not.
+function clearPage() {
+  fillTiles(0, LABEL_ROWS, COLS, ROWS - LABEL_ROWS, T_BACK)
+}
+
+// ── Page 0: the cafe wall ───────────────────────────────────────────────────────────────────────
+// Rows of alternating light and dark blocks, each row OFFSET from the one above, separated by a
+// mortar line of a grey between the two. The parallel rows look wedge-shaped.
+//
+// The two numbers that decide whether it works at all:
+//   • the offset must be about a QUARTER of a block, not a half. A half-shift is symmetric and the
+//     tilt cancels exactly — it reads as a plain brick wall. Blocks are 32px (4 tiles) and the
+//     shift is 8px (1 tile), which is the largest quarter-shift this tile grid can express.
+//   • the mortar must be MID GREY. In black it is a checkerboard; in white it is a checkerboard.
+//     The tilt only appears when the line's luminance sits between the two blocks it separates,
+//     which is why `T_MORTAR_B` and `T_MORTAR_W` carry the grey row in the tile itself rather than
+//     leaving it to a second pass.
+function drawCafe() {
+  let band: i32 = 0
+  while (band < 9) {
+    let r: i32 = LABEL_ROWS + Math.imul(band, 2)
+    if (r + 1 >= ROWS) { return }
+    // Quarter-block stagger, cycling 0, 1, 2, 3 tiles and back — an alternating two-phase offset
+    // makes every OTHER row parallel again and halves the effect.
+    let shift: i32 = band & 3
+    let c: i32 = 0
+    while (c < COLS) {
+      // Which 4-tile block this column falls in, once the row's stagger is applied.
+      let blk: i32 = ((c + shift) / 4) & 1
+      let top: i32 = T_MORTAR_W
+      let bot: i32 = T_WHITE
+      if (blk === 0) { top = T_MORTAR_B; bot = T_BLACK }
+      tilemap_set8(BG, pat, c, r, top)
+      tilemap_set8(BG, pat, c, r + 1, bot)
+      c = c + 1
+    }
+    band = band + 1
+  }
+}
+
+// ── Page 1: the Hermann grid ────────────────────────────────────────────────────────────────────
+// Black squares separated by white streets. Grey smudges appear at the crossings you are NOT
+// looking at, and vanish from the one you are. 24px pitch: two tiles of square, one of street.
+function drawHermann() {
+  let r: i32 = LABEL_ROWS
+  while (r < ROWS) {
+    let c: i32 = 0
+    while (c < COLS) {
+      let t: i32 = T_BLACK
+      if (c % 3 === 2 || (r - LABEL_ROWS) % 3 === 2) { t = T_WHITE }
+      tilemap_set8(BG, pat, c, r, t)
+      c = c + 1
+    }
+    r = r + 1
+  }
+}
+
+// ── Page 2: Ouchi ───────────────────────────────────────────────────────────────────────────────
+// One checkerboard inside another, the inner one rotated 90 degrees. The inset appears to float on
+// its own plane and to slide against the surround when the console moves — the visual system reads
+// the two grids' edges as belonging to two different surfaces.
+//
+// The checks are RECTANGLES, 2:1, and that is the illusion rather than a drawing shortcut: it is
+// the mismatch between each grid's long axis that makes the inset detach. A square check does
+// nothing.
+function drawOuchi() {
+  let r: i32 = LABEL_ROWS
+  while (r < ROWS) {
+    let c: i32 = 0
+    while (c < COLS) {
+      // Surround: 16px wide by 8px tall checks. Inset: the same rectangle stood on end.
+      let t: i32 = T_BLACK
+      let inset: i32 = 0
+      if (c >= 10 && c < 20 && r >= 7 && r < 15) { inset = 1 }
+      if (inset === 1) {
+        if (((c + (r / 2)) & 1) === 0) { t = T_WHITE }
+      } else {
+        if ((((c / 2) + r) & 1) === 0) { t = T_WHITE }
+      }
+      tilemap_set8(BG, pat, c, r, t)
+      c = c + 1
+    }
+    r = r + 1
+  }
+}
+
+// ── Page 3: the Kanizsa triangle ────────────────────────────────────────────────────────────────
+// Three black discs, each with a wedge cut out, arranged so the wedges face a common centre. A
+// bright white triangle appears — with crisp edges, brighter than the page — over regions where
+// nothing at all is drawn.
+//
+// The wedge is carved rather than drawn: `terrain_carve` is a circle, so the notch is swept out by
+// walking small circles along every ray inside the wedge angle. The illusion needs the wedge's two
+// straight EDGES to line up with the phantom triangle's sides — nothing else about the shape does
+// any work — so what matters is the sweep being FINE enough that the edges come out straight.
+//
+// ⚠️ The first version swept three rays 30 degrees apart with radius-7 circles. It cut a notch, and
+// the notch was visibly round: a radius-7 circle centred ON the disc's centre rounds the wedge's
+// apex away, and 30-degree spacing leaves the rim scalloped. Both blunt exactly the two features
+// carrying the effect, and the page reads as three pac-men with no triangle. Fifteen-degree rays
+// and radius 3 cost about 90 more `terrain_carve` calls once, at enter, and fix both.
+//
+// Sines and cosines x100 at 15-degree steps. There is no trig in tish and no libm on this target;
+// a table is the whole answer, and the pages that want 30-degree steps just index it by twos.
+let RAY_X: i32[] = [100, 97, 87, 71, 50, 26, 0, 0 - 26, 0 - 50, 0 - 71, 0 - 87, 0 - 97,
+                    0 - 100, 0 - 97, 0 - 87, 0 - 71, 0 - 50, 0 - 26, 0, 26, 50, 71, 87, 97]
+let RAY_Y: i32[] = [0, 26, 50, 71, 87, 97, 100, 97, 87, 71, 50, 26,
+                    0, 0 - 26, 0 - 50, 0 - 71, 0 - 87, 0 - 97, 0 - 100, 0 - 97, 0 - 87, 0 - 71,
+                    0 - 50, 0 - 26]
+
+// Carve a 60-degree wedge out of the disc at (cx, cy), centred on ray `dir` and swept from the
+// centre out past the rim so the mouth opens cleanly instead of leaving a rind.
+//
+// ⚠️ THE CARVE RADIUS HAS TO GROW WITH DISTANCE. Five rays 15 degrees apart are 8px apart out at
+// the rim, so a constant radius-3 circle (6px across) stops touching its neighbours about two
+// thirds of the way out and leaves a scatter of black specks between the rays. It is nearly
+// invisible at a glance — the wedge still reads as a wedge — but a connected-component count of
+// the page found twenty-five dark regions instead of three, which is what actually caught it.
+// `2 + step/5` keeps neighbouring circles overlapping the whole way out.
+function carveWedge(cx: i32, cy: i32, r: i32, dir: i32) {
+  let k: i32 = 0 - 2
+  while (k <= 2) {
+    let d: i32 = (dir + k + 24) % 24
+    let step: i32 = 3
+    while (step <= r + 3) {
+      terrain_carve(cx + (Math.imul(RAY_X[d], step) / 100),
+                    cy + (Math.imul(RAY_Y[d], step) / 100), 2 + (step / 5))
+      step = step + 3
+    }
+    k = k + 1
+  }
+}
+
+function drawKanizsa() {
+  fillTiles(0, LABEL_ROWS, COLS, ROWS - LABEL_ROWS, T_WHITE)
+  terrain_palette(1, 0x101010)
+  // Three corners of a large triangle, and for each, the ray direction pointing back at the
+  // triangle's CENTRE — roughly (120, 76) for the corners below.
+  //
+  // ⚠️ Getting a direction wrong does not look like a bug. The disc still draws, the notch still
+  // cuts, and the page reads as "three pac-men that happen not to line up" rather than as anything
+  // broken — so the phantom triangle simply never appears and there is nothing to grep for. The
+  // ray index is `atan2(centre - corner)` on the 24-point table: (+56,+28) is 2, (-56,+28) is 10,
+  // (0,-56) is 18.
+  // Radius 28 against a 112px triangle side is a support ratio of about 0.5. That number is the
+  // one knob on this page: at radius 22 the discs were too small for their spacing and the phantom
+  // edges faded out between them, which looks like nothing more than three pac-men.
+  terrain_disc(64, 48, 28, 1)
+  carveWedge(64, 48, 28, 2)
+  terrain_disc(176, 48, 28, 1)
+  carveWedge(176, 48, 28, 10)
+  terrain_disc(120, 126, 28, 1)
+  carveWedge(120, 126, 28, 18)
+}
+
+// ── Page 4: Ebbinghaus ──────────────────────────────────────────────────────────────────────────
+// Two centre discs of IDENTICAL radius. The one ringed by large discs looks smaller than the one
+// ringed by small ones. Two materials so the centres can be recoloured together later, and so a
+// screenshot check can tell centre from ring by palette rather than by geometry.
+function drawEbbing() {
+  fillTiles(0, LABEL_ROWS, COLS, ROWS - LABEL_ROWS, T_LIGHT)
+  terrain_palette(1, 0x2050C0)   // the two centres
+  terrain_palette(2, 0x606060)   // the rings
+  terrain_disc(62, 92, 15, 1)
+  terrain_disc(178, 92, 15, 1)
+  let i: i32 = 0
+  while (i < 12) {
+    // Step the 24-point table by twos: these rings want 30-degree spacing.
+    let d: i32 = Math.imul(i, 2)
+    if ((i & 1) === 0) {
+      // Left: six large satellites, held far enough out that they do not touch the centre.
+      terrain_disc(62 + (Math.imul(RAY_X[d], 44) / 100),
+                   92 + (Math.imul(RAY_Y[d], 44) / 100), 15, 2)
+    }
+    // Right: twelve small ones, closer in.
+    terrain_disc(178 + (Math.imul(RAY_X[d], 26) / 100),
+                 92 + (Math.imul(RAY_Y[d], 26) / 100), 5, 2)
+    i = i + 1
+  }
+}
+
+// ── Page 5: Muller-Lyer ─────────────────────────────────────────────────────────────────────────
+// Two shafts of exactly the same length. The one whose fins point BACK along the shaft, `<——>`,
+// looks shorter; the one whose fins splay outward, `>——<`, looks longer. The only page drawn on the
+// UI canvas, because it is nothing but thin straight lines and that is the one thing the canvas is
+// better at than either other surface.
+//
+// ⚠️ `ui_rect` is called in its SIX-argument form throughout. The five-argument outline form is
+// still on the boxed path in this tree (see crates/tish-agb/tish.d.tish) — passing `1` for `filled`
+// costs nothing and takes the typed one.
+function line(x: i32, y: i32, w: i32, h: i32) {
+  ui_rect(x, y, w, h, 0xFFFFFF, 1)
+}
+
+// One arrowhead: a diagonal pair of hairlines from (x, y), stepping `dx` per pixel of run.
+function head(x: i32, y: i32, dx: i32) {
+  let i: i32 = 0
+  while (i < 14) {
+    line(x + Math.imul(dx, i), y - i, 1, 1)
+    line(x + Math.imul(dx, i), y + i, 1, 1)
+    i = i + 1
+  }
+}
+
+function drawMuller() {
+  fillTiles(0, LABEL_ROWS, COLS, ROWS - LABEL_ROWS, T_BACK)
+  let len: i32 = 120
+  let x0: i32 = 60
+  // Shaft one: `<——>`, fins folded back along the shaft. Looks SHORTER.
+  line(x0, 58, len, 2)
+  head(x0, 58, 1)
+  head(x0 + len, 58, 0 - 1)
+  // Shaft two: `>——<`, same x0 and the same `len`, fins splayed outward. Looks LONGER.
+  line(x0, 112, len, 2)
+  head(x0, 112, 0 - 1)
+  head(x0 + len, 112, 1)
+  // ⚠️ NO CONNECTING LINES BETWEEN THE TWO SHAFTS. The first version dropped a hairline from each
+  // end of the top shaft to the bottom one, meaning to PROVE the lengths match. It closed the
+  // figure into a rectangle, and a rectangle is one object: the eye stopped comparing two lines
+  // and the illusion vanished completely. Short stubs that stop short of the other shaft keep the
+  // proof without joining them.
+  line(x0, 66, 1, 8)
+  line(x0 + len, 66, 1, 8)
+  line(x0, 100, 1, 8)
+  line(x0 + len, 100, 1, 8)
+}
+
+// ── Page 6: the lilac chaser ────────────────────────────────────────────────────────────────────
+// Twelve magenta discs in a ring on grey. One disc is blanked at a time, running round the ring. Fix
+// on the centre and: first a GREEN disc chases the gap (the negative afterimage of magenta), then
+// the magenta discs fade out altogether and only the green one is left going round.
+//
+// ⚠️ NOTHING IS REDRAWN. Each disc is a different terrain MATERIAL, so hiding one is a single
+// `terrain_palette` write — the blanked disc is not erased, it is repainted in the field's own grey.
+// A redraw-per-frame version of this page would cost twelve `terrain_disc` calls a frame for a
+// picture that changes by one palette entry.
+let LILAC_FIELD: i32 = 0x909090
+let LILAC_DISC: i32 = 0xE050E0
+
+function drawLilac() {
+  fillTiles(0, LABEL_ROWS, COLS, ROWS - LABEL_ROWS, T_GREY)
+  let i: i32 = 0
+  while (i < 12) {
+    let d: i32 = Math.imul(i, 2)
+    terrain_palette(i + 1, LILAC_DISC)
+    terrain_disc(120 + (Math.imul(RAY_X[d], 58) / 100),
+                 88 + (Math.imul(RAY_Y[d], 58) / 100), 12, i + 1)
+    i = i + 1
+  }
+  // The fixation cross. Without one the illusion does not happen at all — it is an effect of
+  // PERIPHERAL vision, and an eye free to wander never lets the discs fade.
+  ui_rect(116, 87, 9, 1, 0x303030, 1)
+  ui_rect(120, 83, 1, 9, 0x303030, 1)
+}
+
+// One eighth of a second per step is the rate the effect is usually described at; much faster and
+// the gap smears, much slower and the afterimage decays between steps.
+function stepLilac(t: i32) {
+  let cur: i32 = (t / 8) % 12
+  let prev: i32 = (cur + 11) % 12
+  if (t % 8 === 0) {
+    terrain_palette(prev + 1, LILAC_DISC)
+    terrain_palette(cur + 1, LILAC_FIELD)
+  }
+}
+
+// ── Page 7: the afterimage ──────────────────────────────────────────────────────────────────────
+// A flag in the WRONG colours — cyan where it should be red, black where it should be white,
+// yellow where it should be blue. Stare at it, and when the screen snaps to white the flag comes
+// back in its real colours for a second or two.
+//
+// The snap is `fade_white`, the BLDY brightness register, ramped to full over four frames. It is
+// the right instrument for this and not just a convenient one: it whitens EVERY layer plus the
+// backdrop in one register write, so the page does not have to be redrawn white — and a redraw
+// would take long enough to blur the very transition the illusion depends on being instant.
+//
+// ⚠️ BLDCNT holds ONE effect for the whole screen and the engine resolves fade > fade_white >
+// fx_flash > blend_alpha. A live scene fade therefore SUPPRESSES this — which is exactly why the
+// white flash is timed to the middle of the page's dwell and `leave()` puts the register back.
+function drawAfter() {
+  fillTiles(0, LABEL_ROWS, COLS, ROWS - LABEL_ROWS, T_BLACK)
+  // Canton, then the stripes: cyan for red, black for white, yellow for blue.
+  let i: i32 = 0
+  while (i < 7) {
+    let t: i32 = T_CYAN
+    if ((i & 1) === 1) { t = T_BLACK }
+    fillTiles(0, LABEL_ROWS + Math.imul(i, 2), COLS, 2, t)
+    i = i + 1
+  }
+  fillTiles(0, LABEL_ROWS, 12, 8, T_YELLOW)
+  fillTiles(2, LABEL_ROWS + 2, 2, 2, T_MAGENTA)
+  fillTiles(7, LABEL_ROWS + 2, 2, 2, T_MAGENTA)
+  fillTiles(4, LABEL_ROWS + 5, 2, 2, T_MAGENTA)
+}
+
+// Hold the plate for two thirds of the dwell, then white for the rest.
+function stepAfter(t: i32) {
+  let hold: i32 = 200
+  if (t < hold) { return }
+  let k: i32 = (t - hold) * 4
+  if (k > 16) { k = 16 }
+  fade_white(k)
+}
+
+// ── Pages 8 and 9: the two that MOVE ────────────────────────────────────────────────────────────
+// Both are one `bg_scroll` per frame and nothing else — no redraw, no per-pixel work, no DMA. The
+// scroll registers are two halfwords the hardware applies at scanout, so these are the cheapest
+// pages in the ROM and the only two that animate the whole screen.
+//
+// ⚠️ THEY PAINT ALL 32x32 CELLS, NOT THE 30x20 THAT ARE ON SCREEN. `tilemap_new` allocates a
+// `Background32x32` — 256x256 pixels — and the hardware WRAPS it. Every other page paints the
+// visible window and leaves the rest blank, which is invisible until something scrolls: then the
+// unwritten rows come round and the pattern tears open. Filling the whole map is what makes the
+// wrap seamless, and it is why these two have their own `clearFull` on the way out.
+function fillFull(t: i32) {
+  fillTiles(0, 0, 32, 32, t)
+}
+
+// The motion aftereffect, a.k.a. the waterfall illusion. Horizontal stripes scroll steadily
+// upward for four seconds and then STOP DEAD. The stopped, entirely static screen appears to drift
+// slowly downward for a second or two — the direction-selective cells that adapted to the upward
+// motion go quiet, and the opposing ones are left unopposed.
+//
+// The stop has to be instant. Easing the scroll to a halt lets the adaptation unwind with it and
+// there is no aftereffect at all, which is why `stepWaterfall` clamps rather than decays.
+function drawWaterfall() {
+  fillFull(T_HSTRIPE)
+  ui_rect(116, 87, 9, 1, 0xE00000, 1)
+  ui_rect(120, 83, 1, 9, 0xE00000, 1)
+}
+
+let MAE_RUN: i32 = 240
+
+function stepWaterfall(t: i32) {
+  let y: i32 = t
+  if (y > MAE_RUN) { y = MAE_RUN }
+  // Two pixels a frame. One is slow enough that the stripes read as a staircase rather than as
+  // motion; four aliases against the 8px stripe period and starts to flicker backwards.
+  bg_scroll(BG, 0, 0 - Math.imul(y, 2))
+}
+
+// The barber pole. Diagonal stripes slide HORIZONTALLY, but seen through a tall vertical slot they
+// appear to travel straight up. The aperture decides the perceived direction, not the stripes: the
+// visual system can only measure motion perpendicular to a line it cannot see the ends of, so it
+// resolves the ambiguity using the only ends available — the ones the slot creates.
+//
+// ⚠️ THE APERTURE IS DRAWN ON THE UI CANVAS, NOT WITH `win_rect`. The window registers would do
+// this in hardware, but their layer mask is by DRAW ORDER — bit 0..3 is the nth background actually
+// SHOWN this frame — so the mask silently re-points whenever the set of visible layers changes.
+// This ROM has three layers whose visibility varies by page. Two `ui_fill_cells` calls on the
+// front-most layer are unconditional, cost two shared tiles, and cannot be aimed at the wrong one.
+let SLOT_X: i32 = 96
+let SLOT_W: i32 = 48
+
+function drawBarber() {
+  fillFull(T_DIAG)
+  ui_fill_cells(0, LABEL_ROWS * 8, SLOT_X, 160 - (LABEL_ROWS * 8), 0x181828)
+  ui_fill_cells(SLOT_X + SLOT_W, LABEL_ROWS * 8, 240 - SLOT_X - SLOT_W,
+                160 - (LABEL_ROWS * 8), 0x181828)
+}
+
+function stepBarber(t: i32) {
+  bg_scroll(BG, t, 0)
+}
+
+// ── The page machine ────────────────────────────────────────────────────────────────────────────
+// One `enter`/`update`/`leave` per page would be twenty-four closures sitting in module scope, and
+// a module body holding that many is the shape that has run this engine's 29KB stack out before.
+// Three closures TOTAL, created by a factory that captures only an index, is the same feature for a
+// constant frame — the pages themselves are ordinary functions dispatched on `i`.
+function pageEnter(i: i32) {
+  let t0: i32 = ticks()
+  S[3] = 0
+  fade_white(0)
+  if (i === P_CAFE) { drawCafe() }
+  if (i === P_HERMANN) { drawHermann() }
+  if (i === P_OUCHI) { drawOuchi() }
+  if (i === P_KANIZSA) { drawKanizsa() }
+  if (i === P_EBBING) { drawEbbing() }
+  if (i === P_MULLER) { drawMuller() }
+  if (i === P_LILAC) { drawLilac() }
+  if (i === P_AFTER) { drawAfter() }
+  if (i === P_WATERFALL) { drawWaterfall() }
+  if (i === P_BARBER) { drawBarber() }
+  // The build cost, logged rather than guessed at. A frame is ~4,389 ticks; `scene.tish` hides this
+  // behind a black hold, so what this number decides is how long the crossing FEELS, and a page
+  // that drifts past ~40 frames is the one to split across `update()`. Measured here: 4 frames for
+  // the cafe wall, 11 for kanizsa's ~450 carves — comfortably invisible.
+  //
+  // ⚠️ MASKED TO 16 BITS BECAUSE `ticks()` WRAPS — AND THE MASK ONLY HIDES HALF THE PROBLEM. The
+  // counter rolls over about every fifteen frames. Under that, the raw subtraction goes negative
+  // whenever a build straddles the rollover and the mask corrects it. OVER it, the measurement is
+  // simply lost: the barber pole's 1,024 tilemap writes reported 2,267 ticks, which is the true
+  // ~67,800 wrapped once and is indistinguishable from a genuinely fast page.
+  //
+  // So treat this number as indicative, not as a bound. What verify.sh actually asserts is the
+  // page-to-page CADENCE in this log, which is measured in frames and cannot wrap.
+  log("ILLUSIONS page " + i + " " + NAMES[i] + " build " + ((ticks() - t0) & 65535))
+}
+
+function pageUpdate(i: i32) {
+  S[3] = S[3] + 1
+  if (i === P_LILAC) { stepLilac(S[3]) }
+  if (i === P_AFTER) { stepAfter(S[3]) }
+  if (i === P_WATERFALL) { stepWaterfall(S[3]) }
+  if (i === P_BARBER) { stepBarber(S[3]) }
+}
+
+// ⚠️ EVERY PAGE PUTS BACK WHAT IT TOOK. The tilemap is shared, the terrain layer is shared, the UI
+// canvas is shared and BLDCNT is a single global register — so a page that leaves any of them dirty
+// does not break itself, it breaks the NEXT one, which is the hardest version of this bug to read.
+function pageLeave(i: i32) {
+  fade_white(0)
+  bg_scroll(BG, 0, 0)
+  terrain_clear()
+  ui_clear_rect(0, LABEL_ROWS * 8, 240, 160 - (LABEL_ROWS * 8))
+  // The scrolling pages painted all 1,024 cells, so blanking only the visible 600 would leave the
+  // next page sitting on half of theirs — invisible until something scrolls again, at which point
+  // it looks like the tilemap corrupting rather than like a page that did not clean up.
+  if (i === P_WATERFALL || i === P_BARBER) { fillFull(T_BACK) } else { clearPage() }
+}
+
+function makePage(i: i32) {
+  return {
+    enter: () => pageEnter(i),
+    update: () => pageUpdate(i),
+    leave: () => pageLeave(i)
+  }
+}
+
+backdrop(0x181828)
+log("ILLUSIONS boot")
+
+let PAGE_LIST = []
+let n: i32 = 0
+while (n < PAGES) {
+  PAGE_LIST.push(makePage(n))
+  n = n + 1
+}
+sceneStart(PAGE_LIST, 0)
+sceneSetTransition(FX[0], LEN)
+
+while (true) {
+  // Page selection, only between transitions: changing pages mid-crossing would close on one and
+  // open on another, which reads as two bugs rather than one feature.
+  if (!sceneBusy()) {
+    let l: i32 = key_pressed(KEY_LEFT)
+    let r: i32 = key_pressed(KEY_RIGHT)
+    let a: i32 = key_pressed(KEY_A)
+    let cur: i32 = sceneCur()
+    if (S[2] === 0) {
+      if (l === 1) { S[0] = 0; sceneSetTransition(FX[(cur + PAGES - 1) % PAGES], LEN)
+                     sceneGoto((cur + PAGES - 1) % PAGES); S[2] = 1 }
+      if (r === 1) { S[0] = 0; sceneSetTransition(FX[(cur + 1) % PAGES], LEN)
+                     sceneGoto((cur + 1) % PAGES); S[2] = 1 }
+      if (a === 1) { S[2] = 1; S[0] = DWELL }
+    }
+    if (l === 0 && r === 0 && a === 0) { S[2] = 0 }
+  }
+
+  // Auto-advance, so an unattended headless run covers every page in order.
+  S[0] = S[0] + 1
+  if (S[0] >= DWELL && !sceneBusy()) {
+    S[0] = 0
+    let nxt: i32 = (sceneCur() + 1) % PAGES
+    sceneSetTransition(FX[nxt], LEN)
+    sceneGoto(nxt)
+  }
+
+  // The label, repainted the moment the page index changes — which `scene.tish` does at the black
+  // midpoint, so the name is already right when the new page is revealed. Waiting for
+  // `!sceneBusy()` instead meant every crossing opened on the new picture under the OLD name for
+  // the length of the transition, which reads as a page drawing the wrong illusion.
+  //
+  // ⚠️ Except into a SOFTWARE transition, which owns the canvas until it finishes — see FX above.
+  if (S[1] !== sceneCur() && (!sceneBusy() || FX[sceneCur()] !== TR_CHECKER)) {
+    S[1] = sceneCur()
+    // ⚠️ FILL the band, do not CLEAR it. `ui_clear_rect` leaves the cells transparent, which was
+    // fine while every page was static — and then the two scrolling pages ran their stripes
+    // straight through the label. `ui_fill_cells` is the shared-solid-tile path, so an opaque
+    // header for every page costs one tile in total.
+    ui_fill_cells(0, 0, 240, LABEL_ROWS * 8, 0x181828)
+    ui_text(small, 4, 1, NAMES[S[1]] + "  •  " + trName(FX[S[1]]), 0xFFFFFF)
+  }
+
+  sceneStep()
+  frame()
+}

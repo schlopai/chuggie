@@ -1,0 +1,107 @@
+# Meadow Circuit — overworld theme (4 bars, loops).
+# Dual-engine: pulse lead + pulse pad + wave bass + PCM kick/hat.
+deck 1
+bpm 108
+
+track Lead id lead gen gameBoyDmg * 4
+  gen type pulse duty 50 env_mode constant vol 12
+  gen vib_rate 5 vib_amt 12
+  # A section
+  note 67 0 0.5 v 110
+  note 69 0.5 0.5 v 100
+  note 71 1 0.5 v 110
+  note 74 1.5 0.5 v 120
+  note 71 2 0.5 v 100
+  note 69 2.5 0.5 v 95
+  note 67 3 1 v 110
+  # B section — lifts
+  note 74 4 0.5 v 115
+  note 76 4.5 0.5 v 110
+  note 79 5 0.75 v 120
+  note 76 5.75 0.25 v 100
+  note 74 6 0.5 v 110
+  note 71 6.5 0.5 v 100
+  note 69 7 0.5 v 95
+  note 67 7.5 0.5 v 105
+  # C — home
+  note 64 8 0.5 v 100
+  note 67 8.5 0.5 v 105
+  note 69 9 0.5 v 110
+  note 71 9.5 0.5 v 115
+  note 74 10 1 v 120
+  note 71 11 0.5 v 100
+  note 69 11.5 0.5 v 95
+  note 67 12 1 v 110
+  note 64 13 1 v 90
+  note 62 14 1 v 85
+  note 60 15 1 v 100
+
+track Harmony id harm gen gameBoyDmg * 4
+  gen type pulse duty 25 env_mode constant vol 6
+  note 60 0 2 v 80
+  note 62 2 2 v 75
+  note 64 4 2 v 85
+  note 62 6 2 v 75
+  note 60 8 2 v 80
+  note 57 10 2 v 70
+  note 55 12 2 v 75
+  note 60 14 2 v 85
+
+track Bass id bass gen gameBoyDmg * 4
+  gen type wave wave_shape saw vol 15
+  note 36 0 1 v 120
+  note 36 1 1 v 90
+  note 38 2 1 v 110
+  note 38 3 1 v 85
+  note 40 4 1 v 120
+  note 40 5 1 v 90
+  note 38 6 1 v 110
+  note 36 7 1 v 100
+  note 36 8 1 v 120
+  note 33 9 1 v 100
+  note 31 10 1 v 110
+  note 31 11 1 v 90
+  note 36 12 1 v 120
+  note 38 13 1 v 100
+  note 40 14 1 v 110
+  note 36 15 1 v 115
+
+track Kick id kick gen gbaDirectSound * 4
+  gen waveform pulse duty 50 vol 14 bitcrush true pitch_drop -10 pitch_dec 0.07
+  adsr a 0 d 0.12 s 0 r 0.04
+  note 36 0 0.15 v 127
+  note 36 1 0.15 v 100
+  note 36 2 0.15 v 127
+  note 36 3 0.15 v 100
+  note 36 4 0.15 v 127
+  note 36 5 0.15 v 100
+  note 36 6 0.15 v 127
+  note 36 7 0.15 v 100
+  note 36 8 0.15 v 127
+  note 36 9 0.15 v 100
+  note 36 10 0.15 v 127
+  note 36 11 0.15 v 100
+  note 36 12 0.15 v 127
+  note 36 13 0.15 v 100
+  note 36 14 0.15 v 127
+  note 36 15 0.15 v 110
+
+track Hat id hat gen gbaDirectSound * 4
+  gen waveform triangle duty 50 vol 8 bitcrush true
+  adsr a 0 d 0.06 s 0 r 0.03
+  note 84 0.5 0.1 v 80
+  note 84 1.5 0.1 v 70
+  note 84 2.5 0.1 v 80
+  note 84 3.5 0.1 v 70
+  note 84 4.5 0.1 v 85
+  note 84 5.5 0.1 v 70
+  note 84 6.5 0.1 v 80
+  note 84 7.5 0.1 v 75
+  note 84 8.5 0.1 v 80
+  note 84 9.5 0.1 v 70
+  note 84 10.5 0.1 v 80
+  note 84 11.5 0.1 v 70
+  note 84 12.5 0.1 v 85
+  note 84 13.5 0.1 v 70
+  note 84 14.5 0.1 v 80
+  note 84 15.5 0.1 v 90

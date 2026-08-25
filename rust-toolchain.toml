@@ -1,0 +1,19 @@
+# PINNED, deliberately. Do not change this to a bare `channel = "nightly"`.
+#
+# A floating `nightly` means the compiler can move under all three repos (tish, agb, chuggie-engine)
+# without a single line of source changing — building an unrelated project, or any `rustup update`,
+# silently swaps it. That produces "the code is identical but the ROM broke", which is unfalsifiable
+# and costs days. On 2026-08-14 the channel drifted from 2026-07-22 to 2026-08-14 mid-session.
+#
+# This file governs the ROM builds too, not just `crates/`: `tish build` copies the channel from the
+# nearest pin at or above the project into the crate it generates
+# (`.tish/gba/<name>/rust-toolchain.toml`, see tish_native/src/build.rs). rustup honours the file
+# nearest the build directory, so before tish inherited the pin, that generated file's bare
+# `nightly` silently overrode this one on every ROM build — and still would on any tish older than
+# that change.
+#
+# To move the pin: change it here, then rebuild every ROM (`npm run clean` per example). A dated
+# channel is safe to auto-install, so CI and new machines fetch exactly this toolchain.
+[toolchain]
+channel = "nightly-2026-07-22"
+components = ["rust-src", "clippy", "rustfmt"]

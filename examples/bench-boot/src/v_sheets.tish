@@ -1,0 +1,23 @@
+// Variant: FLOOR + 14 sprite sheets, nothing else. Isolates `sheet*:` registration.
+//
+// Each handle is summed into the log line so the compiler cannot decide the imports are dead and
+// drop them — a tree-shaken import measures nothing, very convincingly.
+import { log, frame } from 'cargo:tish_agb'
+import { hero } from 'sheet64:../../akari/assets/hero.png'
+import { hero32 } from 'sheet32:../../akari/assets/debug-hero32.png'
+import { hero64 } from 'sheet64:../../akari/assets/debug-hero64.png'
+import { slimeSheet } from 'sheet32:../../akari/assets/slime.png'
+import { batSheet } from 'sheet32:../../akari/assets/bat.png'
+import { skeletonSheet } from 'sheet32:../../akari/assets/skeleton.png'
+import { bossSheet } from 'sheet32:../../akari/assets/boss.png'
+import { elderSheet } from 'sheet32:../../akari/assets/elder.png'
+import { womanSheet } from 'sheet32:../../akari/assets/woman.png'
+import { merchantSheet } from 'sheet32:../../akari/assets/merchant.png'
+import { senseiSheet } from 'sheet32:../../akari/assets/sensei.png'
+import { heartsSheet } from 'sheet32:../../akari/assets/hearts.png'
+import { itemsSheet } from 'sheet32:../../akari/assets/items.png'
+import { faces } from 'sheet32:../../akari/assets/faces32.png'
+
+log("BB sheets sum=" + (hero + hero32 + hero64 + slimeSheet + batSheet + skeletonSheet + bossSheet +
+  elderSheet + womanSheet + merchantSheet + senseiSheet + heartsSheet + itemsSheet + faces))
+while (true) { frame() }

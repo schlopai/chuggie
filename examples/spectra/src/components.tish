@@ -1,0 +1,100 @@
+// The behaviours. There is deliberately very little here: the lens lives in `packages/chroma`, the
+// character controller in `packages/platformer`, and the physics in the engine crate. What is left
+// is the handful of rules specific to THIS game.
+//
+// ⚠️ NO `tick` HOOK ANYWHERE, and that is a rule rather than a coincidence. A `tick` gets a boxed
+// `s`: every field touch is a clone plus a string-keyed lookup and the arithmetic around it is boxed
+// f64, billed per ON-SCREEN entity. The stalker would be the obvious place for one — it changes
+// colour and it comes and goes — and instead it is a `set_sleeping` toggle driven once per LENS
+// CHANGE from the main loop, which costs nothing on the frames between.
+import { input_x, input_y } from 'cargo:tish_agb'
+import { platformerInit, platformerDrive, platformerAnimate } from '../../../packages/platformer'
+import { chromaLumenAdd } from '../../../packages/chroma'
+
+// Tags, so a collision can tell what it hit without a string compare.
+export let TAG_PLAYER: i32 = 1
+export let TAG_STALKER: i32 = 2
+export let TAG_PRISM: i32 = 3
+export let TAG_PAD: i32 = 4
+export let TAG_EXIT: i32 = 5
+
+// The hero's collision box, and where the 32x32 art sits over it. The box is 12 wide so the player
+// fits a one-tile gap without catching a corner, which several rooms need. The art is centred on the
+// box horizontally and STANDS on it: the figure's feet are drawn at y=27 inside the cell, so the
+// sprite sits 27px above the box's bottom edge rather than 32.
+export let BOX_W: i32 = 12
+export let BOX_H: i32 = 20
+export let SPR_OX: i32 = 0 - 10
+export let SPR_OY: i32 = 0 - 7
+
+// Clips into hero.png: [first, count, framesPerStep, loop]. Order matches `build_hero` in the
+// generator. `shift` (14-17) is not here on purpose — the main loop plays it over the top, because
+// turning the lantern is something the LANTERN does while the body carries on running underneath.
+export const CLIPS = {
+  idle: [0, 4, 14, 1],
+  walk: [4, 6, 6, 1],
+  run: [4, 6, 4, 1],
+  jump: [10, 1, 1, 0],
+  fall: [11, 1, 1, 0],
+  land: [12, 2, 3, 0],
+  hurt: [18, 1, 1, 0],
+  dead: [19, 3, 6, 0]
+}
+
+// Signals raised by hooks and consumed by the main loop, which is where the room actually changes.
+// Warping inside a hook tears down the entity whose `update` is still on the stack.
+//
+// Read through FUNCTIONS rather than as bare exported `let`s: a mutable module binding reached
+// through a namespace import (`components.sigWarp`) is a different thing from the module's own view
+// of it, and the failure is silent — the main loop reads a value that never changes, and no room
+// ever ends.
+let sigWarp: i32 = 0
+let sigHurt: i32 = 0
+let sigPad: i32 = 0
+
+/// Read this frame's signals as one packed word and clear them: bit 0 exit, bit 1 hurt, bit 2 pad.
+///
+/// One call rather than a clear plus three reads. On this chip a boxed call is ~117 ticks and the
+/// arithmetic around it is free, so four calls to move three bits cost ~470 — which is most of the
+/// ~900 this game had to find to hold 60fps.
+export function takeSignals(): i32 {
+  let m: i32 = sigWarp | (sigHurt << 1) | (sigPad << 2)
+  sigWarp = 0
+  sigHurt = 0
+  sigPad = 0
+  return m
+}
+
+export const Player = {
+  start: ({ this }) => {
+    platformerInit(this, this.data, {
+      boxW: BOX_W, boxH: BOX_H, spriteOX: SPR_OX, spriteOY: SPR_OY,
+      // No ladders, no wall-slide, no ledge-grab. Every one of those is a way to hold position that
+      // is not "stand on something", and this game's whole tension is whether the thing you are
+      // standing on is still there after the next button press.
+      ladders: 0, ledges: 0, wallSlide: 0, slide: 0,
+      walkSpeed: 1.4, runSpeed: 2.1, landFrames: 6
+    })
+  },
+  update: ({ this }) => {
+    let d = this.data
+    platformerDrive(this, d, input_x(), input_y(), 0)
+    platformerAnimate(this, d, CLIPS)
+  },
+  onCollide: ({ this, other }) => {
+    let t: i32 = other.tag()
+    if (t === TAG_EXIT) { sigWarp = 1 }
+    if (t === TAG_STALKER) { sigHurt = 1 }
+    if (t === TAG_PAD) { sigPad = 1 }
+    // A prism is a charging station, not a pickup: it stays where it is, because its tile is drawn
+    // by the map and a consumed one would leave its picture behind with nothing under it.
+    if (t === TAG_PRISM) { chromaLumenAdd(6) }
+  }
+}
+
+// Inert by design: what a stalker IS depends on the lens, and that is decided by the main loop on
+// the frames the lantern turns.
+export const Stalker = { start: ({ this }) => { this.setTag(TAG_STALKER) } }
+export const Prism = { start: ({ this }) => { this.setTag(TAG_PRISM) } }
+export const Pad = { start: ({ this }) => { this.setTag(TAG_PAD) } }
+export const Exit = { start: ({ this }) => { this.setTag(TAG_EXIT) } }

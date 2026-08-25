@@ -1,0 +1,242 @@
+// Sunnyside de-risk 4 (examples/sunnyside/SPEC.md §ladder): the farming core.
+//
+// The world comes from the shared generator; the farm plot is a parallel-
+// typed-array state machine over its cells (state/crop/stage/watered), and
+// every visual change is ONE bg_set_tile patch on the streamed layer — the
+// mechanism made for tiles that change during play.  A day passes every
+// DAY_FRAMES frames (fast, for testing): watered+planted cells advance a
+// growth stage and dry off; stage 5 is harvestable with the scythe.
+//
+// Controls: D-pad walks; L/R cycle the tool (hoe, can, seeds, scythe);
+// A uses the tool on the faced cell.  The farmer plays the pack's dig /
+// water / doing / attack animation while the tool lands.
+import { world } from 'bgtiles:../../../assets/sunnyside/baked/world_tiles.png'
+import { player } from 'sheet6432:../../../assets/sunnyside/baked/char_player.png'
+import {
+  frame, log, backdrop, hud_text, heap_free, key_pressed, bg_set_tile, input_x, input_y,
+  sprite_new, sprite_set_frame, sprite_set_flip,
+} from 'cargo:tish_agb'
+import {
+  spawn, set_transform, set_collider, set_topdown, topdown_speed, topdown_moving, topdown_move,
+  topdown_facing, attach_sprite, set_sprite_offset, set_camera_target, world_step,
+  entity_x, entity_y,
+} from 'cargo:tish_gba_game_engine'
+import {
+  ssgenGenerate, ssgenUpload, ssgenFarmX, ssgenFarmY, ssgenFarmW, ssgenFarmH,
+  ssgenDoorX, ssgenDoorY,
+} from '../../sunnyside/src/worldgen.tish'
+import {
+  GID_TILLED, GID_PLANTED, GID_WATERED, GID_SOIL, CROP_TILE_GID,
+} from '../../sunnyside/src/data_world.tish'
+import { ANIM_PLAYER_START, ANIM_PLAYER_LEN } from '../../sunnyside/src/data_anim.tish'
+
+let TILE: i32 = 16
+let BTN_A: i32 = 0
+let BTN_L: i32 = 4
+let BTN_R: i32 = 5
+let DAY_FRAMES: i32 = 600
+let CROP: i32 = 2        // carrot in the baked crop order
+let STAGES: i32 = 6
+
+// tools
+let TOOL_HOE: i32 = 0
+let TOOL_CAN: i32 = 1
+let TOOL_SEED: i32 = 2
+let TOOL_SCYTHE: i32 = 3
+
+// plot cell states
+let P_SOIL: i32 = 0
+let P_TILLED: i32 = 1
+let P_PLANTED: i32 = 2
+
+// plot state, parallel typed arrays (the save payload in de-risk 6)
+let PSTATE: i32[] = []
+let PSTAGE: i32[] = []
+let PWET: i32[] = []
+let pf: i32 = 0
+while (pf < 96) { PSTATE.push(0); pf = pf + 1 }
+pf = 0
+while (pf < 96) { PSTAGE.push(0); pf = pf + 1 }
+pf = 0
+while (pf < 96) { PWET.push(0); pf = pf + 1 }
+
+// local copies of the crop tile table (dry/wet per stage for one crop)
+let CROPG: i32[] = []
+let cg: i32 = 0
+while (cg < 12) { CROPG.push(CROP_TILE_GID[CROP * 12 + cg]); cg = cg + 1 }
+
+let FX: i32 = 0
+let FY: i32 = 0
+let FW: i32 = 0
+let FH: i32 = 0
+
+let day: i32 = 1
+let dayTick: i32 = 0
+let harvested: i32 = 0
+let tool: i32 = 0
+let acting: i32 = 0     // frames left in the tool animation
+let actAnim: i32 = 0
+
+function toolLabel() {
+  if (tool === TOOL_HOE) { hud_text(1, 4, 20, "HOE") }
+  if (tool === TOOL_CAN) { hud_text(1, 4, 20, "CAN") }
+  if (tool === TOOL_SEED) { hud_text(1, 4, 20, "SEEDS") }
+  if (tool === TOOL_SCYTHE) { hud_text(1, 4, 20, "SCYTHE") }
+}
+
+function dayLabel() {
+  hud_text(2, 170, 4, "DAY " + day)
+}
+
+/// The gid a plot cell should show right now.
+function cellGid(i: i32): i32 {
+  let st: i32 = PSTATE[i]
+  if (st === P_SOIL) { return GID_SOIL }
+  if (st === P_TILLED) {
+    if (PWET[i] > 0) { return GID_WATERED }
+    return GID_TILLED
+  }
+  return CROPG[PSTAGE[i] + PSTAGE[i] + PWET[i]]
+}
+
+function repaintCell(i: i32) {
+  let col: i32 = FX + (i % FW)
+  let row: i32 = FY + i / FW
+  bg_set_tile(0, col, row, cellGid(i))
+}
+
+/// One in-game day: watered planted cells grow, everything dries.
+function advanceDay() {
+  day = day + 1
+  let grown: i32 = 0
+  let i: i32 = 0
+  let cells: i32 = FW * FH
+  while (i < cells) {
+    let changed: i32 = 0
+    if (PSTATE[i] === P_PLANTED && PWET[i] > 0 && PSTAGE[i] < STAGES - 1) {
+      PSTAGE[i] = PSTAGE[i] + 1
+      grown = grown + 1
+      changed = 1
+    }
+    if (PWET[i] > 0) { PWET[i] = 0; changed = 1 }
+    if (changed > 0) { repaintCell(i) }
+    i = i + 1
+  }
+  log("FARM day=" + day + " grown=" + grown)
+  dayLabel()
+}
+
+backdrop(0x2090e8)
+hud_text(0, 4, 4, "SUNNYSIDE FARM")
+
+let hero: i32 = spawn()
+set_collider(hero, 8, 8)
+set_topdown(hero)
+topdown_speed(hero, 2)
+let heroSpr: i32 = sprite_new(player, 0)
+attach_sprite(hero, heroSpr)
+// the 64px frame is asymmetric (tool swings reach right), so the body is
+// NOT at the frame centre: flipping the frame moves it 18px. The offset
+// compensates per facing — see the flip block in the loop.
+set_sprite_offset(hero, 0 - 19, 0 - 21)
+set_camera_target(hero)
+
+ssgenGenerate(7)
+ssgenUpload(world, 3)
+FX = ssgenFarmX()
+FY = ssgenFarmY()
+FW = ssgenFarmW()
+FH = ssgenFarmH()
+set_transform(hero, (FX + 2) * TILE + 4, (FY + 2) * TILE + 4)
+toolLabel()
+dayLabel()
+log("FARM READY plot=" + FX + "," + FY + " " + FW + "x" + FH)
+log("HEAP " + heap_free())
+
+let tick: i32 = 0
+let cell: i32 = 0
+while (true) {
+  if (key_pressed(BTN_L) > 0) { tool = (tool + 3) % 4; toolLabel() }
+  if (key_pressed(BTN_R) > 0) { tool = (tool + 1) % 4; toolLabel() }
+
+  if (key_pressed(BTN_A) > 0 && acting === 0) {
+    // the faced cell, one tile ahead of the feet
+    let px: i32 = entity_x(hero) + 4
+    let py: i32 = entity_y(hero) + 4
+    let cx: i32 = px / TILE
+    let cy: i32 = py / TILE
+    let f: i32 = topdown_facing(hero)
+    if (f === 0) { cy = cy + 1 }
+    if (f === 1) { cy = cy - 1 }
+    if (f === 2) { cx = cx - 1 }
+    if (f === 3) { cx = cx + 1 }
+    if (cx >= FX && cx < FX + FW && cy >= FY && cy < FY + FH) {
+      let i: i32 = (cy - FY) * FW + (cx - FX)
+      let hit: i32 = 0
+      if (tool === TOOL_HOE && PSTATE[i] === P_SOIL) {
+        PSTATE[i] = P_TILLED
+        hit = 1
+        actAnim = 3   // dig
+      }
+      if (tool === TOOL_SEED && PSTATE[i] === P_TILLED) {
+        PSTATE[i] = P_PLANTED
+        PSTAGE[i] = 0
+        hit = 1
+        actAnim = 8   // doing
+      }
+      if (tool === TOOL_CAN && PSTATE[i] > P_SOIL && PWET[i] === 0) {
+        PWET[i] = 1
+        hit = 1
+        actAnim = 4   // water
+      }
+      if (tool === TOOL_SCYTHE && PSTATE[i] === P_PLANTED && PSTAGE[i] === STAGES - 1) {
+        PSTATE[i] = P_TILLED
+        PSTAGE[i] = 0
+        harvested = harvested + 1
+        hit = 1
+        actAnim = 6   // attack swing
+        log("HARVEST OK total=" + harvested)
+        hud_text(3, 170, 20, "CROPS " + harvested)
+      }
+      if (hit > 0) {
+        repaintCell(i)
+        acting = 30
+        cell = 0
+      }
+    }
+  }
+
+  dayTick = dayTick + 1
+  if (dayTick >= DAY_FRAMES) {
+    dayTick = 0
+    advanceDay()
+  }
+
+  // set_topdown gives the body; topdown_move each frame is what walks it.
+  // Feet stay planted while a tool action plays.
+  if (acting === 0) {
+    topdown_move(hero, input_x(), input_y())
+  } else {
+    topdown_move(hero, 0, 0)
+  }
+  tick = tick + 1
+  if (tick >= 3) { tick = 0; cell = cell + 1 }
+  let act: i32 = 0
+  if (acting > 0) {
+    act = actAnim
+    acting = acting - 1
+  } else if (topdown_moving(hero) > 0) {
+    act = 1
+  }
+  let len: i32 = ANIM_PLAYER_LEN[act]
+  sprite_set_frame(heroSpr, ANIM_PLAYER_START[act] + (cell % len))
+  if (topdown_facing(hero) === 2) {
+    sprite_set_flip(heroSpr, 1)
+    set_sprite_offset(hero, 0 - 37, 0 - 21)
+  }
+  if (topdown_facing(hero) === 3) {
+    sprite_set_flip(heroSpr, 0)
+    set_sprite_offset(hero, 0 - 19, 0 - 21)
+  }
+  world_step()
+}

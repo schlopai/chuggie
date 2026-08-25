@@ -1,0 +1,15 @@
+{
+ "columns": 8,
+ "image": "../Backgrounds/Tilesets/TilesetLogic.png",
+ "imagewidth": 128,
+ "imageheight": 160,
+ "margin": 0,
+ "spacing": 0,
+ "name": "TilesetLogic",
+ "tilecount": 80,
+ "tiledversion": "1.11.0",
+ "tilewidth": 16,
+ "tileheight": 16,
+ "type": "tileset",
+ "version": "1.10"
+}

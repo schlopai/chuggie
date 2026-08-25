@@ -1,0 +1,25 @@
+{
+  "name": "repro-sprite-y",
+  "private": true,
+  "scripts": {
+    "build": "TISH_FAST_NATIVE_BUILD=1 tish build src/main.tish --target gba -o repro-sprite-y.gba",
+    "clean": "rm -rf .tish repro-sprite-y.gba"
+  },
+  "devDependencies": {
+    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_game_engine": {
+        "path": "../../crates/tish-gba-game-engine"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
+    }
+  },
+  "description": "A bug reproduction or regression test case for sprite Y coordinates."
+}

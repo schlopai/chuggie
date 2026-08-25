@@ -1,0 +1,325 @@
+// crawler — a first-person grid maze: the one thing the catalogue could not do.
+//
+// ── WHAT IT IS THE ACCEPTANCE TEST FOR ────────────────────────────────────────────────────────
+//
+// `packages/fpview.tish`, which is new. Two independent engine reviews a day apart, from different
+// starting questions, named the same hole: the whole catalogue is side-view, top-down or isometric,
+// and **nothing renders into the screen**. Wizardry / Eye of the Beholder / Etrian Odyssey is a very
+// GBA shape and there was nothing behind it.
+//
+// You step a cell, you turn ninety degrees, and the corridor ahead is drawn from rectangles. An
+// auto-map fills in beside it as you go, and there is an exit to find.
+//
+// ── WHAT IT COSTS, AND WHY THAT IS FINE ───────────────────────────────────────────────────────
+//
+// The view is ~70 `ui_rect` calls, which is far too much to do sixty times a second and completely
+// fine to do when the player actually moves — and in this genre the player moves in discrete steps.
+// **The screen is redrawn on a step or a turn, and on nothing else**: standing still issues no draw
+// calls at all. That is the whole reason the package is not a raycaster (see its header).
+//
+// ── THE MAZE IS GENERATED, AND IT IS THE SAME MAZE EVERY BOOT ─────────────────────────────────
+//
+// A recursive-backtracker carve from a seeded RNG, so the map is reproducible run to run — which is
+// what lets a headless capture at frame N mean anything at all, and what lets the auto-walker below
+// be checked against a known layout.
+
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  backdrop, ui_begin, ui_rect, ui_text, ui_clear_rect, ui_reserve_tiles,
+  frame, keys_edge, audio_defer, log
+} from 'cargo:tish_agb'
+import { fpInit, fpSetGrid, fpRender, fpSolid } from '../../../packages/fpview'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+import { chipBlip, chipCancel, chipChime, chipCoin } from '../../../packages/chipsfx'
+
+// ── the maze ─────────────────────────────────────────────────────────────────────────────────
+// Odd dimensions: a backtracker carves on the odd cells and leaves the even ones as walls, so the
+// border comes out solid for free.
+let MC: i32 = 15
+let MR: i32 = 11
+let MAZE: i32[] = []
+
+// Carve stack — pre-grown, never allocated during the carve.
+let SX: i32[] = []
+let SY: i32[] = []
+
+function mazeAt(c: i32, r: i32): i32 {
+  if (c < 0 || r < 0 || c >= MC || r >= MR) { return 1 }
+  return MAZE[r * MC + c]
+}
+function carve(c: i32, r: i32) { MAZE[r * MC + c] = 0 }
+
+// Recursive backtracker, iteratively: from the current cell, pick a random unvisited neighbour two
+// cells away, knock out the wall between, and walk on; when stuck, pop.
+function buildMaze(seed: i32) {
+  rngSeed(2, seed)
+  let i: i32 = 0
+  while (i < MC * MR) {
+    MAZE[i] = 1
+    i = i + 1
+  }
+  let cx: i32 = 1
+  let cy: i32 = 1
+  carve(cx, cy)
+  let depth: i32 = 0
+  SX[0] = cx
+  SY[0] = cy
+  depth = 1
+  let guard: i32 = 0
+  while (depth > 0 && guard < 4000) {
+    guard = guard + 1
+    cx = SX[depth - 1]
+    cy = SY[depth - 1]
+    // Collect the unvisited neighbours two cells out.
+    let n: i32 = 0
+    let nc: i32[] = [0, 0, 0, 0]
+    let nr: i32[] = [0, 0, 0, 0]
+    if (cy - 2 >= 1 && mazeAt(cx, cy - 2) === 1) { nc[n] = cx  nr[n] = cy - 2  n = n + 1 }
+    if (cy + 2 < MR - 1 && mazeAt(cx, cy + 2) === 1) { nc[n] = cx  nr[n] = cy + 2  n = n + 1 }
+    if (cx - 2 >= 1 && mazeAt(cx - 2, cy) === 1) { nc[n] = cx - 2  nr[n] = cy  n = n + 1 }
+    if (cx + 2 < MC - 1 && mazeAt(cx + 2, cy) === 1) { nc[n] = cx + 2  nr[n] = cy  n = n + 1 }
+    if (n === 0) {
+      depth = depth - 1
+    } else {
+      let k: i32 = rngBelow(2, n)
+      let tx: i32 = nc[k]
+      let ty: i32 = nr[k]
+      carve((cx + tx) >> 1, (cy + ty) >> 1)
+      carve(tx, ty)
+      SX[depth] = tx
+      SY[depth] = ty
+      depth = depth + 1
+    }
+  }
+}
+
+// ── state ────────────────────────────────────────────────────────────────────────────────────
+//   0 col  1 row  2 facing  3 steps  4 t  5 human  6 won  7 dirty  8 seed  9 wonT  10 pendStep
+let P: i32[] = [1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0]
+let P_C: i32 = 0
+let P_R: i32 = 1
+let P_F: i32 = 2
+let P_STEP: i32 = 3
+let P_T: i32 = 4
+let P_HUMAN: i32 = 5
+let P_WON: i32 = 6
+let P_DIRTY: i32 = 7
+let P_SEED: i32 = 8
+let P_WONT: i32 = 9
+let P_PEND: i32 = 10
+
+let EXIT_C: i32 = 13
+let EXIT_R: i32 = 9
+
+// Which cells the player has stood in — the auto-map only shows where you have been, which is the
+// entire point of an auto-map.
+let SEEN: i32[] = []
+
+let VIEW_X: i32 = 4
+let VIEW_Y: i32 = 18
+let VIEW_W: i32 = 150
+let VIEW_H: i32 = 116
+
+let MAP_X: i32 = 162
+let MAP_Y: i32 = 18
+let MAP_CELL: i32 = 5
+
+let BG: i32 = 0x0A0C14
+let PANEL: i32 = 0x1A2038
+let EDGE: i32 = 0x7A88B0
+let INK: i32 = 0xE8ECF8
+let DIM: i32 = 0x7A82A0
+let GOLD: i32 = 0xFFD060
+let GOOD: i32 = 0x60D080
+let MAPWALL: i32 = 0x2A3050
+let MAPFLOOR: i32 = 0x50608A
+let MAPYOU: i32 = 0xFFD060
+let MAPEXIT: i32 = 0x60D080
+
+let DIRN = ["N", "E", "S", "W"]
+
+// ── boot ─────────────────────────────────────────────────────────────────────────────────────
+backdrop(BG)
+ui_reserve_tiles(400)
+ui_begin()
+
+let g: i32 = 0
+while (g < MC * MR) {
+  MAZE.push(1)
+  SEEN.push(0)
+  SX.push(0)
+  SY.push(0)
+  g = g + 1
+}
+
+P[P_SEED] = 20260814
+buildMaze(P[P_SEED])
+// The exit must be reachable floor; the carve always reaches the far odd cell, but assert rather
+// than hope — a sealed exit is a maze nobody can finish and it looks like a bug in the renderer.
+if (mazeAt(EXIT_C, EXIT_R) === 1) { carve(EXIT_C, EXIT_R) }
+fpSetGrid(MAZE, MC, MR)
+fpInit({ x: VIEW_X, y: VIEW_Y, w: VIEW_W, h: VIEW_H, depth: 5, strips: 8 })
+SEEN[P[P_R] * MC + P[P_C]] = 1
+log("CRAWLER boot maze " + MC + "x" + MR + " exit " + EXIT_C + "," + EXIT_R)
+
+// ── painting ─────────────────────────────────────────────────────────────────────────────────
+let NUMS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+function numStr(n: i32) {
+  if (n <= 0) { return "0" }
+  let s = ""
+  let v: i32 = n
+  while (v > 0) {
+    s = NUMS[v % 10] + s
+    v = (v / 10) | 0
+  }
+  return s
+}
+
+function paintMap() {
+  ui_rect(MAP_X - 2, MAP_Y - 2, MC * MAP_CELL + 4, MR * MAP_CELL + 4, PANEL, 1)
+  let r: i32 = 0
+  while (r < MR) {
+    let c: i32 = 0
+    while (c < MC) {
+      let x: i32 = MAP_X + c * MAP_CELL
+      let y: i32 = MAP_Y + r * MAP_CELL
+      if (SEEN[r * MC + c] === 1) {
+        ui_rect(x, y, MAP_CELL - 1, MAP_CELL - 1, MAPFLOOR, 1)
+      } else if (mazeAt(c, r) === 1) {
+        ui_rect(x, y, MAP_CELL - 1, MAP_CELL - 1, MAPWALL, 1)
+      }
+      c = c + 1
+    }
+    r = r + 1
+  }
+  if (SEEN[EXIT_R * MC + EXIT_C] === 1) {
+    ui_rect(MAP_X + EXIT_C * MAP_CELL, MAP_Y + EXIT_R * MAP_CELL, MAP_CELL - 1, MAP_CELL - 1, MAPEXIT, 1)
+  }
+  ui_rect(MAP_X + P[P_C] * MAP_CELL, MAP_Y + P[P_R] * MAP_CELL, MAP_CELL - 1, MAP_CELL - 1, MAPYOU, 1)
+}
+
+function paintHud() {
+  ui_clear_rect(0, 0, 240, 16)
+  ui_text(small, 4, 4, "CRAWLER", GOLD)
+  ui_text(small, 64, 4, DIRN[P[P_F] & 3], INK)
+  ui_text(small, 82, 4, numStr(P[P_C]) + "," + numStr(P[P_R]), DIM)
+  ui_text(small, 132, 4, "steps " + numStr(P[P_STEP]), DIM)
+  ui_clear_rect(0, 138, 240, 22)
+  if (P[P_WON] === 1) {
+    ui_text(small, 4, 142, "You found the way out.", GOOD)
+  } else {
+    ui_text(small, 4, 142, "up step  down back  left/right turn", DIM)
+  }
+}
+
+function paintAll() {
+  fpRender(P[P_C], P[P_R], P[P_F])
+  paintMap()
+  paintHud()
+}
+paintAll()
+
+// ── the walker ───────────────────────────────────────────────────────────────────────────────
+// A right-hand-on-the-wall follower, which is the classic maze rule and always finds the exit of a
+// perfect maze. It presses the same three buttons a player would.
+//
+// ⚠️ AFTER TURNING RIGHT IT MUST STEP, AND THAT IS THE WHOLE RULE. Written as "if the right is open,
+// turn right" it spins on the spot for ever: having turned, its NEW right is where it just came
+// from, which is also open, so it turns again. It logged not one exit in 9,000 frames. The pending
+// flag is what makes the turn-and-advance a single indivisible move.
+function autoKey(): i32 {
+  if (P[P_PEND] === 1) {
+    P[P_PEND] = 0
+    return 64
+  }
+  let f: i32 = P[P_F] & 3
+  let rc: i32 = 0
+  let rr: i32 = 0
+  if (f === 0) { rc = 1  rr = 0 }
+  else if (f === 1) { rc = 0  rr = 1 }
+  else if (f === 2) { rc = 0 - 1  rr = 0 }
+  else { rc = 0  rr = 0 - 1 }
+  // If the right side is open, turn right; else if ahead is open, step; else turn left.
+  if (fpSolid(P[P_C] + rc, P[P_R] + rr) === 0) { P[P_PEND] = 1  return 512 }
+  let dc: i32 = 0
+  let dr: i32 = 0
+  if (f === 0) { dc = 0  dr = 0 - 1 }
+  else if (f === 1) { dc = 1  dr = 0 }
+  else if (f === 2) { dc = 0  dr = 1 }
+  else { dc = 0 - 1  dr = 0 }
+  if (fpSolid(P[P_C] + dc, P[P_R] + dr) === 0) { return 64 }
+  return 256
+}
+
+function stepBy(sign: i32) {
+  let f: i32 = P[P_F] & 3
+  let dc: i32 = 0
+  let dr: i32 = 0
+  if (f === 0) { dc = 0  dr = 0 - 1 }
+  else if (f === 1) { dc = 1  dr = 0 }
+  else if (f === 2) { dc = 0  dr = 1 }
+  else { dc = 0 - 1  dr = 0 }
+  let nc: i32 = P[P_C] + Math.imul(dc, sign)
+  let nr: i32 = P[P_R] + Math.imul(dr, sign)
+  if (fpSolid(nc, nr) === 1) {
+    chipCancel()
+    return
+  }
+  P[P_C] = nc
+  P[P_R] = nr
+  P[P_STEP] = P[P_STEP] + 1
+  SEEN[nr * MC + nc] = 1
+  P[P_DIRTY] = 1
+  chipBlip()
+  if (nc === EXIT_C && nr === EXIT_R && P[P_WON] === 0) {
+    P[P_WON] = 1
+    P[P_WONT] = 240
+    chipChime()
+    log("CRAWLER exit reached in " + P[P_STEP] + " steps")
+  }
+}
+
+while (true) {
+  P[P_T] = P[P_T] + 1
+  let k: i32 = keys_edge()
+  if (k > 0) { P[P_HUMAN] = 1 }
+
+  // The walker moves every 18 frames so the view is readable; a human is not rate-limited.
+  if (P[P_HUMAN] === 0 && P[P_WON] === 0 && (P[P_T] % 18) === 0) { k = autoKey() }
+
+  if ((k & 256) > 0) { P[P_F] = (P[P_F] + 3) & 3  P[P_DIRTY] = 1  chipBlip() }   // LEFT
+  if ((k & 512) > 0) { P[P_F] = (P[P_F] + 1) & 3  P[P_DIRTY] = 1  chipBlip() }   // RIGHT
+  if ((k & 64) > 0) { stepBy(1) }                                                 // UP
+  if ((k & 128) > 0) { stepBy(0 - 1) }                                            // DOWN
+
+  // ⚠️ THE ONLY REDRAW. Standing still costs nothing — no clear, no rect, no text. That is what
+  // makes a seventy-call view affordable in this genre.
+  if (P[P_DIRTY] === 1) {
+    P[P_DIRTY] = 0
+    audio_defer(1)
+    paintAll()
+    audio_defer(0)
+  }
+  if (P[P_WONT] > 0) {
+    P[P_WONT] = P[P_WONT] - 1
+    if (P[P_WONT] === 0) {
+      // Another maze, so a soak run keeps exercising the carve and the renderer.
+      P[P_SEED] = P[P_SEED] + 977
+      buildMaze(P[P_SEED])
+      if (mazeAt(EXIT_C, EXIT_R) === 1) { carve(EXIT_C, EXIT_R) }
+      fpSetGrid(MAZE, MC, MR)
+      let z: i32 = 0
+      while (z < MC * MR) { SEEN[z] = 0  z = z + 1 }
+      P[P_C] = 1
+      P[P_R] = 1
+      P[P_F] = 1
+      P[P_STEP] = 0
+      P[P_WON] = 0
+      SEEN[MC + 1] = 1
+      P[P_DIRTY] = 1
+      log("CRAWLER new maze seed " + P[P_SEED])
+    }
+  }
+
+  frame()
+}

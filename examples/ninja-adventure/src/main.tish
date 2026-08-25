@@ -1,0 +1,68 @@
+// Ninja Adventure — the real village, ported from the Godot NinjaAdventure project via Tiled.
+// The whole world (overworld AND the house interior) is ONE self-contained Tiled map,
+// `assets/village.tmj`: the interior room is carved into an unused corner of the same tilemap, so
+// entering a house is just an in-map teleport — no second scene, no map reload. The `.tmj`
+// references the shared tileset library and bakes its own collision (a `Collision` layer), so
+// `tish build` packs + streams it into ROM with no prebuilt binary map or atlas checked in.
+import { village } from 'scene:../assets/village.tmj'
+import { ninja } from 'sheet:../assets/ninja.png'
+import { sprite_new } from 'cargo:tish_agb'
+import { mount, create, entity, loadSceneRom, mapSpawnCount, mapSpawn, step } from '../../../packages/engine'
+import * as components from './components'
+import { Player } from './components'
+
+mount(components)
+loadSceneRom(village)
+
+// Spawn from the map's object layer: kind 0 = player (camera follows); anything else = a static NPC.
+// Keep the player's ID, not the object `create()` handed back: that object is a pooled slot the next
+// spawn re-points at an NPC, and the loop below would then walk an NPC through the door.
+let playerId = -1
+let si: i32 = 0
+while (si < mapSpawnCount()) {
+  let sp = mapSpawn(si)
+  let e = create()
+  e.onGrid(sp.col, sp.row)
+  if (sp.kind === 0) {
+    e.setSprite(sprite_new(ninja))
+    e.follow()
+    e.behave(Player, {})
+    playerId = e.id
+  } else {
+    e.setSprite(sprite_new(ninja))
+    e.setFrame(0)
+  }
+  si = si + 1
+}
+
+// Teleport pads (both directions of each door/warp are carved into the same map). Stepping onto a
+// pad instantly moves the player to its partner tile — the central house door drops you into the
+// interior room in the map's corner, and the room's exit pad drops you back in front of the house.
+let warps = [
+  { col: 31, row: 43, toCol: 70, toRow: 15 },  // central house door → interior room
+  { col: 70, row: 15, toCol: 31, toRow: 43 }   // interior exit → in front of the house
+]
+
+// `onWarp` latches while the player stands on a pad so each entry fires once (and so the tile you
+// ARRIVE on doesn't immediately bounce you back).
+let onWarp = false
+while (true) {
+  step()
+  let gc = entity(playerId).gridCol()
+  let gr = entity(playerId).gridRow()
+  let hit = null
+  let wi = 0
+  while (wi < warps.length) {
+    let wp = warps[wi]
+    if (wp.col === gc && wp.row === gr) { hit = wp }
+    wi = wi + 1
+  }
+  if (hit !== null) {
+    if (!onWarp) {
+      onWarp = true
+      entity(playerId).onGrid(hit.toCol, hit.toRow)
+    }
+  } else {
+    onWarp = false
+  }
+}

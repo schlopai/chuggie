@@ -1,0 +1,22 @@
+# Burned! - defeat
+# Burn motif + drop.
+deck 1
+bpm 90
+
+track Lead id lead gen gameBoyDmg
+  gen type pulse duty 25 env_mode step vol 12
+  note 67 0 0.25 v 110
+  note 66 0.3 0.45 v 100
+  note 62 0.9 0.5 v 90
+  note 55 1.5 0.8 v 80
+  note 51 2.4 1 v 70
+
+track Noise id n gen gameBoyDmg
+  gen type noise noise_mode short vol 8 env_mode step env_step 3
+  note 60 0.3 0.4 v 100
+  note 60 1.2 0.6 v 80
+
+track Drop id drop gen gbaDirectSound
+  gen waveform sawtooth vol 10 bitcrush true pitch_drop -8 pitch_dec 0.25
+  adsr a 0 d 0.3 s 0 r 0.15
+  note 40 0.5 0.5 v 110

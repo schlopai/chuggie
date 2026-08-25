@@ -1,0 +1,11 @@
+Silkscreen — by The Silkscreen Project Authors (OFL 1.1)
+
+  https://github.com/googlefonts/silkscreen
+
+Copyright 2001 The Silkscreen Project Authors.
+
+Licensed under the SIL Open Font License, Version 1.1.
+See silkscreen.OFL.txt in this directory for the full OFL text.
+
+Vendored as silkscreen.ttf / silkscreen-bold.ttf (Regular + Bold).
+Native grid is **8px** (`font:…/silkscreen.ttf@8`). Doubling to 16 looks stretched — don't.

@@ -1,0 +1,86 @@
+# Clipboard - menus
+# Sparse ambient fifths. Almost no drums.
+deck 1
+bpm 84
+
+track Pad id pad gen gameBoyDmg * 12
+  gen type pulse duty 12_5 env_mode constant vol 4
+  gen vib_rate 1 vib_amt 10
+  note 64 0 3.95 v 60
+  note 60 4 3.95 v 65
+  note 55 8 3.95 v 70
+  note 59 12 3.95 v 75
+  note 64 16 3.95 v 80
+  note 62 20 3.95 v 60
+  note 60 24 3.95 v 65
+  note 59 28 3.95 v 70
+  note 64 32 3.95 v 75
+  note 60 36 3.95 v 80
+  note 55 40 3.95 v 60
+  note 64 44 3.95 v 65
+
+track Lead id lead gen gameBoyDmg * 12
+  gen type pulse duty 25 env_mode constant vol 7
+  gen vib_rate 2 vib_amt 12
+  note 69 1 2.5 v 70
+  note 60 6 1.5 v 65
+  note 64 13 2.5 v 70
+  note 64 18 1.5 v 65
+  note 65 25 2.5 v 70
+  note 59 30 1.5 v 65
+  note 65 37 2.5 v 70
+  note 55 42 1.5 v 65
+
+track Bass id bass gen gameBoyDmg * 12
+  gen type wave wave_shape sine vol 14
+  note 45 0 4 v 110
+  note 41 4 4 v 110
+  note 36 8 4 v 110
+  note 40 12 4 v 110
+  note 45 16 4 v 110
+  note 43 20 4 v 110
+  note 41 24 4 v 110
+  note 40 28 4 v 110
+  note 45 32 4 v 110
+  note 41 36 4 v 110
+  note 36 40 4 v 110
+  note 45 44 4 v 110
+
+track Kick id kick gen gbaDirectSound * 12
+  gen waveform pulse duty 50 vol 14 bitcrush true pitch_drop -6 pitch_dec 0.06
+  adsr a 0 d 0.1 s 0 r 0.03
+  note 34 0 0.14 v 90
+  note 34 8 0.14 v 90
+  note 34 16 0.14 v 90
+  note 34 24 0.14 v 90
+  note 34 32 0.14 v 90
+  note 34 40 0.14 v 90
+
+track Hats id hats gen gbaDirectSound * 12
+  gen waveform sine vol 4 bitcrush true
+  adsr a 0 d 0.04 s 0 r 0.02
+  note 84 0.75 0.1 v 50
+  note 79 2.75 0.12 v 45
+  note 84 4.75 0.1 v 50
+  note 79 6.75 0.12 v 45
+  note 84 8.75 0.1 v 50
+  note 79 10.75 0.12 v 45
+  note 84 12.75 0.1 v 50
+  note 79 14.75 0.12 v 45
+  note 84 16.75 0.1 v 50
+  note 79 18.75 0.12 v 45
+  note 84 20.75 0.1 v 50
+  note 79 22.75 0.12 v 45
+  note 84 24.75 0.1 v 50
+  note 79 26.75 0.12 v 45
+  note 84 28.75 0.1 v 50
+  note 79 30.75 0.12 v 45
+  note 84 32.75 0.1 v 50
+  note 79 34.75 0.12 v 45
+  note 84 36.75 0.1 v 50
+  note 79 38.75 0.12 v 45
+  note 84 40.75 0.1 v 50
+  note 79 42.75 0.12 v 45
+  note 84 44.75 0.1 v 50
+  note 79 46.75 0.12 v 45
+

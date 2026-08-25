@@ -1,0 +1,1227 @@
+{
+ "type": "map",
+ "orientation": "orthogonal",
+ "renderorder": "right-down",
+ "infinite": false,
+ "width": 20,
+ "height": 12,
+ "tilewidth": 16,
+ "tileheight": 16,
+ "nextlayerid": 4,
+ "nextobjectid": 44,
+ "version": "1.10",
+ "tiledversion": "1.11.0",
+ "tilesets": [
+  {
+   "firstgid": 1,
+   "source": "../../../assets/ninja-adventure/tiled/TilesetField.tsj"
+  }
+ ],
+ "layers": [
+  {
+   "type": "tilelayer",
+   "name": "Ground",
+   "id": 1,
+   "width": 20,
+   "height": 12,
+   "x": 0,
+   "y": 0,
+   "opacity": 1,
+   "visible": true,
+   "data": [
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64
+   ]
+  },
+  {
+   "type": "tilelayer",
+   "name": "Solid",
+   "id": 2,
+   "width": 20,
+   "height": 12,
+   "x": 0,
+   "y": 0,
+   "opacity": 1,
+   "visible": true,
+   "data": [
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64
+   ]
+  },
+  {
+   "type": "objectgroup",
+   "name": "spawns",
+   "id": 3,
+   "opacity": 1,
+   "visible": true,
+   "x": 0,
+   "y": 0,
+   "objects": [
+    {
+     "id": 1,
+     "name": "surface",
+     "x": 96,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 2,
+     "name": "surface",
+     "x": 112,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 3,
+     "name": "surface",
+     "x": 128,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 4,
+     "name": "surface",
+     "x": 144,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 5,
+     "name": "surface",
+     "x": 160,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 6,
+     "name": "surface",
+     "x": 176,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 7,
+     "name": "surface",
+     "x": 192,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 8,
+     "name": "surface",
+     "x": 208,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 9,
+     "name": "surface",
+     "x": 96,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 10,
+     "name": "surface",
+     "x": 112,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 11,
+     "name": "surface",
+     "x": 128,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 12,
+     "name": "surface",
+     "x": 144,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 13,
+     "name": "surface",
+     "x": 160,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 14,
+     "name": "surface",
+     "x": 176,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 15,
+     "name": "surface",
+     "x": 192,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 16,
+     "name": "surface",
+     "x": 208,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 17,
+     "name": "surface",
+     "x": 96,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 18,
+     "name": "surface",
+     "x": 112,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 19,
+     "name": "surface",
+     "x": 128,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 20,
+     "name": "surface",
+     "x": 144,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 21,
+     "name": "surface",
+     "x": 160,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 22,
+     "name": "surface",
+     "x": 176,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 23,
+     "name": "surface",
+     "x": 192,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 24,
+     "name": "surface",
+     "x": 208,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 25,
+     "name": "surface",
+     "x": 96,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 26,
+     "name": "surface",
+     "x": 112,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 27,
+     "name": "surface",
+     "x": 128,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 28,
+     "name": "surface",
+     "x": 144,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 29,
+     "name": "surface",
+     "x": 160,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 30,
+     "name": "surface",
+     "x": 176,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 31,
+     "name": "surface",
+     "x": 192,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 32,
+     "name": "surface",
+     "x": 208,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 33,
+     "name": "surface",
+     "x": 96,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 34,
+     "name": "surface",
+     "x": 112,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 35,
+     "name": "surface",
+     "x": 128,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 36,
+     "name": "surface",
+     "x": 144,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 37,
+     "name": "surface",
+     "x": 160,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 38,
+     "name": "surface",
+     "x": 176,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 39,
+     "name": "surface",
+     "x": 192,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 40,
+     "name": "surface",
+     "x": 208,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 3
+      }
+     ]
+    },
+    {
+     "id": 41,
+     "name": "tee",
+     "x": 48,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 100
+      }
+     ]
+    },
+    {
+     "id": 42,
+     "name": "cup",
+     "x": 272,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 101
+      }
+     ]
+    },
+    {
+     "id": 43,
+     "name": "par",
+     "x": 0,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 202
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

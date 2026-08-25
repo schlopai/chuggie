@@ -1,0 +1,18 @@
+# New Recipe - level up
+# Pentatonic sparkle.
+deck 1
+bpm 140
+
+track Lead id lead gen gameBoyDmg
+  gen type pulse duty 50 env_mode step vol 13
+  note 72 0 0.1 v 120
+  note 76 0.12 0.1 v 115
+  note 79 0.24 0.15 v 125
+  note 84 0.42 0.2 v 127
+  note 88 0.7 0.25 v 120
+  note 84 1.05 0.4 v 115
+
+track Shimmer id shim gen gbaDirectSound
+  gen waveform sine vol 10 bitcrush true
+  adsr a 0 d 0.25 s 0 r 0.15
+  note 96 0.3 0.5 v 90

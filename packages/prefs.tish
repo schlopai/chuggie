@@ -1,0 +1,224 @@
+// prefs.tish — a small versioned, checksummed key/value block in cartridge SRAM.
+//
+// The companion to `packages/save.tish`, not a replacement for it. That one stores an ADVENTURE
+// BLOB — scene, HP, score, flags, tile position — which is the right shape for an RPG and the
+// wrong shape for everything else. A puzzle game's save is a handful of loose numbers: a high
+// score, a rank, an unlock bit, a sound toggle. Bending an adventure record around those means
+// pretending a high score is an HP value, so this is the other half of the pair.
+//
+//     import { prefsInit, prefsGet, prefsSet, prefsSave, prefsFresh } from '../../../packages/prefs'
+//
+//     let P_BEST = 0
+//     let P_UNLOCKED = 1
+//     prefsInit({ magic: 0x4D44, version: 1, count: 4 })   // "MD"
+//     if (prefsGet(P_BEST) < score) {
+//       prefsSet(P_BEST, score)
+//       prefsSave()
+//     }
+//
+// WHY A CHECKSUM AND A VERSION, ON A TOY. Because the failure without them is silent and
+// permanent. A flash cart hands you whatever bytes were in that chip before — another game's save,
+// or noise — and a bare `if (magic == X)` check passes on a 1-in-65536 coincidence and then feeds
+// a garbage high score into the UI forever, with no way for the player to clear it. And the first
+// time the layout changes, every existing cartridge reads the new fields out of the old positions.
+// A magic plus a version plus a sum over the payload turns all three of those into "this looks
+// like a fresh cartridge", which is a state the game already has to handle.
+//
+// SRAM WRITES ARE SLOW — a byte at a time over an 8-bit bus, and a flash cart needs a sector erase
+// on top. So the block is read ONCE at `prefsInit`, mutated in RAM, and written only when the game
+// calls `prefsSave`. Never call it on a frame path.
+//
+// The user window starts at raw offset 0 here, which is SRAM byte 2048 on the cartridge; the
+// engine's own `save_*` slots live below that and are untouched by this.
+import { sram_read_u8, sram_write_u8, sram_commit, sram_size } from 'cargo:tish_agb'
+
+// Header: magic lo/hi, version, count, checksum lo/hi. Slots are 32-bit little-endian after it,
+// which is wide enough for a score that a good player can actually reach — a 16-bit slot saturates
+// at 65535 and this game's scores pass that in a long chain.
+let HDR: i32 = 6
+let SLOT_BYTES: i32 = 4
+let MAX_SLOTS: i32 = 32
+
+interface Prefs {
+  base: i32, magic: i32, version: i32, count: i32, fresh: i32, ready: i32, dirty: i32
+}
+let P: Prefs = { base: 0, magic: 0, version: 0, count: 0, fresh: 1, ready: 0, dirty: 0 }
+
+// The live values, pre-sized to MAX_SLOTS and only ever written by index.
+//
+// NEVER REASSIGN THIS. A plain module-level array is shared by reference, which is what makes
+// `prefsSet` visible to `checksum` and `prefsSave` — but `VALUES = []` inside a function rebinds
+// rather than clears, and every writer afterwards is touching a different array from every reader.
+// That failure is silent: the game logs a successful save and the cartridge stays blank, which is
+// exactly how it presented. (A typed array would be worse still: those are cloned on every read
+// on this target.)
+let VALUES = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+
+function readU8(off: i32): i32 { return sram_read_u8(P.base + off) }
+function writeU8(off: i32, v: i32) { sram_write_u8(P.base + off, v & 255) }
+
+function readU32(off: i32): i32 {
+  return readU8(off) | (readU8(off + 1) << 8) | (readU8(off + 2) << 16) | (readU8(off + 3) << 24)
+}
+
+function writeU32(off: i32, v: i32) {
+  writeU8(off, v)
+  writeU8(off + 1, v >> 8)
+  writeU8(off + 2, v >> 16)
+  writeU8(off + 3, v >> 24)
+}
+
+// Sum of every payload byte, folded to 16 bits. Not a CRC: a CRC table is 1KB of ROM to catch
+// corruption patterns a save block this small does not have. What this has to catch is "these
+// bytes were never written by this game", and a sum does that.
+function checksum(): i32 {
+  let sum = 0
+  let i = 0
+  while (i < P.count) {
+    let v = VALUES[i]
+    sum = sum + (v & 255) + ((v >> 8) & 255) + ((v >> 16) & 255) + ((v >> 24) & 255)
+    i = i + 1
+  }
+  return sum & 65535
+}
+
+// LOAD, or start fresh. `cfg`: { magic, version, count, base? }.
+//
+// Returns 1 when a valid block was found and 0 when the cartridge was blank, mismatched or
+// corrupt — in which case every slot reads 0 and the caller's defaults apply. `prefsFresh()`
+// answers the same question later.
+export function prefsInit(cfg): i32 {
+  P.magic = cfg.magic & 65535
+  P.version = cfg.version & 255
+  P.count = cfg.count
+  if (P.count > MAX_SLOTS) { P.count = MAX_SLOTS }
+  P.base = 0
+  if (cfg.base !== null) { P.base = cfg.base }
+  P.ready = 1
+  P.dirty = 0
+
+  let i = 0
+  while (i < MAX_SLOTS) {
+    VALUES[i] = 0
+    i = i + 1
+  }
+
+  // No cartridge SRAM at all (an emulator without a save type, or a mis-declared header): behave
+  // exactly like a blank one rather than reading whatever address 0x0E000000 happens to decode to.
+  if (sram_size() < P.base + HDR + P.count * SLOT_BYTES) {
+    P.fresh = 1
+    return 0
+  }
+
+  let magic = readU8(0) | (readU8(1) << 8)
+  let version = readU8(2)
+  let count = readU8(3)
+  let want = readU8(4) | (readU8(5) << 8)
+  if (magic !== P.magic || version !== P.version || count !== P.count) {
+    P.fresh = 1
+    return 0
+  }
+
+  i = 0
+  while (i < P.count) {
+    VALUES[i] = readU32(HDR + i * SLOT_BYTES)
+    i = i + 1
+  }
+  if (checksum() !== want) {
+    // Plausible header, wrong payload. Discard rather than serve it: half a save is worse than
+    // none, because the player cannot tell it is half.
+    i = 0
+    while (i < P.count) {
+      VALUES[i] = 0
+      i = i + 1
+    }
+    P.fresh = 1
+    return 0
+  }
+  P.fresh = 0
+  return 1
+}
+
+/// 1 when the block was blank/invalid at init — i.e. this is a new cartridge.
+export function prefsFresh(): i32 { return P.fresh }
+
+/// 1 when a value has changed since the last `prefsSave`.
+export function prefsDirty(): i32 { return P.dirty }
+
+export function prefsGet(slot: i32): i32 {
+  if (P.ready === 0 || slot < 0 || slot >= P.count) { return 0 }
+  return VALUES[slot]
+}
+
+/// Set a slot in RAM. Nothing reaches the cartridge until `prefsSave`.
+export function prefsSet(slot: i32, value: i32) {
+  if (P.ready === 0 || slot < 0 || slot >= P.count) { return }
+  if (VALUES[slot] !== value) {
+    VALUES[slot] = value
+    P.dirty = 1
+  }
+}
+
+/// Raise a slot to `value` if it is higher. The high-score idiom, so every caller does not
+/// re-implement the comparison and then forget the `prefsSave`.
+export function prefsRaise(slot: i32, value: i32): i32 {
+  if (value > prefsGet(slot)) {
+    prefsSet(slot, value)
+    return 1
+  }
+  return 0
+}
+
+/// Set or clear one bit of a slot — unlock flags, option toggles.
+export function prefsSetBit(slot: i32, bit: i32, on: i32) {
+  let v = prefsGet(slot)
+  if (on !== 0) { v = v | (1 << bit) } else { v = v & (~(1 << bit)) }
+  prefsSet(slot, v)
+}
+
+export function prefsBit(slot: i32, bit: i32): i32 {
+  if ((prefsGet(slot) & (1 << bit)) !== 0) { return 1 }
+  return 0
+}
+
+// COMMIT TO THE CARTRIDGE. Returns 1 if it wrote, 0 if there was nothing to write.
+//
+// Skipping a clean save is not just a speed trick: on flash carts every commit is a sector erase,
+// and erase cycles are the part of the cartridge that wears out.
+export function prefsSave(): i32 {
+  if (P.ready === 0) { return 0 }
+  if (P.dirty === 0) { return 0 }
+  // Payload first, header last. If the machine loses power midway the block reads as invalid and
+  // the player gets a fresh cartridge, rather than a valid-looking header over half-written data.
+  let i = 0
+  while (i < P.count) {
+    writeU32(HDR + i * SLOT_BYTES, VALUES[i])
+    i = i + 1
+  }
+  let sum = checksum()
+  writeU8(0, P.magic)
+  writeU8(1, P.magic >> 8)
+  writeU8(2, P.version)
+  writeU8(3, P.count)
+  writeU8(4, sum)
+  writeU8(5, sum >> 8)
+  sram_commit()
+  P.dirty = 0
+  P.fresh = 0
+  return 1
+}
+
+/// Zero every slot and write. For an in-game "erase data".
+export function prefsClear() {
+  let i = 0
+  while (i < P.count) {
+    VALUES[i] = 0
+    i = i + 1
+  }
+  P.dirty = 1
+  prefsSave()
+  P.fresh = 1
+}

@@ -1,0 +1,8 @@
+// Variant: FLOOR + 2 scenes (akari's 3,600-tile town, the local 38,400-tile overworld), nothing else.
+// Isolates `scene:` registration — NOT streaming, which the staged run measures separately.
+import { log, frame } from 'cargo:tish_agb'
+import { townScene } from 'scene:../../akari/assets/town.tmj'
+import { overworldScene } from 'scene:../assets/overworld.tmj'
+
+log("BB scenes sum=" + (townScene + overworldScene))
+while (true) { frame() }

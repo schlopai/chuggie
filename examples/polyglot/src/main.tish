@@ -1,0 +1,213 @@
+// polyglot — one merchant screen, four languages, and a layout that survives all of them.
+//
+// The acceptance test for the `strings:` import scheme, which is new. Every string in every other
+// example is inline in tish source; this screen holds none of its own text at all. L and R switch
+// language, and the choice is written to the cartridge.
+//
+// ── WHY A SHOP SCREEN AND NOT A LIST OF STRINGS ───────────────────────────────────────────────
+//
+// A list proves the table loads. It does not prove the game is INTERNATIONALISED, because the hard
+// part of i18n is never the lookup — it is that **the same screen has to hold text of wildly
+// different length and shape**, and a layout tuned to English quietly breaks on everything else:
+//
+//   * The merchant's line is 82 characters in English and 96 in French. It has to WRAP, not clip,
+//     and the box under it has to move.
+//   * "Gold" is `Or` in French and `所持金` in Japanese. A price column positioned by eyeballing the
+//     English is wrong in three languages, so prices are RIGHT-ALIGNED by measuring the string
+//     (`text_width`) rather than by a hard-coded x.
+//   * "B  Leave" is "B  Verlassen" in German — half again as wide. The footer is laid out from the
+//     measured width of the first prompt, not from a constant.
+//   * Japanese has no spaces to wrap on and its glyphs are full-width, so the same wrap width holds
+//     far fewer characters.
+//
+// Everything on this screen is positioned from what the current language actually measures. Switch
+// language and watch the price column and the footer move.
+//
+// ── THE GLYPH ROSTER IS GENERATED ─────────────────────────────────────────────────────────────
+//
+// `font:` bakes a SELECTIVE glyph set collected from the program's string LITERALS — that is what
+// makes a CJK face affordable. A `.strings` table is data, so the compiler never sees it and every
+// non-ASCII character renders as a blank gap. `src/generated/glyphs.tish` is DERIVED from the table
+// by `scripts/gen_strings_glyphs.py` (50 glyphs here) and referenced once, which puts them in the
+// AST. Never hand-write that list: it is a second copy of the content that fails silently, in the
+// language nobody reviewing can read.
+
+import { ui } from 'strings:../assets/ui.strings'
+import { STRING_GLYPHS } from './generated/glyphs'
+import { body } from 'font:../../../assets/fonts/ark-pixel-cjk.ttf@12'
+import {
+  backdrop, ui_begin, ui_rect, ui_text, ui_clear_rect, ui_reserve_tiles, text_width,
+  str_get, str_count, str_langs, str_lang_name, str_find_lang,
+  frame, keys_edge, audio_defer, log
+} from 'cargo:tish_agb'
+import { prefsInit, prefsGet, prefsSet, prefsSave } from '../../../packages/prefs'
+import { chipBlip, chipCoin } from '../../../packages/chipsfx'
+
+// String ids — positions in `assets/ui.strings`. Keep in step with the file.
+let S_TITLE: i32 = 0
+let S_LINE1: i32 = 1
+let S_LINE2: i32 = 2
+let S_ITEM1: i32 = 3
+let S_ITEM2: i32 = 4
+let S_ITEM3: i32 = 5
+let S_GOLD: i32 = 6
+let S_BUY: i32 = 7
+let S_LEAVE: i32 = 8
+let S_LANG: i32 = 9
+let S_SAVED: i32 = 10
+
+let PRICE: i32[] = [120, 30, 45]
+
+let BG: i32 = 0x121826
+let PANEL: i32 = 0x1E2740
+let EDGE: i32 = 0x7C8CB8
+let INK: i32 = 0xEDF1FA
+let DIM: i32 = 0x8A93B2
+let GOLD: i32 = 0xFFD166
+let ACC: i32 = 0x6FD08C
+
+let RIGHT: i32 = 232          // the right margin every price is aligned to
+let LEFT: i32 = 8
+
+//   0 lang  1 shown  2 savedT
+let V: i32[] = [0, 0 - 1, 0]
+let V_LANG: i32 = 0
+let V_SHOWN: i32 = 1
+let V_SAVED: i32 = 2
+
+backdrop(BG)
+// ⚠️ ABOVE THE 512 CLIFF, DELIBERATELY. `docs/MEMORY.md` records the reserve as a cliff at 512
+// (20 KB of tile map below it, 40 KB above). A screen of 12px CJK is the one kind of content that
+// needs the upper tier — sixty-odd unique full-width glyphs is a few hundred tiles on its own — and
+// this example can afford it because it loads NO background image at all. At 480 it crashed with
+// "Ran out of video RAM for tiles" on the first repaint.
+ui_reserve_tiles(512)
+ui_begin()
+
+// The language choice is a PREFERENCE, so it lives on the cartridge — a player should not pick their
+// language twice. Slot 0 of a small prefs block; `flags.tish` would claim slots above it.
+prefsInit({ magic: 0x9101, version: 1, count: 1, base: 0 })
+let saved: i32 = prefsGet(0)
+if (saved >= 0 && saved < str_langs(ui)) { V[V_LANG] = saved }
+
+log("POLYGLOT langs=" + str_langs(ui) + " strings=" + str_count(ui)
+  + " glyphs=" + STRING_GLYPHS + " restored=" + str_lang_name(ui, V[V_LANG]))
+
+// ⚠️ DEFINED BEFORE `paint`, WHICH USES IT. A function body that calls one declared LATER in the
+// file resolves to nothing here and the caller aborts mid-draw — silently, with a blank screen and
+// no error. `examples/crawler` hit the same rule from module scope.
+let NUMS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+function numStr(n: i32) {
+  if (n <= 0) { return "0" }
+  let s = ""
+  let v: i32 = n
+  while (v > 0) {
+    s = NUMS[v % 10] + s
+    v = (v / 10) | 0
+  }
+  return s
+}
+
+// ── the screen ───────────────────────────────────────────────────────────────────────────────
+function t(id: i32) { return str_get(ui, V[V_LANG], id) }
+
+function paint() {
+  // ⚠️ CLEAR, COMMIT, THEN DRAW. agb frees a tile only at a frame boundary, so clearing and
+  // redrawing in one frame peaks at BOTH sets of glyphs — and with this much CJK on screen that is
+  // what exhausted tile VRAM. Spending a frame here is free: this runs on a language switch, not
+  // per frame.
+  ui_clear_rect(0, 0, 240, 160)
+  frame()
+
+  // Title, centred by measurement rather than by a guessed x.
+  let title = t(S_TITLE)
+  let tw: i32 = text_width(body, title)
+  ui_rect(0, 0, 240, 16, PANEL, 1)
+  ui_rect(0, 16, 240, 1, EDGE, 1)
+  // ⚠️ `>> 1`, NOT `/ 2`. tish's `/` is FLOAT division, so `(240 - tw) / 2` handed `ui_text` an x of
+  // 52.5 — and a fractional coordinate takes the canvas down silently: paint aborted on this line,
+  // every later draw never ran, and the screen came up blank with no error anywhere. Centring text
+  // is the one place this is easy to write by accident.
+  ui_text(body, (240 - tw) >> 1, 2, title, GOLD)
+
+  // ⚠️ THE MERCHANT'S LINE IS TWO STRINGS, NOT ONE WRAPPED STRING.
+  //
+  // `ui_text`'s sixth argument is a wrap width, and passing one KILLS THE CANVAS SILENTLY: paint
+  // aborted on that call, every later draw never ran, and the screen came up blank with no error —
+  // the agb `Layout` trap `docs/MEMORY.md` records as "the 5 ways agb 0.25's Layout panics naming no
+  // caller". Bisected by logging between draws.
+  //
+  // Splitting the line in the TABLE is better i18n anyway: a translator decides where their own
+  // language breaks, which is not a thing an English-tuned wrap width can decide for Japanese — it
+  // has no spaces to break on at all.
+  ui_text(body, LEFT, 22, t(S_LINE1), INK)
+  ui_text(body, LEFT, 38, t(S_LINE2), INK)
+
+  // The stock. Names left, prices RIGHT-ALIGNED by measuring each string: "Gold" / "Or" / "所持金"
+  // are different widths, so a fixed price column is wrong in three languages out of four.
+  let y: i32 = 70
+  let i: i32 = 0
+  while (i < 3) {
+    let name = t(S_ITEM1 + i)
+    ui_text(body, LEFT + 4, y, name, INK)
+    let p = numStr(PRICE[i]) + " " + t(S_GOLD)
+    let pw: i32 = text_width(body, p)
+    ui_text(body, RIGHT - pw, y, p, GOLD)
+    y = y + 16
+    // ⚠️ THE INCREMENT. Without it this loop redrew item 0 for ever: the canvas ran out of tile VRAM
+    // ("Ran out of video RAM for tiles"), paint never returned, and the screen was blank. A missing
+    // `i = i + 1` in a `while` is the one bug in this file that cost more than all the i18n put
+    // together, and it looked exactly like a font problem.
+    i = i + 1
+  }
+
+  // Footer prompts, laid out from the MEASURED width of the first one — "B  Leave" is
+  // "B  Verlassen" in German, half again as wide.
+  ui_rect(0, 126, 240, 34, PANEL, 1)
+  ui_rect(0, 126, 240, 1, EDGE, 1)
+  let buy = t(S_BUY)
+  let bw: i32 = text_width(body, buy)
+  ui_text(body, LEFT, 130, buy, ACC)
+  ui_text(body, LEFT + bw + 14, 130, t(S_LEAVE), ACC)
+
+  // Language line, right-aligned the same way.
+  let lang = t(S_LANG) + ": " + str_lang_name(ui, V[V_LANG]) + "  L/R"
+  let lw: i32 = text_width(body, lang)
+  ui_text(body, RIGHT - lw, 144, lang, DIM)
+  if (V[V_SAVED] > 0) { ui_text(body, LEFT, 144, t(S_SAVED), GOLD) }
+}
+
+
+
+paint()
+V[V_SHOWN] = V[V_LANG]
+
+while (true) {
+  let k: i32 = keys_edge()
+  let n: i32 = str_langs(ui)
+  if ((k & 16) > 0) { V[V_LANG] = (V[V_LANG] + n - 1) % n  chipBlip() }     // L
+  if ((k & 32) > 0) { V[V_LANG] = (V[V_LANG] + 1) % n  chipBlip() }         // R
+
+  if (V[V_SHOWN] !== V[V_LANG]) {
+    V[V_SHOWN] = V[V_LANG]
+    // The preference follows the choice immediately — a language you have to confirm is a language
+    // you will lose on the next boot.
+    prefsSet(0, V[V_LANG])
+    prefsSave()
+    V[V_SAVED] = 90
+    chipCoin()
+    audio_defer(1)
+    paint()
+    audio_defer(0)
+    log("POLYGLOT lang=" + str_lang_name(ui, V[V_LANG]) + " title=" + t(S_TITLE))
+  } else if (V[V_SAVED] > 0) {
+    V[V_SAVED] = V[V_SAVED] - 1
+    if (V[V_SAVED] === 0) {
+      audio_defer(1)
+      paint()
+      audio_defer(0)
+    }
+  }
+
+  frame()
+}

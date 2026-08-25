@@ -1,0 +1,45 @@
+// Collision + events: a player (d-pad) collects coins that despawn on contact.
+// Both the Player controller and the Coin's onCollide reaction are tish components.
+import { player } from 'asset:../assets/player.png'
+import { sprite_new, input_x, input_y } from 'cargo:tish_agb'
+import {
+  spawn, set_transform, set_collider, attach_sprite,
+  define_component, add_behaviour, set_body, despawn, world_step
+} from 'cargo:tish_gba_game_engine'
+
+// Player controller: d-pad → velocity. The engine integrates + renders it.
+define_component('Player', {
+  update: (me, e, dt) => {
+    set_body(e, input_x() * 1.5, input_y() * 1.5)
+  }
+})
+
+// Coin: vanish when something (the player) touches it.
+define_component('Coin', {
+  onCollide: (me, e, other) => {
+    despawn(e)
+  }
+})
+
+let hero = spawn()
+set_transform(hero, 104.0, 72.0)
+set_collider(hero, 16.0, 16.0)
+attach_sprite(hero, sprite_new(player))
+add_behaviour(hero, 'Player', {})
+
+// Scatter five coins.
+let cx: i32 = 30
+let cy: i32 = 24
+let i: i32 = 0
+while (i < 5) {
+  let coin = spawn()
+  set_transform(coin, cx, cy)
+  set_collider(coin, 16.0, 16.0)
+  attach_sprite(coin, sprite_new(player))
+  add_behaviour(coin, 'Coin', {})
+  cx = cx + 44
+  cy = cy + 26
+  i = i + 1
+}
+
+while (true) { world_step() }

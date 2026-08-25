@@ -1,0 +1,132 @@
+// fonts-demo — paginated specimens (sprite VRAM is finite; one page at a time).
+// Every face is baked at its native pixel size.
+// Pages: faces → tiny pixel → Kenney → display → agb layout effects.
+import { monogram } from "font:../../../assets/fonts/monogram.ttf@16"
+import { peaberry } from "font:../../../assets/fonts/peaberry.ttf@16"
+import { peaberryMono } from "font:../../../assets/fonts/peaberry-mono.ttf@16"
+import { alagard } from "font:../../../assets/fonts/alagard.ttf@16"
+import { ark10 } from "font:../../../assets/fonts/ark-pixel-10px.ttf@10"
+import { arkcjk } from "font:../../../assets/fonts/ark-pixel-10px-cjk.ttf@10"
+import { kpixel } from "font:../../../assets/fonts/kenney-pixel.ttf@16"
+import { kmini } from "font:../../../assets/fonts/kenney-mini.ttf@8"
+import { kfuture } from "font:../../../assets/fonts/kenney-future.ttf@8"
+import { kblocks } from "font:../../../assets/fonts/kenney-blocks.ttf@8"
+import { khigh } from "font:../../../assets/fonts/kenney-high-square.ttf@16"
+import { tiny } from "font:../../../assets/fonts/tinypixel.ttf@7"
+import { mono3 } from "font:../../../assets/fonts/3x3-mono.ttf@4"
+import { m3x6 } from "font:../../../assets/fonts/m3x6.ttf@16"
+import { m5x7 } from "font:../../../assets/fonts/m5x7.ttf@16"
+import { undead8 } from "font:../../../assets/fonts/undead-pixel-8.ttf@8"
+import { undead11 } from "font:../../../assets/fonts/undead-pixel-11.ttf@11"
+import { b03 } from "font:../../../assets/fonts/04b03.ttf@8"
+import { foot } from "font:../../../assets/fonts/monogram.ttf@12"
+import { silver } from "font:../../../assets/fonts/silver.ttf@19"
+import { pixelify } from "font:../../../assets/fonts/pixelify-sans.ttf@11"
+// Bold stems are ~127u (Regular ~92u). @11 crushes Bold to the same 1px-stem
+// bitmaps as Regular; @16 is the smallest size that keeps 2px bold stems.
+import { pixelifyB } from "font:../../../assets/fonts/pixelify-sans-bold.ttf@16"
+import { silk } from "font:../../../assets/fonts/silkscreen.ttf@8"
+import { silkB } from "font:../../../assets/fonts/silkscreen-bold.ttf@8"
+import { emoji } from "emoji:../../../assets/emoji/serenity"
+import {
+  backdrop, text_draw, text_color, text_tag_set, text_tag_unset,
+  frame, key_pressed,
+} from "cargo:tish_agb"
+
+let BTN_LEFT: i32 = 8
+let BTN_RIGHT: i32 = 9
+let PAGES: i32 = 5
+let FOOTER: i32 = 9
+let S = { page: 0 }
+
+backdrop(0x0E1420)
+
+function clearSlots() {
+  let i = 0
+  while (i < FOOTER) {
+    text_draw(foot, i, 0, 0, "")
+    i = i + 1
+  }
+}
+
+function paintFaces() {
+  text_draw(monogram, 0, 4, 4, "Monogram 16  字体 ⭐", 0xEDEDED, 0x202028)
+  text_draw(peaberry, 1, 4, 24, "Peaberry 16  字体 🔥", 0xFFCE4A, 0x5A3A00)
+  text_draw(peaberryMono, 2, 4, 44, "PeaberryMono 16  🎮", 0xEDB458, 0x3A2208)
+  text_draw(alagard, 3, 4, 64, "Alagard 16  字体 ❤", 0xF4E4C1, 0x2A2010)
+  text_draw(ark10, 4, 4, 90, "Ark10  字体 👍", 0x8CE06A, 0x1A3A12)
+  text_draw(arkcjk, 5, 4, 112, "ArkCJK 字体世界 💬", 0x66CC96, 0x0A2A1A)
+}
+
+function paintTiny() {
+  text_draw(mono3, 0, 4, 2, "3x3 mono 4  字体", 0xB9C0D6, 0x101018)
+  text_draw(tiny, 1, 4, 14, "tinypixel 7  字体", 0x8CE06A, 0x1A3A12)
+  text_draw(b03, 2, 4, 28, "04b03 8  字体", 0x6AB0FF, 0x0A1A3A)
+  text_draw(undead8, 3, 4, 44, "Undead8  字体", 0xEDB458, 0x3A2208)
+  text_draw(undead11, 4, 4, 62, "Undead11  字体", 0xE0A0FF, 0x201028)
+  // m3x6/m5x7: names are glyph grids (3×6 / 5×7). Author point size is 16 (itch: "use 16, 32, 48…").
+  // Latin only — fallback CJK at @16 is soft/oversized and hides how small the native Latin is.
+  text_draw(m3x6, 5, 4, 88, "m3x6 @16  ABC abc 123", 0xFFCE4A, 0x5A3A00)
+  text_draw(m5x7, 6, 4, 112, "m5x7 @16  ABC abc 123", 0xEDB458, 0x3A2208)
+}
+
+function paintKenney() {
+  // Native grids differ: Pixel/HighSq = 64u → @16; Mini/Future/Blocks = 128u → @8.
+  text_draw(kpixel, 0, 4, 4, "Pixel 16  字体 ⭐", 0x8CE06A, 0x1A3A12)
+  text_draw(kmini, 1, 4, 28, "Mini 8  字体 🔥", 0xEDB458, 0x3A2208)
+  text_draw(kfuture, 2, 4, 46, "Future 8  字体 🎮", 0x6AB0FF, 0x0A1A3A)
+  text_draw(kblocks, 3, 4, 64, "Blocks 8  字体 ❤", 0xFF5C8A, 0x2A0010)
+  text_draw(khigh, 4, 4, 88, "HighSq 16  字体 👍", 0xE0A0FF, 0x201028)
+}
+
+function paintDisplay() {
+  text_draw(silver, 0, 4, 4, "Silver 19  字体 ⭐", 0xEDEDED, 0x202028)
+  text_draw(pixelify, 1, 4, 28, "Pixelify 11  ABC abc", 0xFFCE4A, 0x5A3A00)
+  text_draw(pixelifyB, 2, 4, 48, "Pixelify Bold 16  ABC", 0xEDB458, 0x3A2208)
+  text_draw(silk, 3, 4, 70, "Silkscreen 8  ❤", 0x6AB0FF, 0x0A1A3A)
+  text_draw(silkB, 4, 4, 88, "Silkscreen Bold 8  👍", 0xE0A0FF, 0x201028)
+}
+
+function paintEffects() {
+  text_draw(tiny, 0, 4, 4,
+    "Hi " + text_color(2) + "pink " + text_color(3) + "blue" + text_color(1) + "!",
+    { colors: [0xEDEDED, 0xFF5C8A, 0x6AB0FF], shadow: 0x202028 })
+
+  text_draw(tiny, 1, 0, 22, "centre", {
+    color: 0x8CE06A, shadow: 0x1A3A12, align: "center", maxw: 240,
+  })
+  text_draw(tiny, 2, 0, 36, "right edge", {
+    color: 0xEDB458, shadow: 0x3A2208, align: "right", maxw: 232,
+  })
+
+  text_draw(tiny, 3, 8, 54,
+    "wrap + justify: several words fill this narrow box evenly",
+    { color: 0xB9C0D6, shadow: 0x101018, align: "justify", maxw: 112 })
+
+  text_draw(tiny, 4, 4, 100,
+    "flat " + text_tag_set(0) + "raised" + text_tag_unset(0) + " flat",
+    { color: 0xE0A0FF, shadow: 0x201028 })
+}
+
+function paint() {
+  clearSlots()
+  if (S.page === 0) { paintFaces() }
+  if (S.page === 1) { paintTiny() }
+  if (S.page === 2) { paintKenney() }
+  if (S.page === 3) { paintDisplay() }
+  if (S.page === 4) { paintEffects() }
+  text_draw(foot, FOOTER, 4, 148, "< >  page " + (S.page + 1) + "/" + PAGES, 0x8899AA)
+}
+
+paint()
+
+while (true) {
+  let next = S.page
+  if (key_pressed(BTN_LEFT) > 0) { next = (S.page + PAGES - 1) % PAGES }
+  if (key_pressed(BTN_RIGHT) > 0) { next = (S.page + 1) % PAGES }
+  if (next !== S.page) {
+    S.page = next
+    paint()
+  }
+  frame()
+}

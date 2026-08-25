@@ -1,0 +1,68 @@
+// bands-demo — three parallax depths out of ONE background layer.
+//
+// The GBA has four background layers, and a game with menus has already spent one on its UI canvas
+// and one on the world. That leaves two, which is a hard ceiling on how many separately-scrolling
+// backdrops a scene can have — until you stop thinking in layers.
+//
+// A background's horizontal scroll register can be rewritten between scanlines, by DMA, while the
+// screen is drawing. So a SINGLE layer can scroll at one speed across the stars, another across the
+// mountains and a third across the treeline: three depths, one layer, no extra VRAM, and no
+// per-frame cost beyond the 320-byte table the engine builds for the DMA to walk.
+//
+// That is all this example is. There is no player, no map, no engine — one image, one background,
+// one call:
+//
+//     bg_bands(bg, [0, STAR_MUL, MTN_TOP, MTN_MUL, TREE_TOP, TREE_MUL])
+//
+// ⚠️ ONE layer per game can be banded. agb's frame holds a single DMA slot and the HBlank transfer
+// is hardcoded to DMA channel 0, so a second banded layer would silently replace the first.
+//
+// ⚠️ Bands only work on a background that WRAPS — a full-screen `background:` image (this) or a
+// `scene:` backdrop layer. The world layer of a big map is streamed and only keeps a 256x256 window
+// of tiles in VRAM, so it cannot be scrolled per scanline; there is nothing there to show.
+import { bands } from 'background:../assets/bands.png'
+import { bg_new, bg_bands, camera_set, frame, key_held } from 'cargo:tish_agb'
+
+// Where each band of the art starts, in scanlines. These match the three strata drawn by
+// scripts/gen_bands_demo.py — change them there and here together.
+let MTN_TOP: i32 = 52
+let TREE_TOP: i32 = 104
+
+// Scroll speed per band, in 1/256ths of the camera: 256 tracks the camera exactly, 0 is pinned to
+// the screen. The stars barely move, the mountains drift, the trees rush past — which is the whole
+// illusion, and it is three numbers.
+let STAR_MUL: i32 = 12
+let MTN_MUL: i32 = 72
+let TREE_MUL: i32 = 240
+
+// `button_of` in tish-agb, and the order is NOT the GBA's register bit order: 4 and 5 are the
+// SHOULDER buttons, and the d-pad's horizontal axis comes after the vertical, at 8 and 9.
+//
+//   0 A · 1 B · 2 Select · 3 Start · 4 L · 5 R · 6 Up · 7 Down · 8 Left · 9 Right
+//
+// This file had LEFT = 5 and RIGHT = 4 — bound to R and L — so the d-pad did nothing here, and the
+// comment below promising you could "scrub back and forth" was the only implementation of it. A
+// headless frame with RIGHT held was pixel-identical to one with no input at all.
+let LEFT: i32 = 8
+let RIGHT: i32 = 9
+
+// Priority 3 — furthest back. Nothing is drawn in front of it here, but a real game's world layer
+// would be at 2.
+const bg = bg_new(bands, 3)
+
+// NOTE there is deliberately no `bg_parallax` call. This layer has no whole-layer scroll at all, so
+// every pixel of movement you see is the per-scanline DMA doing it. If the bands stopped working,
+// the picture would sit perfectly still rather than merely look wrong — which is what makes this
+// example a test as well as a demo.
+bg_bands(bg, [0, STAR_MUL, MTN_TOP, MTN_MUL, TREE_TOP, TREE_MUL])
+
+// Drift right on its own so the effect is visible in a screenshot with no input, and let the d-pad
+// take over so a person can scrub back and forth.
+let cam: i32 = 0
+while (true) {
+  cam = cam + 1
+  if (key_held(LEFT) > 0) { cam = cam - 3 }
+  if (key_held(RIGHT) > 0) { cam = cam + 3 }
+  camera_set(cam, 0)
+  frame()
+}

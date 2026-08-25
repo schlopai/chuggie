@@ -1,0 +1,10146 @@
+{
+ "source": "Ninja Adventure Asset Pack (CC0, Pixel-boy & AAA)",
+ "catalogs": {
+  "tilesets": {
+   "file": "catalog/tilesets.json",
+   "count": 23,
+   "depth": "vision (deep)"
+  },
+  "actors": {
+   "file": "catalog/actors.json",
+   "count": 206,
+   "depth": "structural (pattern-defined)"
+  },
+  "items": {
+   "file": "catalog/items.json",
+   "count": 140,
+   "depth": "structural"
+  },
+  "fx": {
+   "file": "catalog/fx.json",
+   "count": 75,
+   "depth": "structural"
+  },
+  "ui": {
+   "file": "catalog/ui.json",
+   "count": 359,
+   "depth": "structural"
+  }
+ },
+ "autotile": {
+  "file": "catalog/autotile.json",
+  "converter": "scripts/ninja_autotile.py",
+  "materials": [
+   "dirt_grass",
+   "dirt_grass_dark",
+   "tan_sand",
+   "pink_sand",
+   "snow",
+   "dark_mud",
+   "ice_blue",
+   "orange_clay",
+   "cream_wall",
+   "orange_wall",
+   "brown_wall",
+   "green_wall",
+   "dark_cobble",
+   "tan_plank",
+   "cream_brick",
+   "cream_brick_sm",
+   "orange_brick",
+   "orange_brick_sm",
+   "gold_ornate",
+   "green_ornate",
+   "hole",
+   "sand_water",
+   "grass_water",
+   "ice_water",
+   "magic_water",
+   "cloud",
+   "cloud_island",
+   "orange_soil",
+   "spring_grass",
+   "summer_grass",
+   "autumn_ground",
+   "field_snow",
+   "stone_slab"
+  ],
+  "generator": "scripts/gen_autotile_masks.py",
+  "tiled_library": "scripts/gen_tileset_library.py",
+  "note": "VERIFIED wangset/mask tables in this file: TilesetFloor 8\u00d747-blob (Godot); TilesetWallSimple 4 palettes; TilesetInteriorFloor dark_cobble + tan_plank + cream/orange brick frames + gold/green ornate; TilesetHole; TilesetWater\u00d74; TilesetFloorB cloud+island; TilesetField\u00d75; tileset_bed stone. NOT wangsets (modular/hand-place kits \u2014 see tilesets.json): Pipes, Desert wall-kit, Relief cliffs."
+ },
+ "total_assets": 803,
+ "assets": [
+  {
+   "file": "Backgrounds/Tilesets/Interior/Elements.png",
+   "group": "tileset",
+   "name": "Interior Elements (misc props)",
+   "dims": [
+    144,
+    48
+   ],
+   "grid": [
+    9,
+    3
+   ],
+   "autotile": false,
+   "theme": "small miscellaneous interior props (wall pilaster, cushions/barrels, boxes)"
+  },
+  {
+   "file": "Backgrounds/Tilesets/Interior/TilesetInterior.png",
+   "group": "tileset",
+   "name": "Interior Pipes / Ornate Tubing",
+   "dims": [
+    256,
+    320
+   ],
+   "grid": [
+    16,
+    20
+   ],
+   "autotile": false,
+   "theme": "interior decoration \u2014 connective pipes / ornate wall tubing that link into rectangular loops"
+  },
+  {
+   "file": "Backgrounds/Tilesets/Interior/TilesetInteriorFloor.png",
+   "group": "tileset",
+   "name": "Interior Floors & Walled Rooms",
+   "dims": [
+    352,
+    272
+   ],
+   "grid": [
+    22,
+    17
+   ],
+   "autotile": true,
+   "theme": "indoor floors and walled-room wall sets for building interior rooms"
+  },
+  {
+   "file": "Backgrounds/Tilesets/Interior/TilesetWallSimple.png",
+   "group": "tileset",
+   "name": "Simple Walls",
+   "dims": [
+    160,
+    176
+   ],
+   "grid": [
+    10,
+    11
+   ],
+   "autotile": true,
+   "theme": "simple square interior wall frames with a decorative center medallion, in four palettes"
+  },
+  {
+   "file": "Backgrounds/Tilesets/Pipes.png",
+   "group": "tileset",
+   "name": "Pipes",
+   "dims": [
+    240,
+    48
+   ],
+   "grid": [
+    15,
+    3
+   ],
+   "autotile": true,
+   "theme": "Connectable segmented pipe/tube props in 3 color variants (reads as segmented pipe-worms)"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetDesert.png",
+   "group": "tileset",
+   "name": "TilesetDesert",
+   "dims": [
+    320,
+    192
+   ],
+   "grid": [
+    20,
+    12
+   ],
+   "autotile": true,
+   "theme": "desert ruins / oasis (sandstone buildings, palms, statues, water)"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetDungeon.png",
+   "group": "tileset",
+   "name": "TilesetDungeon",
+   "dims": [
+    192,
+    64
+   ],
+   "grid": [
+    12,
+    4
+   ],
+   "autotile": false,
+   "theme": "Dungeon interior props & puzzle objects: crates, chests, storage shelves, orbs on pedestals, colored switches, gem/crystal blocks, cushions"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetElement.png",
+   "group": "tileset",
+   "name": "TilesetElement",
+   "dims": [
+    256,
+    240
+   ],
+   "grid": [
+    16,
+    15
+   ],
+   "autotile": false,
+   "theme": "Interior furniture and mixed decorative props (indoor decoration set)"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetField.png",
+   "group": "tileset",
+   "name": "TilesetField",
+   "dims": [
+    80,
+    240
+   ],
+   "grid": [
+    5,
+    15
+   ],
+   "autotile": true,
+   "theme": "field/meadow ground blocks - 5 color variants, simple island autotiles"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetFloor.png",
+   "group": "tileset",
+   "name": "TilesetFloor",
+   "dims": [
+    352,
+    417
+   ],
+   "grid": [
+    22,
+    26
+   ],
+   "autotile": true,
+   "theme": "multi-biome ground terrain autotiles (8 materials, all 47-blob)"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetFloorB.png",
+   "group": "tileset",
+   "name": "TilesetFloorB",
+   "dims": [
+    176,
+    112
+   ],
+   "grid": [
+    11,
+    7
+   ],
+   "autotile": true,
+   "theme": "pale cloud / fluffy soft-white floor autotile"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetFloorDetail.png",
+   "group": "tileset",
+   "name": "TilesetFloorDetail",
+   "dims": [
+    256,
+    80
+   ],
+   "grid": [
+    16,
+    5
+   ],
+   "autotile": false,
+   "theme": "single-tile ground scatter decorations (rocks, plants, props)"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetHole.png",
+   "group": "tileset",
+   "name": "TilesetHole",
+   "dims": [
+    176,
+    80
+   ],
+   "grid": [
+    11,
+    5
+   ],
+   "autotile": true,
+   "theme": "pits / holes / chasms (impassable void)"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetHouse.png",
+   "group": "tileset",
+   "name": "TilesetHouse",
+   "dims": [
+    528,
+    368
+   ],
+   "grid": [
+    33,
+    23
+   ],
+   "autotile": false,
+   "theme": "Overworld buildings grab-bag: village houses, dojo, cabins, ovens, igloos, torii/gates, statues, fences & walls, plus interior furniture props"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetLogic.png",
+   "group": "tileset",
+   "name": "TilesetLogic",
+   "dims": [
+    128,
+    160
+   ],
+   "grid": [
+    8,
+    10
+   ],
+   "autotile": false,
+   "theme": "Puzzle/logic markers and keyed props, color-coded across 8 columns"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetNature.png",
+   "group": "tileset",
+   "name": "TilesetNature",
+   "dims": [
+    384,
+    336
+   ],
+   "grid": [
+    24,
+    21
+   ],
+   "autotile": false,
+   "theme": "nature props: trees, rock/boulder formations, bushes, flowers, crystals, mushrooms, stumps, pond"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetRelief.png",
+   "group": "tileset",
+   "name": "TilesetRelief",
+   "dims": [
+    320,
+    192
+   ],
+   "grid": [
+    20,
+    12
+   ],
+   "autotile": true,
+   "theme": "cliffs / elevation / plateaus (two-tier terrain walls)"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetReliefDetail.png",
+   "group": "tileset",
+   "name": "TilesetReliefDetail",
+   "dims": [
+    192,
+    192
+   ],
+   "grid": [
+    12,
+    12
+   ],
+   "autotile": false,
+   "theme": "cliff detail / decoration overlays (caves, ladders, boulders, props)"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetTowers.png",
+   "group": "tileset",
+   "name": "TilesetTowers",
+   "dims": [
+    384,
+    96
+   ],
+   "grid": [
+    24,
+    6
+   ],
+   "autotile": false,
+   "theme": "Natural rock spires / stone 'tower' formations and crystal outcrops - decorative landmark objects, NOT enterable buildings"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetVillageAbandoned.png",
+   "group": "tileset",
+   "name": "TilesetVillageAbandoned",
+   "dims": [
+    320,
+    192
+   ],
+   "grid": [
+    20,
+    12
+   ],
+   "autotile": false,
+   "theme": "Abandoned/overgrown village: mossy ruined houses, big weathered timber buildings, graves, dead stumps, heavy foliage. (Tileset used by the demo village map.)"
+  },
+  {
+   "file": "Backgrounds/Tilesets/TilesetWater.png",
+   "group": "tileset",
+   "name": "TilesetWater",
+   "dims": [
+    448,
+    272
+   ],
+   "grid": [
+    28,
+    17
+   ],
+   "autotile": true,
+   "theme": "water / ponds / rivers / docks (multi-biome water edges)"
+  },
+  {
+   "file": "Backgrounds/Tilesets/tileset_bed.png",
+   "group": "tileset",
+   "name": "Beds & Bedroom Furniture",
+   "dims": [
+    224,
+    192
+   ],
+   "grid": [
+    14,
+    12
+   ],
+   "autotile": true,
+   "theme": "bedroom furniture \u2014 beds in several colors, mattresses, wooden storage & railings, stone floor"
+  },
+  {
+   "file": "Backgrounds/Tilesets/tileset_camp.png",
+   "group": "tileset",
+   "name": "tileset_camp",
+   "dims": [
+    368,
+    144
+   ],
+   "grid": [
+    23,
+    9
+   ],
+   "autotile": false,
+   "theme": "Campsite / war-camp: canvas tents, campfires & stone fire rings, logs, barrels, crates, cooking gear, hay, rope, training dummy"
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/Cat/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Cat",
+   "dims": [
+    32,
+    16
+   ],
+   "layout": "strip",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/CatBlack/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "CatBlack",
+   "dims": [
+    32,
+    16
+   ],
+   "layout": "strip",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/CatCyclop/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "CatCyclop",
+   "dims": [
+    32,
+    16
+   ],
+   "layout": "strip",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/CatOrange/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "CatOrange",
+   "dims": [
+    44,
+    17
+   ],
+   "layout": "large-or-irregular",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/CatWhite/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "CatWhite",
+   "dims": [
+    34,
+    15
+   ],
+   "layout": "large-or-irregular",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Chicken",
+   "dims": null,
+   "layout": null,
+   "faceset": false,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Cow",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/Dog/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Dog",
+   "dims": [
+    32,
+    16
+   ],
+   "layout": "strip",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/Dog2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Dog2",
+   "dims": [
+    32,
+    16
+   ],
+   "layout": "strip",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/DogBlack/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "DogBlack",
+   "dims": [
+    36,
+    17
+   ],
+   "layout": "large-or-irregular",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/DogOrange/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "DogOrange",
+   "dims": [
+    36,
+    16
+   ],
+   "layout": "large-or-irregular",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/DogYellow/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "DogYellow",
+   "dims": [
+    42,
+    17
+   ],
+   "layout": "large-or-irregular",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Donkey",
+   "dims": null,
+   "layout": null,
+   "faceset": false,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Fish",
+   "dims": null,
+   "layout": null,
+   "faceset": false,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/Frog/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Frog",
+   "dims": [
+    32,
+    16
+   ],
+   "layout": "strip",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/Hamster/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Hamster",
+   "dims": [
+    30,
+    15
+   ],
+   "layout": "large-or-irregular",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Horse",
+   "dims": null,
+   "layout": null,
+   "faceset": false,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/Hyena/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Hyena",
+   "dims": [
+    28,
+    13
+   ],
+   "layout": "large-or-irregular",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Lion",
+   "dims": null,
+   "layout": null,
+   "faceset": false,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/LionCub/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "LionCub",
+   "dims": [
+    32,
+    16
+   ],
+   "layout": "strip",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Lioness",
+   "dims": null,
+   "layout": null,
+   "faceset": false,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Monkey",
+   "dims": null,
+   "layout": null,
+   "faceset": false,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Parrot",
+   "dims": null,
+   "layout": null,
+   "faceset": false,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Pig",
+   "dims": null,
+   "layout": null,
+   "faceset": false,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/Racoon/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "Racoon",
+   "dims": [
+    32,
+    16
+   ],
+   "layout": "strip",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Animal/WildBoar/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Animal",
+   "name": "WildBoar",
+   "dims": [
+    34,
+    16
+   ],
+   "layout": "large-or-irregular",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Boss/DemonCyclop/Sprite.png",
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "DemonCyclop",
+   "dims": [
+    37,
+    33
+   ],
+   "layout": "large-or-irregular",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Boss/DemonCyclop2/Sprite.png",
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "DemonCyclop2",
+   "dims": [
+    37,
+    33
+   ],
+   "layout": "large-or-irregular",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "DragonBlue",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "DragonGreen",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "GiantBamboo",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "GiantBamboo2",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "GiantBlueSamurai",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "GiantFlam",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "GiantFrog",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "GiantFrog2",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Boss/GiantRacoon/Sprite.png",
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "GiantRacoon",
+   "dims": [
+    55,
+    50
+   ],
+   "layout": "large-or-irregular",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Boss/GiantRacoonGold/Sprite.png",
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "GiantRacoonGold",
+   "dims": [
+    43,
+    48
+   ],
+   "layout": "large-or-irregular",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "GiantRedSamurai",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "GiantSlime",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "GiantSlime2",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "GiantSpirit",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "SquidGreen",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "SquidRed",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "TenguBlue",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Boss",
+   "name": "TenguRed",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Boy/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Boy",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/CamouflageGreen/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "CamouflageGreen",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/CamouflageRed/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "CamouflageRed",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/CaveLion/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "CaveLion",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/CaveLion2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "CaveLion2",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Cavegirl/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Cavegirl",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Cavegirl2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Cavegirl2",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Caveman/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Caveman",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Caveman2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Caveman2",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Child/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Child",
+   "dims": [
+    64,
+    32
+   ],
+   "layout": "grid-16",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/DemonGreen/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "DemonGreen",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/DemonRed/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "DemonRed",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/EggBoy/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "EggBoy",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/EggGirl/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "EggGirl",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Eskimo/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Eskimo",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/FighterRed/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "FighterRed",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/FighterWhite/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "FighterWhite",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Flam/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Flam",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/GladiatorBlue/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "GladiatorBlue",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/GoldStatue/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "GoldStatue",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/GreenPig/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "GreenPig",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Hunter/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Hunter",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Inspector/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Inspector",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Knight/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Knight",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/KnightGold/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "KnightGold",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Lion/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Lion",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/LionBoy/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "LionBoy",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/LionOrange/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "LionOrange",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/LionYellow/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "LionYellow",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/ManGreen/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "ManGreen",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": false,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/MaskFrog/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "MaskFrog",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/MaskGoldRacoon/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "MaskGoldRacoon",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/MaskRacoon/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "MaskRacoon",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Master/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Master",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Monk/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Monk",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Monk2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Monk2",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Monkey/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Monkey",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/MonkeyBoxerBlue/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "MonkeyBoxerBlue",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/MonkeyBoxerRed/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "MonkeyBoxerRed",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaBlue/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaBlue",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaBlue2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaBlue2",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaBomb/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaBomb",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaDark/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaDark",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaEskimo/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaEskimo",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaFire/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaFire",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaGray/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaGray",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaGreen/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaGreen",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaLeaf/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaLeaf",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaMageBlack/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaMageBlack",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaMageOrange/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaMageOrange",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaMasked/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaMasked",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaRed/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaRed",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaRed2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaRed2",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaThunder/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaThunder",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaWater/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaWater",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/NinjaYellow/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "NinjaYellow",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Noble/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Noble",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/OldMan/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "OldMan",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/OldMan2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "OldMan2",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/OldMan3/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "OldMan3",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/OldWoman/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "OldWoman",
+   "dims": [
+    64,
+    32
+   ],
+   "layout": "grid-16",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Pig/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Pig",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Princess/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Princess",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/RedGladiator/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "RedGladiator",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/RedNinja3/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "RedNinja3",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/RobotCamouflage/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "RobotCamouflage",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/RobotGreen/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "RobotGreen",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/RobotGrey/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "RobotGrey",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Samurai/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Samurai",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/SamuraiBlue/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "SamuraiBlue",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "SamuraiRed",
+   "dims": null,
+   "layout": null,
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Shaman/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Shaman",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/ShamanLion/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "ShamanLion",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Skeleton/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Skeleton",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/SkeletonDemon/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "SkeletonDemon",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/SorcererBlack/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "SorcererBlack",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/SorcererOrange/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "SorcererOrange",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Spirit/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Spirit",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Statue/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Statue",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Sultan/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Sultan",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Sultan2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Sultan2",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Tengu/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Tengu",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Tengu2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Tengu2",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Vampire/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Vampire",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Village6/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Village6",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Villager/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Villager",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Villager2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Villager2",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Villager3/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Villager3",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Villager4/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Villager4",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Villager5/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Villager5",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Villager6/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Villager6",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Character/Woman/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Character",
+   "name": "Woman",
+   "dims": [
+    64,
+    112
+   ],
+   "layout": "standard-4dir",
+   "faceset": true,
+   "anims": [
+    "Attack",
+    "Dead",
+    "Idle",
+    "Item",
+    "Jump",
+    "Special1",
+    "Special2",
+    "Walk"
+   ]
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/CharacterAnimated/NinjaGreen/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "CharacterAnimated",
+   "name": "NinjaGreen",
+   "dims": [
+    256,
+    544
+   ],
+   "layout": "grid-16",
+   "faceset": false,
+   "anims": [
+    "Attack",
+    "Climb",
+    "Dead",
+    "Hit",
+    "Idle",
+    "Item",
+    "Jump",
+    "Pickup",
+    "Push",
+    "Roll",
+    "Swim",
+    "Walk"
+   ]
+  },
+  {
+   "file": null,
+   "group": "actor",
+   "subgroup": "CharacterAnimated",
+   "name": "Weapon",
+   "dims": null,
+   "layout": null,
+   "faceset": false,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Axolot/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Axolot",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/AxolotBlue/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "AxolotBlue",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Bamboo/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Bamboo",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/BambooYellow/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "BambooYellow",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Bear/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Bear",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Beast/Beast.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Beast",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Beast2/Beast2.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Beast2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/BlueBat/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "BlueBat",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Butterfly/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Butterfly",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/ButterflyBlue/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "ButterflyBlue",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Cyclope/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Cyclope",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Cyclope2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Cyclope2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Dragon/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Dragon",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/DragonYellow/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "DragonYellow",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Eye/Eye.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Eye",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Eye2/Eye2.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Eye2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Fish/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Fish",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/FishRed/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "FishRed",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Flam/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Flam",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Flam2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Flam2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/GoldRacoon/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "GoldRacoon",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/GreenOctopus/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "GreenOctopus",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Grey Trex/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Grey Trex",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/HeartGreen/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "HeartGreen",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/HeartRed/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "HeartRed",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/KappaGreen/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "KappaGreen",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/KappaRed/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "KappaRed",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/LanternGreen/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "LanternGreen",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/LanternRed/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "LanternRed",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Larva/Larva.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Larva",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Larva2/Larva2.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Larva2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Lizard/Lizard.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Lizard",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Lizard2/Lizard2.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Lizard2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Mole/Mole.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Mole",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Mole2/Mole2.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Mole2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Mollusc/Mollusc.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Mollusc",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Mollusc2/Mollusc2.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Mollusc2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Mouse/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Mouse",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/MouseBlack/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "MouseBlack",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Mushroom/Mushroom.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Mushroom",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Mushroom2/Mushroom2.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Mushroom2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Octopus/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Octopus",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Octopus2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Octopus2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Owl/Owl.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Owl",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Owl2/Owl2.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Owl2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Panda/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Panda",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Racoon/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Racoon",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/RedOctopus/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "RedOctopus",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Reptile/Reptile.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Reptile",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Reptile2/Reptile2.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Reptile2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Skull/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Skull",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/SkullBlue/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "SkullBlue",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Slime/Slime.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Slime",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Slime2/Slime2.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Slime2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Slime3/Slime3.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Slime3",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Slime4/Slime4.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Slime4",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Snake/Snake.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Snake",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Snake2/Snake2.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Snake2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Snake3/Snake3.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Snake3",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Snake4/Snake4.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Snake4",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/SpiderRed/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "SpiderRed",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/SpiderYellow/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "SpiderYellow",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Spirit/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Spirit",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/Spirit2/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "Spirit2",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/TRex/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "TRex",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "assets/ninja-adventure/Actor/Monster/YellowsBat/SpriteSheet.png",
+   "group": "actor",
+   "subgroup": "Monster",
+   "name": "YellowsBat",
+   "dims": [
+    64,
+    64
+   ],
+   "layout": "walk-4dir",
+   "faceset": true,
+   "anims": []
+  },
+  {
+   "file": "Items/Action/Hit.png",
+   "group": "items",
+   "name": "Hit",
+   "category": "Action",
+   "dims": [
+    15,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Action/Interact.png",
+   "group": "items",
+   "name": "Interact",
+   "category": "Action",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/AllPreview.png",
+   "group": "items",
+   "name": "AllPreview",
+   "category": "Items",
+   "dims": [
+    867,
+    925
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Food/Beaf.png",
+   "group": "items",
+   "name": "Beaf",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Calamari.png",
+   "group": "items",
+   "name": "Calamari",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Fish.png",
+   "group": "items",
+   "name": "Fish",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/FortuneCookie.png",
+   "group": "items",
+   "name": "FortuneCookie",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Honey.png",
+   "group": "items",
+   "name": "Honey",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Meat.png",
+   "group": "items",
+   "name": "Meat",
+   "category": "Food",
+   "dims": [
+    15,
+    15
+   ],
+   "type": "icon-15"
+  },
+  {
+   "file": "Items/Food/Noodle.png",
+   "group": "items",
+   "name": "Noodle",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Nut.png",
+   "group": "items",
+   "name": "Nut",
+   "category": "Food",
+   "dims": [
+    15,
+    15
+   ],
+   "type": "icon-15"
+  },
+  {
+   "file": "Items/Food/Nut2.png",
+   "group": "items",
+   "name": "Nut2",
+   "category": "Food",
+   "dims": [
+    15,
+    15
+   ],
+   "type": "icon-15"
+  },
+  {
+   "file": "Items/Food/Octopus.png",
+   "group": "items",
+   "name": "Octopus",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Onigiri.png",
+   "group": "items",
+   "name": "Onigiri",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Seed1.png",
+   "group": "items",
+   "name": "Seed1",
+   "category": "Food",
+   "dims": [
+    8,
+    8
+   ],
+   "type": "icon-8"
+  },
+  {
+   "file": "Items/Food/Seed2.png",
+   "group": "items",
+   "name": "Seed2",
+   "category": "Food",
+   "dims": [
+    8,
+    8
+   ],
+   "type": "icon-8"
+  },
+  {
+   "file": "Items/Food/Seed3.png",
+   "group": "items",
+   "name": "Seed3",
+   "category": "Food",
+   "dims": [
+    8,
+    8
+   ],
+   "type": "icon-8"
+  },
+  {
+   "file": "Items/Food/SeedBig1.png",
+   "group": "items",
+   "name": "SeedBig1",
+   "category": "Food",
+   "dims": [
+    10,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Food/SeedBig2.png",
+   "group": "items",
+   "name": "SeedBig2",
+   "category": "Food",
+   "dims": [
+    10,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Food/SeedBig3.png",
+   "group": "items",
+   "name": "SeedBig3",
+   "category": "Food",
+   "dims": [
+    10,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Food/SeedLarge.png",
+   "group": "items",
+   "name": "SeedLarge",
+   "category": "Food",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Food/SeedLargeWhite.png",
+   "group": "items",
+   "name": "SeedLargeWhite",
+   "category": "Food",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Food/Shrimp.png",
+   "group": "items",
+   "name": "Shrimp",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Sushi.png",
+   "group": "items",
+   "name": "Sushi",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Sushi2.png",
+   "group": "items",
+   "name": "Sushi2",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/TeaLeaf.png",
+   "group": "items",
+   "name": "TeaLeaf",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Yakitori.png",
+   "group": "items",
+   "name": "Yakitori",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/Bag.png",
+   "group": "items",
+   "name": "Bag",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/Book.png",
+   "group": "items",
+   "name": "Book",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/CrateEmpty.png",
+   "group": "items",
+   "name": "CrateEmpty",
+   "category": "Object",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Object/Dice 20.png",
+   "group": "items",
+   "name": "Dice 20",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/Dice 4.png",
+   "group": "items",
+   "name": "Dice 4",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/Dice 6.png",
+   "group": "items",
+   "name": "Dice 6",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/Dice 8.png",
+   "group": "items",
+   "name": "Dice 8",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/Gourd.png",
+   "group": "items",
+   "name": "Gourd",
+   "category": "Object",
+   "dims": [
+    14,
+    14
+   ],
+   "type": "icon-14"
+  },
+  {
+   "file": "Items/Object/Hourglass.png",
+   "group": "items",
+   "name": "Hourglass",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/MoneyBag.png",
+   "group": "items",
+   "name": "MoneyBag",
+   "category": "Object",
+   "dims": [
+    14,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Object/PanFlute.png",
+   "group": "items",
+   "name": "PanFlute",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Other/Letter.png",
+   "group": "items",
+   "name": "Letter",
+   "category": "Other",
+   "dims": [
+    12,
+    9
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Other/Letter2.png",
+   "group": "items",
+   "name": "Letter2",
+   "category": "Other",
+   "dims": [
+    12,
+    7
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Other/Letter3.png",
+   "group": "items",
+   "name": "Letter3",
+   "category": "Other",
+   "dims": [
+    12,
+    7
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Other/Stamp.png",
+   "group": "items",
+   "name": "Stamp",
+   "category": "Other",
+   "dims": [
+    9,
+    9
+   ],
+   "type": "icon-9"
+  },
+  {
+   "file": "Items/Potion/EmptyPot.png",
+   "group": "items",
+   "name": "EmptyPot",
+   "category": "Potion",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Potion/Heart.png",
+   "group": "items",
+   "name": "Heart",
+   "category": "Potion",
+   "dims": [
+    9,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Potion/LifePot.png",
+   "group": "items",
+   "name": "LifePot",
+   "category": "Potion",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Potion/Medipack.png",
+   "group": "items",
+   "name": "Medipack",
+   "category": "Potion",
+   "dims": [
+    10,
+    10
+   ],
+   "type": "icon-10"
+  },
+  {
+   "file": "Items/Potion/MilkPot.png",
+   "group": "items",
+   "name": "MilkPot",
+   "category": "Potion",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Potion/WaterPot.png",
+   "group": "items",
+   "name": "WaterPot",
+   "category": "Potion",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Projectile/Arrow.png",
+   "group": "items",
+   "name": "Arrow",
+   "category": "Projectile",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Projectile/Bomb.png",
+   "group": "items",
+   "name": "Bomb",
+   "category": "Projectile",
+   "dims": [
+    12,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Projectile/Caltrop.png",
+   "group": "items",
+   "name": "Caltrop",
+   "category": "Projectile",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Projectile/CrateDynamite.png",
+   "group": "items",
+   "name": "CrateDynamite",
+   "category": "Projectile",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Projectile/Dynamite.png",
+   "group": "items",
+   "name": "Dynamite",
+   "category": "Projectile",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Projectile/Kunai.png",
+   "group": "items",
+   "name": "Kunai",
+   "category": "Projectile",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Projectile/Shuriken.png",
+   "group": "items",
+   "name": "Shuriken",
+   "category": "Projectile",
+   "dims": [
+    15,
+    15
+   ],
+   "type": "icon-15"
+  },
+  {
+   "file": "Items/Resource/BarCopper.png",
+   "group": "items",
+   "name": "BarCopper",
+   "category": "Resource",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Resource/BarGold.png",
+   "group": "items",
+   "name": "BarGold",
+   "category": "Resource",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Resource/BarIron.png",
+   "group": "items",
+   "name": "BarIron",
+   "category": "Resource",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Resource/BarMithril.png",
+   "group": "items",
+   "name": "BarMithril",
+   "category": "Resource",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Resource/BarPurple.png",
+   "group": "items",
+   "name": "BarPurple",
+   "category": "Resource",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Resource/BarSilver.png",
+   "group": "items",
+   "name": "BarSilver",
+   "category": "Resource",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Resource/Branch.png",
+   "group": "items",
+   "name": "Branch",
+   "category": "Resource",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Resource/GemGreen.png",
+   "group": "items",
+   "name": "GemGreen",
+   "category": "Resource",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Resource/GemPurple.png",
+   "group": "items",
+   "name": "GemPurple",
+   "category": "Resource",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Resource/GemRed.png",
+   "group": "items",
+   "name": "GemRed",
+   "category": "Resource",
+   "dims": [
+    15,
+    15
+   ],
+   "type": "icon-15"
+  },
+  {
+   "file": "Items/Resource/GemYellow.png",
+   "group": "items",
+   "name": "GemYellow",
+   "category": "Resource",
+   "dims": [
+    14,
+    14
+   ],
+   "type": "icon-14"
+  },
+  {
+   "file": "Items/Resource/Grass.png",
+   "group": "items",
+   "name": "Grass",
+   "category": "Resource",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Resource/Rock.png",
+   "group": "items",
+   "name": "Rock",
+   "category": "Resource",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Resource/Water.png",
+   "group": "items",
+   "name": "Water",
+   "category": "Resource",
+   "dims": [
+    14,
+    14
+   ],
+   "type": "icon-14"
+  },
+  {
+   "file": "Items/Resource/feather.png",
+   "group": "items",
+   "name": "feather",
+   "category": "Resource",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Scroll/Scroll.png",
+   "group": "items",
+   "name": "Scroll",
+   "category": "Scroll",
+   "dims": [
+    14,
+    14
+   ],
+   "type": "icon-14"
+  },
+  {
+   "file": "Items/Scroll/ScrollEmpty.png",
+   "group": "items",
+   "name": "ScrollEmpty",
+   "category": "Scroll",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Scroll/ScrollFire.png",
+   "group": "items",
+   "name": "ScrollFire",
+   "category": "Scroll",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Scroll/ScrollIce.png",
+   "group": "items",
+   "name": "ScrollIce",
+   "category": "Scroll",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Scroll/ScrollPlant.png",
+   "group": "items",
+   "name": "ScrollPlant",
+   "category": "Scroll",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Scroll/ScrollRock.png",
+   "group": "items",
+   "name": "ScrollRock",
+   "category": "Scroll",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Scroll/ScrollThunder.png",
+   "group": "items",
+   "name": "ScrollThunder",
+   "category": "Scroll",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Anvil.png",
+   "group": "items",
+   "name": "Anvil",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Axe.png",
+   "group": "items",
+   "name": "Axe",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Hammer.png",
+   "group": "items",
+   "name": "Hammer",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Hoe.png",
+   "group": "items",
+   "name": "Hoe",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Pickaxe.png",
+   "group": "items",
+   "name": "Pickaxe",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Shovel.png",
+   "group": "items",
+   "name": "Shovel",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Sickle.png",
+   "group": "items",
+   "name": "Sickle",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/WateringCan.png",
+   "group": "items",
+   "name": "WateringCan",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Treasure/BigTreasureChest.png",
+   "group": "items",
+   "name": "BigTreasureChest",
+   "category": "Treasure",
+   "dims": [
+    32,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Treasure/Coin2.png",
+   "group": "items",
+   "name": "Coin2",
+   "category": "Treasure",
+   "dims": [
+    40,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Treasure/GoldCoin.png",
+   "group": "items",
+   "name": "GoldCoin",
+   "category": "Treasure",
+   "dims": [
+    7,
+    7
+   ],
+   "type": "icon-7"
+  },
+  {
+   "file": "Items/Treasure/GoldCup.png",
+   "group": "items",
+   "name": "GoldCup",
+   "category": "Treasure",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Treasure/GoldKey.png",
+   "group": "items",
+   "name": "GoldKey",
+   "category": "Treasure",
+   "dims": [
+    12,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Treasure/LittleTreasureChest.png",
+   "group": "items",
+   "name": "LittleTreasureChest",
+   "category": "Treasure",
+   "dims": [
+    32,
+    16
+   ],
+   "type": "strip-h(2)"
+  },
+  {
+   "file": "Items/Treasure/SilverCoin.png",
+   "group": "items",
+   "name": "SilverCoin",
+   "category": "Treasure",
+   "dims": [
+    6,
+    6
+   ],
+   "type": "icon-6"
+  },
+  {
+   "file": "Items/Treasure/SilverCup.png",
+   "group": "items",
+   "name": "SilverCup",
+   "category": "Treasure",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Treasure/SilverKey.png",
+   "group": "items",
+   "name": "SilverKey",
+   "category": "Treasure",
+   "dims": [
+    12,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/WeaponPreview2.png",
+   "group": "items",
+   "name": "WeaponPreview2",
+   "category": "Items",
+   "dims": [
+    160,
+    30
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Axe/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Axe",
+   "dims": [
+    11,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Axe/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Axe",
+   "dims": [
+    11,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/AxeTool/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/AxeTool",
+   "dims": [
+    9,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/AxeTool/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/AxeTool",
+   "dims": [
+    9,
+    9
+   ],
+   "type": "icon-9"
+  },
+  {
+   "file": "Items/Weapons/BigSword/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/BigSword",
+   "dims": [
+    7,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/BigSword/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/BigSword",
+   "dims": [
+    7,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Bone/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Bone",
+   "dims": [
+    7,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Bone/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Bone",
+   "dims": [
+    7,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Book/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Book",
+   "dims": [
+    9,
+    9
+   ],
+   "type": "icon-9"
+  },
+  {
+   "file": "Items/Weapons/Book/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Book",
+   "dims": [
+    12,
+    9
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Bow/Arrow.png",
+   "group": "items",
+   "name": "Arrow",
+   "category": "Weapons/Bow",
+   "dims": [
+    13,
+    5
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Bow/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Bow",
+   "dims": [
+    15,
+    7
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Bow2/Arrow.png",
+   "group": "items",
+   "name": "Arrow",
+   "category": "Weapons/Bow2",
+   "dims": [
+    13,
+    5
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Bow2/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Bow2",
+   "dims": [
+    15,
+    7
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Club/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Club",
+   "dims": [
+    8,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Club/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Club",
+   "dims": [
+    8,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Fishing Rod/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Fishing Rod",
+   "dims": [
+    10,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Fork/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Fork",
+   "dims": [
+    7,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Fork/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Fork",
+   "dims": [
+    7,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Hammer/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Hammer",
+   "dims": [
+    9,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Hammer/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Hammer",
+   "dims": [
+    9,
+    9
+   ],
+   "type": "icon-9"
+  },
+  {
+   "file": "Items/Weapons/Katana/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Katana",
+   "dims": [
+    6,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Katana/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Katana",
+   "dims": [
+    6,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Lance/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Lance",
+   "dims": [
+    6,
+    23
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Lance/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Lance",
+   "dims": [
+    6,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Lance2/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Lance2",
+   "dims": [
+    7,
+    21
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Lance2/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Lance2",
+   "dims": [
+    7,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/MagicWand/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/MagicWand",
+   "dims": [
+    5,
+    18
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/MagicWand/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/MagicWand",
+   "dims": [
+    5,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Ninjaku/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Ninjaku",
+   "dims": [
+    7,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Ninjaku/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Ninjaku",
+   "dims": [
+    3,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Pickaxe/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Pickaxe",
+   "dims": [
+    11,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Pickaxe/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Pickaxe",
+   "dims": [
+    11,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Rapier/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Rapier",
+   "dims": [
+    10,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Rapier/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Rapier",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Sai/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Sai",
+   "dims": [
+    7,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Sai/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Sai",
+   "dims": [
+    7,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Stick/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Stick",
+   "dims": [
+    3,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Stick/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Stick",
+   "dims": [
+    3,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Sword/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Sword",
+   "dims": [
+    6,
+    17
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Sword/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Sword",
+   "dims": [
+    6,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Sword2/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Sword2",
+   "dims": [
+    6,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Sword2/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Sword2",
+   "dims": [
+    6,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Whip/Sprite.png",
+   "group": "items",
+   "name": "Sprite",
+   "category": "Weapons/Whip",
+   "dims": [
+    9,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Whip/SpriteInHand.png",
+   "group": "items",
+   "name": "SpriteInHand",
+   "category": "Weapons/Whip",
+   "dims": [
+    3,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/AllPreview.png",
+   "group": "fx",
+   "name": "AllPreview",
+   "category": "FX",
+   "dims": [
+    735,
+    549
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Attack/CircularSlash/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Attack/CircularSlash",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Attack/Claw/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Attack/Claw",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Attack/ClawDouble/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Attack/ClawDouble",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Attack/Cut/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Attack/Cut",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Attack/CutDouble/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Attack/CutDouble",
+   "dims": [
+    160,
+    32
+   ],
+   "type": "sheet-16(10x2)"
+  },
+  {
+   "file": "FX/Attack/CutX/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Attack/CutX",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Attack/SlashCurved/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Attack/SlashCurved",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Attack/SlashDoubleCurved/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Attack/SlashDoubleCurved",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Elemental/Explosion/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Elemental/Explosion",
+   "dims": [
+    360,
+    40
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Flam/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Elemental/Flam",
+   "dims": [
+    200,
+    30
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Ice/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Elemental/Ice",
+   "dims": [
+    320,
+    32
+   ],
+   "type": "sheet-16(20x2)"
+  },
+  {
+   "file": "FX/Elemental/Ice/SpriteSheetB.png",
+   "group": "fx",
+   "name": "SpriteSheetB",
+   "category": "Elemental/Ice",
+   "dims": [
+    288,
+    32
+   ],
+   "type": "sheet-16(18x2)"
+  },
+  {
+   "file": "FX/Elemental/Ice/SpriteSheetFlake.png",
+   "group": "fx",
+   "name": "SpriteSheetFlake",
+   "category": "Elemental/Ice",
+   "dims": [
+    288,
+    32
+   ],
+   "type": "sheet-16(18x2)"
+  },
+  {
+   "file": "FX/Elemental/Plant/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Elemental/Plant",
+   "dims": [
+    240,
+    28
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Plant/SpriteSheetB.png",
+   "group": "fx",
+   "name": "SpriteSheetB",
+   "category": "Elemental/Plant",
+   "dims": [
+    210,
+    26
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Rock/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Elemental/Rock",
+   "dims": [
+    420,
+    30
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Rock/SpriteSheetB.png",
+   "group": "fx",
+   "name": "SpriteSheetB",
+   "category": "Elemental/Rock",
+   "dims": [
+    420,
+    30
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/RockSpike/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Elemental/RockSpike",
+   "dims": [
+    540,
+    48
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Thunder/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Elemental/Thunder",
+   "dims": [
+    160,
+    28
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Water/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Elemental/Water",
+   "dims": [
+    440,
+    33
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/WaterPillar/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Elemental/WaterPillar",
+   "dims": [
+    270,
+    41
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Environment/Fog.png",
+   "group": "fx",
+   "name": "Fog",
+   "category": "Environment",
+   "dims": [
+    320,
+    180
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Environment/Raylight.png",
+   "group": "fx",
+   "name": "Raylight",
+   "category": "Environment",
+   "dims": [
+    216,
+    102
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Magic/Aura/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Magic/Aura",
+   "dims": [
+    125,
+    24
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Magic/Boost/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Magic/Boost",
+   "dims": [
+    424,
+    35
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Magic/Circle/SpriteSheetOrange.png",
+   "group": "fx",
+   "name": "SpriteSheetOrange",
+   "category": "Magic/Circle",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Magic/Circle/SpriteSheetSpark.png",
+   "group": "fx",
+   "name": "SpriteSheetSpark",
+   "category": "Magic/Circle",
+   "dims": [
+    192,
+    32
+   ],
+   "type": "sheet-16(12x2)"
+  },
+  {
+   "file": "FX/Magic/Circle/SpriteSheetSpark2.png",
+   "group": "fx",
+   "name": "SpriteSheetSpark2",
+   "category": "Magic/Circle",
+   "dims": [
+    160,
+    32
+   ],
+   "type": "sheet-16(10x2)"
+  },
+  {
+   "file": "FX/Magic/Circle/SpriteSheetWhite.png",
+   "group": "fx",
+   "name": "SpriteSheetWhite",
+   "category": "Magic/Circle",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Magic/Shield/SpriteSheetBlue.png",
+   "group": "fx",
+   "name": "SpriteSheetBlue",
+   "category": "Magic/Shield",
+   "dims": [
+    144,
+    26
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Magic/Shield/SpriteSheetYellow.png",
+   "group": "fx",
+   "name": "SpriteSheetYellow",
+   "category": "Magic/Shield",
+   "dims": [
+    144,
+    26
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Magic/Spark/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Magic/Spark",
+   "dims": [
+    270,
+    35
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Magic/Spirit/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Magic/Spirit",
+   "dims": [
+    160,
+    32
+   ],
+   "type": "sheet-16(10x2)"
+  },
+  {
+   "file": "FX/Magic/Spirit/SpriteSheetBlue.png",
+   "group": "fx",
+   "name": "SpriteSheetBlue",
+   "category": "Magic/Spirit",
+   "dims": [
+    160,
+    32
+   ],
+   "type": "sheet-16(10x2)"
+  },
+  {
+   "file": "FX/Magic/Spirit/SpriteSheetDouble.png",
+   "group": "fx",
+   "name": "SpriteSheetDouble",
+   "category": "Magic/Spirit",
+   "dims": [
+    160,
+    32
+   ],
+   "type": "sheet-16(10x2)"
+  },
+  {
+   "file": "FX/Particle/AllPreview.png",
+   "group": "fx",
+   "name": "AllPreview",
+   "category": "Particle",
+   "dims": [
+    147,
+    267
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Bamboo.png",
+   "group": "fx",
+   "name": "Bamboo",
+   "category": "Particle",
+   "dims": [
+    96,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Clouds.png",
+   "group": "fx",
+   "name": "Clouds",
+   "category": "Particle",
+   "dims": [
+    80,
+    36
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Fire.png",
+   "group": "fx",
+   "name": "Fire",
+   "category": "Particle",
+   "dims": [
+    96,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Grass.png",
+   "group": "fx",
+   "name": "Grass",
+   "category": "Particle",
+   "dims": [
+    72,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Leaf.png",
+   "group": "fx",
+   "name": "Leaf",
+   "category": "Particle",
+   "dims": [
+    72,
+    7
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/LeafPink.png",
+   "group": "fx",
+   "name": "LeafPink",
+   "category": "Particle",
+   "dims": [
+    72,
+    7
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Rain.png",
+   "group": "fx",
+   "name": "Rain",
+   "category": "Particle",
+   "dims": [
+    24,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/RainOnFloor.png",
+   "group": "fx",
+   "name": "RainOnFloor",
+   "category": "Particle",
+   "dims": [
+    24,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Rock.png",
+   "group": "fx",
+   "name": "Rock",
+   "category": "Particle",
+   "dims": [
+    80,
+    16
+   ],
+   "type": "strip-h(5)"
+  },
+  {
+   "file": "FX/Particle/RockGray.png",
+   "group": "fx",
+   "name": "RockGray",
+   "category": "Particle",
+   "dims": [
+    80,
+    16
+   ],
+   "type": "strip-h(5)"
+  },
+  {
+   "file": "FX/Particle/Snow.png",
+   "group": "fx",
+   "name": "Snow",
+   "category": "Particle",
+   "dims": [
+    56,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Spark.png",
+   "group": "fx",
+   "name": "Spark",
+   "category": "Particle",
+   "dims": [
+    70,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Vase.png",
+   "group": "fx",
+   "name": "Vase",
+   "category": "Particle",
+   "dims": [
+    84,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Wood.png",
+   "group": "fx",
+   "name": "Wood",
+   "category": "Particle",
+   "dims": [
+    96,
+    16
+   ],
+   "type": "strip-h(6)"
+  },
+  {
+   "file": "FX/Projectile/AllPreview.png",
+   "group": "fx",
+   "name": "AllPreview",
+   "category": "Projectile",
+   "dims": [
+    151,
+    263
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/Arrow.png",
+   "group": "fx",
+   "name": "Arrow",
+   "category": "Projectile",
+   "dims": [
+    13,
+    5
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/BigEnergyBall.png",
+   "group": "fx",
+   "name": "BigEnergyBall",
+   "category": "Projectile",
+   "dims": [
+    96,
+    24
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/BigKunai.png",
+   "group": "fx",
+   "name": "BigKunai",
+   "category": "Projectile",
+   "dims": [
+    35,
+    9
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/BigShuriken.png",
+   "group": "fx",
+   "name": "BigShuriken",
+   "category": "Projectile",
+   "dims": [
+    46,
+    23
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/CanonBall.png",
+   "group": "fx",
+   "name": "CanonBall",
+   "category": "Projectile",
+   "dims": [
+    80,
+    16
+   ],
+   "type": "strip-h(5)"
+  },
+  {
+   "file": "FX/Projectile/EnergyBall.png",
+   "group": "fx",
+   "name": "EnergyBall",
+   "category": "Projectile",
+   "dims": [
+    64,
+    16
+   ],
+   "type": "strip-h(4)"
+  },
+  {
+   "file": "FX/Projectile/Fireball.png",
+   "group": "fx",
+   "name": "Fireball",
+   "category": "Projectile",
+   "dims": [
+    64,
+    16
+   ],
+   "type": "strip-h(4)"
+  },
+  {
+   "file": "FX/Projectile/IceSpike.png",
+   "group": "fx",
+   "name": "IceSpike",
+   "category": "Projectile",
+   "dims": [
+    144,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/Kunai.png",
+   "group": "fx",
+   "name": "Kunai",
+   "category": "Projectile",
+   "dims": [
+    14,
+    5
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/Kunai/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Projectile/Kunai",
+   "dims": [
+    650,
+    59
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/PlantSpike.png",
+   "group": "fx",
+   "name": "PlantSpike",
+   "category": "Projectile",
+   "dims": [
+    96,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/Shuriken.png",
+   "group": "fx",
+   "name": "Shuriken",
+   "category": "Projectile",
+   "dims": [
+    32,
+    16
+   ],
+   "type": "strip-h(2)"
+  },
+  {
+   "file": "FX/Projectile/Shuriken/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Projectile/Shuriken",
+   "dims": [
+    690,
+    54
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/ShurikenMagic.png",
+   "group": "fx",
+   "name": "ShurikenMagic",
+   "category": "Projectile",
+   "dims": [
+    32,
+    16
+   ],
+   "type": "strip-h(2)"
+  },
+  {
+   "file": "FX/Projectile/SpriteSheetRock.png",
+   "group": "fx",
+   "name": "SpriteSheetRock",
+   "category": "Projectile",
+   "dims": [
+    64,
+    16
+   ],
+   "type": "strip-h(4)"
+  },
+  {
+   "file": "FX/Slash/SpriteSheetArc.png",
+   "group": "fx",
+   "name": "SpriteSheetArc",
+   "category": "Slash",
+   "dims": [
+    228,
+    34
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Slash/SpriteSheetCircular.png",
+   "group": "fx",
+   "name": "SpriteSheetCircular",
+   "category": "Slash",
+   "dims": [
+    378,
+    55
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Slash/SpriteSheetMulti.png",
+   "group": "fx",
+   "name": "SpriteSheetMulti",
+   "category": "Slash",
+   "dims": [
+    270,
+    30
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Slash/SpriteSheetSlash01.png",
+   "group": "fx",
+   "name": "SpriteSheetSlash01",
+   "category": "Slash",
+   "dims": [
+    130,
+    32
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Slash/SpriteSheetSlash02.png",
+   "group": "fx",
+   "name": "SpriteSheetSlash02",
+   "category": "Slash",
+   "dims": [
+    396,
+    50
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Slash/SpriteSheetSlash03.png",
+   "group": "fx",
+   "name": "SpriteSheetSlash03",
+   "category": "Slash",
+   "dims": [
+    228,
+    42
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Smoke/Smoke/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Smoke/Smoke",
+   "dims": [
+    192,
+    32
+   ],
+   "type": "sheet-16(12x2)"
+  },
+  {
+   "file": "FX/Smoke/SmokeCircular/SpriteSheet.png",
+   "group": "fx",
+   "name": "SpriteSheet",
+   "category": "Smoke/SmokeCircular",
+   "dims": [
+    240,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Arrow.png",
+   "group": "ui",
+   "name": "Arrow",
+   "category": "Ui",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Dialog/ChoiceBox.png",
+   "group": "ui",
+   "name": "ChoiceBox",
+   "category": "Dialog",
+   "dims": [
+    64,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Dialog/DialogBox.png",
+   "group": "ui",
+   "name": "DialogBox",
+   "category": "Dialog",
+   "dims": [
+    300,
+    58
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Dialog/DialogBoxFaceset.png",
+   "group": "ui",
+   "name": "DialogBoxFaceset",
+   "category": "Dialog",
+   "dims": [
+    300,
+    58
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Dialog/DialogInfo.png",
+   "group": "ui",
+   "name": "DialogInfo",
+   "category": "Dialog",
+   "dims": [
+    80,
+    16
+   ],
+   "type": "strip-h(5)"
+  },
+  {
+   "file": "Ui/Dialog/DialogueBoxSimple.png",
+   "group": "ui",
+   "name": "DialogueBoxSimple",
+   "category": "Dialog",
+   "dims": [
+    316,
+    60
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Dialog/FacesetBox.png",
+   "group": "ui",
+   "name": "FacesetBox",
+   "category": "Dialog",
+   "dims": [
+    48,
+    48
+   ],
+   "type": "icon-48"
+  },
+  {
+   "file": "Ui/Dialog/NoButton.png",
+   "group": "ui",
+   "name": "NoButton",
+   "category": "Dialog",
+   "dims": [
+    26,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Dialog/YesButton.png",
+   "group": "ui",
+   "name": "YesButton",
+   "category": "Dialog",
+   "dims": [
+    26,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote1.png",
+   "group": "ui",
+   "name": "emote1",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote10.png",
+   "group": "ui",
+   "name": "emote10",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote11.png",
+   "group": "ui",
+   "name": "emote11",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote12.png",
+   "group": "ui",
+   "name": "emote12",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote13.png",
+   "group": "ui",
+   "name": "emote13",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote14.png",
+   "group": "ui",
+   "name": "emote14",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote15.png",
+   "group": "ui",
+   "name": "emote15",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote16.png",
+   "group": "ui",
+   "name": "emote16",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote17.png",
+   "group": "ui",
+   "name": "emote17",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote18.png",
+   "group": "ui",
+   "name": "emote18",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote19.png",
+   "group": "ui",
+   "name": "emote19",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote2.png",
+   "group": "ui",
+   "name": "emote2",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote20.png",
+   "group": "ui",
+   "name": "emote20",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote21.png",
+   "group": "ui",
+   "name": "emote21",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote22.png",
+   "group": "ui",
+   "name": "emote22",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote23.png",
+   "group": "ui",
+   "name": "emote23",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote24.png",
+   "group": "ui",
+   "name": "emote24",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote25.png",
+   "group": "ui",
+   "name": "emote25",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote26.png",
+   "group": "ui",
+   "name": "emote26",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote27.png",
+   "group": "ui",
+   "name": "emote27",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote28.png",
+   "group": "ui",
+   "name": "emote28",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote29.png",
+   "group": "ui",
+   "name": "emote29",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote3.png",
+   "group": "ui",
+   "name": "emote3",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote30.png",
+   "group": "ui",
+   "name": "emote30",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote4.png",
+   "group": "ui",
+   "name": "emote4",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote5.png",
+   "group": "ui",
+   "name": "emote5",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote6.png",
+   "group": "ui",
+   "name": "emote6",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote7.png",
+   "group": "ui",
+   "name": "emote7",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote8.png",
+   "group": "ui",
+   "name": "emote8",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote9.png",
+   "group": "ui",
+   "name": "emote9",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Font/font24x30.png",
+   "group": "ui",
+   "name": "font24x30",
+   "category": "Font",
+   "dims": [
+    360,
+    240
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Font/font8x8.png",
+   "group": "ui",
+   "name": "font8x8",
+   "category": "Font",
+   "dims": [
+    120,
+    64
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonA/Disabled.png",
+   "group": "ui",
+   "name": "Disabled",
+   "category": "Input/Gamepad/ButtonA",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonA/Hovered.png",
+   "group": "ui",
+   "name": "Hovered",
+   "category": "Input/Gamepad/ButtonA",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonA/Idle.png",
+   "group": "ui",
+   "name": "Idle",
+   "category": "Input/Gamepad/ButtonA",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonA/Pressed.png",
+   "group": "ui",
+   "name": "Pressed",
+   "category": "Input/Gamepad/ButtonA",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonB/Disabled.png",
+   "group": "ui",
+   "name": "Disabled",
+   "category": "Input/Gamepad/ButtonB",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonB/Hovered.png",
+   "group": "ui",
+   "name": "Hovered",
+   "category": "Input/Gamepad/ButtonB",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonB/Idle.png",
+   "group": "ui",
+   "name": "Idle",
+   "category": "Input/Gamepad/ButtonB",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonB/Pressed.png",
+   "group": "ui",
+   "name": "Pressed",
+   "category": "Input/Gamepad/ButtonB",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonDown.png",
+   "group": "ui",
+   "name": "ButtonDown",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    17
+   ],
+   "type": "icon-17"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonLB.png",
+   "group": "ui",
+   "name": "ButtonLB",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonLT.png",
+   "group": "ui",
+   "name": "ButtonLT",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonLeft.png",
+   "group": "ui",
+   "name": "ButtonLeft",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    17
+   ],
+   "type": "icon-17"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonMinus.png",
+   "group": "ui",
+   "name": "ButtonMinus",
+   "category": "Input/Gamepad",
+   "dims": [
+    14,
+    5
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonPlus.png",
+   "group": "ui",
+   "name": "ButtonPlus",
+   "category": "Input/Gamepad",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonRB.png",
+   "group": "ui",
+   "name": "ButtonRB",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonRT.png",
+   "group": "ui",
+   "name": "ButtonRT",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonRight.png",
+   "group": "ui",
+   "name": "ButtonRight",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    17
+   ],
+   "type": "icon-17"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonUp.png",
+   "group": "ui",
+   "name": "ButtonUp",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    17
+   ],
+   "type": "icon-17"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonX/Disabled.png",
+   "group": "ui",
+   "name": "Disabled",
+   "category": "Input/Gamepad/ButtonX",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonX/Hovered.png",
+   "group": "ui",
+   "name": "Hovered",
+   "category": "Input/Gamepad/ButtonX",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonX/Idle.png",
+   "group": "ui",
+   "name": "Idle",
+   "category": "Input/Gamepad/ButtonX",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonX/Pressed.png",
+   "group": "ui",
+   "name": "Pressed",
+   "category": "Input/Gamepad/ButtonX",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonY/ButtonY.png",
+   "group": "ui",
+   "name": "ButtonY",
+   "category": "Input/Gamepad/ButtonY",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonY/Disabled.png",
+   "group": "ui",
+   "name": "Disabled",
+   "category": "Input/Gamepad/ButtonY",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonY/Hovered.png",
+   "group": "ui",
+   "name": "Hovered",
+   "category": "Input/Gamepad/ButtonY",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonY/Pressed.png",
+   "group": "ui",
+   "name": "Pressed",
+   "category": "Input/Gamepad/ButtonY",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/DPad.png",
+   "group": "ui",
+   "name": "DPad",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/DPadDown.png",
+   "group": "ui",
+   "name": "DPadDown",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    15
+   ],
+   "type": "icon-15"
+  },
+  {
+   "file": "Ui/Input/Gamepad/DPadLeft.png",
+   "group": "ui",
+   "name": "DPadLeft",
+   "category": "Input/Gamepad",
+   "dims": [
+    16,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/DPadRight.png",
+   "group": "ui",
+   "name": "DPadRight",
+   "category": "Input/Gamepad",
+   "dims": [
+    16,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/DPadUp.png",
+   "group": "ui",
+   "name": "DPadUp",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/JoystickLeft.png",
+   "group": "ui",
+   "name": "JoystickLeft",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    18
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/JoystickLeftPressed.png",
+   "group": "ui",
+   "name": "JoystickLeftPressed",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    22
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/JoystickRight.png",
+   "group": "ui",
+   "name": "JoystickRight",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    18
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/JoystickRightPressed.png",
+   "group": "ui",
+   "name": "JoystickRightPressed",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    22
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/Select.png",
+   "group": "ui",
+   "name": "Select",
+   "category": "Input/Gamepad",
+   "dims": [
+    26,
+    9
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/Start.png",
+   "group": "ui",
+   "name": "Start",
+   "category": "Input/Gamepad",
+   "dims": [
+    26,
+    9
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/IconGamepad.png",
+   "group": "ui",
+   "name": "IconGamepad",
+   "category": "Input",
+   "dims": [
+    19,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/IconKeyboard.png",
+   "group": "ui",
+   "name": "IconKeyboard",
+   "category": "Input",
+   "dims": [
+    20,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/IconMouse.png",
+   "group": "ui",
+   "name": "IconMouse",
+   "category": "Input",
+   "dims": [
+    9,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key0.png",
+   "group": "ui",
+   "name": "Key0",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key1.png",
+   "group": "ui",
+   "name": "Key1",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key2.png",
+   "group": "ui",
+   "name": "Key2",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key3.png",
+   "group": "ui",
+   "name": "Key3",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key4.png",
+   "group": "ui",
+   "name": "Key4",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key5.png",
+   "group": "ui",
+   "name": "Key5",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key6.png",
+   "group": "ui",
+   "name": "Key6",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key7.png",
+   "group": "ui",
+   "name": "Key7",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key8.png",
+   "group": "ui",
+   "name": "Key8",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key9.png",
+   "group": "ui",
+   "name": "Key9",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyA.png",
+   "group": "ui",
+   "name": "KeyA",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyAlt.png",
+   "group": "ui",
+   "name": "KeyAlt",
+   "category": "Input/Keyboard",
+   "dims": [
+    20,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyB.png",
+   "group": "ui",
+   "name": "KeyB",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyC.png",
+   "group": "ui",
+   "name": "KeyC",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyCtrl.png",
+   "group": "ui",
+   "name": "KeyCtrl",
+   "category": "Input/Keyboard",
+   "dims": [
+    26,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyD.png",
+   "group": "ui",
+   "name": "KeyD",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyDelete.png",
+   "group": "ui",
+   "name": "KeyDelete",
+   "category": "Input/Keyboard",
+   "dims": [
+    20,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyDown.png",
+   "group": "ui",
+   "name": "KeyDown",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyE.png",
+   "group": "ui",
+   "name": "KeyE",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyEnter.png",
+   "group": "ui",
+   "name": "KeyEnter",
+   "category": "Input/Keyboard",
+   "dims": [
+    17,
+    17
+   ],
+   "type": "icon-17"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyEscape.png",
+   "group": "ui",
+   "name": "KeyEscape",
+   "category": "Input/Keyboard",
+   "dims": [
+    18,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF.png",
+   "group": "ui",
+   "name": "KeyF",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF1.png",
+   "group": "ui",
+   "name": "KeyF1",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF10.png",
+   "group": "ui",
+   "name": "KeyF10",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF11.png",
+   "group": "ui",
+   "name": "KeyF11",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF12.png",
+   "group": "ui",
+   "name": "KeyF12",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF2.png",
+   "group": "ui",
+   "name": "KeyF2",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF3.png",
+   "group": "ui",
+   "name": "KeyF3",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF4.png",
+   "group": "ui",
+   "name": "KeyF4",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF5.png",
+   "group": "ui",
+   "name": "KeyF5",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF6.png",
+   "group": "ui",
+   "name": "KeyF6",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF7.png",
+   "group": "ui",
+   "name": "KeyF7",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF8.png",
+   "group": "ui",
+   "name": "KeyF8",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF9.png",
+   "group": "ui",
+   "name": "KeyF9",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyG.png",
+   "group": "ui",
+   "name": "KeyG",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyH.png",
+   "group": "ui",
+   "name": "KeyH",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyI.png",
+   "group": "ui",
+   "name": "KeyI",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyJ.png",
+   "group": "ui",
+   "name": "KeyJ",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyK.png",
+   "group": "ui",
+   "name": "KeyK",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyL.png",
+   "group": "ui",
+   "name": "KeyL",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyLeft.png",
+   "group": "ui",
+   "name": "KeyLeft",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyM.png",
+   "group": "ui",
+   "name": "KeyM",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyN.png",
+   "group": "ui",
+   "name": "KeyN",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyO.png",
+   "group": "ui",
+   "name": "KeyO",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyP.png",
+   "group": "ui",
+   "name": "KeyP",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyQ.png",
+   "group": "ui",
+   "name": "KeyQ",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyR.png",
+   "group": "ui",
+   "name": "KeyR",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyRight.png",
+   "group": "ui",
+   "name": "KeyRight",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyS.png",
+   "group": "ui",
+   "name": "KeyS",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyShift.png",
+   "group": "ui",
+   "name": "KeyShift",
+   "category": "Input/Keyboard",
+   "dims": [
+    30,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeySpace.png",
+   "group": "ui",
+   "name": "KeySpace",
+   "category": "Input/Keyboard",
+   "dims": [
+    33,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyT.png",
+   "group": "ui",
+   "name": "KeyT",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyTab.png",
+   "group": "ui",
+   "name": "KeyTab",
+   "category": "Input/Keyboard",
+   "dims": [
+    22,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyU.png",
+   "group": "ui",
+   "name": "KeyU",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyUp.png",
+   "group": "ui",
+   "name": "KeyUp",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyV.png",
+   "group": "ui",
+   "name": "KeyV",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyW.png",
+   "group": "ui",
+   "name": "KeyW",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyX.png",
+   "group": "ui",
+   "name": "KeyX",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyY.png",
+   "group": "ui",
+   "name": "KeyY",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyZ.png",
+   "group": "ui",
+   "name": "KeyZ",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Mouse/Mouse.png",
+   "group": "ui",
+   "name": "Mouse",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Mouse/MouseButtonLeft.png",
+   "group": "ui",
+   "name": "MouseButtonLeft",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Mouse/MouseButtonMiddle.png",
+   "group": "ui",
+   "name": "MouseButtonMiddle",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Mouse/MouseButtonRight.png",
+   "group": "ui",
+   "name": "MouseButtonRight",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Mouse/MouseDisabled.png",
+   "group": "ui",
+   "name": "MouseDisabled",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Mouse/MouseWheelDown.png",
+   "group": "ui",
+   "name": "MouseWheelDown",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Mouse/MouseWheelUp.png",
+   "group": "ui",
+   "name": "MouseWheelUp",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    24
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Preview.png",
+   "group": "ui",
+   "name": "Preview",
+   "category": "Input",
+   "dims": [
+    896,
+    210
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Tuto.png",
+   "group": "ui",
+   "name": "Tuto",
+   "category": "Input",
+   "dims": [
+    226,
+    40
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Heart.png",
+   "group": "ui",
+   "name": "Heart",
+   "category": "Receptacle",
+   "dims": [
+    80,
+    16
+   ],
+   "type": "strip-h(5)"
+  },
+  {
+   "file": "Ui/Receptacle/Heart2.png",
+   "group": "ui",
+   "name": "Heart2",
+   "category": "Receptacle",
+   "dims": [
+    64,
+    16
+   ],
+   "type": "strip-h(4)"
+  },
+  {
+   "file": "Ui/Receptacle/Heart3.png",
+   "group": "ui",
+   "name": "Heart3",
+   "category": "Receptacle",
+   "dims": [
+    64,
+    16
+   ],
+   "type": "strip-h(4)"
+  },
+  {
+   "file": "Ui/Receptacle/IconHeart.png",
+   "group": "ui",
+   "name": "IconHeart",
+   "category": "Receptacle",
+   "dims": [
+    14,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/LifeBarMiniProgress.png",
+   "group": "ui",
+   "name": "LifeBarMiniProgress",
+   "category": "Receptacle",
+   "dims": [
+    18,
+    4
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/LifeBarMiniUnder.png",
+   "group": "ui",
+   "name": "LifeBarMiniUnder",
+   "category": "Receptacle",
+   "dims": [
+    18,
+    4
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/AmmoSkill.png",
+   "group": "ui",
+   "name": "AmmoSkill",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    22,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/AmmoSpecial.png",
+   "group": "ui",
+   "name": "AmmoSpecial",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    11,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/Ammokunai.png",
+   "group": "ui",
+   "name": "Ammokunai",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    22,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/BackgroundBag.png",
+   "group": "ui",
+   "name": "BackgroundBag",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    42,
+    58
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/BackgroundBamboo.png",
+   "group": "ui",
+   "name": "BackgroundBamboo",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    34,
+    56
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/BackgroundBottle.png",
+   "group": "ui",
+   "name": "BackgroundBottle",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    32,
+    63
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/BackgroundScroll.png",
+   "group": "ui",
+   "name": "BackgroundScroll",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    38,
+    66
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/BackgroundWood.png",
+   "group": "ui",
+   "name": "BackgroundWood",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    34,
+    56
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/Preview.png",
+   "group": "ui",
+   "name": "Preview",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    960,
+    364
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/ProgressHealth.png",
+   "group": "ui",
+   "name": "ProgressHealth",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    22,
+    40
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/ProgressWhite.png",
+   "group": "ui",
+   "name": "ProgressWhite",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    22,
+    40
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundBamboo.png",
+   "group": "ui",
+   "name": "BackgroundBamboo",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundFlask.png",
+   "group": "ui",
+   "name": "BackgroundFlask",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundIron.png",
+   "group": "ui",
+   "name": "BackgroundIron",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundIron2.png",
+   "group": "ui",
+   "name": "BackgroundIron2",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundMetal.png",
+   "group": "ui",
+   "name": "BackgroundMetal",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundRed.png",
+   "group": "ui",
+   "name": "BackgroundRed",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundWood.png",
+   "group": "ui",
+   "name": "BackgroundWood",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/Over.png",
+   "group": "ui",
+   "name": "Over",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/Preview.png",
+   "group": "ui",
+   "name": "Preview",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    680,
+    352
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressBlack.png",
+   "group": "ui",
+   "name": "ProgressBlack",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressGreen.png",
+   "group": "ui",
+   "name": "ProgressGreen",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressHealth.png",
+   "group": "ui",
+   "name": "ProgressHealth",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressMana.png",
+   "group": "ui",
+   "name": "ProgressMana",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressPurple.png",
+   "group": "ui",
+   "name": "ProgressPurple",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressWhite.png",
+   "group": "ui",
+   "name": "ProgressWhite",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressYellow.png",
+   "group": "ui",
+   "name": "ProgressYellow",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Amulet.png",
+   "group": "ui",
+   "name": "Amulet",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/AmuletDisabled.png",
+   "group": "ui",
+   "name": "AmuletDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Armor.png",
+   "group": "ui",
+   "name": "Armor",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/ArmorDisabled.png",
+   "group": "ui",
+   "name": "ArmorDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Arrow.png",
+   "group": "ui",
+   "name": "Arrow",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/ArrowDisabled.png",
+   "group": "ui",
+   "name": "ArrowDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Boot.png",
+   "group": "ui",
+   "name": "Boot",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/BootDisabled.png",
+   "group": "ui",
+   "name": "BootDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Guard.png",
+   "group": "ui",
+   "name": "Guard",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/GuardDisabled.png",
+   "group": "ui",
+   "name": "GuardDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Helmet.png",
+   "group": "ui",
+   "name": "Helmet",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/HelmetDisabled.png",
+   "group": "ui",
+   "name": "HelmetDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Hook.png",
+   "group": "ui",
+   "name": "Hook",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/HookDisabled.png",
+   "group": "ui",
+   "name": "HookDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Kunai.png",
+   "group": "ui",
+   "name": "Kunai",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/KunaiDisabled.png",
+   "group": "ui",
+   "name": "KunaiDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Money.png",
+   "group": "ui",
+   "name": "Money",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/MoneyDisabled.png",
+   "group": "ui",
+   "name": "MoneyDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Ring.png",
+   "group": "ui",
+   "name": "Ring",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/RingDisabled.png",
+   "group": "ui",
+   "name": "RingDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Scroll.png",
+   "group": "ui",
+   "name": "Scroll",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/ScrollDisabled.png",
+   "group": "ui",
+   "name": "ScrollDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Shuriken.png",
+   "group": "ui",
+   "name": "Shuriken",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/ShurikenDisabled.png",
+   "group": "ui",
+   "name": "ShurikenDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Cook.png",
+   "group": "ui",
+   "name": "Cook",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/CookDisabled.png",
+   "group": "ui",
+   "name": "CookDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Dish.png",
+   "group": "ui",
+   "name": "Dish",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/DishDisabled.png",
+   "group": "ui",
+   "name": "DishDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Harvest.png",
+   "group": "ui",
+   "name": "Harvest",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/HarvestDisabled.png",
+   "group": "ui",
+   "name": "HarvestDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Interact.png",
+   "group": "ui",
+   "name": "Interact",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/InteractDisabled.png",
+   "group": "ui",
+   "name": "InteractDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Mine.png",
+   "group": "ui",
+   "name": "Mine",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/MineDisabled.png",
+   "group": "ui",
+   "name": "MineDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Plant.png",
+   "group": "ui",
+   "name": "Plant",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/PlantDisabled.png",
+   "group": "ui",
+   "name": "PlantDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Potion.png",
+   "group": "ui",
+   "name": "Potion",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/PotionDisabled.png",
+   "group": "ui",
+   "name": "PotionDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Punch.png",
+   "group": "ui",
+   "name": "Punch",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/PunchDisabled.png",
+   "group": "ui",
+   "name": "PunchDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Repair.png",
+   "group": "ui",
+   "name": "Repair",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/RepairDisabled.png",
+   "group": "ui",
+   "name": "RepairDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Sing.png",
+   "group": "ui",
+   "name": "Sing",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/SingDisabled.png",
+   "group": "ui",
+   "name": "SingDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Talk.png",
+   "group": "ui",
+   "name": "Talk",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/TalkDisabled.png",
+   "group": "ui",
+   "name": "TalkDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Water.png",
+   "group": "ui",
+   "name": "Water",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/WaterDisabled.png",
+   "group": "ui",
+   "name": "WaterDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/Moon.png",
+   "group": "ui",
+   "name": "Moon",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/MoonDisabled.png",
+   "group": "ui",
+   "name": "MoonDisabled",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/Rain.png",
+   "group": "ui",
+   "name": "Rain",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/RainDisabled.png",
+   "group": "ui",
+   "name": "RainDisabled",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/Snow.png",
+   "group": "ui",
+   "name": "Snow",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/SnowDisabled.png",
+   "group": "ui",
+   "name": "SnowDisabled",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/Sun.png",
+   "group": "ui",
+   "name": "Sun",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/SunDisabled.png",
+   "group": "ui",
+   "name": "SunDisabled",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Preview.png",
+   "group": "ui",
+   "name": "Preview",
+   "category": "Skill Icon",
+   "dims": [
+    360,
+    192
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Alchemy.png",
+   "group": "ui",
+   "name": "Alchemy",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/AlchemyDisabled.png",
+   "group": "ui",
+   "name": "AlchemyDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/AttackUpgrade.png",
+   "group": "ui",
+   "name": "AttackUpgrade",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/AttackUpgradeDisabled.png",
+   "group": "ui",
+   "name": "AttackUpgradeDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookDarkness.png",
+   "group": "ui",
+   "name": "BookDarkness",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookDarknessDisabled.png",
+   "group": "ui",
+   "name": "BookDarknessDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookDeath.png",
+   "group": "ui",
+   "name": "BookDeath",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookDeathDisabled.png",
+   "group": "ui",
+   "name": "BookDeathDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookFire.png",
+   "group": "ui",
+   "name": "BookFire",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookFireDisabled.png",
+   "group": "ui",
+   "name": "BookFireDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookIce.png",
+   "group": "ui",
+   "name": "BookIce",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookIceDisabled.png",
+   "group": "ui",
+   "name": "BookIceDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookLight.png",
+   "group": "ui",
+   "name": "BookLight",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookLightDisabled.png",
+   "group": "ui",
+   "name": "BookLightDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookPlant.png",
+   "group": "ui",
+   "name": "BookPlant",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookPlantDisabled.png",
+   "group": "ui",
+   "name": "BookPlantDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookRock.png",
+   "group": "ui",
+   "name": "BookRock",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookRockDisabled.png",
+   "group": "ui",
+   "name": "BookRockDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookThunder.png",
+   "group": "ui",
+   "name": "BookThunder",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookThunderDisabled.png",
+   "group": "ui",
+   "name": "BookThunderDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookWind.png",
+   "group": "ui",
+   "name": "BookWind",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookWindDisabled.png",
+   "group": "ui",
+   "name": "BookWindDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Camouflage.png",
+   "group": "ui",
+   "name": "Camouflage",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/CamouflageDisabled.png",
+   "group": "ui",
+   "name": "CamouflageDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Counter.png",
+   "group": "ui",
+   "name": "Counter",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/CounterDisabled.png",
+   "group": "ui",
+   "name": "CounterDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Cut.png",
+   "group": "ui",
+   "name": "Cut",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/CutDisabled.png",
+   "group": "ui",
+   "name": "CutDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Death.png",
+   "group": "ui",
+   "name": "Death",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/DeathDisabled.png",
+   "group": "ui",
+   "name": "DeathDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/DefenseUpgrade.png",
+   "group": "ui",
+   "name": "DefenseUpgrade",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/DefenseUpgradeDisabled.png",
+   "group": "ui",
+   "name": "DefenseUpgradeDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Downgrade.png",
+   "group": "ui",
+   "name": "Downgrade",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/DowngradeDisabled.png",
+   "group": "ui",
+   "name": "DowngradeDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Explosion.png",
+   "group": "ui",
+   "name": "Explosion",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/ExplosionDisabled.png",
+   "group": "ui",
+   "name": "ExplosionDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Fireball.png",
+   "group": "ui",
+   "name": "Fireball",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/FireballDisabled.png",
+   "group": "ui",
+   "name": "FireballDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Heal.png",
+   "group": "ui",
+   "name": "Heal",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/HealDisabled.png",
+   "group": "ui",
+   "name": "HealDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/LuckUpgrade.png",
+   "group": "ui",
+   "name": "LuckUpgrade",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/LuckUpgradeDisabled.png",
+   "group": "ui",
+   "name": "LuckUpgradeDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/MagicWeapon.png",
+   "group": "ui",
+   "name": "MagicWeapon",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/MagicWeaponDisabled.png",
+   "group": "ui",
+   "name": "MagicWeaponDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Mist.png",
+   "group": "ui",
+   "name": "Mist",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/MistDisabled.png",
+   "group": "ui",
+   "name": "MistDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Necromancy.png",
+   "group": "ui",
+   "name": "Necromancy",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/NecromancyDisabled.png",
+   "group": "ui",
+   "name": "NecromancyDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/OrbDarkness.png",
+   "group": "ui",
+   "name": "OrbDarkness",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/OrbDisabled.png",
+   "group": "ui",
+   "name": "OrbDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/OrbFire.png",
+   "group": "ui",
+   "name": "OrbFire",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/OrbLight.png",
+   "group": "ui",
+   "name": "OrbLight",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/OrbPlant.png",
+   "group": "ui",
+   "name": "OrbPlant",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/OrbWater.png",
+   "group": "ui",
+   "name": "OrbWater",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Permutation.png",
+   "group": "ui",
+   "name": "Permutation",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/PermutationDisabled.png",
+   "group": "ui",
+   "name": "PermutationDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/RockSpike.png",
+   "group": "ui",
+   "name": "RockSpike",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/RockSpikeDisabled.png",
+   "group": "ui",
+   "name": "RockSpikeDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Upgrade.png",
+   "group": "ui",
+   "name": "Upgrade",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/UpgradeDisabled.png",
+   "group": "ui",
+   "name": "UpgradeDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Vision.png",
+   "group": "ui",
+   "name": "Vision",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/VisionDisabled.png",
+   "group": "ui",
+   "name": "VisionDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/WaterCanon.png",
+   "group": "ui",
+   "name": "WaterCanon",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/WaterCanonDisabled.png",
+   "group": "ui",
+   "name": "WaterCanonDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/arrow_left.png",
+   "group": "ui",
+   "name": "arrow_left",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/arrow_left_hover.png",
+   "group": "ui",
+   "name": "arrow_left_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/arrow_right.png",
+   "group": "ui",
+   "name": "arrow_right",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/arrow_right_hover.png",
+   "group": "ui",
+   "name": "arrow_right_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_checked.png",
+   "group": "ui",
+   "name": "button_checked",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    26,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_checked_disabled.png",
+   "group": "ui",
+   "name": "button_checked_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    26,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_disabled.png",
+   "group": "ui",
+   "name": "button_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_hover.png",
+   "group": "ui",
+   "name": "button_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_normal.png",
+   "group": "ui",
+   "name": "button_normal",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_pressed.png",
+   "group": "ui",
+   "name": "button_pressed",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_unchecked.png",
+   "group": "ui",
+   "name": "button_unchecked",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    26,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_unchecked_disabled.png",
+   "group": "ui",
+   "name": "button_unchecked_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    26,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/checked.png",
+   "group": "ui",
+   "name": "checked",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/checked_disabled.png",
+   "group": "ui",
+   "name": "checked_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/h_slidder_grabber.png",
+   "group": "ui",
+   "name": "h_slidder_grabber",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    13,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/h_slidder_grabber_disabled.png",
+   "group": "ui",
+   "name": "h_slidder_grabber_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    13,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/h_slidder_grabber_hover.png",
+   "group": "ui",
+   "name": "h_slidder_grabber_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    13,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/inventory_cell.png",
+   "group": "ui",
+   "name": "inventory_cell",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_bg.png",
+   "group": "ui",
+   "name": "nine_path_bg",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_bg_2.png",
+   "group": "ui",
+   "name": "nine_path_bg_2",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_focus.png",
+   "group": "ui",
+   "name": "nine_path_focus",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    8,
+    8
+   ],
+   "type": "icon-8"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_panel_2.png",
+   "group": "ui",
+   "name": "nine_path_panel_2",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_panel_3.png",
+   "group": "ui",
+   "name": "nine_path_panel_3",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_panel_disabled.png",
+   "group": "ui",
+   "name": "nine_path_panel_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_panel_interior.png",
+   "group": "ui",
+   "name": "nine_path_panel_interior",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/radio_checked.png",
+   "group": "ui",
+   "name": "radio_checked",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/radio_checked_disabled.png",
+   "group": "ui",
+   "name": "radio_checked_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/radio_unchecked.png",
+   "group": "ui",
+   "name": "radio_unchecked",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/radio_unchecked_disabled.png",
+   "group": "ui",
+   "name": "radio_unchecked_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/slider_progress.png",
+   "group": "ui",
+   "name": "slider_progress",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/slider_progress_hover.png",
+   "group": "ui",
+   "name": "slider_progress_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/tab.png",
+   "group": "ui",
+   "name": "tab",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/tab_disabled.png",
+   "group": "ui",
+   "name": "tab_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/tab_hover.png",
+   "group": "ui",
+   "name": "tab_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/tab_selected.png",
+   "group": "ui",
+   "name": "tab_selected",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/tab_unselected.png",
+   "group": "ui",
+   "name": "tab_unselected",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/unchecked.png",
+   "group": "ui",
+   "name": "unchecked",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/unchecked_disabled.png",
+   "group": "ui",
+   "name": "unchecked_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/v_slidder_grabber.png",
+   "group": "ui",
+   "name": "v_slidder_grabber",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    11,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/v_slidder_grabber_disabled.png",
+   "group": "ui",
+   "name": "v_slidder_grabber_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    11,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/v_slidder_grabber_hover.png",
+   "group": "ui",
+   "name": "v_slidder_grabber_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    11,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeBamboo/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeBamboo",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeBocal/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeBocal",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeBubble/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeBubble",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeDark/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeDark",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeMap/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeMap",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeMetal/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeMetal",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeMetal2/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeMetal2",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeMetal3/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeMetal3",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeRed/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeRed",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeWood2/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeWood2",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeWood3/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeWood3",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeWood4/nine_path_panel.png",
+   "group": "ui",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeWood4",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/preview.png",
+   "group": "ui",
+   "name": "preview",
+   "category": "Theme",
+   "dims": [
+    976,
+    340
+   ],
+   "type": "irregular"
+  }
+ ]
+}

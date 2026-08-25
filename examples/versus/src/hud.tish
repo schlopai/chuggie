@@ -1,0 +1,316 @@
+// The fight HUD: two health tracks, a round clock, win pips, super meters and the announcer.
+//
+// ── Why none of this is `hud_bar` ────────────────────────────────────────────────────────────────
+// `hud_bar` is the engine's ready-made meter and it is the wrong tool here twice. It clamps width to
+// 64px — a fighting game's health bar is 106 — and it spends a whole 64x32 DynamicSprite (1 KiB of
+// the 32 KiB sprite VRAM) per bar, which is VRAM the fighters need for their next animation frame.
+//
+// `ui_rect` writes the UI *background* canvas instead: a different palette pool from sprites, no
+// sprite VRAM at all, and no width limit. The cost is that a repaint is a tile blit, so everything
+// here is gated on "did the number actually change" — the HP tracks repaint a few times a second
+// during an exchange and not at all while the fighters circle each other.
+import { ui_rect, ui_clear_rect, text_draw, text_width,
+         sprite_set_frame, sprite_set_pos, sprite_set_visible } from 'cargo:tish_agb'
+
+let BAR_W: i32 = 106
+let BAR_H: i32 = 9
+let P1_X: i32 = 6
+let P2_X: i32 = 128
+let BAR_Y: i32 = 16
+// The combo counter and the round pips both live in the strip under the health bars. A number that
+// appears in the middle of the screen during a combo is a number covering the thing it is counting.
+let COMBO_Y: i32 = 26
+
+let COL_FRAME: i32 = 0x1a1420
+let COL_TRACK: i32 = 0x50384a
+let COL_FILL: i32 = 0xffd24a
+let COL_LOW: i32 = 0xd83a2a
+let COL_PIP_ON: i32 = 0xffe89a
+let COL_PIP_OFF: i32 = 0x3a2a3a
+let COL_METER: i32 = 0x58c8ff
+let COL_METER_FULL: i32 = 0xa8f0ff
+
+// Slots 0..7 of the text layer. Each is a cached string — redrawing the same text is a no-op inside
+// text_draw, so these may be called every frame.
+let T_NAME1: i32 = 0
+let T_NAME2: i32 = 1
+let T_CLOCK: i32 = 2
+let T_ANNOUNCE: i32 = 3
+let T_SUB: i32 = 4
+let T_LABEL: i32 = 5      // .. T_LABEL + 3, one per select-screen portrait
+let T_DEBUG: i32 = 9
+
+// Last-painted values, so a repaint only happens on change.
+let L: i32[] = [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1]
+let L_HP1: i32 = 0
+let L_HP2: i32 = 1
+let L_MET1: i32 = 2
+let L_MET2: i32 = 3
+let L_PIP1: i32 = 4
+let L_PIP2: i32 = 5
+let L_CLOCK: i32 = 6
+let L_COMBO: i32 = 7
+let L_PERF: i32 = 8
+
+// Paint the parts that never change: the frames around both tracks and both meters.
+export function hudFrame() {
+  ui_rect(P1_X - 2, BAR_Y - 2, BAR_W + 4, BAR_H + 4, COL_FRAME, 1)
+  ui_rect(P2_X - 2, BAR_Y - 2, BAR_W + 4, BAR_H + 4, COL_FRAME, 1)
+  ui_rect(P1_X, BAR_Y, BAR_W, BAR_H, COL_TRACK, 1)
+  ui_rect(P2_X, BAR_Y, BAR_W, BAR_H, COL_TRACK, 1)
+  ui_rect(P1_X - 1, 150, 82, 5, COL_FRAME, 1)
+  ui_rect(240 - P1_X - 81, 150, 82, 5, COL_FRAME, 1)
+  let k: i32 = 0
+  while (k < 9) { L[k] = 0 - 1 k = k + 1 }
+}
+
+export function hudNames(font: i32, a: string, b: string) {
+  text_draw(font, T_NAME1, P1_X, 3, a, 0xffe6a0, 0x2a1810)
+  text_draw(font, T_NAME2, 240 - P1_X - 52, 3, b, 0xffe6a0, 0x2a1810)
+}
+
+// The whole HUD from two packed fighter words and the clock — see fighterHudView. Twelve getter
+// crossings plus five painter calls a frame was more expensive than drawing the fighters.
+export function hudUpdate(v1: i32, max1: i32, v2: i32, max2: i32, secs: i32) {
+  hudHealth(v1 & 511, max1, v2 & 511, max2)
+  hudMeters((v1 >> 9) & 127, (v2 >> 9) & 127)
+  hudPips((v1 >> 16) & 3, (v2 >> 16) & 3)
+  hudClock(secs)
+  hudCombo((v1 >> 18) & 63, (v2 >> 18) & 63)
+}
+
+// The health tracks. P1's drains toward the left edge and P2's toward the right — both toward the
+// outside of the screen, so the shrinking end is always the one nearest the middle where the fight
+// is. Getting that backwards is the single most common way a versus HUD reads wrong.
+// ⚠️ Repaint the DELTA, not the bar. A 106x9 canvas fill is a tile blit wide enough to overrun the
+// frame, and health changes on exactly the frames that are already the most expensive — the ones
+// with a hit, a spark and a screen shake on them. Overrunning is not merely a dropped frame here:
+// the stage's per-scanline band DMA re-arms partway down the screen and the backdrop visibly shreds
+// into stripes. Erasing just the few pixels that were lost keeps it under budget.
+function hudHealth(hp1: i32, max1: i32, hp2: i32, max2: i32) {
+  let f1: i32 = barFill(hp1, max1)
+  if (f1 !== L[L_HP1]) {
+    if (f1 < L[L_HP1]) {
+      if (L[L_HP1] > 0) { ui_rect(P1_X + f1, BAR_Y, L[L_HP1] - f1, BAR_H, COL_TRACK, 1) }
+      else { ui_rect(P1_X, BAR_Y, BAR_W, BAR_H, COL_TRACK, 1) }
+    } else {
+      ui_rect(P1_X, BAR_Y, BAR_W, BAR_H, COL_TRACK, 1)
+      if (f1 > 0) { ui_rect(P1_X, BAR_Y, f1, BAR_H, fillColour(hp1, max1), 1) }
+    }
+    L[L_HP1] = f1
+  }
+  let f2: i32 = barFill(hp2, max2)
+  if (f2 !== L[L_HP2]) {
+    if (f2 < L[L_HP2]) {
+      if (L[L_HP2] > 0) { ui_rect(P2_X + BAR_W - L[L_HP2], BAR_Y, L[L_HP2] - f2, BAR_H, COL_TRACK, 1) }
+      else { ui_rect(P2_X, BAR_Y, BAR_W, BAR_H, COL_TRACK, 1) }
+    } else {
+      ui_rect(P2_X, BAR_Y, BAR_W, BAR_H, COL_TRACK, 1)
+      if (f2 > 0) { ui_rect(P2_X + BAR_W - f2, BAR_Y, f2, BAR_H, fillColour(hp2, max2), 1) }
+    }
+    L[L_HP2] = f2
+  }
+}
+
+function barFill(hp: i32, max: i32): i32 {
+  if (hp <= 0) { return 0 }
+  let f: i32 = ((hp * BAR_W) / max) | 0
+  if (f < 1) { return 1 }
+  return f
+}
+
+function fillColour(hp: i32, max: i32): i32 {
+  if (hp * 4 <= max) { return COL_LOW }
+  return COL_FILL
+}
+
+function hudMeters(m1: i32, m2: i32) {
+  if (m1 !== L[L_MET1]) {
+    ui_rect(P1_X, 151, 80, 3, COL_FRAME, 1)
+    if (m1 > 0) { ui_rect(P1_X, 151, ((m1 * 80) / 100) | 0, 3, meterColour(m1), 1) }
+    L[L_MET1] = m1
+  }
+  if (m2 !== L[L_MET2]) {
+    let rx: i32 = 240 - P1_X - 80
+    ui_rect(rx, 151, 80, 3, COL_FRAME, 1)
+    if (m2 > 0) {
+      let w: i32 = ((m2 * 80) / 100) | 0
+      ui_rect(rx + 80 - w, 151, w, 3, meterColour(m2), 1)
+    }
+    L[L_MET2] = m2
+  }
+}
+
+function meterColour(m: i32): i32 {
+  if (m >= 30) { return COL_METER_FULL }
+  return COL_METER
+}
+
+// Two pips a side: best of three, so the second one lit ends the match.
+function hudPips(w1: i32, w2: i32) {
+  if (w1 !== L[L_PIP1]) {
+    pip(P1_X, COMBO_Y + 2, w1 >= 1)
+    pip(P1_X + 8, COMBO_Y + 2, w1 >= 2)
+    L[L_PIP1] = w1
+  }
+  if (w2 !== L[L_PIP2]) {
+    pip(240 - P1_X - 5, COMBO_Y + 2, w2 >= 1)
+    pip(240 - P1_X - 13, COMBO_Y + 2, w2 >= 2)
+    L[L_PIP2] = w2
+  }
+}
+
+function pip(x: i32, y: i32, on: bool) {
+  let c: i32 = COL_PIP_OFF
+  if (on) { c = COL_PIP_ON }
+  ui_rect(x, y, 5, 5, c, 1)
+}
+
+// ── the two numbers that change while the fight is running ───────────────────────────────────────
+// The clock and the combo counter are DIGIT SPRITES, not text.
+//
+// ⚠️ This is not a micro-optimisation, it is the difference between a game that runs and one that
+// tears. `text_draw` caches per slot, so redrawing the same string is free — but the moment the
+// string CHANGES it re-shapes the glyphs and allocates sprite VRAM, and that spike overruns the
+// frame. On this stage an overrun does not merely drop a frame: the backdrop's per-scanline band
+// DMA re-arms partway down the screen and the sky visibly shreds into stripes. The clock changes
+// once a second and the combo counter changes mid-combo — i.e. exactly on the busiest frames.
+// Ten pre-baked cells (scripts/gen_versus.py) turn both into `sprite_set_frame`.
+let DIG: i32[] = [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1]
+let D_CLOCK_T: i32 = 0
+let D_CLOCK_U: i32 = 1
+let D_COMBO_T: i32 = 2
+let D_COMBO_U: i32 = 3
+let D_PERF: i32 = 4          // .. D_PERF + 3, the debug overlay's four-digit tick readout
+
+// Hand over eight sprites made from the digits sheet. Call after every `sprite_clear()`.
+export function hudBindDigits(clockTens: i32, clockUnits: i32, comboTens: i32, comboUnits: i32,
+                              p0: i32, p1: i32, p2: i32, p3: i32) {
+  DIG[D_CLOCK_T] = clockTens
+  DIG[D_CLOCK_U] = clockUnits
+  DIG[D_COMBO_T] = comboTens
+  DIG[D_COMBO_U] = comboUnits
+  DIG[D_PERF] = p0
+  DIG[D_PERF + 1] = p1
+  DIG[D_PERF + 2] = p2
+  DIG[D_PERF + 3] = p3
+  let d: i32 = 0
+  while (d < 4) { sprite_set_pos(DIG[D_PERF + d], 4 + d * 13, 138) sprite_set_visible(DIG[D_PERF + d], 0) d = d + 1 }
+  sprite_set_pos(clockTens, 108, 4)
+  sprite_set_pos(clockUnits, 120, 4)
+  sprite_set_visible(comboTens, 0)
+  sprite_set_visible(comboUnits, 0)
+  let k: i32 = 0
+  while (k < 9) { L[k] = 0 - 1 k = k + 1 }
+}
+
+function hudClock(secs: i32) {
+  if (secs === L[L_CLOCK]) { return }
+  L[L_CLOCK] = secs
+  sprite_set_visible(DIG[D_CLOCK_T], 1)
+  sprite_set_visible(DIG[D_CLOCK_U], 1)
+  sprite_set_frame(DIG[D_CLOCK_T], (secs / 10) | 0)
+  sprite_set_frame(DIG[D_CLOCK_U], secs % 10)
+}
+
+// One counter, on the side of whoever is landing the string. Two fighters cannot be in a combo at
+// once — the one being hit is in hitstun — so a single pair of digits serves both.
+// Tucked under the owner's health bar at its inner end. Two fighters cannot be in a combo at once —
+// the one being hit is in hitstun — so a single pair of digits serves both.
+function hudCombo(c1: i32, c2: i32) {
+  let c: i32 = c1
+  let x: i32 = 82
+  if (c2 > c1) { c = c2 x = 128 }
+  if (c < 2) { c = 0 }
+  if (c === L[L_COMBO]) { return }
+  L[L_COMBO] = c
+  if (c === 0) {
+    sprite_set_visible(DIG[D_COMBO_T], 0)
+    sprite_set_visible(DIG[D_COMBO_U], 0)
+    return
+  }
+  sprite_set_visible(DIG[D_COMBO_U], 1)
+  sprite_set_pos(DIG[D_COMBO_U], x + 13, COMBO_Y)
+  sprite_set_frame(DIG[D_COMBO_U], c % 10)
+  if (c >= 10) {
+    sprite_set_visible(DIG[D_COMBO_T], 1)
+    sprite_set_pos(DIG[D_COMBO_T], x, COMBO_Y)
+    sprite_set_frame(DIG[D_COMBO_T], (c / 10) | 0)
+  } else {
+    sprite_set_visible(DIG[D_COMBO_T], 0)
+  }
+}
+
+// The announcer. `""` frees the slot's sprite VRAM, which matters: the banner font is 16px and its
+// glyphs are the biggest single VRAM consumer on screen, so it must not linger into the fight.
+// Centred with `text_width`, not with a hand-guessed half-width. "ROUND 1", "K.O." and "YOU LOSE"
+// are 4, 8 and 15 glyphs of a proportional font; any constant is wrong for two of the three, and
+// the one place a player looks at a banner is the middle of the screen.
+export function hudAnnounce(font: i32, msg: string) {
+  hudAnnounceAt(font, msg, 58)
+}
+
+// The same banner somewhere else — the character-select caption sits under the row of portraits.
+export function hudAnnounceAt(font: i32, msg: string, y: i32) {
+  text_draw(font, T_ANNOUNCE, 120 - (text_width(font, msg) >> 1), y, msg, 0xffd24a, 0x2a1010)
+}
+
+// A centred line in the small font, for a subtitle under the banner.
+export function hudSubtitle(font: i32, msg: string, y: i32) {
+  if (msg === "") { text_draw(font, T_SUB, 0, 0, "") return }
+  text_draw(font, T_SUB, 120 - (text_width(font, msg) >> 1), y, msg, 0xd8c8e0, 0x1a1020)
+}
+
+// One label centred on an arbitrary x — the four names under the select screen's portraits.
+export function hudLabel(font: i32, slot: i32, msg: string, cx: i32, y: i32, colour: i32) {
+  if (msg === "") { text_draw(font, T_LABEL + slot, 0, 0, "") return }
+  text_draw(font, T_LABEL + slot, cx - (text_width(font, msg) >> 1), y, msg, colour, 0x140c1c)
+}
+
+export function hudAnnounceClear(font: i32) {
+  text_draw(font, T_ANNOUNCE, 0, 0, "")
+}
+
+// The perf readout: the worst whole-frame period seen since the last reset, in Timer2 ticks, as
+// four digit sprites. 4389 is one 60fps frame — anything above it is a dropped frame, and on this
+// stage a dropped frame is a visibly shredded backdrop.
+//
+// Digits rather than `text_draw` for the same reason the clock uses them, only more so: a perf
+// counter that re-shapes a string every time the number changes is measuring itself.
+export function hudPerf(value: i32) {
+  if (value === L[L_PERF]) { return }
+  L[L_PERF] = value
+  // Shown in TENS of ticks so four digits reach 99,990: a badly overrunning frame is the case that
+  // matters most and it is exactly the one that would clamp.
+  let v: i32 = (value / 10) | 0
+  if (v > 9999) { v = 9999 }
+  let d: i32 = 3
+  while (d >= 0) {
+    sprite_set_visible(DIG[D_PERF + d], 1)
+    sprite_set_frame(DIG[D_PERF + d], v % 10)
+    v = (v / 10) | 0
+    d = d - 1
+  }
+}
+
+export function hudPerfHide() {
+  let d: i32 = 0
+  while (d < 4) { sprite_set_visible(DIG[D_PERF + d], 0) d = d + 1 }
+  L[L_PERF] = 0 - 1
+}
+
+export function hudDebug(font: i32, msg: string) {
+  text_draw(font, T_DEBUG, 4, 126, msg, 0x9ff0a0, 0x0a1a0a)
+}
+
+export function hudDebugClear(font: i32) {
+  text_draw(font, T_DEBUG, 0, 0, "")
+}
+
+// Wipe the whole canvas region the HUD owns — used when leaving the fight for a menu.
+export function hudClear() {
+  ui_clear_rect(0, 0, 240, 44)
+  ui_clear_rect(0, 148, 240, 10)
+  let k: i32 = 0
+  while (k < 9) { L[k] = 0 - 1 k = k + 1 }
+}

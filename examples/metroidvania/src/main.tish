@@ -1,0 +1,101 @@
+// METROIDVANIA — one castle, three abilities, and walls that were always passable.
+//
+// The design rule the level follows: you meet every lock before you get its key. The entry hall is
+// walled off from the east ledge, the shaft at column 20 has no holds, and the crawl on row 17 is a
+// one-tile gap — all three are visible on your way past, and all three open later without a single
+// new line of physics (see the ability note in components.tish).
+//
+// Controls: d-pad move · A jump (hold higher, tap hop) · B run · B+Down slide (once unlocked) ·
+// A again in mid-air = double jump (once unlocked) · into a wall while falling = wall slide, A to
+// kick off (once unlocked).
+import { tileset } from 'background:../assets/tileset.png'
+import { heroSheet } from 'sheet32:../assets/hero.png'
+import { enemySheet } from 'sheet32:../assets/enemies.png'
+import { heartSheet } from 'sheet:../assets/heart.png'
+import { sprite_new } from 'cargo:tish_agb'
+import { mount, create, loadStreamMap, setupHearts, step, entityApi, entityForget } from '../../../packages/engine'
+import { level } from './maps'
+import * as components from './components'
+import { Player, Enemy, Pickup, TAG_PLAYER, TAG_ENEMY, setSpawn, applyAbility, abilityOwned,
+         ABL_DOUBLE, ABL_WALL, ABL_SLIDE } from './components'
+import { flagsInit, flagsFresh, flagsCount } from '../../../packages/flags'
+import { log } from 'cargo:tish_agb'
+
+// This game never grid-steps, never talks and never runs a top-down move, so those wrapper method
+// groups are dead weight on a small heap. (See examples/sunny-land for the measurement.)
+entityApi({ grid: 0, topdown: 0, dialogue: 0, extra: 0 })
+
+// Three flags: one per ability. `flags.tish` sits on prefs.tish's versioned, checksummed SRAM, so
+// bumping `version` retires an old save rather than reading it as garbage.
+flagsInit({ magic: 0x4D56, version: 1, count: 1, base: 0 })
+
+mount(components)
+loadStreamMap(level, tileset)
+
+let spawnX: i32 = level.spawnCol * 16
+let spawnY: i32 = level.spawnRow * 16
+setSpawn(spawnX, spawnY)
+
+let hero = create()
+hero.setPos(spawnX, spawnY)
+hero.setSprite(sprite_new(heroSheet))
+hero.platformer(12, 26)
+hero.setHealth(6)
+hero.setTag(TAG_PLAYER)
+hero.behave(Player, {})
+hero.follow()
+
+setupHearts(heartSheet, 3, 8, 8, 12)
+
+// ── restoring what the save holds is TWO halves, in two places ──────────────────────────────────
+// Turning the abilities back on happens in `Player.start` (components.tish), because that is where
+// `heroData` first exists — doing it HERE ran before the hero had spawned, `applyAbility` took its
+// null guard, and the restore silently did nothing. A castle that never unlocks and never logs an
+// error is the worst possible version of this bug.
+//
+// Removing the already-collected pickups is the other half, below, and it has to happen too: turn
+// the ability on without removing the pickup and a collectable sits in the room granting what you
+// already have; remove the pickup without turning the ability on and the castle locks for good.
+log("MV boot fresh=" + flagsFresh() + " abilities=" + flagsCount())
+
+// Enemies. Kind 0 = ghost (drifts), 1 = skeleton, 2 = hell-gato — the last two walk the castle on
+// the NATIVE patrol, which turns at walls and ledges and mirrors the sprite, at zero tish cost.
+let ei: i32 = 0
+while (ei < level.enemyCols.length) {
+  let e = create()
+  e.setPos(level.enemyCols[ei] * 16, level.enemyRows[ei] * 16)
+  e.setSprite(sprite_new(enemySheet))
+  e.platformer(14, 20)
+  // 32x32 art, feet at the cell bottom, over a 14x20 box: (14/2-16, 20-32).
+  e.spriteOffset(0 - 9, 0 - 12)
+  let kind: i32 = level.enemyKinds[ei] | 0
+  e.animate(4, 8)
+  e.setHealth(2)
+  e.setTag(TAG_ENEMY)
+  e.patrol(2)                  // mirror when walking left — this art faces right
+  e.behave(Enemy, {})
+  entityForget(e)
+  ei = ei + 1
+}
+
+// The three ability pickups.
+let pi: i32 = 0
+while (pi < level.pickupCols.length) {
+  let p = create()
+  p.setPos(level.pickupCols[pi] * 16, level.pickupRows[pi] * 16)
+  p.setSprite(sprite_new(enemySheet))
+  p.setCollider(16, 16)
+  p.spriteOffset(0 - 8, 0 - 16)   // same rule: (16/2-16, 16-32)
+  p.animate(4, 10)
+  // Already collected in a previous life? Then it is not in the castle any more.
+  if (abilityOwned(level.pickupKinds[pi] | 0) === 1) { p.despawn() }
+  else {
+    p.behave(Pickup, { kind: level.pickupKinds[pi] })
+    entityForget(p)
+  }
+  pi = pi + 1
+}
+
+while (true) {
+  step()
+}

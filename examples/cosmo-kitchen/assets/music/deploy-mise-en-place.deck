@@ -1,0 +1,164 @@
+# Mise en Place - deploy
+# Sus ticks + occasional spoon. Prep tension.
+deck 1
+bpm 108
+
+track Pad id pad gen gameBoyDmg * 12
+  gen type pulse duty 25 env_mode constant vol 4
+  gen vib_rate 2 vib_amt 8
+  note 55 0 3.95 v 60
+  note 64 4 3.95 v 65
+  note 60 8 3.95 v 70
+  note 62 12 3.95 v 75
+  note 55 16 3.95 v 80
+  note 64 20 3.95 v 60
+  note 60 24 3.95 v 65
+  note 62 28 3.95 v 70
+  note 55 32 3.95 v 75
+  note 57 36 3.95 v 80
+  note 62 40 3.95 v 60
+  note 55 44 3.95 v 65
+
+track Lead id lead gen gameBoyDmg * 12
+  gen type pulse duty 50 env_mode constant vol 9
+  note 60 0 0.15 v 90
+  note 67 2 0.15 v 100
+  note 62 4 0.15 v 90
+  note 67 6 0.15 v 100
+  note 64 8 0.15 v 90
+  note 67 10 0.15 v 100
+  note 60 12 0.15 v 90
+  note 67 14 0.15 v 100
+  note 60 14.5 0.2 v 110
+  note 64 14.7 0.2 v 115
+  note 67 14.9 0.35 v 120
+  note 62 16 0.15 v 90
+  note 67 18 0.15 v 100
+  note 64 20 0.15 v 90
+  note 67 22 0.15 v 100
+  note 60 24 0.15 v 90
+  note 67 26 0.15 v 100
+  note 62 28 0.15 v 90
+  note 67 30 0.15 v 100
+  note 60 30.5 0.2 v 110
+  note 64 30.7 0.2 v 115
+  note 67 30.9 0.35 v 120
+  note 64 32 0.15 v 90
+  note 67 34 0.15 v 100
+  note 60 36 0.15 v 90
+  note 67 38 0.15 v 100
+  note 62 40 0.15 v 90
+  note 67 42 0.15 v 100
+  note 64 44 0.15 v 90
+  note 67 46 0.15 v 100
+  note 60 46.5 0.2 v 110
+  note 64 46.7 0.2 v 115
+  note 67 46.9 0.35 v 120
+
+track Bass id bass gen gameBoyDmg * 12
+  gen type wave wave_shape sine vol 14
+  note 36 0 2 v 115
+  note 36 2 2 v 95
+  note 33 4 2 v 115
+  note 33 6 2 v 95
+  note 41 8 2 v 115
+  note 41 10 2 v 95
+  note 43 12 2 v 115
+  note 43 14 2 v 95
+  note 36 16 2 v 115
+  note 36 18 2 v 95
+  note 33 20 2 v 115
+  note 33 22 2 v 95
+  note 41 24 2 v 115
+  note 41 26 2 v 95
+  note 43 28 2 v 115
+  note 43 30 2 v 95
+  note 36 32 2 v 115
+  note 36 34 2 v 95
+  note 38 36 2 v 115
+  note 38 38 2 v 95
+  note 43 40 2 v 115
+  note 43 42 2 v 95
+  note 36 44 2 v 115
+  note 36 46 2 v 95
+
+track Kick id kick gen gbaDirectSound * 12
+  gen waveform pulse duty 50 vol 14 bitcrush true pitch_drop -8 pitch_dec 0.06
+  adsr a 0 d 0.1 s 0 r 0.03
+  note 34 0 0.14 v 115
+  note 34 2 0.14 v 110
+  note 34 4 0.14 v 115
+  note 34 6 0.14 v 110
+  note 34 8 0.14 v 115
+  note 34 10 0.14 v 110
+  note 34 12 0.14 v 115
+  note 34 14 0.14 v 110
+  note 34 16 0.14 v 115
+  note 34 18 0.14 v 110
+  note 34 20 0.14 v 115
+  note 34 22 0.14 v 110
+  note 34 24 0.14 v 115
+  note 34 26 0.14 v 110
+  note 34 28 0.14 v 115
+  note 34 30 0.14 v 110
+  note 34 32 0.14 v 115
+  note 34 34 0.14 v 110
+  note 34 36 0.14 v 115
+  note 34 38 0.14 v 110
+  note 34 40 0.14 v 115
+  note 34 42 0.14 v 110
+  note 34 44 0.14 v 115
+  note 34 46 0.14 v 110
+
+track Hats id hats gen gbaDirectSound * 12
+  gen waveform triangle vol 5 bitcrush true
+  adsr a 0 d 0.04 s 0 r 0.02
+  note 80 0.5 0.07 v 70
+  note 80 1.5 0.07 v 70
+  note 80 2.5 0.07 v 70
+  note 80 3.5 0.07 v 70
+  note 80 4.5 0.07 v 70
+  note 80 5.5 0.07 v 70
+  note 80 6.5 0.07 v 70
+  note 80 7.5 0.07 v 70
+  note 80 8.5 0.07 v 70
+  note 80 9.5 0.07 v 70
+  note 80 10.5 0.07 v 70
+  note 80 11.5 0.07 v 70
+  note 80 12.5 0.07 v 70
+  note 80 13.5 0.07 v 70
+  note 80 14.5 0.07 v 70
+  note 80 15.5 0.07 v 70
+  note 80 16.5 0.07 v 70
+  note 80 17.5 0.07 v 70
+  note 80 18.5 0.07 v 70
+  note 80 19.5 0.07 v 70
+  note 80 20.5 0.07 v 70
+  note 80 21.5 0.07 v 70
+  note 80 22.5 0.07 v 70
+  note 80 23.5 0.07 v 70
+  note 80 24.5 0.07 v 70
+  note 80 25.5 0.07 v 70
+  note 80 26.5 0.07 v 70
+  note 80 27.5 0.07 v 70
+  note 80 28.5 0.07 v 70
+  note 80 29.5 0.07 v 70
+  note 80 30.5 0.07 v 70
+  note 80 31.5 0.07 v 70
+  note 80 32.5 0.07 v 70
+  note 80 33.5 0.07 v 70
+  note 80 34.5 0.07 v 70
+  note 80 35.5 0.07 v 70
+  note 80 36.5 0.07 v 70
+  note 80 37.5 0.07 v 70
+  note 80 38.5 0.07 v 70
+  note 80 39.5 0.07 v 70
+  note 80 40.5 0.07 v 70
+  note 80 41.5 0.07 v 70
+  note 80 42.5 0.07 v 70
+  note 80 43.5 0.07 v 70
+  note 80 44.5 0.07 v 70
+  note 80 45.5 0.07 v 70
+  note 80 46.5 0.07 v 70
+  note 80 47.5 0.07 v 70
+

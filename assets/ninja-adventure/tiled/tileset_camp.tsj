@@ -1,0 +1,15 @@
+{
+ "columns": 23,
+ "image": "../Backgrounds/Tilesets/tileset_camp.png",
+ "imagewidth": 368,
+ "imageheight": 144,
+ "margin": 0,
+ "spacing": 0,
+ "name": "tileset_camp",
+ "tilecount": 207,
+ "tiledversion": "1.11.0",
+ "tilewidth": 16,
+ "tileheight": 16,
+ "type": "tileset",
+ "version": "1.10"
+}

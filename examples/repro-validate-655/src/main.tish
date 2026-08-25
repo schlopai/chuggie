@@ -1,0 +1,31 @@
+import { log, vblank } from 'cargo:tish_agb'
+
+function rec(n) {
+  if (n <= 0) { return 0 }
+  return 1 + rec(n - 1)
+}
+
+log("start")
+let got = "none"
+try {
+  let r = rec(2000)
+  got = "returned " + r
+} catch (e) {
+  got = "caught " + e
+}
+log("shallow: " + got)
+
+// ⚠️ THE POINT OF #655. Before the fix the floor fell back to 1, so no SP could ever be below it and
+// this depth simply ran off the end of IWRAM — a jump through a wild pointer with no message. With a
+// real floor it must come back as a CATCHABLE error instead.
+let deep = "none"
+try {
+  let d = rec(200000)
+  deep = "returned " + d
+} catch (e) {
+  deep = "caught"
+}
+log("deep: " + deep)
+let f: i32 = 0
+while (f < 60) { vblank() f = f + 1 }
+log("done")

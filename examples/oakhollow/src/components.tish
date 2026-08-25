@@ -1,0 +1,128 @@
+// The player, and the clip table that drives their animation.
+//
+// This file is deliberately short. Everything that makes the character feel like a character —
+// coyote time, jump buffering, variable jump height, crouching, sliding, ladders, ledge grabs, wall
+// slides, wall jumps — lives in `packages/platformer` and is shared with every other side-scroller.
+// What belongs HERE is only what is true of Oakhollow's hero specifically: which frames are which,
+// how big the hitbox is, and what the A button means when there is a townsperson in front of you.
+import { input_x, input_y, key_pressed } from 'cargo:tish_agb'
+import { hudText } from '../../../packages/engine'
+import {
+  platformerInit, platformerDrive, platformerAnimate, platformerBusy
+} from '../../../packages/platformer'
+import { dialogActive } from '../../../packages/dialog'
+import { shopActive } from '../../../packages/shop'
+import { gold } from './town'
+
+let A: i32 = 0
+
+// Frame ranges on hero.png as `[first, count, framesPerStep, looping]`. The names are the ones
+// `platformerAnimate` looks for; anything omitted falls back along a chain (a missing `crouchWalk`
+// plays `crouch`, a missing `wallslide` plays `fall`).
+//
+// The sheet is the "DARK - Hero" pack, shared with examples/dark-hero — 79 frames in ten states:
+//   IDLE 0(8)  RUN 8(8)  JUMP 16(4)  FALL 20(4)  LAND 24(12)
+//   LGRAB 36(4)  LHANG 40(14)  CLIMB 54(13)  HIT 67(2)  DEATH 69(10)
+//
+// ⚠️ FOUR OF THIS GAME'S VERBS HAVE NO ART IN THAT PACK: crouch, crouch-walk, slide and wall slide.
+// The free version ships ten states and none of them is a duck or a scrape. They are left OUT rather
+// than mapped onto something that would read as wrong, so the fallback chain plays `idle` for the
+// three crouch states and `fall` for a wall slide — the moves still work, they just do not read.
+// The ladder climb has no art either; it borrows the ledge-climb cycle, which is at least a climb.
+export const CLIPS = {
+  idle:       [0, 8, 10, 1],
+  walk:       [8, 8, 4, 1],       // no walk cycle in the pack — the run, at half cadence
+  // 2 frames per step: this character runs at 5 px/step (see `runSpeed` below), and a slower cadence
+  // makes the feet skate over the ground instead of driving it.
+  run:        [8, 8, 2, 1],
+  jump:       [16, 4, 5, 0],
+  fall:       [20, 4, 6, 1],
+  land:       [24, 12, 1, 0],     // 12 frames long, which is what `landFrames` is set to
+  climb:      [54, 13, 3, 1],     // the ledge-climb cycle, looped — the nearest thing to a ladder
+  // Holding still on a ladder should HOLD a frame, not keep climbing on the spot.
+  climbIdle:  [40, 1, 30, 0],
+  // No sprite offset needed on the ledge clips, unlike the sheet this replaced: the pack draws the
+  // grip hand at cell y=39, which `spriteOY: -47` lands exactly on the ledge's top edge.
+  hang:       [40, 14, 6, 1],
+  ledge:      [54, 13, 3, 0],     // 39 frames long, which is what `ledgeFrames` is set to
+  hurt:       [67, 2, 4, 0],
+  dead:       [69, 10, 5, 0],
+}
+
+// The hitbox is 16x16 — one tile — while the art is a 48x48 frame in a 64x64 cell. `-24, -47`
+// centres the cell over the box with the character's feet on its bottom edge. The 47 rather than 48
+// is load-bearing and not a rounding slip: it is also what puts the ledge-grab clip's raised hand
+// (drawn at cell y=39) exactly on a ledge's top edge, given the hang box sits 8px below it.
+export let BOX_W: i32 = 16
+export let BOX_H: i32 = 16
+export let SPRITE_OX: i32 = 0 - 24
+export let SPRITE_OY: i32 = 0 - 47
+
+// How far in front of you a townsperson counts as "in front of you", in pixels. Three quarters of a
+// tile: close enough that you have to actually walk up to somebody, far enough that you do not have
+// to be touching them.
+let REACH: i32 = 12
+
+export const Player = {
+  start: ({ this }) => {
+    platformerInit(this, this.data, {
+      boxW: BOX_W, boxH: BOX_H,
+      spriteOX: SPRITE_OX, spriteOY: SPRITE_OY,   // 64x64 art over the 16x16 box; see below
+      // This character is only ~10px wide inside a 16px hitbox, so hanging left it a measured 3px of
+      // sky between its hands and the wall. 4 closes that and overlaps the corner by a pixel, which
+      // is what reads as gripping rather than hovering.
+      gripNudge: 4,
+      ladders: 1,        // the hatches down to the undertown and the ladders to the roofs
+      ledges: 1,         // the stone tower on the rooftop run
+      wallSlide: 1,      // the blank wall at the west end
+      slide: 1,          // B + Down while moving
+      crouchH: 10,       // the box still ducks, even though this sheet has no crouch art
+      ledgeFrames: 39,   // matches the ledge clip: 13 frames x 3 frames-per-step
+      landFrames: 12,    // matches the land clip: 12 frames x 1
+      // The town is 120 tiles end to end and you cross it constantly, so running is not a thing you
+      // opt into here — it is how the character moves. Holding B the whole game to avoid a 1.25
+      // trudge was a tax, not a decision. B keeps the slide (B + Down); crouching is still how you
+      // move slowly, and it is the only thing `walkSpeed` applies to now.
+      //
+      // 5 is px per GAME STEP, not per hardware frame — this game steps at about 0.66 of the GBA's
+      // 59.7Hz (see the ~40fps note in the README), so on screen it reads as ~3.3 px/frame and
+      // crosses the 240px view in about 1.2 seconds. Measured, not derived: at `runSpeed` 4 the
+      // world scrolls 2.64 px/frame and at 8 it scrolls 5.2, so the knob is exactly linear.
+      alwaysRun: 1,
+      runSpeed: 5,
+    })
+  },
+  update: ({ this }) => {
+    let d = this.data
+    // A dialog or the shop can only be open on the frame it was just opened from here (the main
+    // loop stops stepping the world afterwards), but pass it through anyway: a controller that
+    // takes input while a menu owns the screen is a bug that only shows up on the awkward frame.
+    let busy = 0
+    if (dialogActive() > 0) { busy = 1 }
+    if (shopActive() > 0) { busy = 1 }
+
+    platformerDrive(this, d, input_x(), input_y(), busy)
+    platformerAnimate(this, d, CLIPS)
+
+    // Both HUD lines are constant strings while nothing changes, which matters more than it looks:
+    // `hudText` re-runs the whole text layout whenever the string differs from last frame — but the
+    // tish-side "G " + n concat allocated every frame REGARDLESS, before hudText could compare.
+    // Gate the call on the value actually changing (d.lastGold starts null, so frame 1 draws).
+    let g = gold()
+    if (d.lastGold !== g) { d.lastGold = g; hudText(0, 8, 8, "G " + g) }
+
+    // Talk. `platformerBusy` is what keeps A from opening a conversation while you are hanging off
+    // a ledge or halfway up a ladder — on a ladder A already means "jump off".
+    if (busy === 0 && platformerBusy(d) === 0) {
+      if (this.canInteract(REACH) > 0) {
+        // "use", not "talk": the same button reads signs and opens the inn door.
+        hudText(1, 8, 22, "A: use")
+        if (key_pressed(A) > 0) { this.interactPF(REACH) }
+      } else {
+        hudText(1, 8, 22, "")
+      }
+    } else {
+      hudText(1, 8, 22, "")
+    }
+  }
+}

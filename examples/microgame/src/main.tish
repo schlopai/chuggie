@@ -1,0 +1,363 @@
+// microgame — a WarioWare-shaped bag of four-second games on one cartridge.
+//
+// The point of this example is NOT the four games in it. It is that the fifth one is an `else if`
+// and a function, and costs nothing until it is written.
+//
+// ── What it is the acceptance test for ────────────────────────────────────────────────────────
+//
+// **The engine's entity pool** (`packages/pool.tish`, `pool_new`/`pool_arm`/…). A microgame
+// cartridge is the harshest pooling workload there is: every four seconds the whole cast is thrown
+// away and a different one is set up, hundreds of times in a session. Done with spawn/despawn that
+// is ~1,400 ticks per prop on the frame a round starts (`docs/perf-rules.md` §6) plus a sprite VRAM
+// alloc/free cycle per prop per round — which is the exact churn that fragments EWRAM into an
+// allocation failure a few hundred transitions later.
+//
+// Here, EIGHT prop entities and one player are created once at boot and re-armed forever. Nothing
+// spawns, nothing despawns, no sprite is allocated after boot, and the verifier asserts all three
+// by watching the entity count and the heap across a full run.
+//
+// ── The shape, and why the harness does not call the games ────────────────────────────────────
+//
+// `packages/microgame.tish` owns time, lives, the speed ramp and the verdict. It does NOT dispatch
+// to a microgame — the cartridge does, with a plain `if/else` in its own module. A registry of
+// `{start, tick}` closures would cost ~151 bytes of heap per registered game whether it ran or not,
+// and `examples/bench-behav` prices the boxed per-frame dispatch at ~1,000 of a frame's 4,389
+// ticks. The branch below costs neither. See the header of `packages/microgame.tish`.
+//
+// ── Controls ──────────────────────────────────────────────────────────────────
+// D-pad moves. A is the button the games that want a button ask for.
+// It also plays itself: with no input the ATTRACT driver below presses things, so the ROM
+// exercises its own player paths headlessly (an example that only ever runs in attract mode never
+// executes the code a real player would — scripts/input_schedule.py:4-8).
+
+import { props } from 'sheet:../assets/props16.png'
+import { hero } from 'sheet:../assets/hero16.png'
+import {
+  frame, log, backdrop, hud_text, key_held, key_pressed, sprite_set_frame, heap_free
+} from 'cargo:tish_agb'
+import {
+  spawn, set_transform, set_collider, set_sprite_offset, attach_sprite, set_tag,
+  set_body, set_topdown, topdown_move, world_step, entity_count, entity_x, entity_y,
+  overlaps, pool_new, pool_arm, pool_retire, pool_clear, pool_get, pool_stat
+} from 'cargo:tish_gba_game_engine'
+import { sprite_new } from 'cargo:tish_agb'
+import { POOL_KIND, POOL_ENT, POOL_SPR, POOLS_COUNT, POOLS_LIVE, POOLS_HIGH, POOL_ANY } from '../../../packages/pool'
+import {
+  mgInit, mgNext, mgStep, mgPhase, mgGame, mgFramesLeft, mgLives, mgRound, mgWins,
+  mgWin, mgLose, mgOutcome, mgPlayFrames,
+  MG_INTRO, MG_PLAY, MG_VERDICT, MG_GAP, MG_OVER, MG_WON, MG_LOST
+} from '../../../packages/microgame'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+
+// ── Prop frames. The order is scripts/gen_microgame.py's PROPS list. ─────────
+let PROP_FOOD: i32 = 0        // 0..5
+let PROP_FOOD_N: i32 = 6
+let PROP_HAZARD: i32 = 6      // 6..9
+let PROP_HAZARD_N: i32 = 4
+let PROP_TREASURE: i32 = 10   // 10..13
+let PROP_TREASURE_N: i32 = 4
+let PROP_HEART: i32 = 14
+let PROP_GLASS: i32 = 15
+
+// ── The games ────────────────────────────────────────────────────────────────
+let G_CATCH: i32 = 0
+let G_DODGE: i32 = 1
+let G_GRAB: i32 = 2
+let G_MASH: i32 = 3
+let G_COUNT: i32 = 4
+
+let SCREEN_W: i32 = 240
+let SCREEN_H: i32 = 160
+
+let PROPS_N: i32 = 8
+let BAG: i32 = 0 - 1      // the prop pool id
+let player: i32 = 0 - 1
+let pspr: i32 = 0 - 1
+
+// Per-round scratch. Flat typed scalars — a boxed state object would be read a dozen times a frame
+// by whichever microgame is up.
+let mashCount: i32 = 0
+let mashTarget: i32 = 0
+let lastPhase: i32 = 0 - 1
+let lastLives: i32 = 0 - 1
+let attract: i32 = 1
+
+// ── Setup helpers ────────────────────────────────────────────────────────────
+
+/// Arm one prop: pick the slot, set its frame, put it somewhere, give it a velocity.
+/// `pool_arm` returns -1 when the bag is full, which is the only failure mode and is a no-op here
+/// because every game asks for fewer props than the bag holds.
+function armProp(frame: i32, x: i32, y: i32, vx: i32, vy: i32): i32 {
+  let e: i32 = pool_arm(BAG, POOL_ANY, frame, 0)
+  if (e < 0) { return 0 - 1 }
+  set_transform(e, x, y)
+  set_collider(e, 12, 12)
+  set_tag(e, 2)
+  set_body(e, vx, vy)
+  return e
+}
+
+/// Repaint every live prop's sprite to match the frame stored as its pool KIND. One pass at round
+/// start rather than a write per prop per frame — `native_sprite_set_frame` rebuilds the agb Object
+/// behind the sprite at roughly 2,200 cycles a call, so doing it per frame is how a board of
+/// sixty-three cells cost 26,000 ticks of a 4,389-tick frame in another game.
+function paintProps() {
+  let i: i32 = 0
+  while (i < PROPS_N) {
+    let k: i32 = pool_get(BAG, i, POOL_KIND)
+    if (k >= 0) { sprite_set_frame(pool_get(BAG, i, POOL_SPR), k) }
+    i = i + 1
+  }
+}
+
+function rnd(n: i32): i32 { return rngBelow(0, n) }
+
+// ── The four microgames ──────────────────────────────────────────────────────
+// Each is a `setup` that arms props and a `tick` that decides. Neither is ever called by the
+// harness; the branch at the bottom of this file calls them directly.
+
+/// CATCH — food falls, get under it. Winning is touching any one of them.
+function catchSetup() {
+  let i: i32 = 0
+  while (i < 3) {
+    armProp(PROP_FOOD + rnd(PROP_FOOD_N), 24 + rnd(SCREEN_W - 48), 0 - 16, 0, 1 + rnd(2))
+    i = i + 1
+  }
+  set_transform(player, SCREEN_W / 2, SCREEN_H - 24)
+}
+
+function catchTick() {
+  let i: i32 = 0
+  while (i < PROPS_N) {
+    let e: i32 = pool_get(BAG, i, POOL_ENT)
+    if (pool_get(BAG, i, POOL_KIND) >= 0) {
+      if (overlaps(player, e) === 1) { mgWin(); return }
+      // Off the bottom: park it, so a missed catch cannot be caught later by walking into where
+      // it used to be. Retiring is the pool's job and costs no allocation.
+      if (entity_y(e) > SCREEN_H + 16) { pool_retire(BAG, i) }
+    }
+    i = i + 1
+  }
+}
+
+/// DODGE — hazards cross the screen. Winning is being untouched when time runs out.
+function dodgeSetup() {
+  let i: i32 = 0
+  while (i < 4) {
+    let fromLeft: i32 = rnd(2)
+    let y: i32 = 24 + rnd(SCREEN_H - 48)
+    if (fromLeft === 1) { armProp(PROP_HAZARD + rnd(PROP_HAZARD_N), 0 - 16, y, 2 + rnd(2), 0) }
+    else { armProp(PROP_HAZARD + rnd(PROP_HAZARD_N), SCREEN_W + 16, y, 0 - (2 + rnd(2)), 0) }
+    i = i + 1
+  }
+  set_transform(player, SCREEN_W / 2, SCREEN_H / 2)
+}
+
+function dodgeTick() {
+  let i: i32 = 0
+  while (i < PROPS_N) {
+    if (pool_get(BAG, i, POOL_KIND) >= 0) {
+      if (overlaps(player, pool_get(BAG, i, POOL_ENT)) === 1) { mgLose(); return }
+    }
+    i = i + 1
+  }
+  // Survived to the buzzer.
+  if (mgFramesLeft() <= 1) { mgWin() }
+}
+
+/// GRAB — treasure sits still, go and get it.
+function grabSetup() {
+  let i: i32 = 0
+  while (i < 3) {
+    armProp(PROP_TREASURE + rnd(PROP_TREASURE_N), 24 + rnd(SCREEN_W - 48), 24 + rnd(SCREEN_H - 48), 0, 0)
+    i = i + 1
+  }
+  set_transform(player, SCREEN_W / 2, SCREEN_H - 20)
+}
+
+function grabTick() {
+  let i: i32 = 0
+  while (i < PROPS_N) {
+    if (pool_get(BAG, i, POOL_KIND) >= 0) {
+      if (overlaps(player, pool_get(BAG, i, POOL_ENT)) === 1) { mgWin(); return }
+    }
+    i = i + 1
+  }
+}
+
+/// MASH — hit A enough times before the buzzer. The target scales with the ramp, so a shorter
+/// window does not silently make this one easier than the others.
+function mashSetup() {
+  mashCount = 0
+  mashTarget = 6 + (mgPlayFrames() / 40)
+  armProp(PROP_GLASS, SCREEN_W / 2, SCREEN_H / 2 - 8, 0, 0)
+  set_transform(player, SCREEN_W / 2, SCREEN_H - 20)
+}
+
+function mashTick(pressed: i32) {
+  if (pressed === 1) { mashCount = mashCount + 1 }
+  if (mashCount >= mashTarget) { mgWin() }
+}
+
+// ── Round wiring ─────────────────────────────────────────────────────────────
+
+/// Clear the previous round and set up the next. The ONLY place props are armed.
+///
+/// ⚠️ `pool_clear` first, always. A round that armed on top of the last one would inherit however
+/// many props the previous game left live, and the failure looks like "DODGE is unfair" rather
+/// than like the missing clear it is.
+function beginRound(g: i32) {
+  pool_clear(BAG)
+  if (g === G_CATCH) { catchSetup() }
+  else if (g === G_DODGE) { dodgeSetup() }
+  else if (g === G_GRAB) { grabSetup() }
+  else if (g === G_MASH) { mashSetup() }
+  paintProps()
+}
+
+function promptFor(g: i32): string {
+  if (g === G_CATCH) { return "CATCH!" }
+  if (g === G_DODGE) { return "DODGE!" }
+  if (g === G_GRAB) { return "GRAB!" }
+  return "MASH A!"
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+
+backdrop(0)
+rngSeed(0, 20260812)
+
+player = spawn()
+set_transform(player, SCREEN_W / 2, SCREEN_H / 2)
+set_collider(player, 12, 12)
+set_topdown(player)
+set_tag(player, 1)
+pspr = sprite_new(hero)
+attach_sprite(player, pspr)
+set_sprite_offset(player, 0 - 8, 0 - 8)
+sprite_set_frame(pspr, 0)
+
+// Eight props, one sheet, one -8/-8 offset, created ONCE. Every microgame borrows from this bag;
+// none of them owns art or entities of its own, which is what keeps the fifth microgame free.
+BAG = pool_new(PROPS_N, props, 0 - 8, 0 - 8)
+
+mgInit(3)
+beginRound(G_CATCH)
+log("MG BOOT props=" + pool_stat(BAG, POOLS_COUNT) + " ENT " + entity_count())
+log("HEAP " + heap_free())
+
+let t: i32 = 0
+while (true) {
+  t = t + 1
+  let phase: i32 = mgPhase()
+
+  // ── input ──────────────────────────────────────────────────────────────────
+  // Attract mode drives the pad so the player paths run headlessly. A real press turns it off for
+  // good — an example that keeps steering itself under a human's hands is worse than one that
+  // never moved.
+  let dx: i32 = 0
+  let dy: i32 = 0
+  let pressed: i32 = 0
+  if (key_held(4) === 1 || key_held(5) === 1 || key_held(6) === 1 || key_held(7) === 1
+      || key_pressed(0) === 1) {
+    attract = 0
+  }
+  if (attract === 1) {
+    // ⚠️ THE ATTRACT DRIVER THROWS EVERY THIRD ROUND, ON PURPOSE.
+    //
+    // The first version played perfectly and won every round, which meant a 1,400-frame soak never
+    // spent a life, never reached GAME OVER and never ran the restart path — so three of the four
+    // states the harness has were dead code that verify.sh would have reported as passing. An
+    // attract mode that cannot lose does not exercise a game that can.
+    let tank: i32 = 0
+    if (mgRound() % 3 === 2) { tank = 1 }
+    let best: i32 = 0 - 1
+    let i: i32 = 0
+    while (i < PROPS_N) {
+      if (pool_get(BAG, i, POOL_KIND) >= 0 && best < 0) { best = pool_get(BAG, i, POOL_ENT) }
+      i = i + 1
+    }
+    if (mgGame() === G_DODGE) {
+      // Dodging: stand still to survive, or walk into the traffic on a thrown round.
+      if (tank === 1) {
+        if (best >= 0) {
+          if (entity_x(best) > entity_x(player)) { dx = 1 } else { dx = 0 - 1 }
+          if (entity_y(best) > entity_y(player)) { dy = 1 } else { dy = 0 - 1 }
+        }
+      }
+    } else if (best >= 0 && tank === 0) {
+      if (entity_x(best) > entity_x(player) + 4) { dx = 1 }
+      else if (entity_x(best) < entity_x(player) - 4) { dx = 0 - 1 }
+      if (entity_y(best) > entity_y(player) + 4) { dy = 1 }
+      else if (entity_y(best) < entity_y(player) - 4) { dy = 0 - 1 }
+    }
+    if ((t & 3) === 0 && tank === 0) { pressed = 1 }
+  } else {
+    if (key_held(5) === 1) { dx = 0 - 1 }
+    if (key_held(4) === 1) { dx = 1 }
+    if (key_held(6) === 1) { dy = 0 - 1 }
+    if (key_held(7) === 1) { dy = 1 }
+    if (key_pressed(0) === 1) { pressed = 1 }
+  }
+
+  if (phase === MG_PLAY) {
+    topdown_move(player, dx, dy)
+    let g: i32 = mgGame()
+    // THE DISPATCH. A direct branch in this module — no closure, no boxed call, nothing per
+    // registered-but-not-running game. Adding a microgame adds one line here.
+    if (g === G_CATCH) { catchTick() }
+    else if (g === G_DODGE) { dodgeTick() }
+    else if (g === G_GRAB) { grabTick() }
+    else if (g === G_MASH) { mashTick(pressed) }
+  } else {
+    topdown_move(player, 0, 0)
+  }
+
+  mgStep()
+  phase = mgPhase()
+
+  // The cartridge owns game SELECTION; the harness owns everything else.
+  if (phase === MG_GAP && lastPhase !== MG_GAP) {
+    let g: i32 = rnd(G_COUNT)
+    mgNext(g)
+    beginRound(g)
+  }
+
+  // ── HUD ────────────────────────────────────────────────────────────────────
+  // hud_text is SPRITES — each glyph group costs an OBJ entry — so these are written only when the
+  // string actually changes, never per frame.
+  if (phase !== lastPhase) {
+    if (phase === MG_INTRO) { hud_text(0, 84, 70, promptFor(mgGame())) }
+    else if (phase === MG_VERDICT) {
+      if (mgOutcome() === MG_WON) { hud_text(0, 96, 70, "NICE!") } else { hud_text(0, 96, 70, "OUCH!") }
+    } else if (phase === MG_OVER) { hud_text(0, 80, 70, "GAME OVER") }
+    else { hud_text(0, 0, 0, "") }
+    lastPhase = phase
+  }
+  if (mgLives() !== lastLives) {
+    hud_text(1, 4, 4, "LIVES " + mgLives())
+    lastLives = mgLives()
+  }
+
+  if ((t & 255) === 0) {
+    log("MG TELE round=" + mgRound() + " wins=" + mgWins() + " lives=" + mgLives()
+      + " ENT " + entity_count() + " live=" + pool_stat(BAG, POOLS_LIVE)
+      + " high=" + pool_stat(BAG, POOLS_HIGH))
+    log("HEAP " + heap_free())
+  }
+
+  if (phase === MG_OVER) {
+    // Restart, so a soak keeps exercising the teardown path rather than idling on a title.
+    if (mgFramesLeft() <= 0) {
+      log("MG RESTART")
+      mgInit(3)
+      let g: i32 = rnd(G_COUNT)
+      mgNext(g)
+      beginRound(g)
+      lastPhase = 0 - 1
+      lastLives = 0 - 1
+    }
+  }
+
+  world_step()
+}

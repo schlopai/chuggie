@@ -1,0 +1,49 @@
+// The people you can talk to.
+//
+// Note what is NOT here: a per-frame hook. `Npc` has `onInteract` and nothing else, so an NPC costs
+// the engine a tile of occupancy and a sprite, and zero tish per frame. A component `update:`/`tick:`
+// is a BOXED callback billed per ON-SCREEN entity — a town's worth of idling villagers each doing
+// nothing is the single most expensive way to render a town (docs/perf-rules.md §7). The player is
+// driven straight from the main loop for the same reason: it is one entity, and the step/encounter
+// state it reads lives in module scope, not in a boxed `this.data`.
+import { dialogSay } from '../../../packages/dialog'
+import { battleGiveBalls } from './battle'
+
+// Every NPC is this one component; the lines and the name come from its spawn.
+export const Npc = {
+  onInteract: ({ this }) => {
+    dialogSay(this.data.lines, { speaker: this.data.name })
+  }
+}
+
+export let LINES_PROF = [
+  "Ah, you are awake! Good.",
+  "Your KAPPLING is rested and ready.",
+  "The tall grass north of town is thick with wild creatures.",
+  "Step into it and one will find you soon enough."
+]
+
+// Mom restocks you. Without her the capture mechanic has a dead end in it: run out of balls and
+// there is no way to get more, and the demo quietly loses half its loop.
+export const Mom = {
+  onInteract: ({ this }) => {
+    battleGiveBalls(6)
+    dialogSay([
+      "Off already? Do be careful out there.",
+      "Here, take some more BALLS. Six of them.",
+      "The road is safe. The grass is not."
+    ], { speaker: "MOM" })
+  }
+}
+
+export let LINES_RIVAL = [
+  "You are going out to Route 1? Ha!",
+  "I have already been. Twice.",
+  "...I stayed on the path, but that still counts."
+]
+
+export let LINES_GUARD = [
+  "Past this gate is Route 1.",
+  "Keep to the dirt and nothing will bother you.",
+  "Step into the grass and something will."
+]

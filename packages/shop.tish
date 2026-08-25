@@ -1,0 +1,941 @@
+// shop.tish — a reusable BUY / SELL SHOP on packages/ui.tish. List/detail/qty chrome uses shared
+// makeListRow / makeDetailPanel / makeStepper (flash-free patch paths). A cursor move repaints two rows
+// (moveHi) AND patches the detail on the same press (SRPG-style; see ui-roadmap's selection budget).
+// Tab open streams in (uiStreamBegin/Step). Input is batched via uiKeys()/keys_edge (one pad read/frame).
+// After the open, nothing re-renders the whole tab: gold, footer, list and right panel patch separately.
+//
+// Flow (non-blocking state machine, shopUpdate() each frame):
+//   GREET  — shopkeeper dialog: Buy / Sell / Leave
+//   BUY / SELL — scrollable list + detail + gold; A opens qty stepper
+//   QTY    — L/R ±1, U/D ±10; A confirm, B cancel
+//   BYE    — thanks, then close
+//
+//   shopInit({ font, cursorSheet?, cursorFrame? })
+//   shopOpen({ title?, keeper?, mode?, stock, bag, gold, onBuy, onSell, cur?, canBuy? })
+//   shopUpdate() -> 1 while open.   shopActive() -> 1 if open.
+import { ui_text_box, ui_rect, ui_release_scratch, ui_begin, ui_hide } from 'cargo:tish_agb'
+import { text_width, text_height } from 'cargo:tish_agb'
+import {
+  uiRender, uiRelayoutInner, uiRelayoutAt, uiStreamBegin, uiStreamStep, makeSelector, makePointer,
+  pointerHide, pointerAtRow, uiHideIcons, col2, makeListRow, makeDetailPanel, makeStepper, makePanel, uiKeys, uiKeyDown, uiRowText
+} from './ui'
+// ⚠️⚠️ THE DIALOGUE IS INJECTED, NOT IMPORTED, and the reason is 38 KB.
+//
+// tish's native merge pulls WHOLE modules: `import … from './dialog'` links dialog, and dialog links
+// `./chipsfx`, and every one of their module-level initialisers runs at boot whether or not a
+// keeper ever speaks. Measured on a large SRPG example — free heap entering `gameInit` fell from 60,416 to
+// 22,528 the moment this file was imported, before a single line of it ran, and the ROM died at
+// frame 97. A game with a shop cannot also be a game with a battlefield at that price.
+//
+// So the four functions the greeting needs arrive through `shopInit({ dialog: … })`. A caller that
+// wants the keeper's box passes them and links dialog itself; a caller that does not gets a shop
+// that opens straight onto its BUY tab and never links it. `mode: "greet"` already degrades to
+// `"buy"` when there is no keeper — this is the same fallback, one step earlier.
+import { onMemReport, memMark } from './scene_hooks'
+
+let BTN_A: i32 = 0
+let BTN_B: i32 = 1
+let BTN_UP: i32 = 6
+let BTN_DOWN: i32 = 7
+let BTN_LEFT: i32 = 8
+let BTN_RIGHT: i32 = 9
+
+function pick(v, d) {
+  if (v === null) { return d }
+  return v
+}
+function present(v) {
+  if (v === null) { return 0 }
+  return 1
+}
+
+let ST_GREET: i32 = 0
+let ST_BUY: i32 = 1
+let ST_SELL: i32 = 2
+let ST_BYE: i32 = 3
+
+// Frames the cursor must be still before the FIRST (pricey, full) detail paint after a deferred tab
+// open. A cursor move on an already-painted panel patches in place on the same press instead.
+let DETAIL_SETTLE: i32 = 2
+// Hard ceiling on that wait, in frames. The selection budget is 0.2s (~12 frames at 60Hz); flushing
+// by 8 leaves room for the paint itself even when the player never lifts the d-pad.
+let DETAIL_DEADLINE: i32 = 8
+// Width of the header gold slot. Right-aligned inside it, so "Gold: 20 G" and "Gold: 12480 G" both end
+// flush with the panel edge and a buy/sell can repaint the slot without a relayout.
+let GOLD_W: i32 = 96
+// Nodes painted per frame while a tab STREAMS in (opening a tab). Small = smoother (more frames), big =
+// snappier (fewer frames but each hangs longer). ~6 keeps each frame near budget while loading in ~0.3s.
+let STREAM_BUDGET: i32 = 6
+// The list viewport's height. Shared by makeSelector and listPlaceholder so the deferred frame and
+// the real rows land in exactly the same box.
+let LIST_H: i32 = 96
+// Space left of a row for the ► cursor.
+let PTR_GUTTER: i32 = 10
+
+let CFG = { font: -1, menuBg: "bg", nameWrap: 1 }   // nameWrap: 1 = wrap a too-long item name onto 2 lines; 0 = ellipsise (".." )
+let PTR = null   // the ► selection cursor (a makePointer state object), or null.
+let DET = null   // makeDetailPanel — shared flash-free detail chrome
+let STEPPER = null  // makeStepper — qty panel + in-place number lines
+
+let S = {
+  // A tab open requested from inside a DIALOG CALLBACK, serviced on the next frame.
+  // 0 = none, 1 = sell, 2 = buy. See the note in `enterGreet` — opening it inline is two
+  // `ui_begin` calls in one frame, which is a hard panic and not a glitch.
+  pending: 0,
+  active: 0, state: 0,
+  title: "Shop", keeper: null, cur: "G",
+  stock: [], bagFn: null, goldFn: null, onBuy: null, onSell: null, canBuy: null,
+  list: [], sel: null, qtyOpen: 0, qty: 1, qmax: 1,
+  msg: "", msgT: 0,
+  detailDirty: 0, settleT: 0, dirtyAge: 0,  // first detail paint after a deferred open: doNav marks dirty, shopUpdate flushes on settle or at DETAIL_DEADLINE
+  streaming: 0,                // 1 while a freshly-opened tab is still painting in over frames (uiStreamStep)
+  detReady: 0, detNodes: null, // detNodes = the detail's {name,desc,price,icon} nodes; when detReady, a nav
+                               // updates them IN PLACE (updateDetail) with no clear/flash — else full fill
+  // Panel GEOMETRY, not panel nodes. Everything this component does to a laid-out panel after the
+  // first paint — swap the right side, rebuild the list, rewrite the footer — needs only the box the
+  // layout put it in, and `uiRelayoutAt`/`uiRelayoutInner`/`ui_text_box` all take that box as four
+  // numbers. Holding the NODES instead kept the panel wrappers, their title rows and their child
+  // containers alive for as long as the tab was open: ~20 KB of boxed objects, resident, read for
+  // four integers. On a game with a world behind the menu that was the difference between a tab that
+  // opens and one that dies in the allocator. `w < 0` means "not laid out yet".
+  // The three trees, held ONLY between "streamed open started" and "stream finished painting" —
+  // geometry does not exist until the stream's layout pass has run. Null at every other moment.
+  pendList: null, pendRight: null, pendFoot: null,
+  listDeferred: 0,   // 1 while a deferred tab's list frame is painted but its rows are not
+  listTop: 0,        // first visible row (the fast painter scrolls by whole rows)
+  listVis: 0, listTop0: 0, listPitch: 0,   // row metrics, so one row can be repainted on its own
+  curX: 0, curY: 0, curH: 0,   // the ► cursor's row box, as numbers (no cell node to read)
+  rightBox: { x: 0, y: 0, w: 0 - 1, h: 0 },
+  listBox:  { x: 0, y: 0, w: 0 - 1, h: 0 },
+  footBox:  { x: 0, y: 0, w: 0 - 1, h: 0 },
+  goldNode: null,   // header gold total — fixed-width right-aligned so a buy/sell patches it in place
+  qNums: null       // the qty picker's 3 changing number nodes — so a qty ± updates them IN PLACE
+}
+
+// One line for `packages/memdebug`: what this component is still holding. Everything here should be
+// zero once a tab has been left — `releaseTab` is what makes that true, and this is how you check.
+function shopMemLine() {
+  let n = 0
+  if (present(S.sel) === 1) { n = n + 1 }
+  if (present(S.goldNode) === 1) { n = n + 1 }
+  if (present(S.detNodes) === 1) { n = n + 1 }
+  if (present(S.pendList) === 1) { n = n + 1 }
+  if (present(S.pendRight) === 1) { n = n + 1 }
+  if (present(S.pendFoot) === 1) { n = n + 1 }
+  if (present(DET.nodes()) === 1) { n = n + 1 }
+  if (present(STEPPER.lines().q) === 1) { n = n + 1 }
+  return "shop  active " + S.active + "  held " + n + "  list " + S.list.length + "  boxes " + S.listBox.w + "/" + S.rightBox.w + "/" + S.footBox.w
+}
+
+let MEMHOOK = { done: 0 }
+
+// The host's dialogue functions, or nulls. See the note on the import that is deliberately absent.
+let DLG = { say: null, update: null, active: null, free: null }
+
+function dlgReady(): i32 {
+  if (present(DLG.say) === 0) { return 0 }
+  return 1
+}
+
+export function shopInit(cfg) {
+  if (MEMHOOK.done === 0) { MEMHOOK.done = 1; onMemReport(shopMemLine) }
+  // ⚠️ `present`, not `pick`: these are FUNCTIONS, and a missing one must stay null so `dlgReady`
+  // can tell "this game has no dialogue" from "this game passed one".
+  if (present(cfg.dialog) === 1) {
+    DLG.say = cfg.dialog.say
+    DLG.update = cfg.dialog.update
+    DLG.active = cfg.dialog.active
+    DLG.free = cfg.dialog.free
+  }
+  CFG.font = pick(cfg.font, -1)
+  CFG.menuBg = pick(cfg.menuBg, "bg")   // colour the screen snaps to instantly when a tab opens, before it streams in
+  // How a too-long item NAME (beside the detail icon, a narrow slot) is handled so it never spills into
+  // the panel border: "wrap" (default — flow onto a 2nd line) or "ellipsis" (truncate with "..").
+  CFG.nameWrap = 1
+  if (pick(cfg.nameOverflow, "wrap") === "ellipsis") { CFG.nameWrap = 0 }
+  let cs = pick(cfg.cursorSheet, -1)
+  if (cs >= 0) { PTR = makePointer({ sheet: cs, frame: pick(cfg.cursorFrame, 0), anim: "bob" }) }
+  DET = makeDetailPanel({
+    font: CFG.font, w: 104, border: "accent", pad: 8, title: "DETAIL",
+    iconSize: 32, nameW: 48, descLines: 3, nameWrap: CFG.nameWrap
+  })
+  STEPPER = makeStepper({ font: CFG.font, w: 104, border: "selected", pad: 8 })
+}
+
+// Cache the current tab's list (SELL calls the game's bag() closure — once per render, not per cell).
+function refreshList() {
+  if (S.state === ST_SELL) { S.list = S.bagFn(); return }
+  if (S.canBuy === null) { S.list = S.stock; return }
+  let out = []
+  let i = 0
+  while (i < S.stock.length) {
+    if (S.canBuy(S.stock[i]) > 0) { out.push(S.stock[i]) }
+    i = i + 1
+  }
+  S.list = out
+}
+function listNow() { return S.list }
+
+// ── Declarative pieces (node trees; the engine positions them) ────────────────
+// A list row: name (grows to push the price right) · price. Colour TOKENS, not raw hex.
+function cellFor(i) {
+  let it = listNow()[i]
+  let right = "" + it.price
+  if (S.state === ST_SELL) { right = right + "  x" + it.qty }
+  return makeListRow({ left: it.name, right: right })
+}
+
+function currentDetailItem() {
+  let list = listNow()
+  if (list.length === 0) { return null }
+  let it = list[S.sel.index()]
+  let ps = "" + it.price
+  let label = "Buy  " + ps + " " + S.cur
+  if (S.state === ST_SELL) { label = "Sell  " + ps + " " + S.cur }
+  return { name: it.name, icon: it.icon, desc: pick(it.desc, ""), priceLabel: label }
+}
+
+function detailNode() {
+  return DET.view(currentDetailItem())
+}
+
+// Redraw the detail panel for the current selection.
+//
+// This used to be `DET.patch`, an in-place rewrite of the panel's cached leaf nodes. That path only
+// works while those nodes are still alive and still laid out — and this component now drops every
+// panel tree as soon as it has painted, keeping the box instead. Rebuilding the panel into its box
+// costs ~3 KB against the ~45 KB this design leaves free, and it cannot go stale.
+function updateDetail() {
+  refreshRight()
+}
+
+function qtyPanel() {
+  let it = listNow()[S.sel.index()]
+  let total = S.qty * it.price
+  let g = S.goldFn()
+  let after = g - total
+  if (S.state === ST_SELL) { after = g + total }
+  let verb = "Buy"
+  if (S.state === ST_SELL) { verb = "Sell" }
+  let node = STEPPER.view({
+    qty: S.qty, total: total, after: after, cur: S.cur,
+    verb: verb, name: it.name, icon: it.icon, size: 32
+  })
+  // Keep legacy qNums pointer for any code that inspected it (STEPPER owns the lines now).
+  S.qNums = STEPPER.lines()
+  return node
+}
+
+// The bottom hint line — depends on state (a flashed message wins, else the qty vs list controls).
+function footerText() {
+  if (S.msg !== "") { return S.msg }
+  if (S.qtyOpen === 1) { return "LR/^v qty  A confirm  B cancel" }
+  let tab = "BUY"
+  if (S.state === ST_SELL) { tab = "SELL" }
+  return "A: " + tab + "   B: back   Up/Down: pick"
+}
+
+// An EMPTY detail panel (just the frame) — same box as detailNode so the real detail can be laid into it
+// later by refreshRight. Used to DEFER the detail's ~½-of-the-render content off the first paint.
+function detailPlaceholder() {
+  return DET.placeholder()
+}
+
+// The LIST panel's frame with no rows in it — same box the real one lays out into (the selector's
+// viewport height is fixed, so an empty spacer of that height reserves exactly the same geometry).
+//
+// The rows are the single biggest part of the tab's tree, and until this existed they had to be
+// built, laid out and painted in the SAME pass as everything else — so the peak was the whole tab at
+// once: selector rows + every panel's nodes + a full canvas of glyphs. Deferring them the way the
+// DETAIL is already deferred means the tree that streams in is a skeleton, and each panel's content
+// is laid into its own box afterwards, one at a time, with the previous one already handed back.
+function listPlaceholder(tab) {
+  return makePanel({
+    title: tab, titleColor: "label", border: "border", pad: 4, gap: 2, w: 118,
+    children: [{ w: 110, h: LIST_H }]
+  })
+}
+
+// Full declarative re-layout of the current tab. Only on a discrete change (tab, scroll, msg, buy/sell).
+// A detail↔qty toggle does NOT need this — see swapRight (only the right panel + footer change there).
+// `defer` (opening a tab): paint the list + gold NOW with an empty detail frame, then fill the detail in
+// on settle — the detail (its wrapped description especially) is ~a third of the render, so skipping it on
+// the first paint makes the menu appear much sooner; it fills in a few frames later like a cursor move.
+function renderTab(defer, stream) {
+  refreshList()
+  let g = S.goldFn()
+  let goldStr = "Gold: " + g + " " + S.cur
+  let tab = "BUY"
+  if (S.state === ST_SELL) { tab = "SELL" }
+  let deferDetail = 0
+  if (present(defer) === 1) { if (defer === 1) { deferDetail = 1 } }
+  let doStream = 0
+  if (present(stream) === 1) { if (stream === 1) { doStream = 1 } }
+  let right = detailNode()
+  if (S.qtyOpen === 1) { right = qtyPanel(); deferDetail = 0 }
+  if (deferDetail === 1) { right = detailPlaceholder() }
+  let footNode = { text: footerText(), color: "dim" }
+  // Fixed width + right align: a buy/sell shortens or lengthens the total, and repaintGold reuses this
+  // box. A content-sized node would re-anchor the string to the old left edge and visibly shift.
+  let goldNode = { text: goldStr, color: "gold", w: GOLD_W, align: "right" }
+  S.goldNode = goldNode
+  let listPanel = listPlaceholder(tab)
+  if (deferDetail === 0) {
+    listPanel = makePanel({
+      title: tab, titleColor: "label", border: "border", pad: 4, gap: 2, w: 118,
+      children: [S.sel.view()]
+    })
+  }
+  // The tab OWNS its background — full screen, opaque, part of the tree.
+  //
+  // It used to rely on `uiStreamBegin`'s one-off canvas fill, which is painted once when a tab opens
+  // and then lost: every later `uiRender` here (a scroll, a buy, a message, closing the quantity
+  // picker) starts with `ui_begin`, which blanks the whole canvas, and only the panels repaint. The
+  // gaps between them — the footer strip, the margins, anything inside a panel the layout didn't
+  // cover — went transparent and showed the GAME through the menu. A shop over a flat backdrop
+  // (shop-demo) hides that completely; one standing in a furnished room does not.
+  //
+  // A 240×160 tile-aligned fill is the cheapest thing the canvas can draw: 600 cells sharing one
+  // solid tile, no per-cell allocation.
+  let tree = {
+    dir: "col", pad: 6, gap: 4, w: 240, h: 160, fill: CFG.menuBg,
+    children: [
+      { dir: "row", justify: "between", align: "end", children: [{ text: S.title, color: "title" }, goldNode] },
+      {
+        dir: "row", grow: 1, gap: 6,
+        children: [listPanel, right]
+      },
+      footNode
+    ]
+  }
+  // Opening a tab STREAMS in (instant bg colour, then the content paints over frames — shopUpdate ticks
+  // uiStreamStep); other renders (scroll, msg, buy/sell) paint in one shot (fast enough, and re-streaming
+  // the whole tab on every scroll would flicker). PTR (the ► cursor) stays hidden until the stream ends.
+  if (doStream === 1) {
+    S.streaming = 1
+    if (present(PTR) === 1) { pointerHide(PTR) }
+    // Geometry isn't written until the stream's layout pass, so the boxes are captured in shopUpdate
+    // when it completes. Hold the three nodes only until then.
+    S.pendList = listPanel
+    S.pendRight = right
+    S.pendFoot = footNode
+    uiStreamBegin(tree, CFG.menuBg)
+  } else {
+    uiRender(tree)
+    captureBoxes(listPanel, right, footNode)
+  }
+  // deferred → detail not painted yet (fill on first settle); else it's painted now (ready for in-place).
+  if (deferDetail === 1) {
+    S.listDeferred = 1
+    S.detailDirty = 1; S.settleT = DETAIL_SETTLE; S.dirtyAge = 0; S.detReady = 0; DET.setReady(0)
+  } else {
+    S.detailDirty = 0
+    if (S.qtyOpen === 1) { S.detReady = 0; DET.setReady(0) } else { S.detReady = 1; DET.setReady(1) }
+  }
+}
+
+// Copy the three panels' laid-out boxes into plain numbers and let the trees go. Called the moment
+// geometry exists — right after a one-shot uiRender, or when the streamed open finishes painting.
+function captureBoxes(listPanel, right, footNode) {
+  boxOf(S.listBox, listPanel)
+  boxOf(S.rightBox, right)
+  boxOf(S.footBox, footNode)
+  S.pendList = null
+  S.pendRight = null
+  S.pendFoot = null
+}
+
+function boxOf(dst, n) {
+  if (present(n) === 0) { dst.w = 0 - 1; return }
+  if (present(n._x) === 0) { dst.w = 0 - 1; return }
+  dst.x = n._x
+  dst.y = n._y
+  dst.w = n._w
+  dst.h = n._h
+}
+
+// Toggle the right panel between DETAIL and the QTY picker WITHOUT re-laying-out the whole tab. The list,
+// title and gold are unchanged on this toggle, so renderTab would re-rasterise ~16 list glyphs for nothing
+// — that was the lag opening/closing the qty picker. The main row is grow:1 (fixed height), so the right
+// panel's box and the footer position never move → both can be updated in place from cached geometry.
+function swapRight() {
+  let b = S.rightBox
+  if (b.w < 0) { renderTab(); return }
+  // The outgoing panel is already gone (only its box was kept), so the incoming one is the only
+  // right-panel tree alive at any moment — and `d` itself is dropped as soon as it has painted.
+  S.detNodes = null
+  let d = detailNode()
+  if (S.qtyOpen === 1) { d = qtyPanel() }
+  // Detail↔qty also changes frame colour (accent → selected); uiRelayoutInner redraws the outline
+  // AFTER its tile clear (which would otherwise blank the top/bottom border tiles).
+  uiRelayoutInner(d, b.x, b.y, b.w, b.h)
+  d = null
+  repaintFooter()
+  S.detailDirty = 0   // the right panel was just repainted — drop any pending debounced detail repaint
+  if (S.qtyOpen === 1) { S.detReady = 0; DET.setReady(0) } else { S.detReady = 1; DET.setReady(1) }
+}
+
+// Redraw just the bottom hint line in place (its cached _x/_y/_w). ui_text_box overwrites opaquely, so the
+// old (differently-sized) hint is cleared without a flash or a whole-tile clear that would nick the border.
+// Returns 0 if there is no laid-out footer yet, so callers can fall back to a full render.
+function repaintFooter() {
+  let f = S.footBox
+  if (f.w < 0) { return 0 }
+  // The menu-background colour is REQUIRED here: without it `ui_text_box` clears the blank glyph
+  // cells to transparent, and the hint line's whole strip turns into a window onto the game behind
+  // the shop. (Same rule as uiRowText's `bg` — a row on a filled surface must name that fill.)
+  ui_text_box(CFG.font, f.x, f.y, footerText(), col2("dim"), f.w, 0, 0, 0, col2(CFG.menuBg))
+  return 1
+}
+
+// Redraw just the header gold total in place. Right-aligned in a fixed GOLD_W box, so the string can
+// change length without moving.
+function repaintGold() {
+  let g = S.goldNode
+  if (present(g) === 0) { return 0 }
+  if (present(g._x) === 0) { return 0 }
+  // The menu background is REQUIRED: without it uiRowText clears the blank glyph cells to
+  // transparent and the gold readout's strip becomes a window onto the game behind the shop.
+  uiRowText(g, "Gold: " + S.goldFn() + " " + S.cur, "gold", CFG.menuBg)
+  return 1
+}
+
+// Redraw JUST the right panel in place (its box from the last render) — the DETAIL, or the QTY picker
+// while choosing. uiRelayoutAt lays out + paints one subtree without touching the rest of the canvas.
+function refreshRight() {
+  let b = S.rightBox
+  if (b.w < 0) { renderTab(); return }
+  S.detNodes = null
+  let d = detailNode()
+  if (S.qtyOpen === 1) { d = qtyPanel() }
+  // Inner-only: keep the panel's border (it doesn't change), redraw just the content.
+  uiRelayoutInner(d, b.x, b.y, b.w, b.h)
+  d = null
+  if (S.qtyOpen === 1) { S.detReady = 0; DET.setReady(0) } else { S.detReady = 1; DET.setReady(1) }
+}
+
+// Rebuild just the left list panel after a scroll (viewport changed) or a sell that changed the xN
+// counts. Title/gold/detail stay put — a full renderTab would re-rasterise the whole tab for one
+// window shift.
+// Paint the list panel DIRECTLY — panel fill, title, rows, border — with no node tree and no layout
+// pass. Same technique packages/clan/party uses for its bag panel, and for the same reason.
+//
+// The declarative path built ~3 boxed nodes per row and laid them out, then painted the same glyphs
+// this does: measured at 49 KB for a seven-item list, of which ~13 KB was the row nodes and stayed
+// resident for as long as the tab was open, purely so a cursor move could find a row's box. That was
+// the difference between a tab that fits and one that leaves nothing for the detail panel. Rows are
+// a fixed pitch in a fixed box, so their geometry is arithmetic, not layout.
+//
+// Returns 0 if there is no laid-out box yet, so callers can fall back to a full render.
+function paintListFast() {
+  let b = S.listBox
+  if (b.w < 0) { return 0 }
+  refreshList()
+  let font = CFG.font
+  let fh = text_height(font)
+  let pad = 4
+  let bg = col2("panel")
+  let list = listNow()
+  fillRectShop(b.x, b.y, b.w, b.h, bg)
+
+  let tab = "BUY"
+  if (S.state === ST_SELL) { tab = "SELL" }
+  ui_text_box(font, b.x + pad + 2, b.y + pad, tab, col2("label"), b.w - pad * 2 - 4, 0, fh, 0, bg)
+
+  let top = b.y + pad + fh + 4
+  let pitch = fh + 3
+  // How many rows the box can show. The selector scrolls by whole rows, so the window is
+  // [topRow, topRow+vis) and everything below is arithmetic off `top`.
+  let vis = Math.floor((b.h - (top - b.y) - pad) / pitch)
+  if (vis < 1) { vis = 1 }
+  S.listVis = vis
+  S.listTop0 = top
+  S.listPitch = pitch
+  let first = S.listTop
+  if (first > list.length - vis) { first = list.length - vis }
+  if (first < 0) { first = 0 }
+  S.listTop = first
+  let rowX = b.x + pad + PTR_GUTTER
+  let rowW = b.w - pad * 2 - PTR_GUTTER
+  let k = 0
+  while (k < vis) {
+    let i = first + k
+    let rowY = top + k * pitch
+    if (i < list.length) {
+      let it = list[i]
+      let nameCol = col2("text")
+      if (i === S.sel.index()) { nameCol = col2("selected") }
+      let right = "" + it.price
+      if (S.state === ST_SELL) { right = right + "  x" + it.qty }
+      let rw = text_width(font, right) + 2
+      ui_text_box(font, rowX, rowY, it.name, nameCol, rowW - rw, 0, fh, 0, bg)
+      ui_text_box(font, rowX + rowW - rw, rowY, right, col2("gold"), rw, 0, fh, "right", bg)
+    }
+    k = k + 1
+  }
+  ui_rect(b.x, b.y, b.w, b.h, col2("border"))
+  // The cursor's row is arithmetic too — no cell node to read a box off.
+  S.curX = b.x + pad
+  S.curY = top + (S.sel.index() - first) * pitch
+  S.curH = fh
+  return 1
+}
+
+// Panel fill that avoids a tile per cell: one tall ui_rect for the bulk (shared solid tile), then the
+// unaligned rims. Mirrors packages/ui's fillRectExact, which isn't exported.
+function fillRectShop(x, y, w, h, color) {
+  ui_rect(x, y, w, h, color, 1)
+  if (h <= 48) { return }
+  let y0 = y + 7
+  y0 = y0 - (y0 % 8)
+  let y1 = y + h
+  y1 = y1 - (y1 % 8)
+  if (y0 > y) { ui_rect(x, y, w, y0 - y, color, 1) }
+  if (y + h > y1) { ui_rect(x, y1, w, y + h - y1, color, 1) }
+}
+
+// Repaint ONE row in place: an opaque text write over exactly that row's box. Nothing else on the
+// panel is touched — not the fill, not the border — so a cursor move costs two of these instead of a
+// whole-panel repaint, and the border never blinks.
+function paintListRow(i) {
+  let b = S.listBox
+  if (b.w < 0) { return }
+  let list = listNow()
+  if (i < 0) { return }
+  if (i >= list.length) { return }
+  let k = i - S.listTop
+  if (k < 0) { return }
+  if (k >= S.listVis) { return }
+  let font = CFG.font
+  let fh = text_height(font)
+  let bg = col2("panel")
+  let rowY = S.listTop0 + k * S.listPitch
+  let rowX = b.x + 4 + PTR_GUTTER
+  let rowW = b.w - 8 - PTR_GUTTER
+  let it = list[i]
+  let nameCol = col2("text")
+  if (i === S.sel.index()) { nameCol = col2("selected") }
+  let right = "" + it.price
+  if (S.state === ST_SELL) { right = right + "  x" + it.qty }
+  let rw = text_width(font, right) + 2
+  ui_text_box(font, rowX, rowY, it.name, nameCol, rowW - rw, 0, fh, 0, bg)
+  ui_text_box(font, rowX + rowW - rw, rowY, right, col2("gold"), rw, 0, fh, "right", bg)
+}
+
+// Put the ► on the selected row, from the numbers paintListFast recorded. The selector's own
+// paintCursor reads a laid-out cell node, and the fast painter doesn't build one.
+// Keep the selected row inside the visible window (the fast painter draws [listTop, listTop+vis)).
+function scrollToSel() {
+  let i = S.sel.index()
+  if (i < S.listTop) { S.listTop = i; return }
+  let b = S.listBox
+  if (b.w < 0) { return }
+  let fh = text_height(CFG.font)
+  let pitch = fh + 3
+  let top = 4 + fh + 4
+  let vis = Math.floor((b.h - top - 4) / pitch)
+  if (vis < 1) { vis = 1 }
+  if (i >= S.listTop + vis) { S.listTop = i - vis + 1 }
+}
+
+function paintListCursor() {
+  if (present(PTR) === 0) { return }
+  if (S.listBox.w < 0) { return }
+  if (S.listPitch <= 0) { return }
+  // Derive the row from the LIVE selection, not from whatever the last full repaint cached — a
+  // same-window cursor move repaints two rows and never runs the full painter, so a cached y would
+  // leave the ► sitting on the row it started on while the highlight and detail moved without it.
+  let k = S.sel.index() - S.listTop
+  if (k < 0) { return }
+  if (k >= S.listVis) { return }
+  pointerAtRow(PTR, S.curX, S.listTop0 + k * S.listPitch, S.curH)
+}
+
+function refreshListPanel() {
+  refreshList()
+  let b = S.listBox
+  if (b.w < 0) { renderTab(); return }
+  let tab = "BUY"
+  if (S.state === ST_SELL) { tab = "SELL" }
+  // The panel wrapper exists only to be laid out and painted; the rows inside it are owned by the
+  // selector and survive on their own. So build it, paint it, drop it — the box is already saved.
+  let neu = makePanel({
+    title: tab, titleColor: "label", border: "border", pad: 4, gap: 2, w: 118,
+    children: [S.sel.view()]
+  })
+  // uiRelayoutInner, not uiRelayoutAt: `uiRelayoutAt` starts with `ui_clear_rect`, which blanks the
+  // area to TRANSPARENT, and the tab's background is behind this panel — so the world showed through
+  // wherever the panel's own fill didn't land. uiRelayoutInner paints the fill first instead.
+  uiRelayoutInner(neu, b.x, b.y, b.w, b.h)
+  neu = null
+  if (present(PTR) === 1) { S.sel.paintCursor() }
+}
+
+function enterTab(buying) {
+  if (buying === 1) { S.state = ST_BUY } else { S.state = ST_SELL }
+  S.qtyOpen = 0
+  S.msg = ""
+  // A tab is the heaviest screen this component has (list + detail node trees, then a full canvas of
+  // glyphs), and the keeper's box is done talking — hand its solved shape back so the quantity prompt has
+  // somewhere to allocate. The greet re-solves when the player returns to it.
+  if (present(DLG.free) === 1) { DLG.free() }
+  // …and the UI's own leftovers from that conversation: the typewriter's row cache and the text-box
+  // compositing buffer are kept between boxes on purpose, but a tab is the one screen big enough
+  // that ~5 KB of a finished conversation's scratch is worth more to it than the re-allocation it
+  // saves. They grow back on the next dialog box.
+  ui_release_scratch()
+  // …and the outgoing screen's CANVAS. The keeper's box is still lit at this point — its ~130
+  // dynamic tiles are ~13 KB — and the only thing that would otherwise free them is the `ui_begin`
+  // inside the render below, which does not run until the tab's whole node tree has already been
+  // built. So the greet's tiles and the tab's tree were alive at the same moment, which is the peak
+  // of the peak. Blanking here costs nothing visually: the stream re-fills the canvas immediately.
+  //
+  // ⚠️⚠️ `ui_hide()`, NOT `ui_begin()`. Both blank the canvas, and only one of them is legal here.
+  // `ui_begin` marks the frame as having opened a canvas, and `renderTab` below reaches
+  // `uiStreamBegin`, which opens one — two in a single frame is a hard panic:
+  //
+  //     ui_begin called twice in one frame: the previous canvas has not released its VRAM yet.
+  //
+  // That took down every game with a shop in it the moment the keeper's menu was answered —
+  // shop-demo, iso-town and oakhollow alike — and the message names agb's rule rather than the call
+  // that broke it, so it reads as a UI-library bug. `ui_hide` releases exactly the tiles this line
+  // exists to release, keeps the background itself, and leaves the frame's one `ui_begin` for the
+  // render that actually needs it.
+  ui_hide()
+  refreshList()
+  S.sel = makeSelector({
+    cols: 1, gap: 3, h: LIST_H, cursor: PTR, gutter: 10,
+    count: () => { return listNow().length },
+    cell: (i) => { return cellFor(i) }
+  })
+  renderTab(1, 1)   // defer the detail + STREAM the tab in (instant bg colour, then content over frames)
+}
+
+function enterGreet() {
+  S.state = ST_GREET
+  let k = S.keeper
+  DLG.say(k.greet, {
+    speaker: k.name, portrait: k.portrait, portraitSize: 32,
+    // Last page shows Buy/Sell/Leave with the body (no second full paint when typing ends).
+    instantChoices: 1,
+    choices: ["Buy", "Sell", "Leave"],
+    onChoose: (idx) => {
+      // ⚠️ DEFERRED BY ONE FRAME, not called here. This runs inside `dialogUpdate`, which has
+      // already opened the dialog's canvas this frame; `enterTab` opens the tab's. Two `ui_begin`
+      // calls in one frame is a hard panic — "the previous canvas has not released its VRAM yet" —
+      // and it took iso-town down the moment you talked to the merchant and pressed Buy.
+      // `shopUpdate` picks this up next frame, when the greet's tiles have actually been released.
+      if (idx === 0) { S.pending = 2 }
+      else if (idx === 1) { S.pending = 1 }
+      else { enterBye() }
+    }
+  })
+}
+
+// Leaving for good. HIDE THE CANVAS — the shop is drawn on the UI background layer, which sits at
+// priority 0, above everything the game draws. Clearing `active` without hiding that layer leaves the
+// whole shop painted over a world that is still running behind it: input works, the loop steps,
+// nothing moves. It is indistinguishable from a freeze.
+//
+// A shop WITH a keeper was accidentally saved from this by its goodbye dialog, whose own close hides
+// the canvas. One WITHOUT a keeper (`mode: "buy"`, the common case for a plain counter) closed
+// straight through and stuck every time.
+function shopDismiss() {
+  if (present(PTR) === 1) { pointerHide(PTR) }
+  uiHideIcons()
+  ui_hide()
+  S.active = 0
+  memMark("shop close")
+}
+
+function enterBye() {
+  let canSpeak = 0
+  if (present(S.keeper) === 1) { if (dlgReady() === 1) { canSpeak = 1 } }
+  if (canSpeak === 1) {
+    let k = S.keeper
+    let bye = pick(k.thanks, "Thank you, come again!")
+    S.state = ST_BYE
+    DLG.say(bye, { speaker: k.name, portrait: k.portrait, portraitSize: 32 })
+  } else {
+    shopDismiss()
+  }
+}
+
+// The mirror of what enterTab does for the dialog: the tab is leaving the screen, so drop the trees it
+// only kept in order to patch itself (the row cells the selector built, the panels, the detail nodes).
+// Without this the keeper's box has to solve its shape with the whole outgoing tab still resident.
+function releaseTab() {
+  S.sel = null
+  S.list = []
+  S.listBox.w = 0 - 1
+  S.rightBox.w = 0 - 1
+  S.footBox.w = 0 - 1
+  S.pendList = null
+  S.pendRight = null
+  S.pendFoot = null
+  S.goldNode = null
+  S.detNodes = null
+  S.qNums = null
+  S.detReady = 0
+  S.detailDirty = 0
+  // The shared chrome retains nodes too, and `setReady(0)` does not drop them: the detail panel keeps
+  // its four leaf nodes and the stepper keeps its three number lines, both so an in-place patch can
+  // find them while the screen is up. Once the tab is gone nobody reads them again — and the stepper
+  // is only populated if the player actually opened the quantity picker, which is why the leak needed
+  // "select an item" to show up.
+  DET.clear()
+  STEPPER.clear()
+}
+
+function leaveTab() {
+  releaseTab()
+  if (present(S.keeper) === 1) { enterGreet() } else { enterBye() }
+}
+
+export function shopOpen(cfg) {
+  memMark("shop open")
+  S.active = 1
+  S.title = pick(cfg.title, "Shop")
+  S.keeper = pick(cfg.keeper, null)
+  S.cur = pick(cfg.cur, "G")
+  S.stock = cfg.stock
+  S.bagFn = cfg.bag
+  S.goldFn = cfg.gold
+  S.onBuy = cfg.onBuy
+  S.onSell = cfg.onSell
+  S.canBuy = pick(cfg.canBuy, null)
+  S.qtyOpen = 0
+  S.qty = 1
+  S.msg = ""
+  S.msgT = 0
+  let mode = pick(cfg.mode, "greet")
+  if (present(S.keeper) === 0) { if (mode === "greet") { mode = "buy" } }
+  // …and a game that linked no dialogue cannot greet even with a keeper. Same fallback.
+  if (dlgReady() === 0) { if (mode === "greet") { mode = "buy" } }
+  if (mode === "buy") { enterTab(1) }
+  else if (mode === "sell") { enterTab(0) }
+  else { enterGreet() }
+}
+
+export function shopActive() { return S.active }
+
+function qtyMax() {
+  let list = listNow()
+  if (list.length === 0) { return 0 }
+  let it = list[S.sel.index()]
+  if (S.state === ST_SELL) {
+    let owned = it.qty
+    if (owned > 99) { return 99 }
+    return owned
+  }
+  let g = S.goldFn()
+  if (it.price <= 0) { return 99 }
+  let afford = Math.floor(g / it.price)
+  if (afford > 99) { return 99 }
+  return afford
+}
+
+function openQty() {
+  refreshList()
+  S.qmax = qtyMax()
+  if (S.qmax < 1) {
+    if (S.state === ST_BUY) { flash("Not enough gold!") } else { flash("Nothing to sell.") }
+    return
+  }
+  S.qty = 1
+  S.qtyOpen = 1
+  swapRight()
+}
+
+// A flashed message only ever replaces the footer hint, so patch that line — re-rendering the tab
+// re-rasterised every list glyph for one string.
+function flash(m) {
+  S.msg = m
+  S.msgT = 90
+  if (repaintFooter() === 0) { renderTab() }
+}
+
+function clampQty() {
+  if (S.qty < 1) { S.qty = 1 }
+  if (S.qty > S.qmax) { S.qty = S.qmax }
+}
+
+function confirmQty() {
+  refreshList()
+  let it = listNow()[S.sel.index()]
+  let total = S.qty * it.price
+  let ok = 0
+  if (S.state === ST_BUY) { ok = S.onBuy(it.id, S.qty, total) } else { ok = S.onSell(it.id, S.qty, total) }
+  S.qtyOpen = 0
+  if (ok === 1) {
+    let verb = "Bought"
+    if (S.state === ST_SELL) { verb = "Sold" }
+    S.msg = verb + " " + it.name + " x" + S.qty
+    S.msgT = 90
+  } else {
+    S.msg = "Can't do that."
+    S.msgT = 90
+  }
+  // The sell list may have shrunk; keep the cursor in range (makeSelector re-reads count each render).
+  refreshList()
+  let n = listNow().length
+  if (S.sel.index() >= n) { if (n > 0) { S.sel.setIndex(n - 1) } else { S.sel.setIndex(0) } }
+  // Patch the regions the transaction actually touched instead of re-rendering the tab: gold total,
+  // the footer result message, the right panel back from the stepper to the detail, and — for SELL only
+  // — the list, whose xN counts changed. BUY leaves the stock list untouched.
+  if (repaintGold() === 0) { renderTab(); return }
+  if (S.state === ST_SELL) { if (paintListFast() === 0) { refreshListPanel() }; paintListCursor() }
+  swapRight()
+}
+
+// ── Actions (shared by live input and scripted control) ──────────────────────
+function inTab() {
+  if (S.state === ST_BUY) { return 1 }
+  if (S.state === ST_SELL) { return 1 }
+  return 0
+}
+
+function doNav(d) {
+  let n = listNow().length
+  if (n === 0) { return }
+  let old = S.sel.index()
+  let i = old + d
+  if (i < 0) { i = 0 }
+  if (i >= n) { i = n - 1 }
+  if (i === old) { return }
+  // select() owns moveHi; 1 = viewport scrolled → rebuild list panel only.
+  // Keep the window on the selection, then repaint the rows in place. Both are cheap now: the
+  // repaint is a handful of opaque text writes, not a rebuilt-and-relaid-out node tree.
+  let wasTop = S.listTop
+  S.sel.setIndex(i)
+  scrollToSel()
+  if (S.listTop !== wasTop) {
+    // The window moved, so every row's text changed — full repaint.
+    if (paintListFast() === 0) { refreshListPanel() }
+  } else {
+    // Same window: only the row losing the highlight and the row gaining it are different.
+    paintListRow(old)
+    paintListRow(i)
+  }
+  paintListCursor()
+  // The reference SRPG moves the highlight and the detail on the SAME press. Once the panel exists, patching it in
+  // place is cheap, so do it now — deferring it is what makes the panel visibly trail the cursor.
+  if (S.detReady === 1) {
+    updateDetail()
+    S.detailDirty = 0
+    return
+  }
+  // First fill from a deferred tab open is a full paint; let it settle, but keep the age it has
+  // already accrued so holding the d-pad can't push it past the deadline (see shopUpdate).
+  if (S.detailDirty === 0) { S.dirtyAge = 0 }
+  S.detailDirty = 1
+  S.settleT = DETAIL_SETTLE
+}
+function doAct() {
+  if (S.qtyOpen === 1) { confirmQty() } else { openQty() }
+}
+function doBack() {
+  if (S.qtyOpen === 1) { S.qtyOpen = 0; swapRight() } else { leaveTab() }
+}
+// Update ONE qty line in place with NO flash — delegated to makeStepper.set (uiSetText).
+function doQty(d) {
+  if (S.qtyOpen === 0) { return }
+  S.qty = S.qty + d
+  clampQty()
+  let it = listNow()[S.sel.index()]
+  let total = S.qty * it.price
+  let g = S.goldFn()
+  let after = g - total
+  if (S.state === ST_SELL) { after = g + total }
+  if (STEPPER.set({ qty: S.qty, total: total, after: after, cur: S.cur }) === 0) { refreshRight() }
+}
+
+// Scripted control (for cutscene shops / self-playing demos) — mirror the live inputs.
+export function shopNav(d) { if (S.active === 1) { if (inTab() === 1) { if (S.qtyOpen === 0) { doNav(d) } } } }
+export function shopAct() { if (S.active === 1) { if (inTab() === 1) { doAct() } } }
+export function shopBack() { if (S.active === 1) { if (inTab() === 1) { doBack() } } }
+export function shopQty(d) { if (S.active === 1) { if (inTab() === 1) { doQty(d) } } }
+export function shopState() { return S.state }
+export function shopChoosing() { if (S.qtyOpen === 1) { return 1 } return 0 }
+
+export function shopUpdate() {
+  if (S.active === 0) { return 0 }
+
+  // The deferred tab open. Runs BEFORE the dialog branch so the frame that services it is not also
+  // a frame the dialog paints in.
+  if (S.pending > 0) {
+    let want = S.pending
+    S.pending = 0
+    if (want === 2) { enterTab(1) } else { enterTab(0) }
+    return 1
+  }
+
+  // Dialog-driven states (greet / bye): delegate to the dialog component (hide the list cursor there).
+  if (S.state === ST_GREET) {
+    if (present(PTR) === 1) { pointerHide(PTR) }
+    DLG.update()
+    return 1
+  }
+  if (S.state === ST_BYE) {
+    if (present(PTR) === 1) { pointerHide(PTR) }
+    DLG.update()
+    if (DLG.active() === 0) { shopDismiss() }
+    return 1
+  }
+
+  // A freshly-opened tab is still painting in — advance the stream a batch and skip everything else (no
+  // cursor, no input) until it's fully on screen. The detail then fills via the normal settle below.
+  if (S.streaming === 1) {
+    if (uiStreamStep(STREAM_BUDGET) === 1) {
+      S.streaming = 0
+      // Painted, so geometry exists: take the three boxes and hand the skeleton back.
+      captureBoxes(S.pendList, S.pendRight, S.pendFoot)
+      // Now fill the list into its box. The skeleton's nodes are already gone, so the rows are the
+      // only tree alive while they are built — which is the whole point of deferring them.
+      if (S.listDeferred === 1) { S.listDeferred = 0; if (paintListFast() === 0) { refreshListPanel() } }
+    }
+    return 1
+  }
+
+  // In a BUY/SELL tab: bob the ► cursor at the selected ware each frame.
+  paintListCursor()
+
+  // Transient message expiry — the hint line comes back, nothing else changed.
+  if (S.msgT > 0) {
+    S.msgT = S.msgT - 1
+    if (S.msgT === 0) { S.msg = ""; if (repaintFooter() === 0) { renderTab() } }
+  }
+
+  // Detail fill: only reached for the FIRST paint after a deferred tab open (a cursor move on an
+  // already-painted panel patches in place inside doNav). Rapid arrowing keeps resetting settleT, so
+  // DETAIL_DEADLINE force-flushes it — otherwise holding the d-pad leaves the panel a placeholder,
+  // which is exactly the "detail loads later" feel the selection budget forbids.
+  if (S.detailDirty === 1) {
+    S.settleT = S.settleT - 1
+    S.dirtyAge = S.dirtyAge + 1
+    if (S.settleT <= 0 || S.dirtyAge >= DETAIL_DEADLINE) {
+      S.detailDirty = 0
+      if (S.detReady === 1) { updateDetail() } else { refreshRight() }
+    }
+  }
+
+  // Quantity picker owns input while open (L/R ±1, U/D ±10, A confirm, B cancel).
+  // One keys_edge() per frame — avoid 4–6 separate key_pressed ctx crossings on the hot path.
+  let k = uiKeys()
+  if (S.qtyOpen === 1) {
+    if (uiKeyDown(k, BTN_RIGHT) > 0) { doQty(1) }
+    if (uiKeyDown(k, BTN_LEFT) > 0) { doQty(-1) }
+    if (uiKeyDown(k, BTN_UP) > 0) { doQty(10) }
+    if (uiKeyDown(k, BTN_DOWN) > 0) { doQty(-10) }
+    if (uiKeyDown(k, BTN_A) > 0) { doAct() }
+    if (uiKeyDown(k, BTN_B) > 0) { doBack() }
+    return 1
+  }
+
+  // Tab navigation: Up/Down move, A opens the quantity picker, B leaves the tab.
+  if (uiKeyDown(k, BTN_UP) > 0) { doNav(-1) }
+  if (uiKeyDown(k, BTN_DOWN) > 0) { doNav(1) }
+  if (uiKeyDown(k, BTN_A) > 0) { doAct() }
+  if (uiKeyDown(k, BTN_B) > 0) { doBack() }
+  return 1
+}

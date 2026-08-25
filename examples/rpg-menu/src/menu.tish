@@ -1,0 +1,84 @@
+// menu.tish — a tiny REUSABLE grid/list cursor widget.
+//
+// This is the UI primitive the engine was missing: every RPG menu (inventory
+// grid, equipment list, shop list, pause menu, party screen) is "a cursor over
+// a grid of N cells, wrap/clamp on the d-pad, confirm/cancel with A/B". The
+// engine only had a horizontal Yes/No dialogue choice and the title screen's
+// hard-coded vertical menu; this generalises both.
+//
+// It is LOGIC ONLY — it owns the selected index + input, and the caller draws
+// the cells and the cursor at `index()`. That keeps it art-agnostic and lets
+// the same widget drive a 4-wide icon grid or a 1-wide text list. A list is
+// just `makeCursor(1, n)`.
+//
+// Usage:
+//   let cur = makeCursor(4, bagCount())        // 4 columns
+//   ... each frame ...
+//   if (cur.nav() > 0) { redraw() }            // d-pad moved the cursor
+//   let a = cur.act()                          // 0 none, 1 A (confirm), 2 B (cancel)
+import { key_pressed } from 'cargo:tish_agb'
+
+// tish-agb button codes.
+let BTN_A: i32 = 0
+let BTN_B: i32 = 1
+let BTN_UP: i32 = 6
+let BTN_DOWN: i32 = 7
+let BTN_LEFT: i32 = 8
+let BTN_RIGHT: i32 = 9
+
+export function makeCursor(cols, count) {
+  // State in an object so the returned closures share + mutate it.
+  let st = { i: 0, cols: cols, count: count }
+
+  // Re-target the widget at a new item count (e.g. after buying/selling), and
+  // keep the index in range.
+  let setCount = (n) => {
+    st.count = n
+    if (st.i >= n) {
+      if (n > 0) { st.i = n - 1 } else { st.i = 0 }
+    }
+  }
+
+  // Read the d-pad once. Clamped (not wrapping) 2-D movement over `count` cells
+  // laid out in `cols` columns. Returns 1 if the selection moved, else 0.
+  let nav = () => {
+    if (st.count <= 0) { return 0 }
+    let i = st.i
+    let c = st.cols
+    let moved = 0
+    if (key_pressed(BTN_LEFT) > 0) {
+      if (i % c > 0) { i = i - 1; moved = 1 }
+    }
+    if (key_pressed(BTN_RIGHT) > 0) {
+      if (i % c < c - 1) {
+        if (i + 1 < st.count) { i = i + 1; moved = 1 }
+      }
+    }
+    if (key_pressed(BTN_UP) > 0) {
+      if (i - c >= 0) { i = i - c; moved = 1 }
+    }
+    if (key_pressed(BTN_DOWN) > 0) {
+      if (i + c < st.count) { i = i + c; moved = 1 }
+    }
+    st.i = i
+    return moved
+  }
+
+  // Confirm / cancel edge. 1 = A pressed, 2 = B pressed, 0 = neither.
+  let act = () => {
+    if (key_pressed(BTN_A) > 0) { return 1 }
+    if (key_pressed(BTN_B) > 0) { return 2 }
+    return 0
+  }
+
+  return {
+    index: () => st.i,
+    count: () => st.count,
+    col: () => st.i % st.cols,
+    row: () => (st.i - (st.i % st.cols)) / st.cols,
+    setIndex: (n) => { st.i = n },
+    setCount: setCount,
+    nav: nav,
+    act: act
+  }
+}

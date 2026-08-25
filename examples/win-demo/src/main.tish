@@ -1,0 +1,82 @@
+// win-demo — the smallest thing that proves `win_rect`, `win_circle` and `win_out_layers` work.
+//
+// A repro-sized ROM on purpose. The window registers had never been reachable from tish, so the
+// first question is not "does a stealth game feel good" but "does the hardware do what the native
+// says". `docs/MEMORY.md` is blunt about this: debug with SMALL examples, not full ROMs — a five
+// minute build is not a debugging loop.
+//
+// WHAT YOU SHOULD SEE, in order, on a loop:
+//   0-119   the whole checkerboard, no window at all
+//   120-239 a RECTANGLE of checkerboard, everything outside it black
+//   240-419 a CIRCLE that irises closed and open again
+//
+// If the outside is not black, `win_out_layers(0)` did not take. If the circle is a rectangle, the
+// per-scanline DMA did not arm. If the circle has straight ragged edges, the isqrt is wrong.
+
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  backdrop, terrain_new, terrain_palette, terrain_disc,
+  ui_begin, ui_text, ui_reserve_tiles, ui_clear_rect,
+  win_rect, win_circle, win_off, win_out_layers,
+  frame, log
+} from 'cargo:tish_agb'
+
+let T: i32[] = [0, 0 - 1]     // 0 = frame counter, 1 = last phase painted
+
+backdrop(0x000000)
+ui_reserve_tiles(96)
+ui_begin()
+
+// A checkerboard of terrain discs, so there is something obvious for a window to cut a hole in.
+terrain_new(240, 160)
+terrain_palette(1, 0x40C0FF)
+terrain_palette(2, 0xFFC040)
+let r: i32 = 0
+while (r < 8) {
+  let c: i32 = 0
+  while (c < 12) {
+    let mat: i32 = 1
+    if (((r + c) & 1) === 0) { mat = 2 }
+    terrain_disc(10 + c * 20, 10 + r * 20, 9, mat)
+    c = c + 1
+  }
+  r = r + 1
+}
+
+log("WINDEMO boot")
+
+while (true) {
+  let t: i32 = T[0] % 420
+  let phase: i32 = 0
+  if (t >= 120) { phase = 1 }
+  if (t >= 240) { phase = 2 }
+
+  if (phase === 0) {
+    win_off(0)
+    win_off(1)
+    win_out_layers(63)                       // everything draws everywhere: back to normal
+  } else if (phase === 1) {
+    win_out_layers(0)                        // the darkness
+    win_rect(0, 60, 36, 120, 88)
+  } else {
+    win_out_layers(0)
+    // Iris: closed at the middle of the phase, open at both ends. 180 frames of ramp.
+    let k: i32 = t - 240
+    let rad: i32 = 90 - k
+    if (rad < 0) { rad = 0 - rad }
+    if (rad > 90) { rad = 90 }
+    win_circle(120, 80, rad)
+  }
+
+  if (T[1] !== phase) {
+    T[1] = phase
+    ui_clear_rect(0, 0, 240, 10)
+    if (phase === 0) { ui_text(small, 4, 1, "no window", 0xFFFFFF) }
+    if (phase === 1) { ui_text(small, 4, 1, "win_rect + win_out_layers(0)", 0xFFFFFF) }
+    if (phase === 2) { ui_text(small, 4, 1, "win_circle iris", 0xFFFFFF) }
+    log("WINDEMO phase " + phase)
+  }
+
+  T[0] = T[0] + 1
+  frame()
+}

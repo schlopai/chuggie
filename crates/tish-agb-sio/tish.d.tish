@@ -1,0 +1,4 @@
+declare fn sio_init(): void
+declare fn sio_send(byte: i32): void
+declare fn sio_recv(): i32
+declare fn sio_available(): i32

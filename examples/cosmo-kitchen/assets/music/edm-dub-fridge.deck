@@ -1,0 +1,140 @@
+# Dub Fridge - dub techno
+# Sparse Dub techno. Fake delay taps. Half-time kick.
+deck 1
+bpm 118
+
+track Pad id pad gen gameBoyDmg * 16
+  gen type pulse duty 12_5 env_mode constant vol 4
+  gen vib_rate 1 vib_amt 16
+  note 62 0 3.8 v 50
+  note 62 4 3.8 v 50
+  note 62 8 3.8 v 50
+  note 62 12 3.8 v 50
+  note 60 16 3.8 v 50
+  note 60 20 3.8 v 50
+  note 60 24 3.8 v 50
+  note 60 28 3.8 v 50
+  note 65 32 3.8 v 50
+  note 65 36 3.8 v 50
+  note 65 40 3.8 v 50
+  note 65 44 3.8 v 50
+  note 62 48 3.8 v 50
+  note 62 52 3.8 v 50
+  note 62 56 3.8 v 50
+  note 62 60 3.8 v 50
+
+track Lead id lead gen gameBoyDmg * 16
+  gen type pulse duty 25 env_mode constant vol 9
+  gen vib_rate 2 vib_amt 12
+  note 62 0.5 0.8 v 90
+  note 62 1.5 0.5 v 55
+  note 62 2.25 0.4 v 35
+  note 58 9 1 v 80
+  note 58 10.5 0.6 v 45
+  note 62 16.5 0.8 v 90
+  note 62 17.5 0.5 v 55
+  note 62 18.25 0.4 v 35
+  note 58 25 1 v 80
+  note 58 26.5 0.6 v 45
+  note 62 32.5 0.8 v 90
+  note 62 33.5 0.5 v 55
+  note 62 34.25 0.4 v 35
+  note 58 41 1 v 80
+  note 58 42.5 0.6 v 45
+  note 62 48.5 0.8 v 90
+  note 62 49.5 0.5 v 55
+  note 62 50.25 0.4 v 35
+  note 58 57 1 v 80
+  note 58 58.5 0.6 v 45
+
+track Bass id bass gen gameBoyDmg * 16
+  gen type wave wave_shape sine vol 14
+  note 38 0 4 v 110
+  note 38 4 4 v 110
+  note 38 8 4 v 110
+  note 38 12 4 v 110
+  note 36 16 4 v 110
+  note 36 20 4 v 110
+  note 36 24 4 v 110
+  note 36 28 4 v 110
+  note 41 32 4 v 110
+  note 41 36 4 v 110
+  note 41 40 4 v 110
+  note 41 44 4 v 110
+  note 38 48 4 v 110
+  note 38 52 4 v 110
+  note 38 56 4 v 110
+  note 38 60 4 v 110
+
+track Kick id kick gen gbaDirectSound * 16
+  gen waveform pulse duty 50 vol 14 bitcrush true pitch_drop -9 pitch_dec 0.06
+  adsr a 0 d 0.1 s 0 r 0.03
+  note 34 0 0.14 v 115
+  note 34 2 0.14 v 110
+  note 34 4 0.14 v 115
+  note 34 6 0.14 v 110
+  note 34 8 0.14 v 115
+  note 34 10 0.14 v 110
+  note 34 12 0.14 v 115
+  note 34 14 0.14 v 110
+  note 34 16 0.14 v 115
+  note 34 18 0.14 v 110
+  note 34 20 0.14 v 115
+  note 34 22 0.14 v 110
+  note 34 24 0.14 v 115
+  note 34 26 0.14 v 110
+  note 34 28 0.14 v 115
+  note 34 30 0.14 v 110
+  note 34 32 0.14 v 115
+  note 34 34 0.14 v 110
+  note 34 36 0.14 v 115
+  note 34 38 0.14 v 110
+  note 34 40 0.14 v 115
+  note 34 42 0.14 v 110
+  note 34 44 0.14 v 115
+  note 34 46 0.14 v 110
+  note 34 48 0.14 v 115
+  note 34 50 0.14 v 110
+  note 34 52 0.14 v 115
+  note 34 54 0.14 v 110
+  note 34 56 0.14 v 115
+  note 34 58 0.14 v 110
+  note 34 60 0.14 v 115
+  note 34 62 0.14 v 110
+
+track Hats id hats gen gbaDirectSound * 16
+  gen waveform sine vol 4 bitcrush true
+  adsr a 0 d 0.04 s 0 r 0.02
+  note 84 0.75 0.1 v 50
+  note 79 2.75 0.12 v 45
+  note 84 4.75 0.1 v 50
+  note 79 6.75 0.12 v 45
+  note 84 8.75 0.1 v 50
+  note 79 10.75 0.12 v 45
+  note 84 12.75 0.1 v 50
+  note 79 14.75 0.12 v 45
+  note 84 16.75 0.1 v 50
+  note 79 18.75 0.12 v 45
+  note 84 20.75 0.1 v 50
+  note 79 22.75 0.12 v 45
+  note 84 24.75 0.1 v 50
+  note 79 26.75 0.12 v 45
+  note 84 28.75 0.1 v 50
+  note 79 30.75 0.12 v 45
+  note 84 32.75 0.1 v 50
+  note 79 34.75 0.12 v 45
+  note 84 36.75 0.1 v 50
+  note 79 38.75 0.12 v 45
+  note 84 40.75 0.1 v 50
+  note 79 42.75 0.12 v 45
+  note 84 44.75 0.1 v 50
+  note 79 46.75 0.12 v 45
+  note 84 48.75 0.1 v 50
+  note 79 50.75 0.12 v 45
+  note 84 52.75 0.1 v 50
+  note 79 54.75 0.12 v 45
+  note 84 56.75 0.1 v 50
+  note 79 58.75 0.12 v 45
+  note 84 60.75 0.1 v 50
+  note 79 62.75 0.12 v 45
+

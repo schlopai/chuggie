@@ -1,0 +1,102 @@
+// shop-demo — packages/shop.tish BUY / SELL shop on the shared UI patterns:
+//   • dialog: streamed open, reserved choice slot, uiKeys, in-place choice moves
+//   • shop tab: streamed open, deferred detail, moveHi + DETAIL_SETTLE, makePanel / makeDetailPanel /
+//     makeStepper, uiRelayoutInner for qty toggle, uiKeys
+//
+// THIS file is the game side only: gold + inventory plugged in via stock / bag / gold / onBuy / onSell.
+// Wares + shopkeeper portrait are catalog art (Ninja Adventure), packed by scripts/gen_shop_demo.py.
+//
+// Controls: A / d-pad page the greeting and pick Buy / Sell / Leave; Up/Down move the list; A opens
+// the quantity picker (L/R ±1, U/D ±10, A confirm); B backs out.
+import { shop } from "sheet32:../assets/shop32.png"
+import { body } from "font:../../../assets/fonts/tinypixel.ttf@7"
+import { arrowFont } from "font:../../../assets/fonts/tinypixel.ttf@7"
+import { backdrop, frame } from "cargo:tish_agb"
+import { uiInit } from "../../../packages/ui"
+import { dialogInit } from "../../../packages/dialog"
+import { shopInit, shopOpen, shopUpdate, shopActive } from "../../../packages/shop"
+
+// ── Game model: item catalog (id = index), gold, and inventory (qty per id) ──
+let CAT = [
+  { name: "Potion", icon: 0, buy: 20, sell: 10, desc: "Restores 50 HP to one ally." },
+  { name: "Tonic Scroll", icon: 1, buy: 60, sell: 30, desc: "Cures every status ailment." },
+  { name: "Kunai", icon: 2, buy: 100, sell: 50, desc: "A balanced throwing blade." },
+  { name: "Shuriken", icon: 3, buy: 150, sell: 75, desc: "Pierces light armour." },
+  { name: "Iron Armor", icon: 4, buy: 300, sell: 150, desc: "Sturdy plate. Raises DEF." },
+  { name: "Iron Helm", icon: 5, buy: 220, sell: 110, desc: "Guards the head. Raises DEF." },
+  { name: "Vigor Ring", icon: 6, buy: 500, sell: 250, desc: "A ring of vigor. Raises max HP." },
+  { name: "Ward Amulet", icon: 7, buy: 800, sell: 400, desc: "Wards against dark magic." }
+]
+
+// Mutable state on ONE object so callbacks capture it by reference (bare reassigned module scalars
+// don't survive closure capture on GBA).
+let M = { gold: 1000, inv: [3, 1, 0, 2, 0, 0, 0, 0] }
+
+let STOCK = []
+let bi: i32 = 0
+while (bi < CAT.length) {
+  let c = CAT[bi]
+  STOCK.push({ id: bi, name: c.name, icon: c.icon, price: c.buy, desc: c.desc })
+  bi = bi + 1
+}
+
+function bagList() {
+  let out = []
+  let i = 0
+  while (i < CAT.length) {
+    let q = M.inv[i]
+    if (q > 0) {
+      let c = CAT[i]
+      out.push({ id: i, name: c.name, icon: c.icon, price: c.sell, qty: q, desc: c.desc })
+    }
+    i = i + 1
+  }
+  return out
+}
+
+let goldFn = () => { return M.gold }
+let bagFn = () => { return bagList() }
+let buyFn = (id, qty, cost) => {
+  if (M.gold >= cost) { M.gold = M.gold - cost; M.inv[id] = M.inv[id] + qty; return 1 }
+  return 0
+}
+let sellFn = (id, qty, gain) => {
+  if (M.inv[id] >= qty) { M.inv[id] = M.inv[id] - qty; M.gold = M.gold + gain; return 1 }
+  return 0
+}
+
+let KEEPER = {
+  name: "Merchant", portrait: 8,
+  greet: ["Welcome to my shop, traveler!", "Have a look at my wares."],
+  thanks: "A pleasure doing business. Safe travels!"
+}
+
+backdrop(0x0E0C16)
+uiInit({ font: body, sheet: shop, icons: 16 })
+dialogInit({ font: body, arrowFont: arrowFont, cursorSheet: shop, cursorFrame: 9 })
+// The keeper's dialogue box. Imported HERE rather than by `packages/shop`, which no longer links
+// it — see the note on shop.tish's absent import: linking dialog from the shop pulls dialog and
+// chipsfx into every ROM with a shop, at 38 KB of boot heap.
+import { dialogSay, dialogUpdate, dialogActive, dialogFree } from '../../../packages/dialog'
+
+shopInit({ font: body, cursorSheet: shop, cursorFrame: 9,
+  // The keeper's box. Passed in rather than imported by the shop: linking `./dialog`
+  // from the shop pulls dialog AND chipsfx into every ROM that has a shop, which cost
+  // a large SRPG example 38 KB at boot and killed it. A game that wants a greeting links it.
+  dialog: { say: dialogSay, update: dialogUpdate, active: dialogActive, free: dialogFree },
+})
+
+function openShop() {
+  shopOpen({
+    title: "Item Shop", keeper: KEEPER, mode: "greet",
+    stock: STOCK, bag: bagFn, gold: goldFn, onBuy: buyFn, onSell: sellFn
+  })
+}
+
+openShop()
+
+while (true) {
+  shopUpdate()
+  if (shopActive() === 0) { openShop() }
+  frame()
+}

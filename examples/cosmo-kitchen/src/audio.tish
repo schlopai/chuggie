@@ -1,0 +1,183 @@
+// Cosmo Kitchen audio router — what games call.
+import { deckPlay, deckStop, deckSetIntensity, deckIntensity } from '../../../packages/deck'
+import {
+  chipCoin, chipAccept, chipBlip, chipSlash, chipWhoosh,
+  chipHit, chipCancel, chipChime,
+} from '../../../packages/chipsfx'
+import {
+  sfxSizzle, sfxChop, sfxLadle, sfxMicrowave, sfxOrderBell,
+  sfxCardFlip, sfxPop, sfxFizz, sfxWhistle, sfxFridge,
+  sfxSteam, sfxClink, sfxSpatula, sfxTimer, sfxGreaseFire, sfxBubbling, sfxSpoon,
+} from './sfx'
+
+import { titleNeonDiner } from 'deck:../assets/music/title-neon-diner.deck'
+import { hubStarportMarket } from 'deck:../assets/music/hub-starport-market.deck'
+import { menuClipboard } from 'deck:../assets/music/menu-clipboard.deck'
+import { shopVendomat } from 'deck:../assets/music/shop-vendomat.deck'
+import { zoneHyperspaceCruise } from 'deck:../assets/music/zone-hyperspace-cruise.deck'
+import { zoneAgriDome } from 'deck:../assets/music/zone-agri-dome.deck'
+import { zoneNeonNightMarket } from 'deck:../assets/music/zone-neon-night-market.deck'
+import { zoneCruiseLiner } from 'deck:../assets/music/zone-cruise-liner.deck'
+import { zoneAsteroidDiner } from 'deck:../assets/music/zone-asteroid-diner.deck'
+import { dungeonIcebox } from 'deck:../assets/music/dungeon-icebox.deck'
+import { dungeonSpiceMines } from 'deck:../assets/music/dungeon-spice-mines.deck'
+import { dungeonSugarCaverns } from 'deck:../assets/music/dungeon-sugar-caverns.deck'
+import { dungeonDerelictGalley } from 'deck:../assets/music/dungeon-derelict-galley.deck'
+import { dungeonWasteCompactor } from 'deck:../assets/music/dungeon-waste-compactor.deck'
+import { battleSkilletSkirmish } from 'deck:../assets/music/battle-skillet-skirmish.deck'
+import { battleCardRecipeDuel } from 'deck:../assets/music/battle-card-recipe-duel.deck'
+import { battleRushHour } from 'deck:../assets/music/battle-rush-hour.deck'
+import { bossKitchenShowdown } from 'deck:../assets/music/boss-kitchen-showdown.deck'
+import { deployMiseEnPlace } from 'deck:../assets/music/deploy-mise-en-place.deck'
+import { ambientHoloLounge } from 'deck:../assets/music/ambient-holo-lounge.deck'
+import { edmWarehouseTechno } from 'deck:../assets/music/edm-warehouse-techno.deck'
+import { edmGravityHouse } from 'deck:../assets/music/edm-gravity-house.deck'
+import { edmAcidReactor } from 'deck:../assets/music/edm-acid-reactor.deck'
+import { edmTranceOrbit } from 'deck:../assets/music/edm-trance-orbit.deck'
+import { edmChoppedBreaks } from 'deck:../assets/music/edm-chopped-breaks.deck'
+import { edmDubFridge } from 'deck:../assets/music/edm-dub-fridge.deck'
+import { edmElectroAlley } from 'deck:../assets/music/edm-electro-alley.deck'
+import { stingPlatedVictory } from 'deck:../assets/music/sting-plated-victory.deck'
+import { stingBurnedDefeat } from 'deck:../assets/music/sting-burned-defeat.deck'
+import { stingLevelUp } from 'deck:../assets/music/sting-level-up.deck'
+import { stingSidequest } from 'deck:../assets/music/sting-sidequest.deck'
+import { stingLawWhistle } from 'deck:../assets/music/sting-law-whistle.deck'
+
+function zoneSong(key) {
+  if (key === "title") { return titleNeonDiner }
+  if (key === "hub") { return hubStarportMarket }
+  if (key === "menu") { return menuClipboard }
+  if (key === "shop") { return shopVendomat }
+  if (key === "hyperspace") { return zoneHyperspaceCruise }
+  if (key === "agri") { return zoneAgriDome }
+  if (key === "night") { return zoneNeonNightMarket }
+  if (key === "liner") { return zoneCruiseLiner }
+  if (key === "asteroid") { return zoneAsteroidDiner }
+  if (key === "icebox") { return dungeonIcebox }
+  if (key === "spice") { return dungeonSpiceMines }
+  if (key === "sugar") { return dungeonSugarCaverns }
+  if (key === "galley") { return dungeonDerelictGalley }
+  if (key === "compactor") { return dungeonWasteCompactor }
+  if (key === "deploy") { return deployMiseEnPlace }
+  if (key === "holo") { return ambientHoloLounge }
+  if (key === "techno") { return edmWarehouseTechno }
+  if (key === "house") { return edmGravityHouse }
+  if (key === "acid") { return edmAcidReactor }
+  if (key === "trance") { return edmTranceOrbit }
+  if (key === "breaks") { return edmChoppedBreaks }
+  if (key === "dub") { return edmDubFridge }
+  if (key === "electro") { return edmElectroAlley }
+  return null
+}
+
+function battleSong(key) {
+  if (key === "skirmish") { return battleSkilletSkirmish }
+  if (key === "card") { return battleCardRecipeDuel }
+  if (key === "rush") { return battleRushHour }
+  if (key === "boss") { return bossKitchenShowdown }
+  return null
+}
+
+function stingSong(key) {
+  if (key === "victory") { return stingPlatedVictory }
+  if (key === "defeat") { return stingBurnedDefeat }
+  if (key === "level") { return stingLevelUp }
+  if (key === "sidequest") { return stingSidequest }
+  if (key === "law") { return stingLawWhistle }
+  return null
+}
+
+export function playZone(key) {
+  let song = zoneSong(key)
+  if (present(song) === 0) { return 0 }
+  deckPlay(song)
+  return 1
+}
+
+export function playBattle(key) {
+  let song = battleSong(key)
+  if (present(song) === 0) { return 0 }
+  deckPlay(song)
+  return 1
+}
+
+export function playSting(key) {
+  let song = stingSong(key)
+  if (present(song) === 0) { return 0 }
+  deckPlay(song)
+  return 1
+}
+
+export function setThreat(n) {
+  let level = n
+  if (level < 0) { level = 0 }
+  if (level > 3) { level = 3 }
+  return deckSetIntensity(level)
+}
+
+export function threat() { return deckIntensity() }
+
+export function stopMusic() { deckStop() }
+
+export function sfx(name) {
+  if (name === "sizzle") { sfxSizzle(); return }
+  if (name === "chop") { sfxChop(); return }
+  if (name === "ladle") { sfxLadle(); return }
+  if (name === "microwave") { sfxMicrowave(); return }
+  if (name === "bell") { sfxOrderBell(); return }
+  if (name === "card") { sfxCardFlip(); return }
+  if (name === "pop") { sfxPop(); return }
+  if (name === "fizz") { sfxFizz(); return }
+  if (name === "whistle") { sfxWhistle(); return }
+  if (name === "fridge") { sfxFridge(); return }
+  if (name === "steam") { sfxSteam(); return }
+  if (name === "clink") { sfxClink(); return }
+  if (name === "spatula") { sfxSpatula(); return }
+  if (name === "timer") { sfxTimer(); return }
+  if (name === "grease") { sfxGreaseFire(); return }
+  if (name === "bubble") { sfxBubbling(); return }
+  if (name === "spoon") { sfxSpoon(); return }
+  if (name === "coin") { chipCoin(); return }
+  if (name === "accept") { chipAccept(); return }
+  if (name === "blip") { chipBlip(); return }
+  if (name === "slash") { chipSlash(); return }
+  if (name === "whoosh") { chipWhoosh(); return }
+  if (name === "hit") { chipHit(); return }
+  if (name === "cancel") { chipCancel(); return }
+  if (name === "chime") { chipChime(); return }
+}
+
+export let SONGS = {
+  titleNeonDiner: titleNeonDiner,
+  hubStarportMarket: hubStarportMarket,
+  menuClipboard: menuClipboard,
+  shopVendomat: shopVendomat,
+  zoneHyperspaceCruise: zoneHyperspaceCruise,
+  zoneAgriDome: zoneAgriDome,
+  zoneNeonNightMarket: zoneNeonNightMarket,
+  zoneCruiseLiner: zoneCruiseLiner,
+  zoneAsteroidDiner: zoneAsteroidDiner,
+  dungeonIcebox: dungeonIcebox,
+  dungeonSpiceMines: dungeonSpiceMines,
+  dungeonSugarCaverns: dungeonSugarCaverns,
+  dungeonDerelictGalley: dungeonDerelictGalley,
+  dungeonWasteCompactor: dungeonWasteCompactor,
+  battleSkilletSkirmish: battleSkilletSkirmish,
+  battleCardRecipeDuel: battleCardRecipeDuel,
+  battleRushHour: battleRushHour,
+  bossKitchenShowdown: bossKitchenShowdown,
+  deployMiseEnPlace: deployMiseEnPlace,
+  ambientHoloLounge: ambientHoloLounge,
+  edmWarehouseTechno: edmWarehouseTechno,
+  edmGravityHouse: edmGravityHouse,
+  edmAcidReactor: edmAcidReactor,
+  edmTranceOrbit: edmTranceOrbit,
+  edmChoppedBreaks: edmChoppedBreaks,
+  edmDubFridge: edmDubFridge,
+  edmElectroAlley: edmElectroAlley,
+  stingPlatedVictory: stingPlatedVictory,
+  stingBurnedDefeat: stingBurnedDefeat,
+  stingLevelUp: stingLevelUp,
+  stingSidequest: stingSidequest,
+  stingLawWhistle: stingLawWhistle,
+}

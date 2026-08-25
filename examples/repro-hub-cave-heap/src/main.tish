@@ -1,0 +1,82 @@
+// Repro: fat boxed index left alive across scene_stream → sprite AllocError on next HUD/sprites.
+// Mirrors the topdown RPG port's hubPadAtTile / overworldWarpAt tip-heap on cave enter.
+import { hero } from 'sheet32:../assets/hero.png'
+import { cave } from 'scene:../assets/cave.tmj'
+// ⚠️ THIS MAP LIVES HERE NOW, NOT IN ITS SOURCE GAME. The source game's `debug_hub.tmj` was deleted in
+// `a93986be` — reasonably, it was a debug scaffold — and this repro was the only thing still
+// importing it, so it stopped building and its ROM went stale without anyone noticing. A repro that
+// depends on another example's scaffolding outlives that scaffolding by exactly zero commits, so
+// the map is restored from that commit's parent into this example's OWN assets. The tileset paths
+// inside it still resolve: `assets/` here is the same depth as the original's was.
+import { debugHub } from 'scene:../assets/debug_hub.tmj'
+// hearts.png is 48x16 — SIXTEEN-px cells. The source game imports it as `sheet:` and this repro still said
+// `sheet32:`, which slices nothing and emits an empty SPRITES table (`cannot find value `SPRITES``).
+import { heartsSheet } from 'sheet:../assets/hearts.png'
+import { itemsSheet } from 'sheet32:../assets/items.png'
+import { log, frame, sprite_new, key_pressed } from 'cargo:tish_agb'
+import {
+  mount, create, loadScene, loadSceneRom, hudText, setupHearts, updateHearts, step
+} from '../../../packages/engine'
+
+let fatIndex = {}
+let phase: i32 = 0
+
+function fillFatIndex(n) {
+  fatIndex = {}
+  let i = 0
+  while (i < n) {
+    fatIndex[i * 17 + 3] = i + 1
+    i = i + 1
+  }
+}
+
+function setupHudLite() {
+  setupHearts(heartsSheet, 3, 72, 2, 10)
+  updateHearts(6, 2)
+  hudText(0, 176, 2, "99")
+  hudText(1, 176, 12, "0")
+  hudText(8, 8, 148, "DEBUG HUB")
+  hudText(9, 80, 148, "WALK TO PAD  A")
+}
+
+function enterHub() {
+  loadScene(() => {
+    loadSceneRom(debugHub)
+    fillFatIndex(80)
+    let e = create()
+    e.setSprite(sprite_new(hero))
+    e.setPos(7 * 16 + 2, 8 * 16 + 2)
+    setupHudLite()
+    log("SCENE 200")
+  })
+  phase = 1
+}
+
+function enterCave(dropIndex) {
+  if (dropIndex !== 0) { fatIndex = {} }
+  loadScene(() => {
+    loadSceneRom(cave)
+    let e = create()
+    e.setSprite(sprite_new(hero))
+    e.setPos(7 * 16 + 2, 8 * 16 + 2)
+    setupHearts(heartsSheet, 3, 72, 2, 10)
+    updateHearts(6, 2)
+    hudText(0, 176, 2, "0")
+    // Extra glyph pressure like greet/shop chrome.
+    hudText(8, 8, 148, "CAVE OK")
+    let item = sprite_new(itemsSheet, 4)
+    log("SCENE 100 drop=" + dropIndex + " item=" + item)
+  })
+  phase = 2
+}
+
+mount({})
+enterHub()
+log("repro: A=cave KEEP index (expect AllocError)  B=cave DROP index (expect ok)")
+
+while (true) {
+  step()
+  if (phase === 1 && key_pressed(0) > 0) { enterCave(0) }
+  if (phase === 1 && key_pressed(1) > 0) { enterCave(1) }
+  frame()
+}

@@ -1,0 +1,119 @@
+// chipsfx — sound effects synthesised on the GBA's PSG channels.
+//
+// Every effect here is a single call that costs no ROM and no per-frame work: the pitch sweep and
+// the volume envelope are both hardware, so a rising coin blip is exactly as cheap as a flat beep
+// and neither needs anything updated while it plays. Compare the sampled equivalents these replace
+// — nine WAVs, ~40 KB, each occupying one of the software mixer's eight voices while it sounds.
+//
+// Channel etiquette: tonal effects take channel 2 (the harmony — the least missed of the four) and
+// percussive ones take channel 4 (the drum). Each borrows its channel from the sequencer for the
+// length of the effect and the music reclaims it automatically. Channel 1 carries the melody and is
+// deliberately left alone, so effects never punch a hole in the tune.
+import { psg_square, psg_slide, psg_noise, chip_borrow } from 'cargo:tish_agb'
+
+// MIDI note numbers, for legibility at the call sites below.
+let C5: i32 = 72
+let E5: i32 = 76
+let G5: i32 = 79
+let C6: i32 = 84
+let E6: i32 = 88
+
+// Sound effects are short; these are frame counts at 60fps.
+let VERY_SHORT: i32 = 4
+let SHORT: i32 = 10
+let MEDIUM: i32 = 18
+
+// A bright rising two-tone — chests, pickups, anything the player should feel good about.
+// The hardware sweep does the rise, so this is one register write's worth of work.
+export function chipCoin() {
+  chip_borrow(1, MEDIUM)
+  psg_slide(E6, 2, 13, 3, 40, 4, 2, 0)   // ch1: E6, 50% duty, sweeping up
+}
+
+// A soft confirm tick for menus and dialogue advance.
+export function chipAccept() {
+  chip_borrow(2, SHORT)
+  psg_square(2, G5, 2, 10, 4, 16)
+}
+
+// The dialogue typewriter. Deliberately the quietest thing here: it fires once per revealed letter
+// group, so anything with presence becomes maddening within one conversation.
+export function chipBlip() {
+  chip_borrow(2, VERY_SHORT)
+  psg_square(2, C6, 1, 5, 6, 6)
+}
+
+// A short bright hiss — the sword swing.
+export function chipSlash() {
+  chip_borrow(4, SHORT)
+  psg_noise(12, 3, 20, 3, 0, 0)
+}
+
+// Lower and airier than the slash: the dash.
+export function chipWhoosh() {
+  chip_borrow(4, MEDIUM)
+  psg_noise(10, 4, 28, 6, 0, 0)
+}
+
+// A falling pitch — the thrown star leaving the hand.
+//
+// Channel 2, not 1. This is a TONAL effect, so the etiquette at the top of this file already put
+// it there in principle, and the exception mattered the moment there was music underneath: a
+// puzzle player throws about once a second, and on channel 1 every throw punched a hole straight
+// through the melody. Channel 2 is the harmony, which is the one the rule says to spend.
+export function chipThrow() {
+  chip_borrow(2, SHORT)
+  psg_slide(C6, 1, 11, 3, 24, 3, 2, 1)   // sweeping down
+}
+
+// A blunt, low impact.
+export function chipHit() {
+  chip_borrow(4, SHORT)
+  psg_noise(14, 4, 18, 7, 0, 1)          // narrow LFSR: metallic rather than airy
+}
+
+// A short descending tone for cancel/back.
+export function chipCancel() {
+  chip_borrow(2, SHORT)
+  psg_square(2, C5, 1, 9, 4, 14)
+}
+
+// A short upward pluck — picking something up off the board. Quieter and drier than `chipCoin`,
+// because a puzzle game fires this every time the player touches the field and a fanfare there
+// wears out inside one round.
+export function chipPluck() {
+  chip_borrow(2, VERY_SHORT)
+  psg_square(2, G5, 1, 9, 5, 8)
+}
+
+// A balloon bursting: a snap of narrow-LFSR noise, short enough to fire several in a row without
+// smearing into a hiss.
+export function chipPop() {
+  chip_borrow(4, VERY_SHORT)
+  psg_noise(11, 6, 8, 4, 0, 1)
+}
+
+// A Bubble Balloon popping out of the pierrot's hands. Deliberately NOT the balloon-burst sound:
+// nothing was cleared and nothing was scored, and a player who hears a pop expects points. A
+// short wide-noise puff reads as a dud — the tempo you just spent, with nothing to show for it.
+export function chipBubble() {
+  chip_borrow(4, VERY_SHORT)
+  psg_noise(6, 3, 7, 2, 0, 0)
+}
+
+// A tone that climbs with `step` — the chain counter. Each link of a chain sounds a semitone
+// higher than the last, which is what makes a long chain audible as a rising run rather than the
+// same note repeated. Clamped so a 30-chain does not walk off the top of the register.
+export function chipChain(step: i32) {
+  let n = step
+  if (n < 1) { n = 1 }
+  if (n > 16) { n = 16 }
+  chip_borrow(2, SHORT)
+  psg_square(2, E5 + n * 2, 2, 11, 3, 14)
+}
+
+// A rising three-step fanfare's first note — used for level/area transitions.
+export function chipChime() {
+  chip_borrow(2, MEDIUM)
+  psg_square(2, E5, 2, 11, 2, 40)
+}

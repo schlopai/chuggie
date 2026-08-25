@@ -1,0 +1,148 @@
+// rpg.tish — the reusable INVENTORY / EQUIPMENT / STATS / GOLD model.
+//
+// All game-agnostic RPG bookkeeping lives here, with no rendering and no
+// per-frame cost (menus are cold — plain boxed objects/arrays are fine, no
+// need for the cvar/lean-tick machinery the shmup kit uses for hot loops).
+// A game drives it through these exports; the screen (main.tish) only reads
+// state back out to draw it.
+//
+// Data model:
+//   - PC   : the character's BASE stats + current hp + gold (a plain object).
+//   - BAG  : parallel arrays ids[]/qty[] (a stack of {itemId, count}).
+//   - EQ   : one slot per SLOT_* index (1..4); -1 = empty. EQ[0] unused.
+// Derived stats = base + the sum of every equipped item's modifier.
+import { item, shopId, SLOT_NONE } from './items'
+
+let PC = { atk: 5, def: 3, spd: 5, maxHp: 30, hp: 18, gold: 80 }
+let BAG = { ids: [], qty: [] }
+let EQ = [-1, -1, -1, -1, -1]
+
+// Remove index i from a plain array by shifting the tail down + popping. (We
+// avoid Array.splice; push/pop/length are the primitives we rely on.)
+function removeAt(arr, i) {
+  let k = i
+  while (k < arr.length - 1) {
+    arr[k] = arr[k + 1]
+    k = k + 1
+  }
+  arr.pop()
+}
+
+// Add n of item `id` to the bag, stacking onto an existing entry if present.
+export function addItem(id, n) {
+  let k = 0
+  while (k < BAG.ids.length) {
+    if (BAG.ids[k] === id) { BAG.qty[k] = BAG.qty[k] + n; return }
+    k = k + 1
+  }
+  BAG.ids.push(id)
+  BAG.qty.push(n)
+}
+
+// Remove one of the bag entry at index bi (dropping the entry at qty 0).
+function consume(bi) {
+  BAG.qty[bi] = BAG.qty[bi] - 1
+  if (BAG.qty[bi] <= 0) {
+    removeAt(BAG.ids, bi)
+    removeAt(BAG.qty, bi)
+  }
+}
+
+// Sum one modifier (0 atk, 1 def, 2 spd, 3 hp) across all equipped gear.
+function sumStat(which) {
+  let s = 0
+  let slot = 1
+  while (slot <= 4) {
+    let id = EQ[slot]
+    if (id >= 0) {
+      let it = item(id)
+      if (which === 0) { s = s + it.atk }
+      if (which === 1) { s = s + it.def }
+      if (which === 2) { s = s + it.spd }
+      if (which === 3) { s = s + it.hp }
+    }
+    slot = slot + 1
+  }
+  return s
+}
+
+export function atk() { return PC.atk + sumStat(0) }
+export function def() { return PC.def + sumStat(1) }
+export function spd() { return PC.spd + sumStat(2) }
+export function maxHp() { return PC.maxHp + sumStat(3) }
+function clampHp() { if (PC.hp > maxHp()) { PC.hp = maxHp() } }
+export function hp() { clampHp(); return PC.hp }
+export function gold() { return PC.gold }
+
+export function bagCount() { return BAG.ids.length }
+export function bagId(i) { return BAG.ids[i] }
+export function bagQty(i) { return BAG.qty[i] }
+export function equipped(slot) { return EQ[slot] }
+
+// Use OR equip the bag item at index bi, whichever fits.
+// Returns 0 = nothing happened, 1 = consumable used, 2 = equipped.
+export function activate(bi) {
+  if (bi < 0) { return 0 }
+  if (bi >= BAG.ids.length) { return 0 }
+  let id = BAG.ids[bi]
+  let it = item(id)
+  if (it.slot === SLOT_NONE) {
+    if (it.heal > 0) {
+      PC.hp = PC.hp + it.heal
+      clampHp()
+      consume(bi)
+      return 1
+    }
+    return 0
+  }
+  // Equippable: swap into its slot, prior gear falls back into the bag.
+  let prev = EQ[it.slot]
+  EQ[it.slot] = id
+  consume(bi)
+  if (prev >= 0) { addItem(prev, 1) }
+  clampHp()
+  return 2
+}
+
+// Take the item out of equipment slot `slot` back into the bag.
+export function unequip(slot) {
+  let id = EQ[slot]
+  if (id < 0) { return 0 }
+  EQ[slot] = -1
+  addItem(id, 1)
+  clampHp()
+  return 1
+}
+
+// Buy shop entry si (buy-only stock). Returns 1 on success, 0 if too poor.
+export function buy(si) {
+  let id = shopId(si)
+  let it = item(id)
+  if (PC.gold < it.price) { return 0 }
+  PC.gold = PC.gold - it.price
+  addItem(id, 1)
+  return 1
+}
+
+// Sell the bag item at index bi for half its price (rounded down).
+export function sell(bi) {
+  if (bi < 0) { return 0 }
+  if (bi >= BAG.ids.length) { return 0 }
+  let it = item(BAG.ids[bi])
+  let half = it.price % 2
+  PC.gold = PC.gold + (it.price - half) / 2
+  consume(bi)
+  return 1
+}
+
+// Set up the opening loadout (called once at boot).
+export function rpgInit() {
+  PC.atk = 5; PC.def = 3; PC.spd = 5; PC.maxHp = 30; PC.hp = 18; PC.gold = 80
+  BAG.ids = []; BAG.qty = []
+  EQ = [-1, -1, -1, -1, -1]
+  EQ[1] = 0            // start with a Kunai equipped
+  addItem(10, 2)       // 2 Potions
+  addItem(9, 1)        // a Bracer
+  addItem(5, 1)        // an Iron Helm
+  addItem(11, 1)       // a Scroll (to sell)
+}

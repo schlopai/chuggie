@@ -1,0 +1,88 @@
+# Hollow Shrine — the dungeon theme.
+#
+# Replaces dungeon.wav: 60 seconds, 1.26 MB. The counterpart to town.chip in every way — A minor
+# instead of C major, a narrow 12.5% pulse for the lead instead of a round 50% one, a drum on the
+# noise channel, and a slower 11 frames a row so it broods rather than skips.
+#
+# 16 bars, eight rows to the bar. Chords: Am F | Am E | Am F | Dm E, twice.
+tempo 11
+loop 0
+
+# A darker table than the village's triangle: a sawtooth-ish ramp, which is buzzier and reads as
+# "unpleasant place" without needing the melody to do the work.
+wave saw 0123456789ABCDEF0123456789ABCDEF
+
+inst lead  square duty=0 vol=10 decay=0
+inst harm  square duty=1 vol=5  decay=0
+inst bass  wave   table=saw vol=1
+inst drum  noise  vol=8  decay=4 len=12 shift=6
+
+# ── A section ────────────────────────────────────────────────────────────────────────────────────
+ch1 lead | A4 .  .  .  C5 .  B4 .  |
+ch1      | A4 .  .  .  .  .  -  .  |
+ch1      | F4 .  .  .  A4 .  G4 .  |
+ch1      | E4 .  .  .  .  .  -  .  |
+ch1      | A4 .  B4 .  C5 .  D5 .  |
+ch1      | E5 .  .  .  .  .  -  .  |
+ch1      | F5 .  E5 .  D5 .  C5 .  |
+ch1      | B4 .  .  .  .  .  -  .  |
+# ── B section: the shrine proper ─────────────────────────────────────────────────────────────────
+ch1      | E5 .  .  .  D5 .  C5 .  |
+ch1      | B4 .  .  .  A4 .  .  .  |
+ch1      | G4 .  .  .  A4 .  B4 .  |
+ch1      | C5 .  .  .  .  .  -  .  |
+ch1      | D5 .  C5 .  B4 .  A4 .  |
+ch1      | G#4 . .  .  B4 .  .  .  |
+ch1      | A4 .  .  .  E4 .  .  .  |
+ch1      | A4 .  .  .  .  .  -  .  |
+
+ch2 harm | A3 .  E4 .  A3 .  E4 .  |
+ch2      | A3 .  E4 .  A3 .  E4 .  |
+ch2      | F3 .  C4 .  F3 .  C4 .  |
+ch2      | E3 .  B3 .  E3 .  B3 .  |
+ch2      | A3 .  E4 .  A3 .  E4 .  |
+ch2      | A3 .  E4 .  A3 .  E4 .  |
+ch2      | F3 .  C4 .  F3 .  C4 .  |
+ch2      | E3 .  B3 .  E3 .  B3 .  |
+ch2      | A3 .  E4 .  A3 .  E4 .  |
+ch2      | A3 .  E4 .  A3 .  E4 .  |
+ch2      | F3 .  C4 .  F3 .  C4 .  |
+ch2      | C4 .  G4 .  C4 .  G4 .  |
+ch2      | D3 .  A3 .  D3 .  A3 .  |
+ch2      | E3 .  B3 .  E3 .  B3 .  |
+ch2      | A3 .  E4 .  A3 .  E4 .  |
+ch2      | A3 .  .  .  .  .  -  .  |
+
+ch3 bass | A1 .  .  .  A1 .  E2 .  |
+ch3      | A1 .  .  .  A1 .  E2 .  |
+ch3      | F1 .  .  .  F1 .  C2 .  |
+ch3      | E1 .  .  .  E1 .  B1 .  |
+ch3      | A1 .  .  .  A1 .  E2 .  |
+ch3      | A1 .  .  .  A1 .  E2 .  |
+ch3      | F1 .  .  .  F1 .  C2 .  |
+ch3      | E1 .  .  .  E1 .  B1 .  |
+ch3      | A1 .  .  .  A1 .  E2 .  |
+ch3      | A1 .  .  .  A1 .  E2 .  |
+ch3      | F1 .  .  .  F1 .  C2 .  |
+ch3      | C2 .  .  .  C2 .  G2 .  |
+ch3      | D1 .  .  .  D1 .  A1 .  |
+ch3      | E1 .  .  .  E1 .  B1 .  |
+ch3      | A1 .  .  .  A1 .  E2 .  |
+ch3      | A1 .  .  .  .  .  -  .  |
+
+ch4 drum | x  .  .  .  x  .  .  .  |
+ch4      | x  .  .  .  x  .  x  .  |
+ch4      | x  .  .  .  x  .  .  .  |
+ch4      | x  .  .  .  x  .  x  .  |
+ch4      | x  .  .  .  x  .  .  .  |
+ch4      | x  .  .  .  x  .  x  .  |
+ch4      | x  .  .  .  x  .  .  .  |
+ch4      | x  .  .  .  x  .  x  .  |
+ch4      | x  .  .  .  x  .  .  .  |
+ch4      | x  .  .  .  x  .  x  .  |
+ch4      | x  .  .  .  x  .  .  .  |
+ch4      | x  .  .  .  x  .  x  .  |
+ch4      | x  .  .  .  x  .  .  .  |
+ch4      | x  .  .  .  x  .  x  .  |
+ch4      | x  .  x  .  x  .  x  .  |
+ch4      | x  .  .  .  .  .  -  .  |

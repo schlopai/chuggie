@@ -1,0 +1,307 @@
+// keylock.tish — the lock-and-key layer of a dungeon: doors, keys, bombable walls, shutters,
+// pushable blocks and the sockets they sit on.
+//
+// ── WHY THIS EXISTS ───────────────────────────────────────────────────────────────────────────
+//
+// The engine review's structural note was that examples had become the documentation: forty `iso-*`
+// demos against one `platformer.tish`. Its proposed test was this exact package — *"switches,
+// pushable blocks, keys/locks, room triggers — written twice already in the two topdown RPG
+// ports. Extract it."* — because **a genre is proven when someone else's example can be
+// built on the package without touching it.**
+//
+// So the rules below are not invented here. They are the ones a dungeon-doors spike established
+// against a real dungeon map, lifted out of it and made map-agnostic. That example is untouched and
+// still passes; this package is what a NEW dungeon should be built on.
+//
+// ⚠️ THE NAME IS NOT `dungeon.tish` — that is already the BSP generator. Generation and lock-and-key
+// are different jobs and a game usually wants both.
+//
+// ── THE FOUR RULES THAT ARE EASY TO GET WRONG ─────────────────────────────────────────────────
+//
+// 1. **A door is ONE object shared by two rooms.** Opening it must mark both halves, or you walk
+//    through from the north and find it still locked from the south.
+// 2. **Keys are a SINGLE GLOBAL counter**, not per-door and not per-room. A key picked up anywhere
+//    opens a lock anywhere.
+// 3. **The Magic Key spends nothing.** It is not "99 keys", it is a different branch — otherwise a
+//    counter bug silently consumes it.
+// 4. **A shutter is not a locked door.** It has no key and cannot be forced; it opens when the room
+//    is cleared, and only then.
+//
+// ── PERSISTENCE COMPOSES WITH `flags.tish` ────────────────────────────────────────────────────
+//
+// This package holds no save code. Give it a flag base and every door's open state maps to a flag id
+// (`base + doorId`), so a dungeon remembers what you unlocked through the same versioned, checksummed
+// SRAM everything else uses. A package that grew its own save format would be a second thing to keep
+// in step with the cartridge.
+//
+//     klInit({ flagBase: 64 })
+//     let d = klAddDoor(4, 2, KL_LOCKED)
+//     klGiveKey(1)
+//     klTryOpen(d)        // -> KL_OK, and the key is spent
+//     klLoad()            // on boot: re-open everything the flags say was opened
+
+import { flagOn, flagSet } from './flags'
+
+// Door kinds. The numbering follows the NES original's dungeon door table.
+export let KL_OPEN: i32 = 0        // a doorway, always passable
+export let KL_WALL: i32 = 1        // not a door at all
+export let KL_FALSE: i32 = 2       // looks like a door, never opens (the trick one)
+export let KL_BOMBABLE: i32 = 4    // opens to a blast, not to a key
+export let KL_LOCKED: i32 = 5      // opens to a key
+export let KL_SHUTTER: i32 = 7     // opens when the room is cleared, and by nothing else
+
+// `klTryOpen` results — a code, not a bool, because "you need a key" and "that is a wall" want
+// different sounds and different messages.
+export let KL_OK: i32 = 0
+export let KL_ALREADY: i32 = 1
+export let KL_NEED_KEY: i32 = 2
+export let KL_NEED_BOMB: i32 = 3
+export let KL_IMPOSSIBLE: i32 = 4  // wall, false door, or a shutter with the room still hostile
+
+let MAXD: i32 = 32
+let dCol: i32[] = []
+let dRow: i32[] = []
+let dKind: i32[] = []
+let dOpen: i32[] = []
+let dRoom: i32[] = []       // which room it belongs to, for shutters
+let dTwin: i32[] = []       // the other half, or -1 — see rule 1
+let dCount: i32 = 0
+
+let MAXB: i32 = 16
+let bCol: i32[] = []
+let bRow: i32[] = []
+let bHome: i32[] = []       // 1 while the block sits on a socket
+let bCount: i32 = 0
+
+let sCol: i32[] = []
+let sRow: i32[] = []
+let sCount: i32 = 0
+
+//   0 keys  1 magic  2 flagBase  3 ready
+let K: i32[] = [0, 0, 0, 0]
+let K_KEYS: i32 = 0
+let K_MAGIC: i32 = 1
+let K_BASE: i32 = 2
+let K_READY: i32 = 3
+
+/// `flagBase` is the first flag id this dungeon owns; door `i` uses `flagBase + i`. Pass a base that
+/// does not collide with the game's own flags — `flags.tish` has 1,024 of them.
+export function klInit(cfg) {
+  while (dCount > 0) { dCount = dCount - 1 }
+  bCount = 0
+  sCount = 0
+  K[K_KEYS] = 0
+  K[K_MAGIC] = 0
+  K[K_BASE] = 0
+  if (cfg !== null && cfg.flagBase !== null) { K[K_BASE] = cfg.flagBase }
+  K[K_READY] = 1
+}
+
+export function klAddDoor(col: i32, row: i32, kind: i32): i32 {
+  if (dCount >= MAXD) { return 0 - 1 }
+  dCol.push(col)
+  dRow.push(row)
+  dKind.push(kind)
+  dRoom.push(0)
+  dTwin.push(0 - 1)
+  let start: i32 = 0
+  if (kind === KL_OPEN) { start = 1 }
+  dOpen.push(start)
+  dCount = dCount + 1
+  return dCount - 1
+}
+
+/// Which room a door belongs to, for `klClearRoom`.
+export function klDoorRoom(id: i32, room: i32) {
+  if (id >= 0 && id < dCount) { dRoom[id] = room }
+}
+
+/// ⚠️ RULE 1. Tie the two halves of one doorway together. Opening either opens both — without this a
+/// door unlocked from the north is still locked from the south, which is the single most confusing
+/// dungeon bug there is because the door visibly opened.
+export function klPair(a: i32, b: i32) {
+  if (a < 0 || b < 0 || a >= dCount || b >= dCount) { return }
+  dTwin[a] = b
+  dTwin[b] = a
+}
+
+export function klDoorCount(): i32 { return dCount }
+export function klDoorKind(id: i32): i32 {
+  if (id < 0 || id >= dCount) { return KL_WALL }
+  return dKind[id]
+}
+export function klIsOpen(id: i32): i32 {
+  if (id < 0 || id >= dCount) { return 0 }
+  return dOpen[id]
+}
+export function klDoorCol(id: i32): i32 { return dCol[id] }
+export function klDoorRow(id: i32): i32 { return dRow[id] }
+
+/// The door at a cell, or -1.
+export function klDoorAt(col: i32, row: i32): i32 {
+  let i: i32 = 0
+  while (i < dCount) {
+    if (dCol[i] === col && dRow[i] === row) { return i }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+// Open a door and its twin, and write both through to the flag store.
+function openBoth(id: i32) {
+  dOpen[id] = 1
+  flagSet(K[K_BASE] + id, 1)
+  let t: i32 = dTwin[id]
+  if (t >= 0) {
+    dOpen[t] = 1
+    flagSet(K[K_BASE] + t, 1)
+  }
+}
+
+/// Try to open a door. Returns a `KL_*` code; spends a key only on a genuine `KL_LOCKED` open, and
+/// only when the Magic Key is not in play (rule 3).
+export function klTryOpen(id: i32): i32 {
+  if (id < 0 || id >= dCount) { return KL_IMPOSSIBLE }
+  if (dOpen[id] === 1) { return KL_ALREADY }
+  let k: i32 = dKind[id]
+  if (k === KL_WALL || k === KL_FALSE) { return KL_IMPOSSIBLE }
+  if (k === KL_SHUTTER) { return KL_IMPOSSIBLE }        // rule 4: only `klClearRoom` opens these
+  if (k === KL_BOMBABLE) { return KL_NEED_BOMB }
+  if (k === KL_LOCKED) {
+    if (K[K_MAGIC] === 1) {
+      openBoth(id)
+      return KL_OK
+    }
+    if (K[K_KEYS] <= 0) { return KL_NEED_KEY }
+    K[K_KEYS] = K[K_KEYS] - 1
+    openBoth(id)
+    return KL_OK
+  }
+  openBoth(id)
+  return KL_OK
+}
+
+/// A blast at a cell. Opens any BOMBABLE door within one cell of it, and returns how many.
+export function klBomb(col: i32, row: i32): i32 {
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < dCount) {
+    if (dKind[i] === KL_BOMBABLE && dOpen[i] === 0) {
+      let dc: i32 = dCol[i] - col
+      let dr: i32 = dRow[i] - row
+      if (dc < 0) { dc = 0 - dc }
+      if (dr < 0) { dr = 0 - dr }
+      if (dc <= 1 && dr <= 1) {
+        openBoth(i)
+        n = n + 1
+      }
+    }
+    i = i + 1
+  }
+  return n
+}
+
+/// Rule 4: the room is clear, so its shutters open. Nothing else opens them.
+export function klClearRoom(room: i32): i32 {
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < dCount) {
+    if (dKind[i] === KL_SHUTTER && dRoom[i] === room && dOpen[i] === 0) {
+      openBoth(i)
+      n = n + 1
+    }
+    i = i + 1
+  }
+  return n
+}
+
+// ── keys (rule 2: one global counter) ────────────────────────────────────────────────────────
+export function klKeys(): i32 { return K[K_KEYS] }
+export function klGiveKey(n: i32) { K[K_KEYS] = K[K_KEYS] + n }
+export function klHasMagic(): i32 { return K[K_MAGIC] }
+export function klGiveMagic() { K[K_MAGIC] = 1 }
+
+// ── pushable blocks and sockets ──────────────────────────────────────────────────────────────
+export function klAddBlock(col: i32, row: i32): i32 {
+  if (bCount >= MAXB) { return 0 - 1 }
+  bCol.push(col)
+  bRow.push(row)
+  bHome.push(0)
+  bCount = bCount + 1
+  return bCount - 1
+}
+export function klAddSocket(col: i32, row: i32) {
+  sCol.push(col)
+  sRow.push(row)
+  sCount = sCount + 1
+}
+export function klBlockCount(): i32 { return bCount }
+export function klBlockCol(i: i32): i32 { return bCol[i] }
+export function klBlockRow(i: i32): i32 { return bRow[i] }
+export function klBlockHome(i: i32): i32 { return bHome[i] }
+export function klSocketCount(): i32 { return sCount }
+export function klSocketCol(i: i32): i32 { return sCol[i] }
+export function klSocketRow(i: i32): i32 { return sRow[i] }
+
+export function klBlockAt(col: i32, row: i32): i32 {
+  let i: i32 = 0
+  while (i < bCount) {
+    if (bCol[i] === col && bRow[i] === row) { return i }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+function socketAt(col: i32, row: i32): i32 {
+  let i: i32 = 0
+  while (i < sCount) {
+    if (sCol[i] === col && sRow[i] === row) { return 1 }
+    i = i + 1
+  }
+  return 0
+}
+
+/// Push the block at (col,row) one cell along (dc,dr). Returns 1 if it moved.
+///
+/// `blocked` is the game's own wall test, passed in rather than assumed: this package has no map.
+/// A block will not push into a wall, into another block, or off the grid.
+export function klPush(col: i32, row: i32, dc: i32, dr: i32, blocked): i32 {
+  let b: i32 = klBlockAt(col, row)
+  if (b < 0) { return 0 }
+  let nc: i32 = col + dc
+  let nr: i32 = row + dr
+  if (blocked(nc, nr) === 1) { return 0 }
+  if (klBlockAt(nc, nr) >= 0) { return 0 }
+  bCol[b] = nc
+  bRow[b] = nr
+  bHome[b] = socketAt(nc, nr)
+  return 1
+}
+
+/// How many sockets currently have a block on them.
+export function klSocketsFilled(): i32 {
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < bCount) {
+    n = n + bHome[i]
+    i = i + 1
+  }
+  return n
+}
+
+/// Every socket filled — the usual trigger for a shutter or a reward.
+export function klSocketsSolved(): i32 {
+  if (sCount === 0) { return 0 }
+  if (klSocketsFilled() >= sCount) { return 1 }
+  return 0
+}
+
+// ── persistence, through flags.tish ──────────────────────────────────────────────────────────
+/// Re-open every door the flag store says was opened. Call it after `flagsInit`, on boot.
+export function klLoad() {
+  let i: i32 = 0
+  while (i < dCount) {
+    if (flagOn(K[K_BASE] + i) === 1) { dOpen[i] = 1 }
+    i = i + 1
+  }
+}

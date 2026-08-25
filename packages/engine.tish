@@ -1,0 +1,728 @@
+// tish-gba-game-engine — the tish authoring layer over the raw Rust engine ABI.
+//
+// Components are exported object literals; each lifecycle hook takes ONE context object
+// and destructures what it needs — `({ this })`, `({ this, other })`, `({ dt })`.
+// `mount(module)` gathers the named exports and registers each under its export name.
+import {
+  spawn, despawn, set_transform, set_body, set_collider, attach_sprite, set_sprite_offset,
+  entity_x, entity_y, overlaps, define_component, add_behaviour, world_step,
+  grid_setup, grid_set_solid, grid_set_oneway, grid_set_ladder, tile_ladder,
+  grid_from_map, grid_from_gids, attach_grid, grid_step, grid_moving, grid_interact,
+  set_anim, set_walk, anim_play, grid_facing, grid_col, grid_row, entity_sprite, clear_world,
+  camera_transitioning,
+  set_camera_target, set_room_camera,
+  set_platformer, platformer_walk, platformer_run, platformer_jump, platformer_jump_release,
+  platformer_drop, platformer_grounded, platformer_blocked, platformer_bounce, tile_solid, set_patrol,
+  platformer_vy, platformer_set_vy, platformer_set_speed, platformer_hold, platformer_face,
+  platformer_interact, platformer_can_interact,
+  platformer_set_physics, platformer_launch, set_carrier, nearest_tag, entity_dist,
+  set_topdown, topdown_snap, topdown_speed, topdown_move, topdown_facing, topdown_moving, topdown_knockback, swing,
+  topdown_interact, set_chase, set_blocker,
+  set_health, set_hp, damage, heal, health_hp, health_max, health_alive, entity_on_screen,
+  set_tag, entity_tag, set_hurt, set_lifetime, set_despawn_offscreen
+} from 'cargo:tish_gba_game_engine'
+import {
+  sprite_set_frame, sprite_set_flip, key_pressed, key_released, hud_hearts, hud_hearts_update,
+  hud_text, bg_clear, sprite_clear, ui_clear, camera_x, camera_y,
+  tilemap_new, tilemap_terrain, tilemap_stream, tilemap_stream_terrain,
+  map_stream, scene_stream, scene_bands, scene_bg_visible,
+  map_spawn_count, map_spawn_col, map_spawn_row, map_spawn_kind, map_spawn_a, map_spawn_b,
+  map_spawn_next_in,
+  dialogue_show, dialogue_ask, dialogue_active, dialogue_is_choice,
+  dialogue_move, dialogue_advance, dialogue_pump
+} from 'cargo:tish_agb'
+import { runSceneHooks, memMark } from './scene_hooks'
+
+export function isCameraTransitioning() {
+  return camera_transitioning()
+}
+
+// ── entity wrappers are POOLED, not per-entity ────────────────────────────────────────────────────
+// MEASURED, by examples/bench-memory on real hardware: ONE wrapper object costs 10.6K. It is ~62 keys
+// at ~90 bytes each (the hash map's bucket, plus the key string) and ~57 bytes per method closure. On a
+// 138K heap that is not a cache, it is the whole machine — eleven entities and nothing else OOM'd the
+// bench, which is exactly why an 18-entity area could load its world and then die allocating 2K for a
+// dialog box. Every crash chased in this engine has been an allocation failure, and this was it.
+//
+// So wrappers are SLOTS, reused, and there are only ever a few. Cost stops scaling with the world: 18
+// entities went from ~190K of wrappers to ~21K, and an area can be as big as the art allows.
+//
+// There are two kinds of slot, because they need different lifetimes:
+//
+//   • A behaviour hook's `this` and `other` get slots of their own, held for the whole hook. Nothing
+//     else can take them, so spawning INSIDE a hook — `spawnFx(...)` and then `this.despawn()` — still
+//     despawns the entity whose hook is running, which is the only thing an author could reasonably
+//     expect. (With one shared rotation it despawned the effect it had just spawned.)
+//   • `create()` and `entity()` hand out a rotating slot, valid for the expression you called them in.
+//
+// THE CONTRACT: a wrapper from `create()`/`entity()` is on loan. Read it, act on it, drop it. To hold an
+// entity across frames or in a list, hold its `id` — a number — and call `entity(id)` when you want the
+// methods back. A stored wrapper names whichever entity has since borrowed the slot, and the symptom is
+// not a crash: akari parked a shrine room through stored wrappers and despawned its own player.
+// Hook slots are a STACK, one level per nesting depth, because hooks nest: `this.interactTD(10)` fires
+// the faced entity's `onInteract` from inside the caller's `update`, and a single slot would leave the
+// outer `this` pointing at whoever was talked to for the rest of the frame. Levels are built on demand,
+// so a game whose hooks never nest pays for exactly one.
+let SELFS = []
+let OTHERS = []
+let DEPTH: i32 = 0
+let POOL = []
+let POOLN: i32 = 2
+let POOLI: i32 = 0
+
+// entityRefs(n) — how many ROTATING slots `create()`/`entity()` share (hook slots are separate and
+// always exist). Two is enough for one nested call, `entity(a).overlaps(entity(b))`. Raise it if you
+// juggle more live wrappers in a single expression; each slot is ~10.6K of heap once built (less with
+// `entityApi` groups off), and slots are built on first use, so an unused one costs nothing.
+export function entityRefs(n) {
+  if (typeof n !== 'number') { return }
+  if (n < 1) { return }
+  POOLN = n
+}
+
+// Which genre method groups a wrapper is built with. All on = the full documented API, which is what an
+// example or a game that hasn't thought about memory gets.
+//
+// This matters much less now that wrappers are pooled (it trims a fixed ~21K, not a per-entity cost),
+// but a group a game never calls is still pure waste: ~90 bytes of key plus ~57 of closure per method,
+// per slot. A game only ever uses one movement genre.
+let API = { grid: 1, platformer: 1, topdown: 1, health: 1, anim: 1, dialogue: 1, extra: 1 }
+
+// entityApi({ grid?, platformer?, topdown?, health?, anim?, dialogue?, extra? }) — drop the entity
+// method groups this game doesn't use (0 = don't build). Call it ONCE at startup, before any spawn.
+//
+// Each group is per-SLOT heap, so a top-down RPG turning off `grid` + `platformer` gets ~40% of its
+// wrapper memory back. Only the methods listed under each group in `buildWrapper` disappear; calling one
+// afterwards is a "not a function" error, so turn a group off when you know the game never calls into it.
+// Must run before the first spawn — a slot is built once and keeps whatever API it was born with.
+export function entityApi(cfg) {
+  if (typeof cfg === 'undefined') { return }
+  if (cfg === null) { return }
+  if (typeof cfg.grid === 'number') { API.grid = cfg.grid }
+  if (typeof cfg.platformer === 'number') { API.platformer = cfg.platformer }
+  if (typeof cfg.topdown === 'number') { API.topdown = cfg.topdown }
+  if (typeof cfg.health === 'number') { API.health = cfg.health }
+  if (typeof cfg.anim === 'number') { API.anim = cfg.anim }
+  if (typeof cfg.dialogue === 'number') { API.dialogue = cfg.dialogue }
+  if (typeof cfg.extra === 'number') { API.extra = cfg.extra }
+}
+
+// Wrap a raw handle in a rich entity object (the callback `this`). `x`/`y` snapshot this frame's
+// position; mutation goes through the methods. See the pool notes above: the object is ON LOAN.
+export function makeEntity(id, data) {
+  let w = POOL[POOLI]
+  if (typeof w !== 'object' || w === null) {
+    w = buildWrapper()
+    POOL[POOLI] = w
+  }
+  POOLI = POOLI + 1
+  if (POOLI >= POOLN) { POOLI = 0 }
+  return bind(w, id, data)
+}
+
+function bind(w, id, data) {
+  w.id = id
+  w.data = data
+  w.x = entity_x(id)
+  w.y = entity_y(id)
+  return w
+}
+
+// The slots a behaviour hook owns for its whole call (see the pool notes above). `hookEnter` claims this
+// nesting level's pair, `hookLeave` gives it back — always in that order, around the hook call.
+function hookSelf(id, data) {
+  let w = SELFS[DEPTH]
+  if (typeof w !== 'object' || w === null) { w = buildWrapper(); SELFS[DEPTH] = w }
+  return bind(w, id, data)
+}
+function hookOther(id, data) {
+  let w = OTHERS[DEPTH]
+  if (typeof w !== 'object' || w === null) { w = buildWrapper(); OTHERS[DEPTH] = w }
+  return bind(w, id, data)
+}
+function hookLeave() {
+  DEPTH = DEPTH - 1
+  if (DEPTH < 0) { DEPTH = 0 }
+}
+
+// The ctx object a hook is called with, pooled per nesting depth for exactly the reason the `this`
+// and `other` wrappers above are.
+//
+// `comp.update({ this: s, dt: dt })` built a FRESH object every hook, every entity, every frame. On
+// GBA that is an `Rc<RefCell<ObjectData>>` (~180-220 B) plus a fresh `Rc<str>` for EACH KEY, because
+// the compiler has no `OnceLock` there and emits a bare `Arc::from("this")` per literal
+// (tish_compile/src/codegen.rs, `cached_object_key`). A room with a handful of AI hooks cycled
+// roughly a kilobyte of transient allocation per frame through a 136K heap — no net growth, but
+// allocator churn and fragmentation pressure on the machine least able to afford it.
+//
+// Re-binding a pooled object costs neither: a property assignment lowers to `set_prop(&obj, "this",
+// v)` with a plain `&str`, so the keys stop being allocated at all. The hook sees the same shape it
+// always did. Same contract as the wrappers: the ctx is ON LOAN for the hook call, and a hook that
+// nests gets its own level.
+let CTXA = []
+let CTXB = []
+
+function ctxSelf(s, dt) {
+  let c = CTXA[DEPTH]
+  if (typeof c !== 'object' || c === null) {
+    c = { this: s, dt: dt }
+    CTXA[DEPTH] = c
+    return c
+  }
+  c.this = s
+  c.dt = dt
+  return c
+}
+function ctxPair(s, o) {
+  let c = CTXB[DEPTH]
+  if (typeof c !== 'object' || c === null) {
+    c = { this: s, other: o }
+    CTXB[DEPTH] = c
+    return c
+  }
+  c.this = s
+  c.other = o
+  return c
+}
+
+// entity(e) — the methods for `e`, which may be an entity object or (the way you should store one) a
+// raw id. This is how you act on an entity you kept across frames: `entity(sceneReg.playerId).go(1, 0)`.
+export function entity(e) {
+  if (typeof e === 'object') { return makeEntity(e.id, e.data) }
+  return makeEntity(e, null)
+}
+
+// Build ONE pool slot. Every method reads `obj.id` when it RUNS rather than an id captured at build
+// time — that indirection is the entire trick, because re-pointing `obj.id` re-points the whole API at
+// another entity for free. Assignment, not an object literal, for the same reason it is written this
+// way below: incremental keys measured cheaper than one big literal.
+function buildWrapper() {
+  let obj = { id: 0, data: null, x: 0, y: 0 }
+  obj.setPos = (px, py) => { set_transform(obj.id, px, py) }
+  obj.setVel = (vx, vy) => { set_body(obj.id, vx, vy) }
+  obj.setCollider = (w, h) => { set_collider(obj.id, w, h) }
+  // Make this collider a solid for top-down movers (an NPC the player can't walk through). The
+  // box travels with the entity — call after `setCollider`. Prefer this over stamping a map tile
+  // solid at spawn: a walked-away NPC would leave an invisible wall and block nothing where it
+  // stands now.
+  obj.block = () => { set_blocker(obj.id) }
+  obj.setSprite = (h) => { attach_sprite(obj.id, h) }
+  // Draw the sprite `ox`/`oy` px from the transform, so art can be bigger than the hitbox: a
+  // 32×32 sprite on a 16×16 collider uses (-8, -16) to centre over the box with feet aligned.
+  // Call after setSprite.
+  obj.spriteOffset = (ox, oy) => { set_sprite_offset(obj.id, ox, oy) }
+  // Attach a component. Prefer the imported component SYMBOL (`behave(Player, {})`)
+  // — checked, IDE-friendly; a bare string still works for dynamic cases.
+  obj.behave = (comp, d) => {
+    let nm = typeof comp === 'string' ? comp : comp.__name
+    add_behaviour(obj.id, nm, d)
+  }
+  obj.despawn = () => { despawn(obj.id) }
+  obj.overlaps = (other) => overlaps(obj.id, other.id)
+  // make the scrolling camera follow this entity (for maps bigger than the screen)
+  obj.follow = () => { set_camera_target(obj.id) }
+  // Room-locked camera: the map is a grid of `w`x`h`-tile screens (default 15x10); the
+  // view locks to the current room and slides to the next when this entity crosses an edge.
+  // Works for both grid (top-down) and platformer (side-scroll) players.
+  obj.roomFollow = (w, h) => { set_room_camera(obj.id, w, h) }
+  // a game-defined integer "kind" label (0 = untagged). Set it on spawn (`this.setTag(PLAYER)`)
+  // and read the collided entity's in a handler (`other.tag()`) to tell a player from an enemy or
+  // a pickup — so a coin grants only to the player and an enemy walking over it is ignored.
+  obj.setTag = (t) => { set_tag(obj.id, t) }
+  obj.tag = () => entity_tag(obj.id)
+  obj.setFrame = (i) => { sprite_set_frame(entity_sprite(obj.id), i) }
+  // ── optional groups (see `entityApi`) ──────────────────────────────────────────────────────────
+  if (API.anim === 1) {
+    // animation (needs a sheet: sprite)
+    obj.animate = (frames, speed) => { set_anim(obj.id, frames, speed) }
+    // directional walk animation — the sheet must be rows of 3 frames (down / up / side;
+    // right reuses the side row, flipped). Driven by grid facing + movement. `speed` =
+    // frames per step toggle.
+    obj.walk = (speed) => { set_walk(obj.id, 3, speed) }
+    // low-level animation controller primitives — bind a state to a clip yourself:
+    // `play` a frame range `[from, from+len)` (idempotent — safe to call every frame),
+    // `setFlip` mirrors the sprite.
+    obj.play = (from, len, speed, looping) => { anim_play(obj.id, from, len, speed, looping) }
+    obj.setFlip = (f) => { sprite_set_flip(entity_sprite(obj.id), f ? 1 : 0) }
+  }
+  if (API.grid === 1) {
+    // grid / RPG genre
+    obj.onGrid = (col, row) => { attach_grid(obj.id, col, row) }
+    obj.gridStep = (dx, dy) => { grid_step(obj.id, dx, dy) }
+    obj.gridMoving = () => grid_moving(obj.id)
+    obj.interact = () => { grid_interact(obj.id) }
+    // grid facing (0 down/1 up/2 left/3 right)
+    obj.facing = () => grid_facing(obj.id)
+    // current grid tile — for door/teleporter checks (warp with `onGrid(toCol, toRow)`)
+    obj.gridCol = () => grid_col(obj.id)
+    obj.gridRow = () => grid_row(obj.id)
+  }
+  if (API.platformer === 1) {
+    // Side-scrolling platformer physics: give the entity a `w`x`h` hitbox with gravity + solid-
+    // tile collision. Drive it with `moveX(dir)` each frame and `jump()` on the button press;
+    // `onGround()` reads whether it's resting on a solid (jump gating / animation).
+    obj.platformer = (w, h) => { set_collider(obj.id, w, h); set_platformer(obj.id) }
+    obj.moveX = (dir) => { platformer_walk(obj.id, dir) }
+    obj.run = (on) => { platformer_run(obj.id, on ? 1 : 0) }   // hold to run instead of walk
+    obj.jump = () => { platformer_jump(obj.id) }               // buffered + coyote-timed
+    obj.jumpRelease = () => { platformer_jump_release(obj.id) }// release early for a short hop
+    obj.drop = () => { platformer_drop(obj.id) }               // Down+jump to fall through a one-way platform
+    obj.onGround = () => platformer_grounded(obj.id)
+    obj.blocked = () => platformer_blocked(obj.id)             // a wall stopped the move this frame (patrol AI)
+    obj.bounce = (vel) => { platformer_bounce(obj.id, vel) }   // launch upward (stomp/spring)
+    obj.vy = () => platformer_vy(obj.id)                       // vertical velocity px/frame (<0 rising, >0 falling)
+    // Set vertical velocity outright (px/frame, fractions fine). `bounce` only ever goes UP; this is
+    // the general form — clamp a fall to a wall-slide scrape, ride an updraft, slam downward.
+    // `val`, not `v`. A one-letter arrow parameter inside this object gets hoisted into the
+    // entity's capture list beside `despawn`/`set_transform`/`set_collider`, and any CONSUMER
+    // that also lowers a function with a `v` parameter then fails to compile with
+    // `cannot find value v in this scope` — pointing at this file, from a game that never
+    // mentions `v`. Costs nothing to name them properly. (tish #556 family.)
+    obj.setVy = (v) => { platformer_set_vy(obj.id, v) }
+    // This body's ground speeds in px/frame, overriding the engine defaults (1.25 walk / 2.25 run).
+    // 0 keeps a default. Per entity, because the defaults are shared by every platformer here — make
+    // one game's hero quicker by calling this from its `start`, not by retuning the engine.
+    obj.setSpeed = (walk, run) => { platformer_set_speed(obj.id, walk, run) }
+    // Which way it's LOOKING (-1 left, +1 right) — the last direction it moved, so it survives the
+    // d-pad being released. `moveX(0)` doesn't change it. Drives sprite flip and `interactPF`.
+    obj.face = () => platformer_face(obj.id)
+    // Press-A-to-talk for a side-scroller: probe `reach` px to the side we're facing (over our own
+    // box height plus a little slack) and fire the `onInteract` of whatever is there. Returns 1 if
+    // something handled it, 0 if not — so one button can talk facing an NPC and attack otherwise.
+    obj.interactPF = (reach) => platformer_interact(obj.id, reach)
+    // The same probe without firing anything — for the little "A" prompt that tells the player
+    // there is someone in front of them to talk to.
+    obj.canInteract = (reach) => platformer_can_interact(obj.id, reach)
+    // freeze the body in place (no gravity/movement) — e.g. hanging on a ledge grab. Release to fall;
+    // teleport + release to climb up.
+    obj.hold = (on) => { platformer_hold(obj.id, on ? 1 : 0) }
+    // native patrol AI (walk + turn at walls/ledges) — runs entirely in Rust, no per-frame tish
+    // callback, so many on-screen enemies stay cheap. Needs `platformer()`; give it an `animate()`.
+    // `flip`: omit to leave the sprite alone, 1 to mirror it when walking RIGHT (art drawn facing
+    // left), 2 to mirror it when walking LEFT (art drawn facing right). Use it — writing the flip
+    // in a tish `tick` instead costs more than the patrol this replaces.
+    obj.patrol = (flip) => { set_patrol(obj.id, flip === null ? 0 : flip) }
+    // THIS body's jump impulse / gravity in px/frame, 0 = keep the engine default — the held-weight
+    // knob (`platformer_set_physics`): heavy cargo lowers the jump, buoyant cargo lowers gravity.
+    // Same per-entity contract as `setSpeed`, and reset the same way: `setPhysics(0, 0)`.
+    obj.setPhysics = (jumpVel, gravity) => { platformer_set_physics(obj.id, jumpVel, gravity) }
+    // Throw arc: persistent horizontal velocity (clears on landing / wall hit) + immediate vertical
+    // velocity (negative = up). How a thrown body flies — a platformer body has no persistent vx.
+    obj.launch = (vx, vyUp) => { platformer_launch(obj.id, vx, vyUp) }
+    // Rideable: this entity's top edge becomes one-way MOVING ground for platformer bodies. Stand
+    // on a walking beast or a drifting raft, inherit its motion, jump off normally; Down+jump
+    // drops through. Carriers are ground, not walls — and cannot themselves ride.
+    obj.setCarrier = () => { set_carrier(obj.id) }
+  }
+  if (API.topdown === 1) {
+    // Free 8-directional top-down movement (the top-down action-RPG genre): a `w`x`h` hitbox that slides
+    // along solid tiles in any direction. Drive it with `go(dx,dy)` each frame (player input or AI).
+    obj.topdown = (w, h) => { set_collider(obj.id, w, h); set_topdown(obj.id) }
+    // Snap profile: 0 free 8-way (default) · 2 tile stepping (a direction commits a full 16px cell;
+    // input is ignored until it lands). Mode 2 suits unsteered movers; a player-steered character
+    // wants a controller of its own rather than a snap mode.
+    obj.topdownSnap = (mode) => { topdown_snap(obj.id, mode) }
+    obj.moveSpeed = (v) => { topdown_speed(obj.id, v) }    // px/frame (default 1.25); keep under 16
+    obj.go = (dx, dy) => { topdown_move(obj.id, dx, dy) }      // move intent this frame; 0,0 stops (`move` is reserved)
+    obj.facing4 = () => topdown_facing(obj.id)                 // 0 down / 1 up / 2 left / 3 right (aims a swing)
+    obj.moving = () => topdown_moving(obj.id)                  // had move intent this frame (walk vs idle anim)
+    obj.knockback = (dx, dy, power) => { topdown_knockback(obj.id, dx, dy, power) }
+    // Native chase-the-player AI — moves + animates entirely in Rust (no per-frame tish callback), so
+    // a room of enemies is cheap. `stride` = the sheet's cols per facing row (5 = idle+4walk), or 0
+    // for a non-directional flap loop over frames `0..flap` (a bat). Needs `topdown(w,h)`.
+    obj.chase = (aggro, stride, flap, animSpeed) => { set_chase(obj.id, aggro, stride, flap, animSpeed) }
+    // Swing a melee hit in the facing direction: a short-lived hurt box `reach` px ahead that deals
+    // `damage` to `targetTag` entities (with health) for `ttl` frames. Returns the hitbox obj.id. Pair it
+    // with an attack animation / a slash FX. i-frames make one swing land once per enemy.
+    obj.attack = (targetTag, damage, reach, size, ttl) => swing(obj.id, targetTag, damage, reach, size, ttl)
+    // Talk / open: fire the `onInteract` of an entity `reach` px in front (by top-down facing).
+    // Returns whether something ahead handled it — so ONE button can talk to what you face and
+    // attack when you face nothing (`if (!this.interactTD(10)) { this.attack(...) }`).
+    obj.interactTD = (reach) => topdown_interact(obj.id, reach) > 0
+  }
+  if (API.health === 1) {
+    // health / combat: hit points with post-hit invincibility (sprite flickers during i-frames).
+    // At 0 hp the entity's `onDeath` hook fires (or it despawns if it has none). `invuln` (optional)
+    // is the i-frame count a hit grants: omit for the usual mercy window, pass 0 so a shmup enemy
+    // takes every bullet in a stream.
+    // `invuln` optional: default to the usual mercy window (40) when omitted. Must be a NUMBER — the
+    // typed-extern path can't coerce `undefined`, so a bare `setHealth(max)` would panic without this.
+    obj.setHealth = (max, invuln) => { set_health(obj.id, max, typeof invuln === 'number' ? invuln : 40) }
+    obj.hurt = (amount) => damage(obj.id, amount)   // returns whether the hit landed (false during i-frames)
+    // make this entity a contact hurt box: it deals `damage` to entities tagged `targetTag` that
+    // have health. A bullet passes `despawnOnHit=true` (consumed on impact); a body hazard passes
+    // false and lets the victim's i-frames rate-limit it. Resolved natively — no per-frame callback.
+    // `stun` (optional) also holds the victim still for that many frames on a landed hit — a
+    // weapon that stops rather than kills, like the classic boomerang.
+    obj.setHurt = (damage, targetTag, despawnOnHit, stun) => {
+      set_hurt(obj.id, damage, targetTag, despawnOnHit ? 1 : 0, typeof stun === 'number' ? stun : 0)
+    }
+    obj.heal = (amount) => { heal(obj.id, amount) }
+    // Set CURRENT hp without touching the max — for restoring carried/saved health, which
+    // `setHealth` (resets the max) and `damage` (i-frames + death check) both get wrong.
+    obj.setHp = (hp) => { set_hp(obj.id, hp) }
+    obj.hp = () => health_hp(obj.id)
+    obj.maxHp = () => health_max(obj.id)
+    obj.alive = () => health_alive(obj.id)
+  }
+  if (API.extra === 1) {
+    // auto-despawn after `ttl` frames (a timed shot, an explosion that clears when its clip ends).
+    obj.setLifetime = (ttl) => { set_lifetime(obj.id, ttl) }
+    // auto-despawn the moment the entity's box leaves the screen (spent bullets; the cleanup a
+    // camera-less shooter needs). Pair with a `setLifetime` backstop.
+    obj.despawnOffscreen = (on) => { set_despawn_offscreen(obj.id, on ? 1 : 0) }
+    // is this entity within the camera view? (off-screen entities are auto-culled — their
+    // behaviour/physics/animation/collision are skipped until they scroll back into view)
+    obj.onScreen = () => entity_on_screen(obj.id)
+  }
+  if (API.dialogue === 1) {
+    // dialogue — `text` is a string or an array of pages; `speaker` (optional) shows as
+    // the name at the top of the box.
+    obj.say = (text, speaker) => { dialogue_show(text, speaker) }
+    // ask a question with a menu of `options` (an array of strings). When the player
+    // confirms, `onChoose` is called with `{ choice, label }` — the picked index + text.
+    obj.ask = (text, speaker, options, onChoose) => {
+      dialogue_ask(text, speaker, options, (sel) => onChoose({ choice: sel, label: options[sel] }))
+    }
+  }
+  return obj
+}
+
+// Global dialogue state (one box at a time).
+export function dialogueActive() { return dialogue_active() }
+export function advanceDialogue() { dialogue_advance(); dialogue_pump() }
+
+// Per-frame dialogue input, for a player component to call while `dialogueActive()`:
+// move a choice's cursor with the d-pad and confirm/advance with A. Handles plain
+// messages (A pages through) and choices (Up/Left, Down/Right move; A confirms) alike.
+export function updateDialogue() {
+  if (dialogue_is_choice()) {
+    if (key_pressed(6) > 0 || key_pressed(8) > 0) { dialogue_move(-1) }  // Up / Left  → previous
+    if (key_pressed(7) > 0 || key_pressed(9) > 0) { dialogue_move(1) }   // Down / Right → next
+  }
+  if (key_pressed(0) > 0) { dialogue_advance(); dialogue_pump() }        // A → confirm / advance
+}
+
+// Declare a component explicitly (carries the `__behaviour` marker). Optional — a plain
+// object literal with a lifecycle hook is registered by `mount` too.
+export function Behaviour(spec) {
+  return {
+    __behaviour: true,
+    start: spec.start,
+    update: spec.update,
+    tick: spec.tick,
+    onCollide: spec.onCollide,
+    onInteract: spec.onInteract,
+    onDeath: spec.onDeath
+  }
+}
+
+// Register one component under `name`. Each hook gets a single ctx object; the callback
+// destructures what it needs. `this` is the rich entity; `dt` the frame delta; `other`
+// the collided/interacting entity. `onDeath` fires when the entity's health hits 0.
+function registerBehaviour(name, comp) {
+  define_component(name, {
+    lean:       comp.lean,
+    // Bind this level's slots, THEN step the depth so anything the hook triggers nests instead of
+    // overwriting, and always give the level back.
+    start:      comp.start      ? (data, e, dt)    => { let c = ctxSelf(hookSelf(e, data), dt); DEPTH = DEPTH + 1; comp.start(c); hookLeave() } : null,
+    update:     comp.update     ? (data, e, dt)    => { let c = ctxSelf(hookSelf(e, data), dt); DEPTH = DEPTH + 1; comp.update(c); hookLeave() } : null,
+    // `tick` is the FAST per-frame hook: the engine hands it the data ctx pre-filled with state
+    // (x/y/grounded/blocked) and reads its decisions (move/jump/run/drop/jumpCut/flip/bounce) back
+    // out. Passed straight through — no `this` wrapper, no per-op ABI call — so it's cheap enough
+    // to run many on-screen entities' AI in tish.
+    tick:       comp.tick ? comp.tick : null,
+    onCollide:  comp.onCollide  ? (data, e, other) => { let c = ctxPair(hookSelf(e, data), hookOther(other, null)); DEPTH = DEPTH + 1; comp.onCollide(c); hookLeave() } : null,
+    onInteract: comp.onInteract ? (data, e, actor) => { let c = ctxPair(hookSelf(e, data), hookOther(actor, null)); DEPTH = DEPTH + 1; comp.onInteract(c); hookLeave() } : null,
+    onDeath:    comp.onDeath    ? (data, e)        => { let c = ctxSelf(hookSelf(e, data), 0); DEPTH = DEPTH + 1; comp.onDeath(c); hookLeave() } : null
+  })
+}
+
+// Gather a module's named exports and register the components under their export names.
+// A component is any exported object that is tagged (`Behaviour({...})`) OR has a
+// lifecycle method (start/update/onCollide/onInteract) — so plain literals work.
+export function mount(mod) {
+  let _mkeys = Object.keys(mod)
+  let _mi = 0
+  while (_mi < _mkeys.length) {
+    let comp = mod[_mkeys[_mi]]
+    if (typeof comp === 'object' &&
+        (comp.__behaviour || comp.update || comp.tick || comp.start || comp.onCollide || comp.onInteract || comp.onDeath)) {
+      comp.__name = _mkeys[_mi]     // tag so `behave(comp)` can look up its registered name
+      registerBehaviour(_mkeys[_mi], comp)
+    }
+    _mi = _mi + 1
+  }
+}
+
+// A HUD hearts readout. `setupHearts` once per scene, `updateHearts(hp)` each frame. Each heart
+// covers `perHeart` hp (frames 0 empty .. perHeart full on the sheet).
+export function setupHearts(sheet, count, x, y, gap) { hud_hearts(sheet, count, x, y, gap) }
+export function updateHearts(hp, perHeart) { hud_hearts_update(hp, perHeart) }
+
+// A line of HUD text (score, timers, labels) at screen pixel (x, y), drawn front-most and
+// camera-independent in the built-in white font. `slot` is an independent line (0, 1, 2, …); call
+// with "" to clear it. Cached per slot — only re-lays-out when the string or position changes.
+export function hudText(slot, x, y, text) { hud_text(slot, x, y, text) }
+
+// Edge-triggered button release (e.g. for variable-height jumps). Codes match `key_pressed`.
+export function keyReleased(code) { return key_released(code) }
+// Probe the map's collision grid (AI, triggers). Out-of-bounds reads as solid.
+export function tileSolid(col, row) { return tile_solid(col, row) }
+
+// Grid / RPG genre setup.
+export function setupGrid(cols, rows) { grid_setup(cols, rows) }
+export function setSolid(col, row) { grid_set_solid(col, row, 1) }
+// Make a tile walkable again — the counterpart to `setSolid`, for a solid that stands in for an
+// entity (an NPC's blocking tile) and so has to move when the entity does. Without it a walked-away
+// NPC leaves an invisible wall behind and no longer blocks where it now stands.
+export function clearSolid(col, row) { grid_set_solid(col, row, 0) }
+// Mark a tile a one-way platform (blocks a platformer box only from above).
+export function setOneway(col, row) { grid_set_oneway(col, row, 1) }
+// Mark a tile climbable (ladder / vine / rope). Independent of solid and one-way: a ladder can be
+// set into a wall, or capped by a one-way landing you can also stand on.
+export function setLadder(col, row) { grid_set_ladder(col, row, 1) }
+// Is there something to climb at this tile? Out-of-bounds reads false (unlike `tileSolid`, where
+// out-of-bounds is a wall) — running off the edge of the map is not a ladder.
+export function tileLadder(col, row) { return tile_ladder(col, row) }
+
+// Where the camera's top-left corner is in world pixels. Needed by anything drawn against the world
+// but outside the entity system — a hand-scrolled backdrop, a minimap, an off-screen marker — when
+// the camera is being driven by the engine (`entity.follow()`) rather than by the game.
+export function cameraX() { return camera_x() }
+export function cameraY() { return camera_y() }
+
+// Load a Tiled-shaped map: render each tile layer from `tileset` and size the movement
+// grid, marking a cell solid when any layer places a GID listed in `map.solid`. `map` is
+// `{ width, height, tileSize, solid:[gids], layers:[{name, data:[gids]}] }` — the same
+// shape a Tiled JSON export maps onto. (Entities/objects are spawned by the scene for now.)
+export function loadMap(map, tileset) {
+  let li = 0
+  while (li < map.layers.length) {
+    let data = map.layers[li].data
+    tilemap_new(tileset, map.tilesetCols, map.width, map.height, data, 3)
+    // Same native pass as `loadStreamMap` — a screen-sized map pays a smaller version of the same
+    // per-cell interpreter cost, and there is no reason for the two loaders to differ. `oneway` is
+    // absent from this map shape, so the argument is left off and the native side sees an empty list.
+    grid_from_gids(map.width, map.height, data, map.solid, map.oneway)
+    li = li + 1
+  }
+}
+
+// Load a ROM-baked map (a `map:` import): render its streamed layers and set up the grid +
+// collision from the map's solid grid. Map payload stays in ROM (GID layers are referenced
+// in place, not copied to EWRAM) so large maps like a 240×80 overworld don't blow the heap
+// on scene reloads. Entity spawns are read with `mapSpawnCount`/`mapSpawn`.
+export function loadMapRom(mapHandle, tileset) {
+  map_stream(mapHandle, tileset)
+  // Grid sizing + collision marking happen in Rust: the tish w×h loop it replaces was the
+  // single biggest cost in area load (thousands of interpreted iterations, two native calls each).
+  grid_from_map()
+}
+// Load a `scene:` import — a recipe-packed map (see tish-gba-scenepack's `include_scene!`) that
+// bundles its own atlas + tilemap into ONE handle, unlike `loadMapRom`'s separate map+tileset
+// pair. Otherwise identical: streams the layers, sizes the grid, and marks collision.
+// Give one of the loaded scene's BACKDROP layers a different horizontal parallax speed per band of
+// scanlines, so one background shows several depths. `i` counts the .tmj's parallax layers in emit
+// order (0 = frontmost). `bands` is a flat [firstRow, mulX, firstRow, mulX, …], rows 0..159 top to
+// bottom, `mulX` in 1/256ths of the camera — the same scale as a Tiled parallax factor.
+//
+//   sceneBands(0, [0, 64, 72, 160])   // above row 72 drifts at 1/4 speed, below it at 5/8
+//
+// This is how you get more depth than you have layers: the GBA has four backgrounds, and a game with
+// menus has already spent one on the UI canvas and one on the world.
+//
+// ⚠️ ONE layer only — agb's frame has a single DMA slot and its HBlank transfer is hardcoded to DMA
+// channel 0, so a second banded layer would silently replace the first. First in scene order wins.
+// ⚠️ Backdrops only. The world layer is streamed and holds just a 256x256 window of tiles, so it
+// cannot be scrolled per scanline; a backdrop wraps in hardware and can.
+// Call it AFTER `loadSceneRom` — a scene load rebuilds the backdrops and clears their bands.
+export function sceneBands(i, bands) { scene_bands(i, bands) }
+
+// Show/hide a scene backdrop. Hiding really does hand the background slot back, so an interior with
+// no sky can afford a layer the outdoors could not.
+export function sceneBgVisible(i, on) { scene_bg_visible(i, on ? 1 : 0) }
+
+export function loadSceneRom(sceneHandle) {
+  scene_stream(sceneHandle)
+  grid_from_map()
+}
+export function mapSpawnCount() { return map_spawn_count() }
+// Index of the first spawn at or after `from` inside the inclusive tile rect, or -1. Use this to
+// walk one screen's spawns: filtering the whole list game-side costs a boxed call per spawn just to
+// reject it, which is the entire cost of a large map's spawn scan.
+export function mapSpawnNextIn(from, c0, r0, c1, r1) { return map_spawn_next_in(from, c0, r0, c1, r1) }
+export function mapSpawnCol(sidx) { return map_spawn_col(sidx) }
+export function mapSpawnRow(sidx) { return map_spawn_row(sidx) }
+export function mapSpawnKind(sidx) { return map_spawn_kind(sidx) }
+export function mapSpawnA(sidx) { return map_spawn_a(sidx) }
+export function mapSpawnB(sidx) { return map_spawn_b(sidx) }
+export function mapSpawn(sidx) {
+  return {
+    col: map_spawn_col(sidx),
+    row: map_spawn_row(sidx),
+    kind: map_spawn_kind(sidx),
+    a: map_spawn_a(sidx),
+    b: map_spawn_b(sidx)
+  }
+}
+
+// Load a STREAMED map (bigger than the screen): each layer is rendered by an
+// InfiniteScrolledMap that pages tiles in as the camera moves. `map` is
+// `{ width, height, tilesetCols, solid:[gids], oneway:[gids]?, ladder:[gids]?, layers:[{data:[gids], priority}] }`.
+// A GID in `oneway` becomes a one-way platform (blocks a platformer box only from above); a GID in
+// `solid` becomes a full wall; a GID in `ladder` becomes climbable (see `tileLadder`), which is a
+// separate plane, so the same tile can be both. Pair with `entity.follow()` or `entity.roomFollow(w,h)`.
+export function loadStreamMap(map, tileset) {
+  let li = 0
+  while (li < map.layers.length) {
+    let layer = map.layers[li]
+    tilemap_stream(tileset, map.tilesetCols, map.width, map.height, layer.data, layer.priority)
+    // Sizing the grid and marking collision happen in Rust, for the same reason `loadMapRom` does it
+    // there: the w×h tish loop this replaces was FOUR property lookups, two calls and up to two
+    // native crossings PER CELL, and it was the whole boot time of every game with a literal map.
+    // On sunny-land's 102x15 it cost 218 frames — 3.65s — against 16 for rendering the same tiles.
+    grid_from_gids(map.width, map.height, layer.data, map.solid, map.oneway, map.ladder)
+    li = li + 1
+  }
+}
+
+// Load a STREAMED, AUTOTILED terrain map (bigger than the screen): the engine autotiles the
+// terrain into GID layers in Rust and streams them (same as `loadTerrainMap`, but scrolled).
+// Pair with `entity.follow()`.
+export function loadStreamTerrain(map, tileset) {
+  setupGrid(map.width, map.height)
+  tilemap_stream_terrain(tileset, map.tilesetCols, map.width, map.height, map.ground, map.blocks, map.base)
+  let r = 0
+  while (r < map.height) {
+    let c = 0
+    while (c < map.width) {
+      let g = map.ground[r * map.width + c]
+      if (g >= 1 && map.solid[g - 1] !== 0) { setSolid(c, r) }
+      c = c + 1
+    }
+    r = r + 1
+  }
+}
+
+// Load an AUTOTILED terrain map: `map.ground` is a terrain id per cell; the engine picks
+// each terrain's corner/edge/centre tile from its 3x3 block (no hand-picked border tiles).
+// The autotiling + rendering run in Rust (tilemap_terrain); here we only size the grid and
+// mark collision for solid terrains. `map` is
+// `{ width, height, tilesetCols, base:id, blocks:[blockPerId], solid:[0/1 perId], ground:[id per cell] }`.
+export function loadTerrainMap(map, tileset) {
+  setupGrid(map.width, map.height)
+  tilemap_terrain(tileset, map.tilesetCols, map.width, map.height, map.ground, map.blocks, map.base)
+  let r = 0
+  while (r < map.height) {
+    let c = 0
+    while (c < map.width) {
+      let g = map.ground[r * map.width + c]
+      if (g >= 1 && map.solid[g - 1] !== 0) { setSolid(c, r) }
+      c = c + 1
+    }
+    r = r + 1
+  }
+}
+
+// Scene transition: tear down the current scene (all entities, the grid, and the
+// sprite/background layers) and build `scene` — a function that sets up the new area
+// (background, grid, entities). Safe to call from a behaviour callback (e.g. a door's
+// onInteract). Component definitions from `mount` persist across scenes.
+export function loadScene(scene) {
+  clear_world()
+  sprite_clear()
+  // Drop any leftover UI canvas tiles before the new scene grabs background VRAM — a filled
+  // dialog panel can hold hundreds of DynamicTile16s; if those linger across a warp, the next
+  // `scene_stream` OOMs the GBA heap.
+  ui_clear()
+  bg_clear()
+  // Nothing to drop for entities: wrappers are pooled, so a scene's worth of them was never allocated.
+  scene()
+  // sprite_clear wiped the UI icon pool + every menu cursor; hand the handles back so portraits and
+  // the ► take fresh ones. A menu is built once at boot and outlives every scene, so without this a
+  // shop opened after a warp draws no cursor and drives whichever entity inherited its old handle.
+  // Hooks live in scene_hooks.tish so engine does not merge-import all of ui.tish / dialog.tish.
+  runSceneHooks()
+  memMark("scene")
+}
+
+// Spawn a fresh entity and return a pooled wrapper for it — configure it right here (`setSprite`,
+// `topdown`, `behave`), and keep `.id` if you need the entity later.
+export function create() {
+  return makeEntity(spawn(), null)
+}
+
+// createId() — spawn and return just the id, for a game that stores entities. Same thing as
+// `create().id`, spelled so the storing is the obvious part.
+export function createId() {
+  return spawn()
+}
+
+// entityX(e) / entityY(e) — an entity's position read LIVE from the native transform. `e` is a wrapper or a
+// raw id, so `entityX(sceneReg.player)` and `entityX(id)` both work.
+//
+// Prefer these over the wrapper's `x`/`y` FIELDS anywhere the read outlives the expression that got the
+// wrapper. The fields are a snapshot taken when the slot was handed out, and the slot is reused — inside a
+// hook they are live and cheaper than a call, but a position stored from one and compared a frame later is
+// comparing against whatever entity has since borrowed the slot.
+//
+// Free functions rather than `e.px()` methods on purpose: a method is another key and closure in EVERY
+// pool slot, which is the cost this whole line of work exists to remove.
+export function entityX(e) {
+  if (typeof e === 'object') { return entity_x(e.id) }
+  return entity_x(e)
+}
+export function entityY(e) {
+  if (typeof e === 'object') { return entity_y(e.id) }
+  return entity_y(e)
+}
+
+// nearestTag(e, tag, radius) — the nearest OTHER entity carrying `tag` within `radius` px
+// (manhattan, box centers), or -1. Free function, not a wrapper method, for the same reason as
+// `entityX`: creature AI stores ids and asks from module pumps. ⚠️ O(entities) per call and NOT
+// gated on the off-screen cull (an ecosystem's creatures keep mattering off screen) — stagger
+// queries (every 8–16 frames, cache the id) rather than asking for every agent every frame.
+export function nearestTag(e, tag: i32, radius: i32): i32 {
+  if (typeof e === 'object') { return nearest_tag(e.id, tag, radius) }
+  return nearest_tag(e, tag, radius)
+}
+
+// entityDist(a, b) — manhattan distance between two entities' box centers in whole px, or -1 if
+// either id no longer resolves (which makes it a cheap liveness probe too).
+export function entityDist(a, b): i32 {
+  let ia = a
+  let ib = b
+  if (typeof a === 'object') { ia = a.id }
+  if (typeof b === 'object') { ib = b.id }
+  return entity_dist(ia, ib)
+}
+
+// entityDespawn(e) — remove an entity by id (or wrapper). Same reason as `entityX`: a game that keeps a
+// LIST of entities keeps ids, and deleting one should not mean borrowing a pool slot to reach `.despawn()`.
+// Despawning an already-dead id is a no-op.
+export function entityDespawn(e) {
+  if (typeof e === 'object') { despawn(e.id); return }
+  despawn(e)
+}
+
+// entityForget(e) — no longer does anything, and is kept only so games written against it still build.
+// Wrappers are pooled now, so the per-entity memory this handed back is never allocated to begin with.
+//
+// ⚠️ THE `typeof` IS LOAD-BEARING; DO NOT "SIMPLIFY" THIS BACK TO AN EMPTY BODY. An exported function
+// with an empty body and an UNANNOTATED parameter touches no module state, so tish promotes it to a
+// real Rust fn and infers the parameter as a NUMBER:
+//
+//     fn entityForget_native(mut e: f64) -> f64 { ... }
+//     entityForget_native(match &e { Value::Number(n) => *n, _ => panic!("expected number") })
+//
+// Every caller passes the wrapper OBJECT from `create()`, so the back-compat stub — whose entire job
+// is to keep old games building — panicked at boot instead. It crashed examples/sunny-land for weeks.
+// Reading `e` as a Value is what keeps the parameter a Value.
+export function entityForget(e) {
+  if (typeof e === 'object') { return }
+}
+
+
+// Advance the world one frame (engine pipeline + commit).
+export function step() { world_step() }

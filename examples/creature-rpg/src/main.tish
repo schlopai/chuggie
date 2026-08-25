@@ -1,0 +1,550 @@
+// CREATURE RPG — a creature-collection RPG: overworld, encounters, and a turn-based battle.
+//
+// One continuous 40x36 world: a town of two enterable buildings in the south, Route 1 and its tall
+// grass in the north, joined by a gap in a treeline. Movement is tile-locked — one press, one tile
+// — which is the whole feel of the genre and is not a physics problem: it is the engine's `GridPos`
+// component, surfaced as `onGrid` / `gridStep` / `gridMoving` / `facing` / `interact`.
+//
+// Everything here is authored, not hand-placed: the maps are Tiled `.tmj` imported with `scene:`
+// (one atlas, collision read off the tilesets, entities from the object layer), the sprite sheets
+// and the map both come out of scripts/gen_creature_rpg.py, and the theme out of
+// scripts/gen_creature_music.py.
+//
+// Controls: d-pad walk · A talk (and turn a dialogue page) · walk onto a door to go in.
+// In a battle: up/down move the cursor, A confirms, B backs out of the move list.
+import { town } from 'scene:../assets/town.tmj'
+import { lab } from 'scene:../assets/lab.tmj'
+import { home } from 'scene:../assets/home.tmj'
+import { heroSheet } from 'sheet:../assets/hero.png'
+import { profSheet } from 'sheet:../assets/prof.png'
+import { momSheet } from 'sheet:../assets/mom.png'
+import { rivalSheet } from 'sheet:../assets/rival.png'
+import { guardSheet } from 'sheet:../assets/guard.png'
+import { creatures } from 'sheet32:../assets/creatures.png'
+import { theme } from 'deck:../assets/theme.deck'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_hud, input_x, input_y,
+         key_pressed, frame, backdrop, ui_begin, ui_rect, fx_flash } from 'cargo:tish_agb'
+import { mount, create, entity, loadScene, loadSceneRom, hudText,
+         mapSpawnCount, mapSpawnCol, mapSpawnRow, mapSpawnKind, mapSpawnA, step } from '../../../packages/engine'
+import { uiInit } from '../../../packages/ui'
+import { dialogInit, dialogActive, dialogUpdate } from '../../../packages/dialog'
+import { deckPlay, deckSetIntensity } from '../../../packages/deck'
+import { feelBump, feelFreeze, feelFrozen, feelTick, feelPlay, FP_ILLEGAL } from '../../../packages/feel'
+import { chipPop, chipAccept, chipHit, chipBlip } from '../../../packages/chipsfx'
+import { rngSeed, rngBelow, rngChance } from '../../../packages/rng'
+import * as components from './components'
+import { Npc, Mom, LINES_PROF, LINES_RIVAL, LINES_GUARD } from './components'
+import { tallGrass } from './generated/world'
+import { battleStart, battleTick, battleState, battleOutcome, battleCursor, battleMessage,
+         battleLastDamage, battleLastHurt, battleHitSeq,
+         battlePlayerSpecies, battleEnemySpecies, battlePlayerHp, battlePlayerMax,
+         battleEnemyHp, battleEnemyMax, battleMenuCount, battleMenuLabel,
+         battleBalls, battleGiveBalls, battleCaughtCount, battleCatchOdds,
+         BS_DONE, BS_MENU, OUT_WIN, OUT_LOSE, OUT_CAUGHT, K_A, K_B, K_UP, K_DOWN, SP_NAME } from './battle'
+
+// Spawn kinds — must match scripts/gen_creature_rpg.py.
+let K_PLAYER: i32 = 0
+let K_DOOR: i32 = 10
+let K_PROF: i32 = 20
+let K_MOM: i32 = 21
+let K_RIVAL: i32 = 22
+let K_GUARD: i32 = 23
+
+// Scene ids. A door spawn carries its destination in the importer's `a` int property.
+let S_TOWN: i32 = 0
+let S_LAB: i32 = 1
+let S_HOME: i32 = 2
+
+let BTN_A: i32 = 0
+let BTN_B: i32 = 1
+let BTN_UP: i32 = 6
+let BTN_DOWN: i32 = 7
+
+// ── the three things the game can be doing ───────────────────────────────────────────────────
+// The battle is a MODE, not a `scene:` map — it has no tilemap at all, just a backdrop colour, two
+// sprites and the UI canvas. That distinction matters in the loop: the world runs on `step()`
+// (which advances the whole ECS), the battle on bare `frame()`, because a wild encounter should
+// not still be ticking the town behind it.
+let M_WORLD: i32 = 0
+let M_ENCOUNTER: i32 = 1     // the flash-and-shake beat between the two
+let M_BATTLE: i32 = 2
+let mode: i32 = 0
+let encTimer: i32 = 0
+
+let STARTER: i32 = 0                          // KAPPLING — species 0 of the roster
+// Whoever you are fighting with. Catching something makes it your partner, which is the point of
+// catching: a caught NIGHTWING outruns everything on the route, a caught CAPSHROOM outlasts it.
+let active: i32 = 0
+let WILD: i32[] = [1, 2, 3, 4, 5, 6]          // everything else roams Route 1
+let ENCOUNTER_PCT: i32 = 14                   // per step taken IN tall grass
+let wildSpecies: i32 = 1
+// Steps of grace after a fight, so walking out of the patch you were dropped back into is not
+// immediately another encounter.
+let grassCool: i32 = 0
+
+// The hero's ID — a NUMBER, never the wrapper `create()` returned.
+//
+// ⚠️⚠️ An entity wrapper is ON LOAN (packages/engine.tish:55): `create()`/`entity()` hand out one of
+// two rotating pool slots, and a stored wrapper silently starts naming whichever entity borrowed the
+// slot next. Holding the wrapper here is what made the first build of this example unplayable — the
+// d-pad did nothing, because `hero` had been re-pointed at an NPC by the rest of the spawn loop and
+// every `gridStep` was trying to walk the gate keeper. It does not crash. Hold the id; ask for the
+// methods back with `entity(id)` when you need them, once a frame.
+let heroId: i32 = 0 - 1
+
+// Where to drop the hero when the next scene loads (-1 = use the map's own player spawn). Coming
+// back out of a house wants the doorstep you left by, not the town's start tile.
+let entryCol: i32 = 0 - 1
+let entryRow: i32 = 0 - 1
+let scene: i32 = 0
+
+// Doors in the CURRENT scene, as three parallel typed arrays. Typed (`: i32[]`) on purpose: an
+// untyped tish array costs 28 bytes an element against 4.
+let doorCol: i32[] = []
+let doorRow: i32[] = []
+let doorTo: i32[] = []
+
+let wasMoving: i32 = 0
+let bumpCool: i32 = 0
+
+// The town door we last stepped into, so leaving a house lands on its doorstep.
+let houseDoorCol: i32 = 0
+let houseDoorRow: i32 = 0
+
+// Whether the last completed step ended in tall grass (-1 = unknown, forces a redraw).
+let lastGrass: i32 = 0 - 1
+
+// ── scene building ───────────────────────────────────────────────────────────────────────────
+// `loadScene` tears the world down (entities, sprites, UI tiles, backgrounds) and calls back to
+// build the new one, so every scene function is written as if from nothing.
+
+function npc(col: i32, row: i32, sheet, lines, name) {
+  let e = create()
+  e.onGrid(col, row)
+  e.setSprite(sprite_new(sheet))
+  e.behave(Npc, { lines: lines, name: name })
+}
+
+// `arr.length = 0` is a SILENT NO-OP on a typed tish array — it leaves every element in place, and
+// the doors of the last scene then warp you out of this one. Pop.
+function clearDoors() {
+  while (doorCol.length > 0) { doorCol.pop() }
+  while (doorRow.length > 0) { doorRow.pop() }
+  while (doorTo.length > 0) { doorTo.pop() }
+}
+
+function buildScene(handle) {
+  loadSceneRom(handle)
+  clearDoors()
+  let i: i32 = 0
+  while (i < mapSpawnCount()) {
+    let col: i32 = mapSpawnCol(i)
+    let row: i32 = mapSpawnRow(i)
+    let kind: i32 = mapSpawnKind(i)
+    if (kind === K_DOOR) {
+      doorCol.push(col)
+      doorRow.push(row)
+      doorTo.push(mapSpawnA(i))
+    } else if (kind === K_PLAYER) {
+      // A warp overrides the map's own start tile — see `entryCol`.
+      let c: i32 = col
+      let r: i32 = row
+      if (entryCol >= 0) {
+        c = entryCol
+        r = entryRow
+      }
+      let e = create()
+      e.onGrid(c, r)
+      e.setSprite(sprite_new(heroSheet))
+      e.follow()                        // camera centred on the player, clamped to the map
+      heroId = e.id                     // the ID, not the wrapper — see the note on `heroId`
+    } else if (kind === K_PROF) {
+      npc(col, row, profSheet, LINES_PROF, "PROF. BIRCHWOOD")
+    } else if (kind === K_MOM) {
+      let e = create()
+      e.onGrid(col, row)
+      e.setSprite(sprite_new(momSheet))
+      e.behave(Mom, {})
+    } else if (kind === K_RIVAL) {
+      npc(col, row, rivalSheet, LINES_RIVAL, "RIVAL")
+    } else if (kind === K_GUARD) {
+      npc(col, row, guardSheet, LINES_GUARD, "GATE KEEPER")
+    }
+    i = i + 1
+  }
+  entryCol = 0 - 1
+  entryRow = 0 - 1
+  wasMoving = 0
+  lastGrass = 0 - 1
+  lastParty = 0 - 1
+  showParty()                       // sprite_clear wiped the HUD slots; put the readout straight back
+}
+
+function sceneTown() { buildScene(town) }
+function sceneLab() { buildScene(lab) }
+function sceneHome() { buildScene(home) }
+
+function enterScene(id: i32) {
+  scene = id
+  if (id === S_LAB) { loadScene(sceneLab) }
+  else if (id === S_HOME) { loadScene(sceneHome) }
+  else { loadScene(sceneTown) }
+}
+
+// ── the hero ─────────────────────────────────────────────────────────────────────────────────
+// Sheet layout: row = facing (0 down / 1 up / 2 left / 3 right), col = [idle, walk0..3], so a
+// facing's frames start at facing * 5. `play` is idempotent, so calling it every frame is free.
+// Every function below takes the wrapper `heroStep` fetched, rather than fetching its own: each
+// `entity()` call rotates the two-slot pool, so three fetches in one frame would hand the third
+// caller a slot the first one is still holding.
+let STRIDE: i32 = 5
+
+function animate(h) {
+  let base: i32 = h.facing() * STRIDE
+  if (h.gridMoving()) {
+    h.play(base + 1, 4, 6, true)
+  } else {
+    h.play(base, 1, 1, false)
+  }
+}
+
+// A door is entered by WALKING ONTO it, the way the genre does it — not by pressing A at it. The
+// check runs on the frame a step completes and never on scene entry, which is what stops a house
+// exit (you arrive standing in the doorway) from bouncing you straight back inside.
+function checkDoor(h): i32 {
+  let i: i32 = 0
+  let col: i32 = h.gridCol()
+  let row: i32 = h.gridRow()
+  while (i < doorCol.length) {
+    if (doorCol[i] === col && doorRow[i] === row) {
+      let to: i32 = doorTo[i]
+      chipAccept()
+      if (to === S_TOWN) {
+        // Back out onto the doorstep of the house we were in, one tile clear of the door itself.
+        entryCol = houseDoorCol
+        entryRow = houseDoorRow + 1
+      } else {
+        // Remember the town door we used, so the way back lands there.
+        houseDoorCol = col
+        houseDoorRow = row
+      }
+      enterScene(to)
+      return 1
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+// What happens the moment a step lands. The readout is the cheap half; the roll is the point.
+function onStepDone(h) {
+  let g: i32 = 0
+  if (scene === S_TOWN) { g = tallGrass(h.gridCol(), h.gridRow()) }
+  if (g !== lastGrass) {
+    lastGrass = g
+    if (g > 0) {
+      hudText(0, 8, 8, "TALL GRASS")
+    } else {
+      hudText(0, 0, 0, "")          // the idiom for clearing a HUD slot
+    }
+  }
+  showParty()
+  if (g === 0) { return }
+
+  // One roll per step IN the grass — never on the road, which is what makes the gate keeper's
+  // advice true and gives the player a way to cross Route 1 untouched if they want to.
+  if (grassCool > 0) {
+    grassCool = grassCool - 1
+    return
+  }
+  if (rngChance(0, ENCOUNTER_PCT) === 0) { return }
+
+  // Remember the tile so the walk resumes exactly where it stopped, then hand over to the
+  // flash-and-shake beat. `entryCol` survives the battle because only `buildScene` clears it, and
+  // the battle screen is not built by `buildScene`.
+  entryCol = h.gridCol()
+  entryRow = h.gridRow()
+  wildSpecies = WILD[rngBelow(0, WILD.length)]
+  // The shake comes from packages/feel, not from `fx_shake` directly. feel's `feelBump` is the same
+  // native spring underneath, but it goes through the library's intensity scaling and its bumps SUM,
+  // so a jolt that lands on top of another reads as one bigger jolt instead of replacing it and
+  // losing the first one's decay. `FP_ILLEGAL` is the one stock preset that is pure bump + PSG note
+  // with nothing to draw, which is exactly what a world-map jolt wants.
+  fx_flash(14)                      // a flash is not a shake; this stays hardware brightness
+  feelPlay(FP_ILLEGAL, 120, 80, 3)
+  feelBump(0, 0 - 1100)
+  feelFreeze(5)
+  chipHit()
+  deckSetIntensity(2)               // the drums come in, on the same playhead
+  encTimer = 34
+  mode = M_ENCOUNTER
+}
+
+// Your standing in the world: who you are fighting with, how many balls are left, and how much of
+// the route you have collected. Redrawn only when one of them changes — `hudText` re-lays-out a
+// slot on every call and each one is a sprite group.
+let lastParty: i32 = 0 - 1
+
+function showParty() {
+  let sig: i32 = active * 1000 + battleBalls() * 10 + battleCaughtCount()
+  if (sig === lastParty) { return }
+  lastParty = sig
+  hudText(1, 8, 140, SP_NAME[active] + "   BALLS " + battleBalls()
+                     + "   CAUGHT " + battleCaughtCount() + "/7")
+}
+
+// ── the battle screen ────────────────────────────────────────────────────────────────────────
+// Two sprites over a backdrop colour: no tilemap, no entities. `sprite_set_hud` puts them in
+// SCREEN space — without it `sprite_set_pos` is world coords and the engine subtracts a camera
+// that belongs to a map no longer on screen.
+let BG_BATTLE: i32 = 0x74a850
+let PANEL: i32 = 0x201c28
+let BAR_BACK: i32 = 0x101820
+
+// Where the two creatures stand. Kept as constants because the enemy's flinch has to be able to put
+// it back exactly where it started.
+let ENEMY_X: i32 = 176
+let ENEMY_Y: i32 = 22
+let PLAYER_X: i32 = 36
+let PLAYER_Y: i32 = 74
+let enemySprite: i32 = 0 - 1
+let playerSprite: i32 = 0 - 1
+
+function sceneBattle() {
+  backdrop(BG_BATTLE)
+  enemySprite = sprite_new(creatures)
+  sprite_set_hud(enemySprite, 1)
+  sprite_set_frame(enemySprite, battleEnemySpecies() * 2)        // view 0 = front, facing the player
+  sprite_set_pos(enemySprite, ENEMY_X, ENEMY_Y)
+  playerSprite = sprite_new(creatures)
+  sprite_set_hud(playerSprite, 1)
+  sprite_set_frame(playerSprite, battlePlayerSpecies() * 2 + 1)  // view 1 = back, over its shoulder
+  sprite_set_pos(playerSprite, PLAYER_X, PLAYER_Y)
+  flinch = 0
+}
+
+// ── who shakes, and why ──────────────────────────────────────────────────────────────────────
+// Hitting something and being hit are different events and should not feel the same:
+//
+//   the wild one takes a blow  -> only IT flinches. The screen holds still, so the hit reads as
+//                                 landing ON something over there.
+//   you take a blow            -> the WHOLE SCREEN recoils, because it happened to you.
+//
+// One shared screen-shake for both made every exchange feel identical and made your own hits feel
+// like they were happening to the camera.
+let FLINCH_FRAMES: i32 = 14
+let flinch: i32 = 0
+let flinchMag: i32 = 0
+
+function tickFlinch() {
+  if (enemySprite < 0 || flinch <= 0) { return }
+  flinch = flinch - 1
+  if (flinch === 0) {
+    sprite_set_pos(enemySprite, ENEMY_X, ENEMY_Y)     // home, exactly
+    return
+  }
+  // A decaying zig-zag: side to side every frame, amplitude falling to nothing. Integer maths only
+  // — this runs every frame of a fight and the ARM7 has no divide instruction to spare.
+  let amp: i32 = (flinchMag * flinch) / FLINCH_FRAMES
+  let off: i32 = amp
+  if ((flinch & 1) === 0) { off = 0 - amp }
+  sprite_set_pos(enemySprite, ENEMY_X + off, ENEMY_Y)
+}
+
+function drawBar(x: i32, y: i32, hp: i32, max: i32) {
+  ui_rect(x, y, 100, 6, BAR_BACK, 1)
+  let w: i32 = (hp * 96) / max
+  if (w < 1 && hp > 0) { w = 1 }
+  let col: i32 = 0x38d060
+  if (hp * 4 <= max) {
+    col = 0xd03838
+  } else if (hp * 2 <= max) {
+    col = 0xd0c038
+  }
+  if (w > 0) { ui_rect(x + 2, y + 1, w, 4, col, 1) }
+}
+
+// `ui_begin` CLEARS the canvas, so a repaint is all-or-nothing — which is why this is gated on a
+// signature rather than run every frame. Repainting 60 times a second would also re-lay-out every
+// `hudText` slot, and each of those is a sprite group.
+let lastSig: i32 = 0 - 1
+let lastCursor: i32 = 0
+let lastHit: i32 = 0
+
+function drawBattle() {
+  let sig: i32 = battleState() * 1000000 + battleCursor() * 100000
+                 + battlePlayerHp() * 100 + battleEnemyHp()
+  if (sig === lastSig) { return }
+  lastSig = sig
+  if (battleCursor() !== lastCursor) { chipBlip() }
+  lastCursor = battleCursor()
+
+  // A blow shakes the screen, scaled by the damage, and freezes it for a few frames. The battle
+  // engine reports the hit (`battleHitSeq` ticks once per blow) and the shake happens HERE, because
+  // a shake is presentation and that file does not do presentation.
+  if (battleHitSeq() !== lastHit) {
+    lastHit = battleHitSeq()
+    if (battleLastHurt() === 0) {
+      // You took it. feel's `feelBump` shakes the whole screen — same native spring as `fx_shake`
+      // underneath, but scaled by feel's intensity and SUMMING, so two blows in quick succession
+      // read as one bigger jolt instead of the second replacing the first and losing its decay.
+      let mag: i32 = 260 + battleLastDamage() * 100
+      feelBump(0 - mag, mag / 2)
+      feelFreeze(5)
+    } else {
+      // The wild one took it: it flinches, the camera does not move.
+      flinchMag = 3 + battleLastDamage() / 3
+      flinch = FLINCH_FRAMES
+      feelFreeze(3)
+    }
+    chipHit()
+  }
+
+  ui_begin()
+  ui_rect(4, 6, 112, 28, PANEL, 1)          // the wild one's plate, top-left
+  ui_rect(124, 56, 112, 34, PANEL, 1)       // yours, bottom-right
+  ui_rect(4, 106, 232, 50, PANEL, 1)        // the message / command box
+  drawBar(10, 24, battleEnemyHp(), battleEnemyMax())
+  drawBar(130, 72, battlePlayerHp(), battlePlayerMax())
+
+  hudText(0, 10, 10, "WILD " + SP_NAME[battleEnemySpecies()])
+  hudText(1, 130, 60, SP_NAME[battlePlayerSpecies()])
+  hudText(2, 178, 80, "" + battlePlayerHp() + "/" + battlePlayerMax())
+  hudText(3, 12, 112, battleMessage())
+
+  let n: i32 = battleMenuCount()
+  let i: i32 = 0
+  while (i < 3) {
+    if (i < n) {
+      let mark = "  "
+      if (i === battleCursor()) { mark = "> " }
+      hudText(4 + i, 16, 126 + i * 11, mark + battleMenuLabel(i))
+    } else {
+      hudText(4 + i, 0, 0, "")
+    }
+    i = i + 1
+  }
+  // Balls left, and — while the root menu is up — how likely a throw is right now. Showing the odds
+  // is what teaches the mechanic without a tutorial: it climbs as you wear the wild one down.
+  if (battleState() === BS_MENU) {
+    hudText(7, 132, 126, "BALLS " + battleBalls())
+    hudText(8, 132, 138, "CATCH " + battleCatchOdds() + "%")
+  } else {
+    hudText(7, 0, 0, "")
+    hudText(8, 0, 0, "")
+  }
+}
+
+// Edge-triggered presses, packed into the bits `battleTick` expects. Built HERE and passed in,
+// because the battle never reads the pad itself.
+function padBits(): i32 {
+  let k: i32 = 0
+  if (key_pressed(BTN_A) > 0) { k = k + K_A }
+  if (key_pressed(BTN_B) > 0) { k = k + K_B }
+  if (key_pressed(BTN_UP) > 0) { k = k + K_UP }
+  if (key_pressed(BTN_DOWN) > 0) { k = k + K_DOWN }
+  return k
+}
+
+function startBattle() {
+  battleStart(active, wildSpecies)
+  lastSig = 0 - 1
+  loadScene(sceneBattle)
+  mode = M_BATTLE
+}
+
+function endBattle() {
+  let i: i32 = 0
+  while (i < 9) {                   // hand every battle HUD slot back before the world redraws
+    hudText(i, 0, 0, "")
+    i = i + 1
+  }
+  if (battleOutcome() === OUT_WIN) { chipAccept() }
+  if (battleOutcome() === OUT_LOSE) { chipPop() }
+  if (battleOutcome() === OUT_CAUGHT) {
+    chipAccept()
+    active = wildSpecies            // what you caught is what you fight with next
+  }
+  deckSetIntensity(1)
+  grassCool = 3
+  mode = M_WORLD
+  enterScene(S_TOWN)                // entryCol/entryRow still name the tile the walk stopped on
+}
+
+function heroStep() {
+  if (heroId < 0) { return }
+  let h = entity(heroId)
+  if (bumpCool > 0) { bumpCool = bumpCool - 1 }
+  let moving: i32 = 0
+  if (h.gridMoving()) { moving = 1 }
+
+  if (moving === 0 && wasMoving === 1) {      // a tile was just finished
+    // ⚠️ `checkDoor` may load a whole new scene, which spawns — and so invalidates `h`. Nothing
+    // below may touch it after this returns 1.
+    if (checkDoor(h) > 0) { return }
+    onStepDone(h)
+    if (mode !== M_WORLD) { return }   // an encounter just started; `h` is about to go away
+  }
+  wasMoving = moving
+  if (moving === 1) {
+    animate(h)
+    return
+  }
+
+  if (key_pressed(BTN_A) > 0) { h.interact() }
+
+  let dx: i32 = input_x()
+  let dy: i32 = input_y()
+  if (dx !== 0 || dy !== 0) {
+    h.gridStep(dx, dy)
+    // `gridStep` turns you to face a wall but does not move you into it. Nothing moving after a
+    // press is the bump — a knock on the screen and a click, rate-limited so holding into a wall
+    // is one bump and not sixty a second.
+    if (!h.gridMoving() && bumpCool === 0) {
+      feelBump(0 - dx * 192, 0 - dy * 192)
+      chipPop()
+      bumpCool = 20
+    }
+  }
+  animate(h)
+}
+
+// ── boot ─────────────────────────────────────────────────────────────────────────────────────
+mount(components)
+uiInit({ font: body, tileReserve: 224 })
+dialogInit({ font: body, bodyW: 200, blipChip: 1, cacheShapes: 1 })
+deckPlay(theme)
+// ⚠️ `deckPlay` resets the intensifier to 0, and the theme's melody is a layer-1 stem — so the
+// default is the bass-and-pad bed ALONE, which sounds like the music failed to load rather than
+// like a town. 1 is the walking-around arrangement; phase 2 lifts it to 2 (the drums come in) when
+// an encounter starts, on the same playhead, so the change lands in time instead of restarting.
+deckSetIntensity(1)
+// One fixed seed. The stream still varies with how you actually walk — every encounter roll draws
+// from it — and a fixed start is what lets a headless run reproduce a fight exactly.
+rngSeed(0, 20260812)
+enterScene(S_TOWN)
+
+while (true) {
+  feelTick()                        // advances feel's keyframes and hit-stop; ~free when idle
+  if (mode === M_WORLD) {
+    if (dialogActive()) {
+      dialogUpdate()
+    } else if (feelFrozen() === 0) {  // hit-stop: the world holds still, the effects do not
+      heroStep()
+    }
+    step()
+  } else if (mode === M_ENCOUNTER) {
+    // Keep stepping the world so the flash decays and the shake settles over the map you were
+    // standing on, the way the genre does it — the cut happens after the jolt, not with it.
+    encTimer = encTimer - 1
+    if (encTimer <= 0) { startBattle() }
+    step()
+  } else {
+    if (feelFrozen() === 0) { battleTick(padBits()) }
+    drawBattle()
+    tickFlinch()                    // outside the freeze gate: hit-stop stops the GAME, not the effect
+    if (battleState() === BS_DONE) { endBattle() }
+    frame()
+  }
+}

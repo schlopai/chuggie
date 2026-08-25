@@ -1,0 +1,84 @@
+// Where does packages/platformer.tish spend its ticks? A game measured step phase 1 (behaviour
+// hooks) at ~3,468/frame with ONE platformer player. This ROM isolates the pieces on a minimal
+// world so the de-boxing pass optimizes measurements, not guesses.
+//
+//   A  platformerDriveRaw, idle          (the SYNTHESISED-input entry: cutscenes, tests)
+//   B  platformerDriveRaw, walking       (ix=1)
+//   C  platformerAnimate                 (clip resolve + gated play)
+//   D  a raw entity-wrapper call         (the unit the package is built from)
+//   E  platformerDrive, idle             (⭐ WHAT EVERY GAME ACTUALLY CALLS — reads the buttons
+//                                         itself and packs straight into the impl)
+//
+// Each phase runs 64 frames and logs the MEAN ticks per call. Logging happens BETWEEN phases,
+// so the measured frames carry no string-concat perturbation (docs/perf-rules.md).
+import { log, ticks } from 'cargo:tish_agb'
+import {
+  spawn, set_transform, set_collider, set_platformer, world_step, step_ticks
+} from 'cargo:tish_gba_game_engine'
+import { grid_setup, grid_set_solid } from 'cargo:tish_gba_game_engine'
+import { makeEntity } from '../../../packages/engine'
+import {
+  platformerInit, platformerDrive, platformerDriveRaw, platformerAnimate
+} from '../../../packages/platformer'
+
+grid_setup(15, 10)
+let c: i32 = 0
+while (c < 15) { grid_set_solid(c, 8, 1) c = c + 1 }
+grid_set_solid(0, 7, 1)
+grid_set_solid(14, 7, 1)
+
+let heroId: i32 = spawn()
+set_transform(heroId, 48, 112)
+set_collider(heroId, 10, 14)
+set_platformer(heroId)
+
+let heroData = { seeded: 1 }
+let CLIPS = {
+  idle: [0, 2, 24, 1], walk: [2, 2, 7, 1], jump: [4, 1, 8, 0], fall: [5, 1, 8, 0]
+}
+
+// one wrapper, held for the whole run (this ROM has exactly one entity, no pool pressure)
+let hero = makeEntity(heroId, heroData)
+platformerInit(hero, heroData, { boxW: 10, boxH: 14, ladders: 1, ledges: 1 })
+
+let acc: i32 = 0
+
+function report(name, frames: i32) {
+  // >> 6 == /64: frames is always 64
+  log("cost " + name + " mean=" + (acc >> 6))
+  acc = 0
+}
+
+let f: i32 = 0
+while (f < 360) {
+  let t0: i32 = ticks()
+  if (f < 64) {
+    platformerDriveRaw(hero, heroData, 0, 0, 0, 0, 0, 0)
+    acc = acc + ((ticks() - t0) & 0xFFFF)
+    if (f === 63) { report("A driveRaw idle", 64) }
+  } else if (f < 128) {
+    platformerDriveRaw(hero, heroData, 1, 0, 0, 0, 0, 0)
+    acc = acc + ((ticks() - t0) & 0xFFFF)
+    if (f === 127) { report("B driveRaw walking", 64) }
+  } else if (f < 192) {
+    platformerAnimate(hero, heroData, CLIPS)
+    acc = acc + ((ticks() - t0) & 0xFFFF)
+    if (f === 191) { report("C animate", 64) }
+  } else if (f < 256) {
+    hero.onGround()
+    acc = acc + ((ticks() - t0) & 0xFFFF)
+    if (f === 255) { report("D one wrapper call", 64) }
+  } else if (f < 320) {
+    platformerDrive(hero, heroData, 0, 0, 0)
+    acc = acc + ((ticks() - t0) & 0xFFFF)
+    if (f === 319) { report("E drive idle", 64) }
+  }
+  world_step()
+  if (f === 340) {
+    log("phases s0=" + step_ticks(0) + " s1=" + step_ticks(1) + " s2=" + step_ticks(2)
+        + " s3=" + step_ticks(3) + " s4=" + step_ticks(4) + " s5=" + step_ticks(5)
+        + " s6=" + step_ticks(6) + " s7=" + step_ticks(7))
+  }
+  f = f + 1
+}
+log("repro-platformer-cost done")

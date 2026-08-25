@@ -1,0 +1,56 @@
+# Triumph Fanfare — victory sting (2 bars, loops as short celebration).
+deck 1
+bpm 132
+
+track Fanfare id fan gen gameBoyDmg * 2
+  gen type pulse duty 50 env_mode constant vol 14
+  note 60 0 0.25 v 120
+  note 64 0.25 0.25 v 115
+  note 67 0.5 0.25 v 120
+  note 72 0.75 0.5 v 127
+  note 67 1.25 0.25 v 110
+  note 72 1.5 0.5 v 127
+  note 76 2 0.25 v 120
+  note 74 2.25 0.25 v 115
+  note 72 2.5 0.25 v 120
+  note 67 2.75 0.25 v 110
+  note 72 3 1 v 127
+  note 60 4 0.25 v 115
+  note 64 4.25 0.25 v 110
+  note 67 4.5 0.25 v 120
+  note 72 4.75 0.5 v 127
+  note 76 5.25 0.25 v 120
+  note 79 5.5 0.5 v 127
+  note 76 6 0.25 v 115
+  note 74 6.25 0.25 v 110
+  note 72 6.5 1.5 v 127
+
+track Harmony id harm gen gameBoyDmg * 2
+  gen type pulse duty 25 env_mode constant vol 8
+  note 48 0 1 v 90
+  note 52 1 1 v 95
+  note 55 2 1 v 100
+  note 60 3 1 v 110
+  note 48 4 1 v 90
+  note 52 5 1 v 95
+  note 55 6 0.5 v 100
+  note 60 6.5 1.5 v 115
+
+track Bass id bass gen gameBoyDmg * 2
+  gen type wave wave_shape square vol 13
+  note 36 0 1 v 120
+  note 40 1 1 v 110
+  note 43 2 1 v 120
+  note 36 3 1 v 127
+  note 36 4 1 v 120
+  note 40 5 1 v 110
+  note 43 6 0.5 v 120
+  note 48 6.5 1.5 v 127
+
+track Crash id crash gen gbaDirectSound * 2
+  gen waveform triangle vol 12 bitcrush true
+  adsr a 0 d 0.25 s 0 r 0.2
+  note 96 0.75 0.3 v 110
+  note 96 3 0.35 v 127
+  note 96 5.5 0.25 v 100
+  note 96 6.5 0.4 v 120

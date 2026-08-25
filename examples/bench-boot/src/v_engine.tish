@@ -1,0 +1,6 @@
+// Variant: FLOOR + packages/engine only.
+import { log, frame } from 'cargo:tish_agb'
+import { create } from '../../../packages/engine'
+
+log("BB engine fn=" + (typeof create))
+while (true) { frame() }

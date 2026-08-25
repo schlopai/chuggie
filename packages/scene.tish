@@ -1,0 +1,140 @@
+// scene.tish — a tiny, genre-agnostic SCENE-TRANSITION system for chuggie-engine.
+//
+// A "scene" is just an object with three closures:
+//     { enter: () => {…}, update: () => {…}, leave: () => {…} }
+//   • enter()  — load the scene: backdrop, backgrounds, sprites, reset state.
+//   • update() — one frame of scene logic (input, movement, HUD). Does NOT present;
+//                the game's main loop presents once (via the engine's `step()` or
+//                tish-agb's `frame()`), so the same present path also applies the fade.
+//   • leave()  — tear the scene down (bg_clear / sprite_clear / clear_world).
+//
+// `sceneGoto(i)` runs a transition — by default a hardware fade-to-black (tish-agb `fade`,
+// the BLDY brightness blend — one register, every layer + sprite + backdrop) — then at full
+// black swaps scenes (old.leave → new.enter) and reverses it. Every effect in
+// `packages/transition` is available instead: `sceneSetTransition(TR_IRIS, 24)` to change it
+// for good, or `sceneGotoFx(i, TR_BOX)` for one crossing. The whole machine is native: the
+// cursor is a typed struct (`SceneReg`), the effect is a typed extern per frame, and the only
+// boxing is the per-frame `scenes[cur].update()` dispatch — inherent to a data-driven
+// scene list, and just one call.
+//
+// Usage:
+//     import { sceneStart, sceneStep, sceneGoto } from '../../packages/scene'
+//     sceneStart([title, play, results], 0)
+//     while (true) { sceneStep(); step() }   // step() = your present (world_step / frame)
+import { trApply, trReset, trConfig, trKind } from './transition'
+
+// Transition length in frames each way (~0.27s at 60fps). 16 is the full 0..16 BLDY range, which
+// is why the default fade uses exactly that many steps; `sceneSetTransition` overrides it, and a
+// wipe or an iris usually wants longer (24 or so) because it moves across the screen.
+let FADE_LEN: i32 = 16
+
+// The effect for the NEXT transition only, or -1 for "use the configured one" — set by
+// `sceneGotoFx` and consumed the moment the transition starts.
+let ONESHOT: i32 = 0 - 1
+// What to restore after a one-shot has run.
+let BASE_FX: i32 = 0
+
+// Transition cursor. Typed so `t += 1` and the phase compares are native i32 ops.
+//   phase 0 = idle (running `cur`), 1 = fading out, 2 = fading in.
+interface SceneReg { cur: i32, next: i32, phase: i32, t: i32 }
+let SCN: SceneReg = { cur: 0, next: -1, phase: 0, t: 0 }
+
+// The registered scenes (an array of { enter, update, leave }). Untyped: it holds closures.
+let SCENES = []
+
+// Begin: register the scenes and enter `first` immediately (no fade on the very first scene).
+export function sceneStart(scenes, first: i32) {
+  SCENES = scenes
+  SCN.cur = first
+  SCN.next = -1
+  SCN.phase = 0
+  SCN.t = 0
+  BASE_FX = trKind()
+  trReset()
+  SCENES[first].enter()
+}
+
+// Choose the transition effect and length for every subsequent `sceneGoto`. `kind` is one of the
+// `TR_*` constants in `packages/transition` (TR_FADE, TR_IRIS, TR_BOX, TR_WIPE, TR_CURTAIN,
+// TR_BARS, TR_WHITE, TR_MOSAIC, TR_RAIN, TR_CHECKER).
+//
+// ⚠️ TR_IRIS spends the single HBlank DMA slot, so it cannot run over a Mode 7 floor or a
+// `bg_bands` layer — use TR_BOX there. The software effects (TR_RAIN, TR_CHECKER) need an open UI
+// canvas and ~600 reserved tiles; see the header of `packages/transition`.
+export function sceneSetTransition(kind: i32, len: i32) {
+  if (len > 0) { FADE_LEN = len }
+  BASE_FX = kind
+  trConfig(kind, FADE_LEN)
+}
+
+// Transition to `idx` using `kind` for this crossing only, then go back to the configured effect.
+// The one a doorway uses: an iris into a cave, a plain fade everywhere else.
+export function sceneGotoFx(idx: i32, kind: i32) {
+  if (SCN.phase === 0 && idx !== SCN.cur) {
+    ONESHOT = kind
+    trConfig(kind, FADE_LEN)
+  }
+  sceneGoto(idx)
+}
+
+// Request a transition to scene `idx`. Ignored while a transition is already running or if
+// `idx` is already current — so a held button can't stack transitions.
+export function sceneGoto(idx: i32) {
+  if (SCN.phase === 0 && idx !== SCN.cur) {
+    SCN.next = idx
+    SCN.phase = 1
+    SCN.t = 0
+  }
+}
+
+// Advance the transition machine and run the active scene's `update()`. Call once per frame,
+// BEFORE your present. The active scene keeps updating THROUGH the fade so it stays animated.
+export function sceneStep() {
+  if (SCN.phase === 1) {
+    // Fading out: darken 0 → 16. At full black, tear the old scene down — but do NOT build the new
+    // one in the same frame.
+    SCN.t = SCN.t + 1
+    trApply(SCN.t, FADE_LEN)
+    if (SCN.t >= FADE_LEN) {
+      SCENES[SCN.cur].leave()
+      SCN.cur = SCN.next
+      SCN.next = -1
+      SCN.phase = 3
+      // Hold at full black for one frame before enter(). agb does not return a scene's dynamic tile
+      // map until a frame boundary, so leave() then enter() inside a single frame asks for a fresh
+      // ~40KB block while the old one is still held — which panics as soon as the heap has no second
+      // block that size to spare. The extra frame is invisible (the screen is already black) and it
+      // is the difference between "works because there happens to be slack" and "works".
+      return
+    }
+  } else if (SCN.phase === 3) {
+    SCENES[SCN.cur].enter()
+    SCN.phase = 2
+  } else if (SCN.phase === 2) {
+    // Fading in: lighten 16 → 0, then idle.
+    SCN.t = SCN.t - 1
+    trApply(SCN.t, FADE_LEN)
+    if (SCN.t <= 0) {
+      trReset()
+      SCN.phase = 0
+      // A one-shot effect lasts exactly one crossing — restore the configured one now that the
+      // screen is back, not when the next goto is requested, so nothing can observe the wrong one.
+      if (ONESHOT >= 0) {
+        ONESHOT = 0 - 1
+        trConfig(BASE_FX, FADE_LEN)
+      }
+    }
+  }
+  SCENES[SCN.cur].update()
+}
+
+// The current scene index, and whether a transition is mid-flight (input can gate on this).
+export function sceneCur(): i32 { return SCN.cur }
+export function sceneBusy(): bool { return SCN.phase !== 0 }
+// The raw machine state, for a debug HUD. `sceneBusy()` answers "is a transition running"; these
+// two answer "and where in it", which is the difference between diagnosing a slow `enter()` and
+// guessing at one — phase 3 is the black hold, and a phase 3 that lasts more than a frame or two is
+// a scene build that is too expensive, not a stuck transition.
+//   phase 0 = idle, 1 = closing, 3 = held at black, 2 = opening
+export function scenePhase(): i32 { return SCN.phase }
+export function sceneT(): i32 { return SCN.t }

@@ -1,0 +1,202 @@
+// Proof ROM for the ecosystem/platformer engine natives. Headless: every assertion prints "ok <name>" or
+// "FAIL <name>" (a check that crashes vanishes into a traceback and the suite still passes —
+// so every check here is a compare + a log, nothing fancier).
+//
+//   P1  platformer_set_physics — a weighted jump peaks measurably lower than a default jump
+//   P2  platformer_launch      — a thrown body flies a real arc and STOPS where it lands
+//   P3  set_carrier            — land on a moving entity, ride it (inherit motion), jump off;
+//                                despawn-under-the-rider detaches cleanly onto the floor
+//   P4  nearest_tag / entity_dist — nearest-by-tag with a radius, and center distance
+//   P5  patrol stun gate       — a stunned patroller stands still instead of walking on blind
+//
+// Screen-space discipline: no camera target is set, so everything must stay inside the
+// 240x160 view or the off-screen cull freezes it mid-test. Floor row 8 (y=128), walls at
+// cols 0 and 14.
+import { log } from 'cargo:tish_agb'
+import {
+  spawn, despawn, set_transform, set_collider, set_platformer, set_tag, set_stun, set_patrol,
+  platformer_jump, platformer_walk, platformer_grounded, platformer_vy,
+  platformer_set_physics, platformer_launch, set_carrier, nearest_tag, entity_dist,
+  entity_x, entity_y, grid_setup, grid_set_solid, world_step
+} from 'cargo:tish_gba_game_engine'
+
+// ── the little world ──────────────────────────────────────────────────────────
+grid_setup(15, 10)
+let c: i32 = 0
+while (c < 15) { grid_set_solid(c, 8, 1) c = c + 1 }
+let r: i32 = 0
+while (r < 9) { grid_set_solid(0, r, 1) grid_set_solid(14, r, 1) r = r + 1 }
+
+// hero: default-physics jumper, then weighted
+let hero: i32 = spawn()
+set_transform(hero, 32, 112)
+set_collider(hero, 16, 16)
+set_platformer(hero)
+
+// thrown dummy
+let thrown: i32 = spawn()
+set_transform(thrown, 48, 112)
+set_collider(thrown, 8, 8)
+set_platformer(thrown)
+
+// carrier + rider
+let carrier: i32 = spawn()
+set_transform(carrier, 80, 96)
+set_collider(carrier, 32, 8)
+set_carrier(carrier)
+let rider: i32 = spawn()
+set_transform(rider, 88, 40)
+set_collider(rider, 16, 16)
+set_platformer(rider)
+
+// nearest_tag probes (tag 7)
+let near1: i32 = spawn()
+set_transform(near1, 40, 24)
+set_collider(near1, 16, 16)
+set_tag(near1, 7)
+let near2: i32 = spawn()
+set_transform(near2, 200, 24)
+set_collider(near2, 16, 16)
+set_tag(near2, 7)
+let probe: i32 = spawn()
+set_transform(probe, 48, 24)
+set_collider(probe, 16, 16)
+
+// patroller
+let pat: i32 = spawn()
+set_transform(pat, 112, 112)
+set_collider(pat, 16, 16)
+set_platformer(pat)
+set_patrol(pat, 0)
+
+// ── bookkeeping ───────────────────────────────────────────────────────────────
+let minY1: i32 = 999      // default-jump apex (P1)
+let minY2: i32 = 999      // weighted-jump apex (P1)
+let landX: i32 = 0 - 1    // where the thrown body landed (P2)
+let rideX0: i32 = 0       // rider x when the ride began (P3)
+let rideLandY: i32 = 0    // rider y while riding (P3)
+let patX0: i32 = 0        // patroller x before the stun (P5)
+let stunX0: i32 = 0       // patroller x right after the stun landed (P5)
+
+function check(name, pass: i32) {
+  if (pass === 1) { log("ok " + name) } else { log("FAIL " + name) }
+}
+
+let f: i32 = 0
+while (f < 640) {
+  // ── P1: default jump apex over frames 10..80, weighted jump over 100..170 ──
+  if (f === 10) { platformer_jump(hero) }
+  if (f > 10 && f < 80) {
+    let y: i32 = entity_y(hero)
+    if (y < minY1) { minY1 = y }
+  }
+  if (f === 90) { platformer_set_physics(hero, 3.4, 0) }
+  if (f === 100) { platformer_jump(hero) }
+  if (f > 100 && f < 170) {
+    let y2: i32 = entity_y(hero)
+    if (y2 < minY2) { minY2 = y2 }
+  }
+  if (f === 180) {
+    let apex1: i32 = 112 - minY1
+    let apex2: i32 = 112 - minY2
+    let p1: i32 = 0
+    if (apex1 >= apex2 + 10) { p1 = 1 }
+    check("weighted jump lower (" + apex1 + " vs " + apex2 + ")", p1)
+    // restore defaults so the hero is a bystander from here on
+    platformer_set_physics(hero, 0, 0)
+  }
+
+  // ── P2: throw at 200, track the landing, prove it stopped ──
+  if (f === 200) { platformer_launch(thrown, 2.5, 0 - 2.5) }
+  if (f > 200 && landX < 0) {
+    if (platformer_grounded(thrown)) { landX = entity_x(thrown) }
+  }
+  if (f === 300) {
+    let tx: i32 = entity_x(thrown)
+    let p2a: i32 = 0
+    if (landX > 48 + 20) { p2a = 1 }
+    check("throw flew (landed x=" + landX + ")", p2a)
+    let dx: i32 = tx - landX
+    if (dx < 0) { dx = 0 - dx }
+    let p2b: i32 = 0
+    if (dx <= 1) { p2b = 1 }
+    check("throw stopped on landing (drift=" + dx + ")", p2b)
+  }
+
+  // ── P3: the rider fell onto the carrier around frame ~30; ride 300..340 ──
+  if (f === 300) {
+    rideX0 = entity_x(rider)
+    rideLandY = entity_y(rider)
+    let p3a: i32 = 0
+    if (platformer_grounded(rider) && rideLandY === 96 - 16) { p3a = 1 }
+    check("landed on carrier (y=" + rideLandY + ")", p3a)
+  }
+  if (f >= 300 && f < 340) {
+    // drive the carrier by hand, 1px/frame rightward — a moving platform
+    set_transform(carrier, 80 + (f - 299), 96)
+  }
+  if (f === 345) {
+    let rx: i32 = entity_x(rider)
+    let p3b: i32 = 0
+    if (rx >= rideX0 + 38 && platformer_grounded(rider)) { p3b = 1 }
+    check("rode the carrier (dx=" + (rx - rideX0) + ")", p3b)
+    platformer_jump(rider)
+  }
+  if (f === 352) {
+    let p3c: i32 = 0
+    if (platformer_vy(rider) < 0) { p3c = 1 }
+    if (platformer_grounded(rider)) { p3c = 0 }
+    check("jumped off the carrier", p3c)
+  }
+  // put the rider back on the carrier, then pull the carrier out from under it
+  if (f === 380) { set_transform(rider, entity_x(carrier) + 8, 60) }
+  if (f === 420) { despawn(carrier) }
+  if (f === 470) {
+    let p3d: i32 = 0
+    if (platformer_grounded(rider) && entity_y(rider) === 112) { p3d = 1 }
+    check("carrier despawn detached to floor (y=" + entity_y(rider) + ")", p3d)
+  }
+
+  // ── P4: nearest_tag / entity_dist (static, run once) ──
+  if (f === 500) {
+    let got: i32 = nearest_tag(probe, 7, 60)
+    let p4a: i32 = 0
+    if (got === near1) { p4a = 1 }
+    check("nearest_tag finds the near one", p4a)
+    let none: i32 = nearest_tag(probe, 7, 4)
+    let p4b: i32 = 0
+    if (none === 0 - 1) { p4b = 1 }
+    check("nearest_tag radius excludes", p4b)
+    let d: i32 = entity_dist(probe, near1)
+    let p4c: i32 = 0
+    if (d === 8) { p4c = 1 }
+    check("entity_dist (d=" + d + ")", p4c)
+    let gone: i32 = entity_dist(probe, carrier)
+    let p4d: i32 = 0
+    if (gone === 0 - 1) { p4d = 1 }
+    check("entity_dist -1 for a despawned id", p4d)
+  }
+
+  // ── P5: the patroller walked since boot; stun it and prove it stands still ──
+  if (f === 520) { patX0 = entity_x(pat) }
+  if (f === 540) {
+    let p5a: i32 = 0
+    if (entity_x(pat) !== patX0) { p5a = 1 }
+    check("patroller walks before stun", p5a)
+    set_stun(pat, 90)
+    stunX0 = entity_x(pat)
+  }
+  if (f === 600) {
+    // entity_x returns FRACTIONAL px; both sides go through the same i32 truncation so this
+    // compares whole pixels. 60 frames of un-gated walking would be ~75px, so a <1px blind
+    // spot cannot mask a real failure.
+    let patNow: i32 = entity_x(pat)
+    let p5b: i32 = 0
+    if (patNow === stunX0) { p5b = 1 }
+    check("stunned patroller stands still (x=" + patNow + " x0=" + stunX0 + ")", p5b)
+  }
+
+  world_step()
+  f = f + 1
+}
+log("repro-eco-natives done")

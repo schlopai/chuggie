@@ -1,0 +1,3596 @@
+{
+ "group": "Ui",
+ "count": 359,
+ "assets": [
+  {
+   "file": "Ui/Arrow.png",
+   "name": "Arrow",
+   "category": "Ui",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Dialog/ChoiceBox.png",
+   "name": "ChoiceBox",
+   "category": "Dialog",
+   "dims": [
+    64,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Dialog/DialogBox.png",
+   "name": "DialogBox",
+   "category": "Dialog",
+   "dims": [
+    300,
+    58
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Dialog/DialogBoxFaceset.png",
+   "name": "DialogBoxFaceset",
+   "category": "Dialog",
+   "dims": [
+    300,
+    58
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Dialog/DialogInfo.png",
+   "name": "DialogInfo",
+   "category": "Dialog",
+   "dims": [
+    80,
+    16
+   ],
+   "type": "strip-h(5)"
+  },
+  {
+   "file": "Ui/Dialog/DialogueBoxSimple.png",
+   "name": "DialogueBoxSimple",
+   "category": "Dialog",
+   "dims": [
+    316,
+    60
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Dialog/FacesetBox.png",
+   "name": "FacesetBox",
+   "category": "Dialog",
+   "dims": [
+    48,
+    48
+   ],
+   "type": "icon-48"
+  },
+  {
+   "file": "Ui/Dialog/NoButton.png",
+   "name": "NoButton",
+   "category": "Dialog",
+   "dims": [
+    26,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Dialog/YesButton.png",
+   "name": "YesButton",
+   "category": "Dialog",
+   "dims": [
+    26,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote1.png",
+   "name": "emote1",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote10.png",
+   "name": "emote10",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote11.png",
+   "name": "emote11",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote12.png",
+   "name": "emote12",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote13.png",
+   "name": "emote13",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote14.png",
+   "name": "emote14",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote15.png",
+   "name": "emote15",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote16.png",
+   "name": "emote16",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote17.png",
+   "name": "emote17",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote18.png",
+   "name": "emote18",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote19.png",
+   "name": "emote19",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote2.png",
+   "name": "emote2",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote20.png",
+   "name": "emote20",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote21.png",
+   "name": "emote21",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote22.png",
+   "name": "emote22",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote23.png",
+   "name": "emote23",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote24.png",
+   "name": "emote24",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote25.png",
+   "name": "emote25",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote26.png",
+   "name": "emote26",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote27.png",
+   "name": "emote27",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote28.png",
+   "name": "emote28",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote29.png",
+   "name": "emote29",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote3.png",
+   "name": "emote3",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote30.png",
+   "name": "emote30",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote4.png",
+   "name": "emote4",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote5.png",
+   "name": "emote5",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote6.png",
+   "name": "emote6",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote7.png",
+   "name": "emote7",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote8.png",
+   "name": "emote8",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Emote/emote9.png",
+   "name": "emote9",
+   "category": "Emote",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Font/font24x30.png",
+   "name": "font24x30",
+   "category": "Font",
+   "dims": [
+    360,
+    240
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Font/font8x8.png",
+   "name": "font8x8",
+   "category": "Font",
+   "dims": [
+    120,
+    64
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonA/Disabled.png",
+   "name": "Disabled",
+   "category": "Input/Gamepad/ButtonA",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonA/Hovered.png",
+   "name": "Hovered",
+   "category": "Input/Gamepad/ButtonA",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonA/Idle.png",
+   "name": "Idle",
+   "category": "Input/Gamepad/ButtonA",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonA/Pressed.png",
+   "name": "Pressed",
+   "category": "Input/Gamepad/ButtonA",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonB/Disabled.png",
+   "name": "Disabled",
+   "category": "Input/Gamepad/ButtonB",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonB/Hovered.png",
+   "name": "Hovered",
+   "category": "Input/Gamepad/ButtonB",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonB/Idle.png",
+   "name": "Idle",
+   "category": "Input/Gamepad/ButtonB",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonB/Pressed.png",
+   "name": "Pressed",
+   "category": "Input/Gamepad/ButtonB",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonDown.png",
+   "name": "ButtonDown",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    17
+   ],
+   "type": "icon-17"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonLB.png",
+   "name": "ButtonLB",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonLT.png",
+   "name": "ButtonLT",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonLeft.png",
+   "name": "ButtonLeft",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    17
+   ],
+   "type": "icon-17"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonMinus.png",
+   "name": "ButtonMinus",
+   "category": "Input/Gamepad",
+   "dims": [
+    14,
+    5
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonPlus.png",
+   "name": "ButtonPlus",
+   "category": "Input/Gamepad",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonRB.png",
+   "name": "ButtonRB",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonRT.png",
+   "name": "ButtonRT",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonRight.png",
+   "name": "ButtonRight",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    17
+   ],
+   "type": "icon-17"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonUp.png",
+   "name": "ButtonUp",
+   "category": "Input/Gamepad",
+   "dims": [
+    17,
+    17
+   ],
+   "type": "icon-17"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonX/Disabled.png",
+   "name": "Disabled",
+   "category": "Input/Gamepad/ButtonX",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonX/Hovered.png",
+   "name": "Hovered",
+   "category": "Input/Gamepad/ButtonX",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonX/Idle.png",
+   "name": "Idle",
+   "category": "Input/Gamepad/ButtonX",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonX/Pressed.png",
+   "name": "Pressed",
+   "category": "Input/Gamepad/ButtonX",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonY/ButtonY.png",
+   "name": "ButtonY",
+   "category": "Input/Gamepad/ButtonY",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonY/Disabled.png",
+   "name": "Disabled",
+   "category": "Input/Gamepad/ButtonY",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonY/Hovered.png",
+   "name": "Hovered",
+   "category": "Input/Gamepad/ButtonY",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/ButtonY/Pressed.png",
+   "name": "Pressed",
+   "category": "Input/Gamepad/ButtonY",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/DPad.png",
+   "name": "DPad",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/DPadDown.png",
+   "name": "DPadDown",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    15
+   ],
+   "type": "icon-15"
+  },
+  {
+   "file": "Ui/Input/Gamepad/DPadLeft.png",
+   "name": "DPadLeft",
+   "category": "Input/Gamepad",
+   "dims": [
+    16,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/DPadRight.png",
+   "name": "DPadRight",
+   "category": "Input/Gamepad",
+   "dims": [
+    16,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/DPadUp.png",
+   "name": "DPadUp",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/JoystickLeft.png",
+   "name": "JoystickLeft",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    18
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/JoystickLeftPressed.png",
+   "name": "JoystickLeftPressed",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    22
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/JoystickRight.png",
+   "name": "JoystickRight",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    18
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/JoystickRightPressed.png",
+   "name": "JoystickRightPressed",
+   "category": "Input/Gamepad",
+   "dims": [
+    15,
+    22
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/Select.png",
+   "name": "Select",
+   "category": "Input/Gamepad",
+   "dims": [
+    26,
+    9
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Gamepad/Start.png",
+   "name": "Start",
+   "category": "Input/Gamepad",
+   "dims": [
+    26,
+    9
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/IconGamepad.png",
+   "name": "IconGamepad",
+   "category": "Input",
+   "dims": [
+    19,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/IconKeyboard.png",
+   "name": "IconKeyboard",
+   "category": "Input",
+   "dims": [
+    20,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/IconMouse.png",
+   "name": "IconMouse",
+   "category": "Input",
+   "dims": [
+    9,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key0.png",
+   "name": "Key0",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key1.png",
+   "name": "Key1",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key2.png",
+   "name": "Key2",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key3.png",
+   "name": "Key3",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key4.png",
+   "name": "Key4",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key5.png",
+   "name": "Key5",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key6.png",
+   "name": "Key6",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key7.png",
+   "name": "Key7",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key8.png",
+   "name": "Key8",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/Key9.png",
+   "name": "Key9",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyA.png",
+   "name": "KeyA",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyAlt.png",
+   "name": "KeyAlt",
+   "category": "Input/Keyboard",
+   "dims": [
+    20,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyB.png",
+   "name": "KeyB",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyC.png",
+   "name": "KeyC",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyCtrl.png",
+   "name": "KeyCtrl",
+   "category": "Input/Keyboard",
+   "dims": [
+    26,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyD.png",
+   "name": "KeyD",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyDelete.png",
+   "name": "KeyDelete",
+   "category": "Input/Keyboard",
+   "dims": [
+    20,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyDown.png",
+   "name": "KeyDown",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyE.png",
+   "name": "KeyE",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyEnter.png",
+   "name": "KeyEnter",
+   "category": "Input/Keyboard",
+   "dims": [
+    17,
+    17
+   ],
+   "type": "icon-17"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyEscape.png",
+   "name": "KeyEscape",
+   "category": "Input/Keyboard",
+   "dims": [
+    18,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF.png",
+   "name": "KeyF",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF1.png",
+   "name": "KeyF1",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF10.png",
+   "name": "KeyF10",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF11.png",
+   "name": "KeyF11",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF12.png",
+   "name": "KeyF12",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF2.png",
+   "name": "KeyF2",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF3.png",
+   "name": "KeyF3",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF4.png",
+   "name": "KeyF4",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF5.png",
+   "name": "KeyF5",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF6.png",
+   "name": "KeyF6",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF7.png",
+   "name": "KeyF7",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF8.png",
+   "name": "KeyF8",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyF9.png",
+   "name": "KeyF9",
+   "category": "Input/Keyboard",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyG.png",
+   "name": "KeyG",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyH.png",
+   "name": "KeyH",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyI.png",
+   "name": "KeyI",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyJ.png",
+   "name": "KeyJ",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyK.png",
+   "name": "KeyK",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyL.png",
+   "name": "KeyL",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyLeft.png",
+   "name": "KeyLeft",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyM.png",
+   "name": "KeyM",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyN.png",
+   "name": "KeyN",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyO.png",
+   "name": "KeyO",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyP.png",
+   "name": "KeyP",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyQ.png",
+   "name": "KeyQ",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyR.png",
+   "name": "KeyR",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyRight.png",
+   "name": "KeyRight",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyS.png",
+   "name": "KeyS",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyShift.png",
+   "name": "KeyShift",
+   "category": "Input/Keyboard",
+   "dims": [
+    30,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeySpace.png",
+   "name": "KeySpace",
+   "category": "Input/Keyboard",
+   "dims": [
+    33,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyT.png",
+   "name": "KeyT",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyTab.png",
+   "name": "KeyTab",
+   "category": "Input/Keyboard",
+   "dims": [
+    22,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyU.png",
+   "name": "KeyU",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyUp.png",
+   "name": "KeyUp",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyV.png",
+   "name": "KeyV",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyW.png",
+   "name": "KeyW",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyX.png",
+   "name": "KeyX",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyY.png",
+   "name": "KeyY",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Keyboard/KeyZ.png",
+   "name": "KeyZ",
+   "category": "Input/Keyboard",
+   "dims": [
+    13,
+    13
+   ],
+   "type": "icon-13"
+  },
+  {
+   "file": "Ui/Input/Mouse/Mouse.png",
+   "name": "Mouse",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Mouse/MouseButtonLeft.png",
+   "name": "MouseButtonLeft",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Mouse/MouseButtonMiddle.png",
+   "name": "MouseButtonMiddle",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Mouse/MouseButtonRight.png",
+   "name": "MouseButtonRight",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Mouse/MouseDisabled.png",
+   "name": "MouseDisabled",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Mouse/MouseWheelDown.png",
+   "name": "MouseWheelDown",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Mouse/MouseWheelUp.png",
+   "name": "MouseWheelUp",
+   "category": "Input/Mouse",
+   "dims": [
+    15,
+    24
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Preview.png",
+   "name": "Preview",
+   "category": "Input",
+   "dims": [
+    896,
+    210
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Input/Tuto.png",
+   "name": "Tuto",
+   "category": "Input",
+   "dims": [
+    226,
+    40
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Heart.png",
+   "name": "Heart",
+   "category": "Receptacle",
+   "dims": [
+    80,
+    16
+   ],
+   "type": "strip-h(5)"
+  },
+  {
+   "file": "Ui/Receptacle/Heart2.png",
+   "name": "Heart2",
+   "category": "Receptacle",
+   "dims": [
+    64,
+    16
+   ],
+   "type": "strip-h(4)"
+  },
+  {
+   "file": "Ui/Receptacle/Heart3.png",
+   "name": "Heart3",
+   "category": "Receptacle",
+   "dims": [
+    64,
+    16
+   ],
+   "type": "strip-h(4)"
+  },
+  {
+   "file": "Ui/Receptacle/IconHeart.png",
+   "name": "IconHeart",
+   "category": "Receptacle",
+   "dims": [
+    14,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/LifeBarMiniProgress.png",
+   "name": "LifeBarMiniProgress",
+   "category": "Receptacle",
+   "dims": [
+    18,
+    4
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/LifeBarMiniUnder.png",
+   "name": "LifeBarMiniUnder",
+   "category": "Receptacle",
+   "dims": [
+    18,
+    4
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/AmmoSkill.png",
+   "name": "AmmoSkill",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    22,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/AmmoSpecial.png",
+   "name": "AmmoSpecial",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    11,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/Ammokunai.png",
+   "name": "Ammokunai",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    22,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/BackgroundBag.png",
+   "name": "BackgroundBag",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    42,
+    58
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/BackgroundBamboo.png",
+   "name": "BackgroundBamboo",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    34,
+    56
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/BackgroundBottle.png",
+   "name": "BackgroundBottle",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    32,
+    63
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/BackgroundScroll.png",
+   "name": "BackgroundScroll",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    38,
+    66
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/BackgroundWood.png",
+   "name": "BackgroundWood",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    34,
+    56
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/Preview.png",
+   "name": "Preview",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    960,
+    364
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/ProgressHealth.png",
+   "name": "ProgressHealth",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    22,
+    40
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Rectangle/ProgressWhite.png",
+   "name": "ProgressWhite",
+   "category": "Receptacle/Receptacle Rectangle",
+   "dims": [
+    22,
+    40
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundBamboo.png",
+   "name": "BackgroundBamboo",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundFlask.png",
+   "name": "BackgroundFlask",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundIron.png",
+   "name": "BackgroundIron",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundIron2.png",
+   "name": "BackgroundIron2",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundMetal.png",
+   "name": "BackgroundMetal",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundRed.png",
+   "name": "BackgroundRed",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/BackgroundWood.png",
+   "name": "BackgroundWood",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/Over.png",
+   "name": "Over",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    32,
+    32
+   ],
+   "type": "icon-32"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/Preview.png",
+   "name": "Preview",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    680,
+    352
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressBlack.png",
+   "name": "ProgressBlack",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressGreen.png",
+   "name": "ProgressGreen",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressHealth.png",
+   "name": "ProgressHealth",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressMana.png",
+   "name": "ProgressMana",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressPurple.png",
+   "name": "ProgressPurple",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressWhite.png",
+   "name": "ProgressWhite",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Receptacle/Receptacle Sphere/ProgressYellow.png",
+   "name": "ProgressYellow",
+   "category": "Receptacle/Receptacle Sphere",
+   "dims": [
+    22,
+    22
+   ],
+   "type": "icon-22"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Amulet.png",
+   "name": "Amulet",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/AmuletDisabled.png",
+   "name": "AmuletDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Armor.png",
+   "name": "Armor",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/ArmorDisabled.png",
+   "name": "ArmorDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Arrow.png",
+   "name": "Arrow",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/ArrowDisabled.png",
+   "name": "ArrowDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Boot.png",
+   "name": "Boot",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/BootDisabled.png",
+   "name": "BootDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Guard.png",
+   "name": "Guard",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/GuardDisabled.png",
+   "name": "GuardDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Helmet.png",
+   "name": "Helmet",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/HelmetDisabled.png",
+   "name": "HelmetDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Hook.png",
+   "name": "Hook",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/HookDisabled.png",
+   "name": "HookDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Kunai.png",
+   "name": "Kunai",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/KunaiDisabled.png",
+   "name": "KunaiDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Money.png",
+   "name": "Money",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/MoneyDisabled.png",
+   "name": "MoneyDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Ring.png",
+   "name": "Ring",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/RingDisabled.png",
+   "name": "RingDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Scroll.png",
+   "name": "Scroll",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/ScrollDisabled.png",
+   "name": "ScrollDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/Shuriken.png",
+   "name": "Shuriken",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Items & Weapon/ShurikenDisabled.png",
+   "name": "ShurikenDisabled",
+   "category": "Skill Icon/Items & Weapon",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Cook.png",
+   "name": "Cook",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/CookDisabled.png",
+   "name": "CookDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Dish.png",
+   "name": "Dish",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/DishDisabled.png",
+   "name": "DishDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Harvest.png",
+   "name": "Harvest",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/HarvestDisabled.png",
+   "name": "HarvestDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Interact.png",
+   "name": "Interact",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/InteractDisabled.png",
+   "name": "InteractDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Mine.png",
+   "name": "Mine",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/MineDisabled.png",
+   "name": "MineDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Plant.png",
+   "name": "Plant",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/PlantDisabled.png",
+   "name": "PlantDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Potion.png",
+   "name": "Potion",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/PotionDisabled.png",
+   "name": "PotionDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Punch.png",
+   "name": "Punch",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/PunchDisabled.png",
+   "name": "PunchDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Repair.png",
+   "name": "Repair",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/RepairDisabled.png",
+   "name": "RepairDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Sing.png",
+   "name": "Sing",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/SingDisabled.png",
+   "name": "SingDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Talk.png",
+   "name": "Talk",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/TalkDisabled.png",
+   "name": "TalkDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/Water.png",
+   "name": "Water",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Job & Action/WaterDisabled.png",
+   "name": "WaterDisabled",
+   "category": "Skill Icon/Job & Action",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/Moon.png",
+   "name": "Moon",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/MoonDisabled.png",
+   "name": "MoonDisabled",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/Rain.png",
+   "name": "Rain",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/RainDisabled.png",
+   "name": "RainDisabled",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/Snow.png",
+   "name": "Snow",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/SnowDisabled.png",
+   "name": "SnowDisabled",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/Sun.png",
+   "name": "Sun",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Meteo/SunDisabled.png",
+   "name": "SunDisabled",
+   "category": "Skill Icon/Meteo",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Preview.png",
+   "name": "Preview",
+   "category": "Skill Icon",
+   "dims": [
+    360,
+    192
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Alchemy.png",
+   "name": "Alchemy",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/AlchemyDisabled.png",
+   "name": "AlchemyDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/AttackUpgrade.png",
+   "name": "AttackUpgrade",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/AttackUpgradeDisabled.png",
+   "name": "AttackUpgradeDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookDarkness.png",
+   "name": "BookDarkness",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookDarknessDisabled.png",
+   "name": "BookDarknessDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookDeath.png",
+   "name": "BookDeath",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookDeathDisabled.png",
+   "name": "BookDeathDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookFire.png",
+   "name": "BookFire",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookFireDisabled.png",
+   "name": "BookFireDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookIce.png",
+   "name": "BookIce",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookIceDisabled.png",
+   "name": "BookIceDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookLight.png",
+   "name": "BookLight",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookLightDisabled.png",
+   "name": "BookLightDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookPlant.png",
+   "name": "BookPlant",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookPlantDisabled.png",
+   "name": "BookPlantDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookRock.png",
+   "name": "BookRock",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookRockDisabled.png",
+   "name": "BookRockDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookThunder.png",
+   "name": "BookThunder",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookThunderDisabled.png",
+   "name": "BookThunderDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookWind.png",
+   "name": "BookWind",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/BookWindDisabled.png",
+   "name": "BookWindDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Camouflage.png",
+   "name": "Camouflage",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/CamouflageDisabled.png",
+   "name": "CamouflageDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Counter.png",
+   "name": "Counter",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/CounterDisabled.png",
+   "name": "CounterDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Cut.png",
+   "name": "Cut",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/CutDisabled.png",
+   "name": "CutDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Death.png",
+   "name": "Death",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/DeathDisabled.png",
+   "name": "DeathDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/DefenseUpgrade.png",
+   "name": "DefenseUpgrade",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/DefenseUpgradeDisabled.png",
+   "name": "DefenseUpgradeDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Downgrade.png",
+   "name": "Downgrade",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/DowngradeDisabled.png",
+   "name": "DowngradeDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Explosion.png",
+   "name": "Explosion",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/ExplosionDisabled.png",
+   "name": "ExplosionDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Fireball.png",
+   "name": "Fireball",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/FireballDisabled.png",
+   "name": "FireballDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Heal.png",
+   "name": "Heal",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/HealDisabled.png",
+   "name": "HealDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/LuckUpgrade.png",
+   "name": "LuckUpgrade",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/LuckUpgradeDisabled.png",
+   "name": "LuckUpgradeDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/MagicWeapon.png",
+   "name": "MagicWeapon",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/MagicWeaponDisabled.png",
+   "name": "MagicWeaponDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Mist.png",
+   "name": "Mist",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/MistDisabled.png",
+   "name": "MistDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Necromancy.png",
+   "name": "Necromancy",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/NecromancyDisabled.png",
+   "name": "NecromancyDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/OrbDarkness.png",
+   "name": "OrbDarkness",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/OrbDisabled.png",
+   "name": "OrbDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/OrbFire.png",
+   "name": "OrbFire",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/OrbLight.png",
+   "name": "OrbLight",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/OrbPlant.png",
+   "name": "OrbPlant",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/OrbWater.png",
+   "name": "OrbWater",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Permutation.png",
+   "name": "Permutation",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/PermutationDisabled.png",
+   "name": "PermutationDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/RockSpike.png",
+   "name": "RockSpike",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/RockSpikeDisabled.png",
+   "name": "RockSpikeDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Upgrade.png",
+   "name": "Upgrade",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/UpgradeDisabled.png",
+   "name": "UpgradeDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/Vision.png",
+   "name": "Vision",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/VisionDisabled.png",
+   "name": "VisionDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/WaterCanon.png",
+   "name": "WaterCanon",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Skill Icon/Spell/WaterCanonDisabled.png",
+   "name": "WaterCanonDisabled",
+   "category": "Skill Icon/Spell",
+   "dims": [
+    24,
+    24
+   ],
+   "type": "icon-24"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/arrow_left.png",
+   "name": "arrow_left",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/arrow_left_hover.png",
+   "name": "arrow_left_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/arrow_right.png",
+   "name": "arrow_right",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/arrow_right_hover.png",
+   "name": "arrow_right_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_checked.png",
+   "name": "button_checked",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    26,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_checked_disabled.png",
+   "name": "button_checked_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    26,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_disabled.png",
+   "name": "button_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_hover.png",
+   "name": "button_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_normal.png",
+   "name": "button_normal",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_pressed.png",
+   "name": "button_pressed",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_unchecked.png",
+   "name": "button_unchecked",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    26,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/button_unchecked_disabled.png",
+   "name": "button_unchecked_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    26,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/checked.png",
+   "name": "checked",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/checked_disabled.png",
+   "name": "checked_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/h_slidder_grabber.png",
+   "name": "h_slidder_grabber",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    13,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/h_slidder_grabber_disabled.png",
+   "name": "h_slidder_grabber_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    13,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/h_slidder_grabber_hover.png",
+   "name": "h_slidder_grabber_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    13,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/inventory_cell.png",
+   "name": "inventory_cell",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_bg.png",
+   "name": "nine_path_bg",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_bg_2.png",
+   "name": "nine_path_bg_2",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_focus.png",
+   "name": "nine_path_focus",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    8,
+    8
+   ],
+   "type": "icon-8"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_panel_2.png",
+   "name": "nine_path_panel_2",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_panel_3.png",
+   "name": "nine_path_panel_3",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_panel_disabled.png",
+   "name": "nine_path_panel_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/nine_path_panel_interior.png",
+   "name": "nine_path_panel_interior",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/radio_checked.png",
+   "name": "radio_checked",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/radio_checked_disabled.png",
+   "name": "radio_checked_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/radio_unchecked.png",
+   "name": "radio_unchecked",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/radio_unchecked_disabled.png",
+   "name": "radio_unchecked_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/slider_progress.png",
+   "name": "slider_progress",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/slider_progress_hover.png",
+   "name": "slider_progress_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/tab.png",
+   "name": "tab",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/tab_disabled.png",
+   "name": "tab_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/tab_hover.png",
+   "name": "tab_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/tab_selected.png",
+   "name": "tab_selected",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/tab_unselected.png",
+   "name": "tab_unselected",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/unchecked.png",
+   "name": "unchecked",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/unchecked_disabled.png",
+   "name": "unchecked_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/v_slidder_grabber.png",
+   "name": "v_slidder_grabber",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    11,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/v_slidder_grabber_disabled.png",
+   "name": "v_slidder_grabber_disabled",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    11,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Theme Wood/v_slidder_grabber_hover.png",
+   "name": "v_slidder_grabber_hover",
+   "category": "Theme/Theme Wood",
+   "dims": [
+    11,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeBamboo/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeBamboo",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeBocal/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeBocal",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeBubble/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeBubble",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeDark/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeDark",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeMap/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeMap",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeMetal/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeMetal",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeMetal2/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeMetal2",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeMetal3/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeMetal3",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeRed/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeRed",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeWood2/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeWood2",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeWood3/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeWood3",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/Wip/ThemeWood4/nine_path_panel.png",
+   "name": "nine_path_panel",
+   "category": "Theme/Wip/ThemeWood4",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Ui/Theme/preview.png",
+   "name": "preview",
+   "category": "Theme",
+   "dims": [
+    976,
+    340
+   ],
+   "type": "irregular"
+  }
+ ]
+}

@@ -1,0 +1,136 @@
+// earshot — a sound source that orbits you, and you can hear where it is.
+//
+// The acceptance test for `packages/sfx.tish` and the new `sound_play_ex` native.
+//
+// ── WHAT WAS MISSING ──────────────────────────────────────────────────────────────────────────
+//
+// `sound_play(wav)` was the entire vocabulary: every effect in every game played dead centre at full
+// volume. An explosion off the left edge of the screen sounded exactly like one under your feet.
+// agb's `SoundChannel` has had volume, panning and playback speed all along — nothing exposed them.
+//
+// ── AND WHY THIS ROM CAN PROVE IT ─────────────────────────────────────────────────────────────
+//
+// Audio is the one subsystem a screenshot cannot check, and "it sounded fine to me" is not a test.
+// `tools/gba-shot` captures a **stereo** WAV (`GBA_SHOT_AUDIO=out.wav`), so panning is measurable:
+// when the source is left of the listener the left channel must carry more energy than the right,
+// and vice versa. `verify.sh` asserts exactly that, per quadrant, plus that distance actually
+// attenuates. See the README for the measured numbers.
+//
+// The orbit is deliberately slow and the blip fires on a fixed beat, so a capture window lines up
+// with a known position rather than with wherever the sound happened to be.
+
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { blip } from 'wav:../assets/blip.wav'
+import {
+  backdrop, ui_begin, ui_rect, ui_text, ui_clear_rect, ui_reserve_tiles,
+  frame, keys_edge, log
+} from 'cargo:tish_agb'
+import { sfxInit, sfxListener, sfxAt, sfxVolumeAt, sfxPanAt } from '../../../packages/sfx'
+
+let CX: i32 = 120        // the listener sits at the centre of the screen
+let CY: i32 = 84
+let RAD: i32 = 96        // orbit radius in pixels
+let BEAT: i32 = 45       // frames between blips
+
+// Sixteen points around a circle, Q8 — a table rather than a sin/cos call, because the orbit is
+// cosmetic and the GBA has no divide instruction to spare on it.
+let COS: i32[] = [256, 236, 181, 98, 0, 0 - 98, 0 - 181, 0 - 236,
+                  0 - 256, 0 - 236, 0 - 181, 0 - 98, 0, 98, 181, 236]
+let SIN: i32[] = [0, 98, 181, 236, 256, 236, 181, 98,
+                  0, 0 - 98, 0 - 181, 0 - 236, 0 - 256, 0 - 236, 0 - 181, 0 - 98]
+
+//   0 t  1 step  2 shown
+let V: i32[] = [0, 0, 0 - 1]
+let V_T: i32 = 0
+let V_STEP: i32 = 1
+let V_SHOWN: i32 = 2
+
+let BG: i32 = 0x0C1020
+let PANEL: i32 = 0x1C2440
+let EDGE: i32 = 0x7C8CB8
+let INK: i32 = 0xE8ECF8
+let DIM: i32 = 0x8890B0
+let GOLD: i32 = 0xFFD060
+let EAR: i32 = 0x60D080
+
+backdrop(BG)
+ui_reserve_tiles(200)
+ui_begin()
+sfxInit({ near: 24, far: 160, minVol: 20 })
+sfxListener(CX, CY)
+log("EARSHOT boot listener=" + CX + "," + CY + " radius=" + RAD)
+
+let NUMS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+function numStr(n: i32) {
+  if (n === 0) { return "0" }
+  let neg: i32 = 0
+  let v: i32 = n
+  if (v < 0) { neg = 1  v = 0 - v }
+  let s = ""
+  while (v > 0) {
+    s = NUMS[v % 10] + s
+    v = (v / 10) | 0
+  }
+  if (neg === 1) { return "-" + s }
+  return s
+}
+
+function srcX(): i32 { return CX + ((Math.imul(COS[V[V_STEP] & 15], RAD)) >> 8) }
+function srcY(): i32 { return CY + ((Math.imul(SIN[V[V_STEP] & 15], RAD)) >> 8) }
+
+function paint() {
+  ui_clear_rect(0, 0, 240, 160)
+  ui_text(small, 6, 4, "EARSHOT", GOLD)
+  ui_text(small, 74, 4, "positional sound", DIM)
+
+  // The orbit, as a ring of dots, with the live one lit.
+  let i: i32 = 0
+  while (i < 16) {
+    let x: i32 = CX + ((Math.imul(COS[i], RAD)) >> 8)
+    let y: i32 = CY + ((Math.imul(SIN[i], RAD)) >> 8)
+    let c: i32 = PANEL
+    if (i === (V[V_STEP] & 15)) { c = GOLD }
+    ui_rect(x - 3, y - 3, 6, 6, c, 1)
+    i = i + 1
+  }
+  // The listener.
+  ui_rect(CX - 4, CY - 4, 8, 8, EAR, 1)
+
+  let dx: i32 = srcX() - CX
+  let d: i32 = dx
+  if (d < 0) { d = 0 - d }
+  let dy: i32 = srcY() - CY
+  let ady: i32 = dy
+  if (ady < 0) { ady = 0 - ady }
+  let dist: i32 = d + (ady >> 1)
+  if (ady > d) { dist = ady + (d >> 1) }
+
+  ui_rect(0, 132, 240, 28, PANEL, 1)
+  ui_rect(0, 132, 240, 1, EDGE, 1)
+  ui_text(small, 6, 136, "pan " + numStr(sfxPanAt(dx)) + "   vol " + numStr(sfxVolumeAt(dist)), INK)
+  ui_text(small, 6, 148, "dx " + numStr(dx) + "  dist " + numStr(dist), DIM)
+}
+paint()
+
+while (true) {
+  V[V_T] = V[V_T] + 1
+
+  if ((V[V_T] % BEAT) === 0) {
+    let x: i32 = srcX()
+    let y: i32 = srcY()
+    sfxAt(blip, x, y)
+    let dx: i32 = x - CX
+    // Logged so `verify.sh` can line a capture window up with a KNOWN position rather than guessing
+    // where the source was when a given sample was written.
+    log("EARSHOT blip step=" + (V[V_STEP] & 15) + " x=" + x + " y=" + y
+      + " dx=" + numStr(dx) + " pan=" + numStr(sfxPanAt(dx)))
+    V[V_STEP] = V[V_STEP] + 1
+  }
+
+  if (V[V_SHOWN] !== V[V_STEP]) {
+    V[V_SHOWN] = V[V_STEP]
+    paint()
+  }
+
+  frame()
+}

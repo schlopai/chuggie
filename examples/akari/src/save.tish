@@ -1,0 +1,101 @@
+// Akari-specific save glue: pack story flags + area names onto packages/save.
+import {
+  saveInit, saveAny, saveHas, saveErase, saveWrite, saveLoad, saveGet, saveFlagOn,
+  SAVE_FILE_COUNT, firstEmptySlot,
+} from '../../../packages/save'
+import { gameState } from './state'
+
+export { saveInit as initSave, saveAny as hasSave, saveHas as slotHasSave, saveErase as eraseSave }
+export { SAVE_FILE_COUNT, firstEmptySlot }
+
+export let FLAG_SWORD: i32 = 1
+export let FLAG_STARS: i32 = 2
+export let FLAG_KEY: i32 = 4
+export let FLAG_BOSS_DEAD: i32 = 8
+export let FLAG_BOSS_HANDLED: i32 = 16
+export let FLAG_OPENING_DONE: i32 = 32
+
+function packFlags() {
+  let f = 0
+  if (gameState.hasSword) { f = f + FLAG_SWORD }
+  if (gameState.hasStars) { f = f + FLAG_STARS }
+  if (gameState.hasKey) { f = f + FLAG_KEY }
+  if (gameState.bossDead) { f = f + FLAG_BOSS_DEAD }
+  if (gameState.bossHandled) { f = f + FLAG_BOSS_HANDLED }
+  if (gameState.openingDone) { f = f + FLAG_OPENING_DONE }
+  return f
+}
+
+function unpackFlags(f) {
+  gameState.hasSword = saveFlagOn(f, FLAG_SWORD) > 0
+  gameState.hasStars = saveFlagOn(f, FLAG_STARS) > 0
+  gameState.hasKey = saveFlagOn(f, FLAG_KEY) > 0
+  gameState.bossDead = saveFlagOn(f, FLAG_BOSS_DEAD) > 0
+  gameState.bossHandled = saveFlagOn(f, FLAG_BOSS_HANDLED) > 0
+  gameState.openingDone = saveFlagOn(f, FLAG_OPENING_DONE) > 0
+}
+
+function areaName(scene) {
+  if (scene === 0) { return "WILLOW VALE" }
+  if (scene === 1) { return "HOLLOW SHRINE" }
+  if (scene === 2) { return "HOUSE" }
+  if (scene === 3) { return "HOUSE" }
+  if (scene === 4) { return "HOUSE" }
+  if (scene === 5) { return "HOUSE" }
+  return "UNKNOWN"
+}
+
+// File-select detail line for packages/menu `formatDetail`.
+export function formatSaveDetail(scene, maxHp, hp, score, flags) {
+  let hearts = (maxHp + 1) / 2
+  return areaName(scene) + "  " + hearts + " HEARTS  " + score + " GEMS"
+}
+
+// Write the live run to `gameState.saveSlot`.
+export function writeSave(hp, pcol, prow) {
+  let slot = gameState.saveSlot
+  if (slot < 0) { slot = 0 }
+  return saveWrite(
+    slot,
+    gameState.scene, gameState.maxHp, hp, gameState.gems, packFlags(),
+    pcol, prow, gameState.entryCol, gameState.entryRow
+  )
+}
+
+// Load `slot` into gameState. Returns 1 on success.
+export function readSave(slot) {
+  if (saveLoad(slot) === 0) { return 0 }
+  let g = saveGet()
+  gameState.saveSlot = slot
+  gameState.scene = g.scene
+  gameState.maxHp = g.maxHp
+  gameState.gems = g.score
+  unpackFlags(g.flags)
+  gameState.entryCol = g.entryCol
+  gameState.entryRow = g.entryRow
+  gameState.loadHp = g.hp
+  gameState.loadCol = g.pcol
+  gameState.loadRow = g.prow
+  return 1
+}
+
+export function resetGameState() {
+  gameState.playerId = -1
+  gameState.scene = 0
+  gameState.maxHp = 6
+  gameState.hasSword = false
+  gameState.hasStars = true
+  gameState.hasKey = false
+  gameState.gems = 0
+  gameState.bossDead = false
+  gameState.bossHandled = false
+  gameState.openingDone = false
+  gameState.entryCol = 18
+  gameState.entryRow = 14
+  gameState.entryX = 18 * 16 + 1
+  gameState.entryY = 14 * 16 + 1
+  gameState.loadHp = 6
+  gameState.loadCol = -1
+  gameState.loadRow = -1
+  gameState.saveSlot = 0
+}

@@ -1,0 +1,66 @@
+// AKARI audio — everything is synthesised on the GBA's four PSG channels; nothing is sampled.
+//
+// This used to be nine WAVs and two 10512 Hz music recordings totalling 2.3 MB, of which the two
+// themes alone were 2.2 MB of a 4.47 MB ROM. They are now `chip:` songs (note data, ~1 KB the pair)
+// and hardware sound effects. Besides the ROM, the change removes the software mixer from this game
+// entirely: no per-frame mixing, and no need to keep the mixer fed through long synchronous work
+// like a scene stream or a menu build, which is what used to make the music stutter while loading.
+//
+// The songs live in assets/audio/*.chip; see crates/tish-gba-scenepack/src/chippack.rs for the
+// format. Typewriter blips are armed via dialogInit({ blip }).
+import { townSong } from 'chip:../assets/audio/town.chip'
+import { dungeonSong } from 'chip:../assets/audio/dungeon.chip'
+import { chip_play, chip_stop } from 'cargo:tish_agb'
+import { chipSlash, chipThrow, chipWhoosh, chipCoin } from '../../../packages/chipsfx'
+import { gameState } from './state'
+
+let MUS_TOWN: i32 = 0
+let MUS_DUNGEON: i32 = 1
+
+// Mutes, driven by the pause → Options screen. `area` remembers which theme the player is standing in while
+// the BGM is off, so unmuting starts the right one instead of waiting for the next warp.
+let AUDIO = { musicOff: 0, sfxOff: 0, area: 0 }
+
+// The dialogue typewriter chirps on the synth now: main.tish passes `blipChip: 1` to dialogInit
+// instead of a `wav:` handle, so there is no blip asset and no mixer voice held open per letter.
+
+export function playAreaMusic(kind) {
+  AUDIO.area = kind
+  if (AUDIO.musicOff > 0) { return }
+  if (kind === 1) {
+    if (gameState.music !== MUS_DUNGEON) {
+      chip_play(dungeonSong)
+      gameState.music = MUS_DUNGEON
+    }
+  } else {
+    if (gameState.music !== MUS_TOWN) {
+      chip_play(townSong)
+      gameState.music = MUS_TOWN
+    }
+  }
+}
+
+export function musicOn() { if (AUDIO.musicOff > 0) { return 0 } return 1 }
+export function sfxOn() { if (AUDIO.sfxOff > 0) { return 0 } return 1 }
+
+// Clearing gameState.music is what lets playAreaMusic start the same theme again on unmute.
+export function setMusicOn(on) {
+  if (on > 0) {
+    AUDIO.musicOff = 0
+    playAreaMusic(AUDIO.area)
+    return
+  }
+  AUDIO.musicOff = 1
+  chip_stop()
+  gameState.music = -1
+}
+
+export function setSfxOn(on) {
+  if (on > 0) { AUDIO.sfxOff = 0 } else { AUDIO.sfxOff = 1 }
+}
+
+// Names kept as they were so the callers in components.tish are untouched by the move to the synth.
+export function sfxSlash() { if (AUDIO.sfxOff === 0) { chipSlash() } }
+export function sfxThrow() { if (AUDIO.sfxOff === 0) { chipThrow() } }
+export function sfxWhoosh() { if (AUDIO.sfxOff === 0) { chipWhoosh() } }
+export function sfxCoin() { if (AUDIO.sfxOff === 0) { chipCoin() } }

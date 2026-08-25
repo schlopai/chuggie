@@ -1,0 +1,338 @@
+// bench-memory — WHICH subsystem does not give its heap back?
+//
+// Almost every crash on this hardware is an allocation failure, and the hard part is never "the heap is
+// small" (it is 136K and always was) — it is finding which of a dozen subsystems keeps a few K after it
+// claims to be done. Chasing that inside a real game means walking a player to a door for two minutes per
+// build, with a scene load, a dialog, a menu warm and an audio swap all happening in the same frame.
+//
+// So: one subsystem at a time, in a loop, printing free heap after every cycle. A cycle that gives
+// everything back is FLAT — the number after cycle 8 equals the number after cycle 1. A slope is a leak,
+// and the trial name says who owns it. Run it under a logging emulator:
+//
+//   GBA_SHOT_LOG=1 scripts/screenshot.sh examples/bench-memory/bench-memory.gba /tmp/m.png 2000
+//
+// The first cycle of each trial is a WARM-UP and is not measured: first touch legitimately allocates
+// (a lazy cache, a font atlas, a sprite pool), and counting that as a leak would flag every trial.
+import { uif } from "font:../../../assets/fonts/ark-pixel-10px.ttf@10"
+import { tiny } from "font:../../../assets/fonts/tinypixel.ttf@7"
+import { log, frame, backdrop, heap_free, ui_clear, ui_hide, text_draw, text_visible } from 'cargo:tish_agb'
+import { mount, create, loadScene, setupGrid, entityApi, entity, entityDespawn, step } from '../../../packages/engine'
+import { uiInit, uiRender, uiBake, uiBaked, uiReplay, uiBakeFreeAll, col2, makePanel, makeSelector } from '../../../packages/ui'
+import { dialogInit, dialogSay, dialogUpdate, dialogActive, dialogAdvance, dialogFree } from '../../../packages/dialog'
+
+backdrop(0x101018)
+uiInit({ font: uif, icons: 0 })
+dialogInit({ font: uif, bodyW: 176, speed: 8 })
+setupGrid(32, 32)
+
+let ENTS: i32 = 12
+let ITERS: i32 = 6
+
+// ── correctness: the pooled-wrapper CONTRACT ──────────────────────────────────────────────────────
+// Pooling entity wrappers is what makes a scene affordable (see the note in engine.tish), and it buys
+// that with a rule: a wrapper is a borrowed slot. The rule is only worth anything if the cases a game
+// actually writes are safe, and every one of these is a bug that was hit for real:
+//
+//   • spawning INSIDE a hook and then still using `this`  (an effect + `this.despawn()` — despawned the
+//     effect, and the thing that should have died lived on)
+//   • keeping a LIST of entities to unload later          (a stored wrapper despawned the player, and
+//     the game stopped responding without crashing)
+//   • `this` and `other` in the same hook being different entities
+//
+// Failures print FAIL with both ids, so this is the file that says whether the pool is safe — not a game.
+let CHK = { n: 0, bad: 0 }
+function check(name, got, want) {
+  CHK.n = CHK.n + 1
+  if (got === want) {
+    log("PASS " + name)
+    return
+  }
+  CHK.bad = CHK.bad + 1
+  log("FAIL " + name + " got=" + got + " want=" + want)
+}
+
+let PROBE = { ran: 0, selfBefore: 0, selfAfter: 0, spawned: 0, collideSelf: 0, collideOther: 0 }
+
+let Spawner = {
+  // The `spawnFx(...)` then `this.despawn()` shape: take a wrapper for a NEW entity mid-hook, then keep
+  // using `this`. If `create()` could take the hook's slot, `this` would silently become the spawn.
+  update: ({ this }) => {
+    if (PROBE.ran === 1) { return }
+    PROBE.ran = 1
+    PROBE.selfBefore = this.id
+    let f = create()
+    f.setPos(4, 4)
+    PROBE.spawned = f.id
+    // several more borrows, to be sure it is not just "one deep"
+    let i = 0
+    while (i < 6) { entity(PROBE.spawned).setTag(2); i = i + 1 }
+    PROBE.selfAfter = this.id
+  }
+}
+
+let Bumper = {
+  onCollide: ({ this, other }) => {
+    if (PROBE.collideSelf !== 0) { return }
+    PROBE.collideSelf = this.id
+    PROBE.collideOther = other.id
+  }
+}
+
+mount({ Spawner: Spawner, Bumper: Bumper })
+
+function testHookSlots() {
+  loadScene(() => {
+    setupGrid(32, 32)
+    let a = create()
+    a.setPos(40, 40)
+    a.behave(Spawner, {})
+  })
+  let i = 0
+  while (i < 4) { step(); frame(); i = i + 1 }
+  check("hook `this` survives create() inside the hook", PROBE.selfAfter, PROBE.selfBefore)
+  check("the spawn got its own entity, not the hook's", PROBE.spawned === PROBE.selfBefore, false)
+}
+
+// The shrine-room pattern: remember a room's entities, unload them on the way out, rebuild on return.
+// Ids are the only thing safe to remember, and this is the test that says so.
+function testParkAndRespawn() {
+  let parked = []
+  loadScene(() => {
+    setupGrid(32, 32)
+    let i = 0
+    while (i < ENTS) {
+      let e = create()
+      e.setPos(i * 8, 16)
+      parked.push(e.id)
+      i = i + 1
+    }
+  })
+  let playerId = create().id
+  entity(playerId).setPos(120, 120)
+  entity(playerId).setTag(9)
+
+  let cycles = 0
+  while (cycles < 4) {
+    let i = 0
+    while (i < parked.length) { entityDespawn(parked[i]); i = i + 1 }
+    parked = []
+    i = 0
+    while (i < ENTS) { parked.push(create().id); i = i + 1 }
+    step()
+    cycles = cycles + 1
+  }
+  // The one entity nobody parked must have survived every unload, with its tag intact.
+  check("parking rooms by id leaves the player alive", entity(playerId).tag(), 9)
+}
+
+// ── the harness ───────────────────────────────────────────────────────────────────────────────────
+// `d` is the number that matters: bytes NOT given back since the post-warm-up baseline. Flat d = clean.
+// A trial reports its own total so a scan of the log reads as a table.
+function run(name, body) {
+  body()                       // warm-up: first-touch allocation is not a leak
+  let base = heap_free()
+  let i = 0
+  while (i < ITERS) {
+    body()
+    i = i + 1
+    let free = heap_free()
+    log(name + " i=" + i + " free=" + free + " d=" + (free - base))
+  }
+  log("== " + name + " leaked " + (base - heap_free()) + " over " + ITERS + " cycles")
+  frame()
+}
+
+// ── trials ────────────────────────────────────────────────────────────────────────────────────────
+function tNop() { }
+
+// Entity wrappers through the documented sugar: `despawn()` is the path that evicts the cache.
+function tSpawnDespawn() {
+  let ids = []
+  let i = 0
+  while (i < ENTS) { ids.push(create().id); i = i + 1 }
+  i = 0
+  while (i < ENTS) { entity(ids[i]).despawn(); i = i + 1 }
+}
+
+// A scene load with nothing in it: pure teardown cost (clear_world, sprite_clear, ui_clear, bg_clear).
+function tSceneEmpty() {
+  loadScene(() => { setupGrid(32, 32) })
+}
+
+// The real warp shape: teardown, then spawn an area's worth of entities that are never despawned
+// individually (the next `clear_world` takes them).
+function tSceneEntities() {
+  loadScene(() => {
+    setupGrid(32, 32)
+    let i = 0
+    while (i < ENTS) { create(); i = i + 1 }
+  })
+}
+
+// Spawning through the id-keeping pattern a game should use for entities it holds on to.
+function tSceneEntityIds() {
+  loadScene(() => {
+    setupGrid(32, 32)
+    let ids = []
+    let i = 0
+    while (i < ENTS) { ids.push(create().id); i = i + 1 }
+    i = 0
+    while (i < ENTS) { entity(ids[i]).setTag(1); i = i + 1 }
+  })
+}
+
+let PANEL = {
+  dir: "col", pad: 6, gap: 4, border: "border", fill: "panel", w: 150,
+  children: [
+    { text: "MEMORY", color: "title" },
+    { text: "The quick brown fox jumps over the lazy dog.", color: "text", font: tiny, wrap: 1 },
+    { text: "A: ok   B: back", color: "dim", font: tiny }
+  ]
+}
+
+// UI canvas: does a rendered panel's DynamicTile16s + node graph come back on ui_clear?
+//
+// The `frame()` is not padding. Tiles are VRAM-backed and only actually released at the commit, so a
+// loop that renders and clears several times WITHOUT presenting piles up every tile it ever made — the
+// first version of this trial had six panels live at once, tripped agb's live-tile map into its 20K
+// growth step, and then ran the GBA out of tile VRAM. It looked exactly like a leak in `ui_clear`, and
+// it was the bench measuring something no game does.
+function tUiRenderClear() {
+  uiRender(PANEL)
+  frame()
+  ui_clear()
+}
+
+// The cheap teardown a menu actually uses between opens (blank the tiles, keep the allocation).
+function tUiRenderHide() {
+  uiRender(PANEL)
+  frame()
+  ui_hide()
+}
+
+// Baked display lists: bake a tree, replay it, free it.
+function tUiBake() {
+  if (uiBaked(1) === 0) { uiBake(1, PANEL) }
+  uiReplay(1)
+  frame()
+  uiBakeFreeAll()
+}
+
+// A dialog box open → typed out → closed, the way a cutscene line runs.
+function tDialog() {
+  dialogSay(["The shadow breaks and the shrine is cleansed at last.",
+             "Return to Willow Vale when you are ready to travel."])
+  let guard = 0
+  while (dialogActive() === 1 && guard < 600) {
+    dialogUpdate()
+    dialogAdvance()
+    frame()
+    guard = guard + 1
+  }
+}
+
+// Retained sprite text, the pause menu's storage: draw into slots, hide, draw again.
+function tSpriteText() {
+  let i = 0
+  while (i < 8) { text_draw(uif, 200 + i, 8, 8 + i * 10, "Slot line " + i); i = i + 1 }
+  i = 0
+  while (i < 8) { text_visible(200 + i, 0); i = i + 1 }
+}
+
+// A selector component built and dropped per open — the shape a menu takes when it is rebuilt
+// rather than retained.
+function tComponent() {
+  let sel = makeSelector({
+    cols: 1, gap: 1, rowH: 10,
+    count: () => 8,
+    cell: (i) => { return { text: "Item " + i, color: "text", font: tiny } }
+  })
+  uiRender(makePanel({ title: "BAG", border: "border", fill: "panel", pad: 4, children: [sel.view()] }))
+  frame()
+  sel.clear()
+  ui_clear()
+}
+
+// What ONE entity wrapper costs, which is the number that decides how big an area a game may have.
+// Measured against a warm arena (the first spawn grows native storage; that is capacity, not per-entity
+// cost), and with the wrappers still held — this is the resident footprint of a loaded scene.
+function wrapperCost() {
+  let warm = create()
+  warm.despawn()
+  let base = heap_free(64)
+  let ids = []
+  let i = 0
+  while (i < ENTS) {
+    ids.push(create().id)
+    let now = heap_free(64)
+    log("wrapper n=" + (i + 1) + " free=" + now + " each=" + ((base - now) / (i + 1)))
+    i = i + 1
+  }
+  i = 0
+  while (i < ENTS) { entity(ids[i]).despawn(); i = i + 1 }
+  log("== wrapper reclaimed to " + heap_free(64) + " (base was " + base + ")")
+  frame()
+}
+
+// An entity wrapper is an object of ~62 method closures. Before rebuilding it, find out which half of
+// that sentence costs the memory: the closures, or the object that holds them.
+function closureCost() {
+  let base = heap_free(64)
+  let fns = []
+  let i = 0
+  while (i < 62) {
+    let n = i
+    fns.push((v) => v + n)
+    i = i + 1
+  }
+  let afterFns = heap_free(64)
+  log("62 bare closures  = " + (base - afterFns) + "  (" + ((base - afterFns) / 62) + " each)")
+
+  let lit = {
+    a: () => 1, b: () => 2, c: () => 3, d: () => 4, e: () => 5,
+    f: () => 6, g: () => 7, h: () => 8, i: () => 9, j: () => 10
+  }
+  let afterLit = heap_free(64)
+  log("10 closures in an object literal = " + (afterFns - afterLit))
+
+  let inc = {}
+  inc.a = () => 1
+  inc.b = () => 2
+  inc.c = () => 3
+  inc.d = () => 4
+  inc.e = () => 5
+  inc.f = () => 6
+  inc.g = () => 7
+  inc.h = () => 8
+  inc.i = () => 9
+  inc.j = () => 10
+  let afterInc = heap_free(64)
+  log("10 closures assigned one by one   = " + (afterLit - afterInc))
+
+  let plain = { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8, i: 9, j: 10 }
+  log("10 NUMBERS in an object literal   = " + (afterInc - heap_free(64)) + " (keys=" + Object.keys(plain).length + " fns=" + fns.length + " " + lit.a() + inc.a() + ")")
+  frame()
+}
+
+// ── go ────────────────────────────────────────────────────────────────────────────────────────────
+log("bench-memory: heap at start = " + heap_free() + " (1K blocks), " + heap_free(64) + " (64B blocks)")
+testHookSlots()
+testParkAndRespawn()
+log("== contract: " + (CHK.n - CHK.bad) + "/" + CHK.n + " checks passed")
+closureCost()
+wrapperCost()
+run("nop", tNop)
+run("spawn+despawn", tSpawnDespawn)
+run("scene-empty", tSceneEmpty)
+run("scene-entities", tSceneEntities)
+run("scene-entity-ids", tSceneEntityIds)
+run("scene-entities-again", tSceneEntities)
+run("ui-render+clear", tUiRenderClear)
+run("ui-render+hide", tUiRenderHide)
+run("ui-bake", tUiBake)
+run("dialog", tDialog)
+run("sprite-text", tSpriteText)
+run("component", tComponent)
+log("bench-memory: heap at end = " + heap_free() + " (1K blocks), " + heap_free(64) + " (64B blocks)")
+
+while (true) { frame() }

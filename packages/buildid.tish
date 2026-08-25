@@ -1,0 +1,28 @@
+// buildid.tish — put the build number on screen.
+//
+// One line, bottom right, dim enough to ignore and legible enough to read off a photo. Pair it with
+// `scripts/stamp_build.py`, which regenerates `src/buildid.tish` with a fresh number on every build:
+//
+//     import { BUILD_ID } from './buildid'
+//     import { buildShow } from '../../../packages/buildid'
+//     buildShow(9, small, BUILD_ID)      // once, at startup
+//
+// Why bother: when a fix appears not to work, "the change is wrong" and "the ROM is stale" look
+// exactly the same from outside, and this repo caches compiled packages in `.tish/` so stale is a
+// real possibility rather than a theoretical one. Reading a number off the screen answers it in a
+// second. Guessing at it, and especially guessing that the other party's build is at fault, is how
+// an afternoon disappears.
+import { text_draw } from 'cargo:tish_agb'
+
+/// Draw the build id bottom-right. Call once; it costs nothing after that.
+///
+/// `maxw` is inset from 240 so the right-aligned text clears the screen edge, and the colour is
+/// deliberately low-contrast — this is a diagnostic, not part of the game.
+export function buildShow(slot: i32, font: i32, id) {
+  text_draw(font, slot, 0, 151, id, { color: 0x7a6f86, align: "right", maxw: 236 })
+}
+
+/// Hide it (a title screen you want clean for a screenshot, say).
+export function buildHide(slot: i32, font: i32) {
+  text_draw(font, slot, 0, 0, "")
+}

@@ -1,0 +1,425 @@
+{
+ "count": 28,
+ "assets": [
+  {
+   "file": "Backgrounds/Animated/Conveyor Belt/Left.png",
+   "name": "Left",
+   "kind": "animated",
+   "category": "Conveyor Belt",
+   "dims": [
+    32,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 2
+  },
+  {
+   "file": "Backgrounds/Animated/Conveyor Belt/Middle.png",
+   "name": "Middle",
+   "kind": "animated",
+   "category": "Conveyor Belt",
+   "dims": [
+    32,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 2
+  },
+  {
+   "file": "Backgrounds/Animated/Conveyor Belt/Right.png",
+   "name": "Right",
+   "kind": "animated",
+   "category": "Conveyor Belt",
+   "dims": [
+    32,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 2
+  },
+  {
+   "file": "Backgrounds/Animated/Flag/FlagBlack16x16.png",
+   "name": "FlagBlack16x16",
+   "kind": "animated",
+   "category": "Flag",
+   "dims": [
+    64,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/Flag/FlagBlue16x16.png",
+   "name": "FlagBlue16x16",
+   "kind": "animated",
+   "category": "Flag",
+   "dims": [
+    64,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/Flag/FlagBrown16x16.png",
+   "name": "FlagBrown16x16",
+   "kind": "animated",
+   "category": "Flag",
+   "dims": [
+    64,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/Flag/FlagGray16x16.png",
+   "name": "FlagGray16x16",
+   "kind": "animated",
+   "category": "Flag",
+   "dims": [
+    64,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/Flag/FlagGreen16x16.png",
+   "name": "FlagGreen16x16",
+   "kind": "animated",
+   "category": "Flag",
+   "dims": [
+    64,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/Flag/FlagRed16x16.png",
+   "name": "FlagRed16x16",
+   "kind": "animated",
+   "category": "Flag",
+   "dims": [
+    64,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/Flag/FlagWhite16x16.png",
+   "name": "FlagWhite16x16",
+   "kind": "animated",
+   "category": "Flag",
+   "dims": [
+    64,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/Flag/FlagYellow16x16.png",
+   "name": "FlagYellow16x16",
+   "kind": "animated",
+   "category": "Flag",
+   "dims": [
+    64,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/Flower/SpriteSheet16x16.png",
+   "name": "SpriteSheet16x16",
+   "kind": "animated",
+   "category": "Flower",
+   "dims": [
+    20,
+    8
+   ],
+   "frame": [
+    20,
+    8
+   ],
+   "frames": 1
+  },
+  {
+   "file": "Backgrounds/Animated/MillPropeller/MillPropeller_A_64x64.png",
+   "name": "MillPropeller_A_64x64",
+   "kind": "animated",
+   "category": "MillPropeller",
+   "dims": [
+    256,
+    64
+   ],
+   "frame": [
+    64,
+    64
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/MillPropeller/MillPropeller_B_64x64.png",
+   "name": "MillPropeller_B_64x64",
+   "kind": "animated",
+   "category": "MillPropeller",
+   "dims": [
+    256,
+    64
+   ],
+   "frame": [
+    64,
+    64
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/Plant/SpriteSheet16x16.png",
+   "name": "SpriteSheet16x16",
+   "kind": "animated",
+   "category": "Plant",
+   "dims": [
+    64,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/QuickSand/QuickSand32x32.png",
+   "name": "QuickSand32x32",
+   "kind": "animated",
+   "category": "QuickSand",
+   "dims": [
+    256,
+    32
+   ],
+   "frame": [
+    32,
+    32
+   ],
+   "frames": 8
+  },
+  {
+   "file": "Backgrounds/Animated/Water Ripples/SpriteSheet16x16.png",
+   "name": "SpriteSheet16x16",
+   "kind": "animated",
+   "category": "Water Ripples",
+   "dims": [
+    64,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/Water Ripples/SpriteSheetPurple.png",
+   "name": "SpriteSheetPurple",
+   "kind": "animated",
+   "category": "Water Ripples",
+   "dims": [
+    64,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 4
+  },
+  {
+   "file": "Backgrounds/Animated/WaterMill/Watermill_A_34x36.png",
+   "name": "Watermill_A_34x36",
+   "kind": "animated",
+   "category": "WaterMill",
+   "dims": [
+    102,
+    36
+   ],
+   "frame": [
+    34,
+    36
+   ],
+   "frames": 3
+  },
+  {
+   "file": "Backgrounds/Animated/WaterMill/Watermill_B_34x36.png",
+   "name": "Watermill_B_34x36",
+   "kind": "animated",
+   "category": "WaterMill",
+   "dims": [
+    102,
+    36
+   ],
+   "frame": [
+    34,
+    36
+   ],
+   "frames": 3
+  },
+  {
+   "file": "Backgrounds/Animated/Waterfall/BottomSheet16x16.png",
+   "name": "BottomSheet16x16",
+   "kind": "animated",
+   "category": "Waterfall",
+   "dims": [
+    48,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 3
+  },
+  {
+   "file": "Backgrounds/Animated/Waterfall/MiddleSheet16x16.png",
+   "name": "MiddleSheet16x16",
+   "kind": "animated",
+   "category": "Waterfall",
+   "dims": [
+    80,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 5
+  },
+  {
+   "file": "Backgrounds/Animated/Waterfall/TopSheet16x16.png",
+   "name": "TopSheet16x16",
+   "kind": "animated",
+   "category": "Waterfall",
+   "dims": [
+    80,
+    16
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 5
+  },
+  {
+   "file": "Backgrounds/Vehicles/Boat.png",
+   "name": "Boat",
+   "kind": "vehicles",
+   "category": "Vehicles",
+   "dims": [
+    80,
+    32
+   ],
+   "frame": [
+    16,
+    16
+   ],
+   "frames": 10
+  },
+  {
+   "file": "Backgrounds/Vehicles/Crane.png",
+   "name": "Crane",
+   "kind": "vehicles",
+   "category": "Vehicles",
+   "dims": [
+    33,
+    36
+   ],
+   "frame": [
+    33,
+    36
+   ],
+   "frames": 1
+  },
+  {
+   "file": "Backgrounds/Vehicles/FishNet.png",
+   "name": "FishNet",
+   "kind": "vehicles",
+   "category": "Vehicles",
+   "dims": [
+    33,
+    25
+   ],
+   "frame": [
+    33,
+    25
+   ],
+   "frames": 1
+  },
+  {
+   "file": "Backgrounds/Vehicles/FishNetFull.png",
+   "name": "FishNetFull",
+   "kind": "vehicles",
+   "category": "Vehicles",
+   "dims": [
+    33,
+    25
+   ],
+   "frame": [
+    33,
+    25
+   ],
+   "frames": 1
+  },
+  {
+   "file": "Backgrounds/Vehicles/Sail.png",
+   "name": "Sail",
+   "kind": "vehicles",
+   "category": "Vehicles",
+   "dims": [
+    30,
+    43
+   ],
+   "frame": [
+    30,
+    43
+   ],
+   "frames": 1
+  }
+ ]
+}

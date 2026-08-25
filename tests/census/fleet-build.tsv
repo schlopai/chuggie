@@ -1,0 +1,96 @@
+# Fleet build — every example built with a fresh .tish/gba against the compiler of the day.
+# 112 PASS / 2 FAIL, after the M5 scope fix (tishlang/tish 830d03b88) took 49 examples back.
+# The 2 remaining failures are MISSING ASSETS, not code:
+#   bench-room            -> an asset from the topdown RPG port  (does not exist)
+#   repro-hub-cave-heap   -> a map asset from the same port      (does not exist; the .map.bin does)
+# Both reference assets from the topdown RPG port (moved to its own repo) that were renamed or
+# never committed; neither is a compiler
+# or engine defect. Previous run of this file: 63 PASS / 51 FAIL.
+# Reproduce: TISH_GBA_TARGET_DIR=<shared dir>, then per example `rm -rf .tish/gba && npm run build`.
+# fleet build	2026-08-07T00:34:28	tish=830d03b88	repo=53fdd07
+akari	PASS	159	akari.gba 3723688
+anim-demo	PASS	20	anim-demo.gba 1052024
+asset-sprite	PASS	6	asset-sprite.gba 497000
+bands-demo	PASS	6	bands-demo.gba 511496
+beatemup	PASS	23	beatemup.gba 1128096
+bench-ai	PASS	6	bench-ai.gba 521160
+bench-behav	PASS	21	bench-behav.gba 1100416
+bench-boot	PASS	296	bench-boot.gba 2862168
+bench-build	PASS	18	engine_only.gba 1037544
+bench-entities	PASS	5	bench-entities.gba 493232
+bench-memory	PASS	78	bench-memory.gba 2701376
+bench-room	FAIL	0	rc=1 errors=0 e0425=0 :: 
+bg-demo	PASS	6	bg-demo.gba 513664
+button-demo	PASS	44	button-demo.gba 1796072
+chiptune	PASS	11	chiptune.gba 500952
+collect-demo	PASS	7	collect-demo.gba 568464
+cosmo-kitchen	PASS	57	cosmo-kitchen.gba 2126480
+dark-hero	PASS	22	dark-hero.gba 1317488
+deck-demo	PASS	47	deck-demo.gba 1918744
+dialog-demo	PASS	53	dialog-demo.gba 2071008
+dpad-sprite	PASS	6	dpad-sprite.gba 496584
+engine-demo	PASS	6	engine-demo.gba 562752
+feel-demo	PASS	11	feel-demo.gba 689120
+fonts-demo	PASS	8	fonts-demo.gba 661952
+fx-demo	PASS	8	fx-demo.gba 629792
+gradient-demo	PASS	9	gradient-demo.gba 627496
+grid-demo	PASS	14	grid-demo.gba 793800
+input-demo	PASS	5	input-demo.gba 500272
+iso-abilities	PASS	54	iso-abilities.gba 2169840
+iso-ai	PASS	58	iso-ai.gba 2327792
+iso-campaign	PASS	63	iso-campaign.gba 2466672
+iso-cardkeeper	PASS	50	iso-cardkeeper.gba 2120968
+iso-clanmenu	PASS	60	iso-clanmenu.gba 2303400
+iso-clanrank	PASS	52	iso-clanrank.gba 2142384
+iso-clinic	PASS	62	iso-clinic.gba 2407120
+iso-combo	PASS	53	iso-combo.gba 2154800
+iso-cutscene	PASS	63	iso-cutscene.gba 2510904
+iso-damage	PASS	54	iso-damage.gba 2253712
+iso-equip	PASS	54	iso-equip.gba 2169480
+iso-formation	PASS	53	iso-formation.gba 2239624
+iso-hud	PASS	56	iso-hud.gba 2289752
+iso-jobtree	PASS	55	iso-jobtree.gba 2236392
+iso-judge	PASS	55	iso-judge.gba 2240328
+iso-levelup	PASS	51	iso-levelup.gba 2125320
+iso-moverange	PASS	56	iso-moverange.gba 2267472
+iso-npc	PASS	67	iso-npc.gba 2584976
+iso-objective	PASS	56	iso-objective.gba 2322320
+iso-panel	PASS	53	iso-panel.gba 2154200
+iso-pub	PASS	65	iso-pub.gba 2466224
+iso-race	PASS	54	iso-race.gba 2170952
+iso-reward	PASS	51	iso-reward.gba 2149368
+iso-rumors	PASS	51	iso-rumors.gba 2114696
+iso-save	PASS	54	iso-save-flash.gba 2226056
+iso-scriptedbattle	PASS	71	iso-scriptedbattle.gba 2701224
+iso-shop	PASS	62	iso-shop.gba 2421424
+iso-sprite	PASS	6	iso-sprite.gba 508832
+iso-status	PASS	51	iso-status.gba 2212872
+iso-story-branch	PASS	70	iso-story-branch.gba 2637328
+iso-targeting	PASS	57	iso-targeting.gba 2246544
+iso-town	PASS	145	iso-town.gba 3906744
+iso-transitions	PASS	51	iso-transitions.gba 2160792
+iso-turnorder	PASS	51	iso-turnorder.gba 2193560
+iso-worldmap	PASS	52	iso-worldmap.gba 2157064
+link-demo	PASS	7	link-demo.gba 565928
+platformer-combat	PASS	20	platformer-combat.gba 1151272
+minimal	PASS	5	minimal.gba 426744
+mono-demo	PASS	18	mono-demo.gba 1054376
+ninja-adventure	PASS	19	ninja-adventure.gba 1154424
+ninja-village	PASS	19	ninja-village.gba 1093552
+oakhollow	PASS	104	oakhollow.gba 3537832
+p0-spike	PASS	1	p0-spike.gba 188248
+platformer-rooms	PASS	21	platformer-rooms.gba 1117912
+platformer-scroll	PASS	20	platformer-scroll.gba 1118888
+overworld-demo	PASS	21	overworld-demo.gba 1147440
+probe-arrayret	PASS	6	probe-arrayret.gba 514720
+repro-hub-cave-heap	FAIL	0	rc=1 errors=0 e0425=0 :: 
+repro-sprite-y	PASS	1	rebuilt after the hearts sheet32 fix
+repro-structwrite	PASS	5	repro-structwrite.gba 492824
+rpg-menu	PASS	50	rpg-menu.gba 1989032
+shmup	PASS	16	shmup.gba 946816
+shop-demo	PASS	64	shop-demo.gba 2371848
+sunny-land	PASS	21	sunny-land.gba 1225552
+title-demo	PASS	8	title-demo.gba 609296
+ui-demo	PASS	43	ui-demo.gba 1792808
+ui-shell	PASS	43	ui-shell.gba 1765144
+# done	2026-08-07T01:51:16

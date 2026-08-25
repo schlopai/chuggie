@@ -1,0 +1,3659 @@
+{
+ "type": "map",
+ "orientation": "orthogonal",
+ "renderorder": "right-down",
+ "infinite": false,
+ "width": 20,
+ "height": 12,
+ "tilewidth": 16,
+ "tileheight": 16,
+ "nextlayerid": 4,
+ "nextobjectid": 196,
+ "version": "1.10",
+ "tiledversion": "1.11.0",
+ "tilesets": [
+  {
+   "firstgid": 1,
+   "source": "../../../assets/ninja-adventure/tiled/TilesetField.tsj"
+  }
+ ],
+ "layers": [
+  {
+   "type": "tilelayer",
+   "name": "Ground",
+   "id": 1,
+   "width": 20,
+   "height": 12,
+   "x": 0,
+   "y": 0,
+   "opacity": 1,
+   "visible": true,
+   "data": [
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    19,
+    64,
+    64,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    19,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64
+   ]
+  },
+  {
+   "type": "tilelayer",
+   "name": "Solid",
+   "id": 2,
+   "width": 20,
+   "height": 12,
+   "x": 0,
+   "y": 0,
+   "opacity": 1,
+   "visible": true,
+   "data": [
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64
+   ]
+  },
+  {
+   "type": "objectgroup",
+   "name": "spawns",
+   "id": 3,
+   "opacity": 1,
+   "visible": true,
+   "x": 0,
+   "y": 0,
+   "objects": [
+    {
+     "id": 1,
+     "name": "surface",
+     "x": 160,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 2,
+     "name": "surface",
+     "x": 176,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 3,
+     "name": "surface",
+     "x": 192,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 4,
+     "name": "surface",
+     "x": 208,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 5,
+     "name": "surface",
+     "x": 224,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 6,
+     "name": "surface",
+     "x": 240,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 7,
+     "name": "surface",
+     "x": 256,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 8,
+     "name": "surface",
+     "x": 272,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 9,
+     "name": "surface",
+     "x": 160,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 10,
+     "name": "surface",
+     "x": 176,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 11,
+     "name": "surface",
+     "x": 192,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 12,
+     "name": "surface",
+     "x": 208,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 13,
+     "name": "surface",
+     "x": 224,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 14,
+     "name": "surface",
+     "x": 240,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 15,
+     "name": "surface",
+     "x": 256,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 16,
+     "name": "surface",
+     "x": 272,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 17,
+     "name": "surface",
+     "x": 160,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 18,
+     "name": "surface",
+     "x": 176,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 19,
+     "name": "surface",
+     "x": 192,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 20,
+     "name": "surface",
+     "x": 208,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 21,
+     "name": "surface",
+     "x": 224,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 22,
+     "name": "surface",
+     "x": 240,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 23,
+     "name": "surface",
+     "x": 256,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 24,
+     "name": "surface",
+     "x": 272,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 25,
+     "name": "surface",
+     "x": 160,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 26,
+     "name": "surface",
+     "x": 176,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 27,
+     "name": "surface",
+     "x": 192,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 28,
+     "name": "surface",
+     "x": 208,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 29,
+     "name": "surface",
+     "x": 224,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 30,
+     "name": "surface",
+     "x": 240,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 31,
+     "name": "surface",
+     "x": 256,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 32,
+     "name": "surface",
+     "x": 272,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 33,
+     "name": "surface",
+     "x": 160,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 34,
+     "name": "surface",
+     "x": 176,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 35,
+     "name": "surface",
+     "x": 192,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 36,
+     "name": "surface",
+     "x": 208,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 37,
+     "name": "surface",
+     "x": 224,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 38,
+     "name": "surface",
+     "x": 240,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 39,
+     "name": "surface",
+     "x": 256,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 40,
+     "name": "surface",
+     "x": 272,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 41,
+     "name": "surface",
+     "x": 160,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 42,
+     "name": "surface",
+     "x": 176,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 43,
+     "name": "surface",
+     "x": 192,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 44,
+     "name": "surface",
+     "x": 208,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 45,
+     "name": "surface",
+     "x": 224,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 46,
+     "name": "surface",
+     "x": 240,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 47,
+     "name": "surface",
+     "x": 256,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 48,
+     "name": "surface",
+     "x": 272,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 49,
+     "name": "surface",
+     "x": 160,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 50,
+     "name": "surface",
+     "x": 176,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 51,
+     "name": "surface",
+     "x": 192,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 52,
+     "name": "surface",
+     "x": 208,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 53,
+     "name": "surface",
+     "x": 224,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 54,
+     "name": "surface",
+     "x": 240,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 55,
+     "name": "surface",
+     "x": 256,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 56,
+     "name": "surface",
+     "x": 272,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 57,
+     "name": "surface",
+     "x": 160,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 58,
+     "name": "surface",
+     "x": 176,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 59,
+     "name": "surface",
+     "x": 192,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 60,
+     "name": "surface",
+     "x": 208,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 61,
+     "name": "surface",
+     "x": 224,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 62,
+     "name": "surface",
+     "x": 240,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 63,
+     "name": "surface",
+     "x": 256,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 64,
+     "name": "surface",
+     "x": 272,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 65,
+     "name": "surface",
+     "x": 160,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 66,
+     "name": "surface",
+     "x": 176,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 67,
+     "name": "surface",
+     "x": 192,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 68,
+     "name": "surface",
+     "x": 208,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 69,
+     "name": "surface",
+     "x": 224,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 70,
+     "name": "surface",
+     "x": 240,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 71,
+     "name": "surface",
+     "x": 256,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 72,
+     "name": "surface",
+     "x": 272,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 73,
+     "name": "surface",
+     "x": 160,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 74,
+     "name": "surface",
+     "x": 176,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 75,
+     "name": "surface",
+     "x": 192,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 76,
+     "name": "surface",
+     "x": 208,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 77,
+     "name": "surface",
+     "x": 224,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 78,
+     "name": "surface",
+     "x": 240,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 79,
+     "name": "surface",
+     "x": 256,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 80,
+     "name": "surface",
+     "x": 272,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 81,
+     "name": "surface",
+     "x": 160,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 82,
+     "name": "surface",
+     "x": 176,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 83,
+     "name": "surface",
+     "x": 192,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 84,
+     "name": "surface",
+     "x": 208,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 85,
+     "name": "surface",
+     "x": 224,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 86,
+     "name": "surface",
+     "x": 240,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 87,
+     "name": "surface",
+     "x": 256,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 88,
+     "name": "surface",
+     "x": 272,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 89,
+     "name": "surface",
+     "x": 160,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 90,
+     "name": "surface",
+     "x": 176,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 91,
+     "name": "surface",
+     "x": 192,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 92,
+     "name": "surface",
+     "x": 208,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 93,
+     "name": "surface",
+     "x": 224,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 94,
+     "name": "surface",
+     "x": 240,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 95,
+     "name": "surface",
+     "x": 256,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 96,
+     "name": "surface",
+     "x": 272,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 97,
+     "name": "surface",
+     "x": 160,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 98,
+     "name": "surface",
+     "x": 176,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 99,
+     "name": "surface",
+     "x": 192,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 100,
+     "name": "surface",
+     "x": 208,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 101,
+     "name": "surface",
+     "x": 224,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 102,
+     "name": "surface",
+     "x": 240,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 103,
+     "name": "surface",
+     "x": 256,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 104,
+     "name": "surface",
+     "x": 272,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 105,
+     "name": "surface",
+     "x": 160,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 106,
+     "name": "surface",
+     "x": 176,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 107,
+     "name": "surface",
+     "x": 192,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 108,
+     "name": "surface",
+     "x": 208,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 109,
+     "name": "surface",
+     "x": 224,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 110,
+     "name": "surface",
+     "x": 240,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 111,
+     "name": "surface",
+     "x": 256,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 112,
+     "name": "surface",
+     "x": 272,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 113,
+     "name": "surface",
+     "x": 160,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 114,
+     "name": "surface",
+     "x": 176,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 115,
+     "name": "surface",
+     "x": 192,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 116,
+     "name": "surface",
+     "x": 208,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 117,
+     "name": "surface",
+     "x": 224,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 118,
+     "name": "surface",
+     "x": 240,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 119,
+     "name": "surface",
+     "x": 256,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 120,
+     "name": "surface",
+     "x": 272,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 121,
+     "name": "surface",
+     "x": 160,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 122,
+     "name": "surface",
+     "x": 176,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 123,
+     "name": "surface",
+     "x": 192,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 124,
+     "name": "surface",
+     "x": 208,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 125,
+     "name": "surface",
+     "x": 224,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 126,
+     "name": "surface",
+     "x": 240,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 127,
+     "name": "surface",
+     "x": 256,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 128,
+     "name": "surface",
+     "x": 272,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 129,
+     "name": "surface",
+     "x": 160,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 130,
+     "name": "surface",
+     "x": 176,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 131,
+     "name": "surface",
+     "x": 192,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 132,
+     "name": "surface",
+     "x": 208,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 133,
+     "name": "surface",
+     "x": 224,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 134,
+     "name": "surface",
+     "x": 240,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 135,
+     "name": "surface",
+     "x": 256,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 136,
+     "name": "surface",
+     "x": 272,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 137,
+     "name": "surface",
+     "x": 160,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 138,
+     "name": "surface",
+     "x": 176,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 139,
+     "name": "surface",
+     "x": 192,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 140,
+     "name": "surface",
+     "x": 208,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 141,
+     "name": "surface",
+     "x": 224,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 142,
+     "name": "surface",
+     "x": 240,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 143,
+     "name": "surface",
+     "x": 256,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 144,
+     "name": "surface",
+     "x": 272,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 145,
+     "name": "surface",
+     "x": 160,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 146,
+     "name": "surface",
+     "x": 176,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 147,
+     "name": "surface",
+     "x": 192,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 148,
+     "name": "surface",
+     "x": 208,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 149,
+     "name": "surface",
+     "x": 224,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 150,
+     "name": "surface",
+     "x": 240,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 151,
+     "name": "surface",
+     "x": 256,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 152,
+     "name": "surface",
+     "x": 272,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 153,
+     "name": "surface",
+     "x": 160,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 154,
+     "name": "surface",
+     "x": 176,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 155,
+     "name": "surface",
+     "x": 192,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 156,
+     "name": "surface",
+     "x": 208,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 157,
+     "name": "surface",
+     "x": 224,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 158,
+     "name": "surface",
+     "x": 240,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 159,
+     "name": "surface",
+     "x": 256,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 160,
+     "name": "surface",
+     "x": 272,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 161,
+     "name": "surface",
+     "x": 160,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 162,
+     "name": "surface",
+     "x": 176,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 163,
+     "name": "surface",
+     "x": 192,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 164,
+     "name": "surface",
+     "x": 208,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 165,
+     "name": "surface",
+     "x": 224,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 166,
+     "name": "surface",
+     "x": 240,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 167,
+     "name": "surface",
+     "x": 256,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 168,
+     "name": "surface",
+     "x": 272,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 169,
+     "name": "surface",
+     "x": 160,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 170,
+     "name": "surface",
+     "x": 176,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 171,
+     "name": "surface",
+     "x": 192,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 172,
+     "name": "surface",
+     "x": 208,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 173,
+     "name": "surface",
+     "x": 224,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 174,
+     "name": "surface",
+     "x": 240,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 175,
+     "name": "surface",
+     "x": 256,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 176,
+     "name": "surface",
+     "x": 272,
+     "y": 144,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 177,
+     "name": "surface",
+     "x": 160,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 178,
+     "name": "surface",
+     "x": 176,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 179,
+     "name": "surface",
+     "x": 192,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 180,
+     "name": "surface",
+     "x": 208,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 181,
+     "name": "surface",
+     "x": 224,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 182,
+     "name": "surface",
+     "x": 240,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 183,
+     "name": "surface",
+     "x": 256,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 184,
+     "name": "surface",
+     "x": 272,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 185,
+     "name": "surface",
+     "x": 160,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 186,
+     "name": "surface",
+     "x": 176,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 187,
+     "name": "surface",
+     "x": 192,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 188,
+     "name": "surface",
+     "x": 208,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 189,
+     "name": "surface",
+     "x": 224,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 190,
+     "name": "surface",
+     "x": 240,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 191,
+     "name": "surface",
+     "x": 256,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 192,
+     "name": "surface",
+     "x": 272,
+     "y": 176,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 4
+      }
+     ]
+    },
+    {
+     "id": 193,
+     "name": "tee",
+     "x": 48,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 100
+      }
+     ]
+    },
+    {
+     "id": 194,
+     "name": "cup",
+     "x": 256,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 101
+      }
+     ]
+    },
+    {
+     "id": 195,
+     "name": "par",
+     "x": 0,
+     "y": 0,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 203
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

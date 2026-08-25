@@ -1,0 +1,8 @@
+04b03 (04B_03) — pixel font by Yuji Oshimoto / 04
+
+  Copyright 1999–2003 yuji oshimoto
+  https://www.04.jp.org
+  04@dsg4.com
+
+Distributed as freeware. Credit the author when you use it.
+Native bake size for crisp pixels: `font:…@8` (also clean at 16).

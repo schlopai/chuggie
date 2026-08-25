@@ -1,0 +1,437 @@
+// asteroids — the rotate-and-thrust arena, on top of packages/shmup's bullets.
+//
+// Left/Right turn, UP thrusts (momentum carries — there is barely any friction), A fires, B is
+// hyperspace: it drops you somewhere else at random, which is sometimes worse. Shoot a big rock and
+// it breaks into two mediums, a medium into two smalls, a small into nothing. Clear the field and
+// the next wave arrives with one more rock. A saucer wanders in every so often and shoots back.
+//
+// ── What comes from where ──────────────────────────────────────────────────────────────────────
+//
+// The BULLETS are packages/shmup's: `fireAngle` fires along the ship's heading, and the shot is a
+// pure-component entity the native engine flies, hits with, and retires on its TTL — no per-shot
+// tish callback. `spawnEnemy` builds each rock (collider, contact damage, tag, native tumble anim)
+// and `explode` handles the debris burst. The genre-specific parts are exactly three: a ship that
+// rotates and accelerates, rocks that split when they die, and the wrap-around screen.
+//
+// The WRAP is `set_arena_wrap` — a native engine flag that makes the 240×160 screen a torus for
+// everything at once. That has to be native: twenty-odd rocks each reading two coordinates and
+// writing a transform through the tish ABI is most of a 60fps frame, spent on arithmetic that costs
+// nothing in Rust. It also means nothing is ever off-screen, so shots retire on `ttl` rather than on
+// exit (which is the classic behaviour anyway — a shot in this game dies of old age).
+//
+// ── The per-frame cost ─────────────────────────────────────────────────────────────────────────
+//
+// One tish tick for the ship, one for the saucer when there is one, and this file's own main loop.
+// A rock costs NOTHING per frame: it drifts on native velocity, tumbles on a native anim, wraps in
+// the native wrap pass, and only wakes tish up at the moment it dies, to split.
+import { space } from 'sheet:../assets/space16.png'
+import { rocks } from 'sheet32:../assets/rocks32.png'
+import { starfield } from 'background:../assets/starfield.png'
+import {
+  shmupInit, step, fireAngle, fireAimed, explode, spawnEnemy, loadStars, scrollStars,
+  tagPlayer, tagEnemy
+} from '../../../packages/shmup'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+import {
+  spawn, despawn, clear_world, set_transform, set_body, set_collider, set_sprite_offset,
+  attach_sprite, set_tag, set_health, set_lifetime, set_arena_wrap, damage,
+  define_component, add_behaviour, entity_x, entity_y, entity_sprite, cvar, set_cvar,
+  entity_count, step_ticks, frame_period
+} from 'cargo:tish_gba_game_engine'
+import {
+  sprite_new, sprite_set_frame, sprite_set_visible, backdrop, hud_text, key_held, key_pressed
+} from 'cargo:tish_agb'
+
+// ── Sheet layout (see scripts/gen_asteroids.py, which prints exactly this map) ──
+let SHIP_F: i32 = 0  // 16 headings, 0 = pointing up, clockwise
+let THRUST_F: i32 = 16  // the same 16 with the engine plume lit
+let PSHOT_F: i32 = 32
+let ESHOT_F: i32 = 33
+let BOOM_F: i32 = 34  // 4-frame debris burst
+let SAUCER_F: i32 = 38  // 2 frames: blinking underside lamps
+let ROCK_MED_F: i32 = 40  // 8 rotations
+let ROCK_SM_F: i32 = 48  // 8 rotations
+let ROCK_BIG_F: i32 = 0  // on the 32px sheet: 0..7 grey silhouette, 8..15 the brown one
+
+let HEADINGS: i32 = 16
+let SPINS: i32 = 8  // rotation frames per rock silhouette
+
+// ── Tuning ──
+let TURN_FRAMES: i32 = 4  // frames of held d-pad per 22.5° step → a full turn in ~1.07s
+let DRAG: i32 = 48  // velocity shed per frame is v/DRAG — light, so momentum still rules
+let SHOT_SPEED = 3.6
+let SHOT_TTL: i32 = 46  // ≈165px of travel: not quite a screen width, as the arcade had it
+let FIRE_CD: i32 = 9
+let SPAWN_INV: i32 = 100  // i-frames after a respawn
+let RESPAWN_DELAY: i32 = 70
+let SAUCER_EVERY: i32 = 900
+let SAUCER_LIFE: i32 = 620  // it gives up and leaves — under a wrap there is no edge to exit through
+let WAVE_PAUSE: i32 = 80  // a beat of empty sky between waves
+
+// How full the sky is allowed to get. Both of these are FRAME-BUDGET numbers, not taste, and they
+// were measured on device rather than guessed:
+//
+//   entities   world_step   frame period (4389 ticks = 60fps)
+//    9          1046         4514
+//   22          2413         4904
+//   35          3324         5754
+//   46          4416         7110   ← the whole 60fps budget spent inside the step
+//
+// The breakdown says why: collision is nearly flat across that range (114 → 186 ticks), and it is
+// the engine's NATIVE system pass that grows — about 60 ticks per live entity, paid whether or not
+// the entity runs a line of game code, because a dozen systems each scan every slot. So a rock that
+// costs no callback still costs frame. Six large rocks split all the way down would be 24 pieces,
+// and with the ship, its shots and a couple of bursts that lands where the step eats the frame.
+let WAVE_MAX: i32 = 6  // large rocks in the biggest wave
+let ROCK_CAP: i32 = 16  // at this many rocks, a break yields ONE piece instead of two
+
+// Unit direction per heading, ×256. Heading 0 is UP (screen -y), turning clockwise, so the index is
+// also the ship's sprite frame. A table, not `Math.cos`: on this hardware trig is soft-float, and
+// 16 headings means the exact values fit in sixteen integers.
+let CX: i32[] = [0, 98, 181, 237, 256, 237, 181, 98, 0, -98, -181, -237, -256, -237, -181, -98]
+let CY: i32[] = [-256, -237, -181, -98, 0, 98, 181, 237, 256, 237, 181, 98, 0, -98, -181, -237]
+
+// Per-tier rock geometry, largest → smallest. `W` is the hitbox (a good bit smaller than the art,
+// so grazing a rock's corner doesn't kill you), `HALF` its centre offset, `ART` the frame size.
+let R_W: i32[] = [22, 12, 8]
+let R_HALF: i32[] = [11, 6, 4]
+let R_ART: i32[] = [32, 16, 16]
+let R_PTS: i32[] = [20, 50, 100]
+
+let CV_TIER: i32 = 7  // rock size tier, in a native slot (shmup's own ticks use slots 0..6)
+let CV_T: i32 = 0  // saucer frame counter
+let CV_DIR: i32 = 4  // saucer travel direction, -1 or +1
+
+// The ship is a single entity, so its state lives here rather than on a boxed per-entity context —
+// a typed struct means every read in the tick below is a native field load.
+interface Ship { e: i32, head: i32, turn: i32, vx: fixed, vy: fixed, cd: i32, inv: i32, curF: i32 }
+let SHIP: Ship = { e: -1, head: 0, turn: 0, vx: 0, vy: 0, cd: 0, inv: 0, curF: -1 }
+
+interface Game {
+  score: i32, lives: i32, wave: i32, rocks: i32,
+  respawn: i32, wait: i32, next: i32, over: i32, dbg: i32, t: i32
+}
+let GAME: Game = {
+  score: 0, lives: 3, wave: 0, rocks: 0,
+  respawn: 0, wait: 0, next: SAUCER_EVERY, over: 0, dbg: 0, t: 0
+}
+
+// Bullet styles, built once as plain objects. shmup reads one of these on each `fire*` call and
+// resolves it into the engine's native bullet style, so the shot itself spawns entirely in Rust.
+let SHOT = { target: tagEnemy(), frame: PSHOT_F, damage: 1, size: 4, ttl: SHOT_TTL }
+let ESHOT = { target: tagPlayer(), frame: ESHOT_F, damage: 1, size: 5, ttl: 200 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The ship
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The one tick this game runs every frame. Rotation is a held-input counter (so a tap is one 22.5°
+// step and a hold sweeps), thrust adds the heading's unit vector to a velocity that persists, and
+// the sprite frame IS the heading — which is why the art has exactly 16 of them.
+//
+// Every line here goes through `SHIP.` rather than through a local alias. `let s: Ship = SHIP`
+// COPIES the struct — the tick then accelerates, turns and counts down a throwaway, and the ship
+// flies nowhere while firing on every single frame. Two symptoms, one cause, and neither of them
+// looks like an aliasing bug from the outside.
+let shipTick = (e: i32) => {
+  let turnDir: i32 = key_held(9) - key_held(8)      // Right − Left
+  if (turnDir === 0) {
+    SHIP.turn = 0
+  } else {
+    SHIP.turn = SHIP.turn + 1
+    if (SHIP.turn >= TURN_FRAMES) {
+      SHIP.turn = 0
+      SHIP.head = (SHIP.head + turnDir + HEADINGS) % HEADINGS
+    }
+  }
+
+  let thrust: i32 = key_held(6)                     // UP
+  if (thrust > 0) {
+    // /4096 because the table is in 1/256ths: one unit of thrust is ~0.0625 px/frame², which
+    // against the drag below settles at a top speed of about 3 px/frame.
+    SHIP.vx = SHIP.vx + CX[SHIP.head] / 4096
+    SHIP.vy = SHIP.vy + CY[SHIP.head] / 4096
+  }
+  // Barely-there friction. The arcade had none at all; a little makes the ship land where you aim
+  // it without taking away the drift that the whole game is about.
+  SHIP.vx = SHIP.vx - SHIP.vx / DRAG
+  SHIP.vy = SHIP.vy - SHIP.vy / DRAG
+  set_body(e, SHIP.vx, SHIP.vy)
+
+  let cx: fixed = entity_x(e) + 5
+  let cy: fixed = entity_y(e) + 5
+
+  SHIP.cd = SHIP.cd - 1
+  if (key_held(0) > 0 && SHIP.cd <= 0) {            // A — fire along the nose
+    fireAngle(cx + CX[SHIP.head] / 40, cy + CY[SHIP.head] / 40,
+              SHIP.head * 22.5 - 90, SHOT_SPEED, SHOT)
+    SHIP.cd = FIRE_CD
+  }
+  if (key_pressed(1) > 0) {                          // B — hyperspace
+    set_transform(e, rngBelow(0, 224) + 3, rngBelow(0, 144) + 3)
+    SHIP.vx = 0
+    SHIP.vy = 0
+  }
+
+  // Frame: heading, or heading + the plume, blinked so the flame flickers the way it should.
+  let want: i32 = SHIP.head
+  if (thrust > 0 && (GAME.t % 4) < 2) { want = SHIP.head + THRUST_F }
+  let sp: i32 = entity_sprite(e)
+  if (want !== SHIP.curF) {
+    sprite_set_frame(sp, want)
+    SHIP.curF = want
+  }
+  // Blink through the post-respawn mercy window, so it is visible that you cannot be hit yet.
+  if (SHIP.inv > 0) {
+    SHIP.inv = SHIP.inv - 1
+    sprite_set_visible(sp, (SHIP.inv % 8) < 4 ? 0 : 1)
+    if (SHIP.inv === 0) { sprite_set_visible(sp, 1) }
+  }
+}
+
+let onShipDeath = (data, e) => {
+  explode(entity_x(e) + 5, entity_y(e) + 5)
+  despawn(e)
+  SHIP.e = -1
+  GAME.lives = GAME.lives - 1
+  if (GAME.lives > 0) { GAME.respawn = RESPAWN_DELAY } else { GAME.over = 1 }
+}
+
+function spawnShip() {
+  let e = spawn()
+  set_transform(e, 115, 75)
+  set_collider(e, 10, 10)
+  attach_sprite(e, mkSprite(space, SHIP_F))
+  set_sprite_offset(e, -3, -3)                       // centre the 16px art on the 10px box
+  set_tag(e, tagPlayer())
+  // Two hit points and a long mercy window, then spend one immediately: `damage` is what STARTS the
+  // window, so this is how an entity is born invulnerable without a component of its own. It leaves
+  // exactly one hit point, so once the window closes a single rock still ends the life.
+  set_health(e, 2, SPAWN_INV)
+  damage(e, 1)
+  add_behaviour(e, 'aShip', {})
+  SHIP.e = e
+  SHIP.head = 0
+  SHIP.turn = 0
+  SHIP.vx = 0
+  SHIP.vy = 0
+  SHIP.cd = 0
+  SHIP.inv = SPAWN_INV
+  SHIP.curF = SHIP_F
+  return e
+}
+
+function mkSprite(sheet, frame) {
+  let sp = sprite_new(sheet)
+  sprite_set_frame(sp, frame)
+  return sp
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rocks
+// ─────────────────────────────────────────────────────────────────────────────
+
+// One rock. `tier` is 0 large / 1 medium / 2 small; `head` picks its drift direction off the same
+// 16-way table the ship steers by. The tumble is a native looping anim over the silhouette's eight
+// contiguous rotation frames, so a drifting, spinning rock runs no tish code at all.
+function spawnRock(tier: i32, cx: fixed, cy: fixed, head: i32, speed: fixed) {
+  let big: i32 = tier === 0 ? 1 : 0
+  let base: i32 = tier === 0 ? ROCK_BIG_F + rngBelow(0, 2) * SPINS
+             : tier === 1 ? ROCK_MED_F : ROCK_SM_F
+  let e = spawnEnemy({
+    x: cx, y: cy,
+    w: R_W[tier],
+    sheet: big === 1 ? rocks : space,
+    frameSize: R_ART[tier],
+    frame: base,
+    animLen: SPINS,
+    animSpeed: 7 - tier * 2,                          // small rocks tumble faster
+    vx: CX[head] * speed / 256,
+    vy: CY[head] * speed / 256,
+    hp: 1,
+    contact: 1,
+    pts: R_PTS[tier],
+    behaviour: 'aRock'
+  })
+  set_cvar(e, CV_TIER, tier)
+  GAME.rocks = GAME.rocks + 1
+  return e
+}
+
+// A rock dies: burst, score, and break into the next size down. The engine does NOT auto-despawn an
+// entity that has an onDeath hook — the hook owns the teardown.
+let onRockDeath = (data, e) => {
+  let tier: i32 = cvar(e, CV_TIER)
+  let half: i32 = R_HALF[tier]
+  let cx: fixed = entity_x(e) + half
+  let cy: fixed = entity_y(e) + half
+  explode(cx, cy)
+  GAME.score = GAME.score + data.pts
+  GAME.rocks = GAME.rocks - 1
+  despawn(e)
+  if (tier < 2) {
+    // The two halves leave on headings roughly opposite each other, faster than their parent.
+    let h: i32 = rngBelow(0, HEADINGS)
+    let spd: fixed = tier === 0 ? 0.62 : 0.95
+    spawnRock(tier + 1, cx, cy, h, spd)
+    // …unless the sky is already full, in which case it breaks into one piece and not two. See
+    // ROCK_CAP: an entity here costs frame time just by existing, so an uncapped split is how a
+    // 60fps game becomes a 40fps one, several waves in, for a player who is doing well.
+    if (GAME.rocks < ROCK_CAP) {
+      spawnRock(tier + 1, cx, cy, (h + 6 + rngBelow(0, 5)) % HEADINGS, spd)
+    }
+  }
+}
+
+// A wave: large rocks only, placed around the rim so nothing materialises on top of the ship.
+function startWave() {
+  GAME.wave = GAME.wave + 1
+  let n: i32 = 3 + GAME.wave
+  if (n > WAVE_MAX) { n = WAVE_MAX }
+  let i: i32 = 0
+  while (i < n) {
+    let side: i32 = rngBelow(0, 4)
+    let x: i32 = side === 2 ? 14 : side === 3 ? 226 : rngBelow(0, 240)
+    let y: i32 = side === 0 ? 12 : side === 1 ? 148 : rngBelow(0, 160)
+    spawnRock(0, x, y, rngBelow(0, HEADINGS), 0.3 + rngBelow(0, 3) * 0.08)
+    i = i + 1
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The saucer
+// ─────────────────────────────────────────────────────────────────────────────
+
+// It crosses the screen, jinks now and then, and lobs an aimed shot at the ship. One lean tick, and
+// only while a saucer exists — its movement between decisions is native velocity.
+let saucerTick = (e: i32) => {
+  let t: i32 = cvar(e, CV_T) + 1
+  set_cvar(e, CV_T, t)
+  if (t % 52 === 0) {
+    set_body(e, cvar(e, CV_DIR) * 0.78, (rngBelow(0, 3) - 1) * 0.55)
+  }
+  if (t % 66 === 0 && SHIP.e >= 0) {
+    fireAimed(entity_x(e) + 6, entity_y(e) + 6, entity_x(SHIP.e) + 5, entity_y(SHIP.e) + 5, 1.7, ESHOT)
+  }
+}
+
+let onSaucerDeath = (data, e) => {
+  explode(entity_x(e) + 6, entity_y(e) + 6)
+  GAME.score = GAME.score + data.pts
+  despawn(e)
+}
+
+function spawnSaucer() {
+  let dir: i32 = rngBelow(0, 2) === 0 ? 1 : -1
+  let e = spawnEnemy({
+    x: dir > 0 ? 6 : 234,
+    y: rngBelow(0, 120) + 20,
+    w: 12, frame: SAUCER_F, animLen: 2, animSpeed: 14,
+    vx: dir * 0.78, vy: 0,
+    hp: 1, contact: 1, pts: 200,
+    behaviour: 'aSaucer'
+  })
+  set_cvar(e, CV_DIR, dir)
+  // Under a wrap there is no edge to leave by, so it leaves by expiring instead. A lifetime despawn
+  // runs no onDeath — it just goes, with no burst and no points, which is what "it left" should be.
+  set_lifetime(e, SAUCER_LIFE)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Boot
+// ─────────────────────────────────────────────────────────────────────────────
+
+backdrop(0x070916)
+rngSeed(0, 20250810)
+shmupInit({
+  sheet: space, bossSheet: space,
+  shotF: PSHOT_F, eshotF: ESHOT_F,
+  boomF: BOOM_F, boomLen: 4, boomSpeed: 3
+})
+define_component('aShip', { lean: true, tick: shipTick, onDeath: (data, e) => { onShipDeath(data, e) } })
+define_component('aRock', { onDeath: (data, e) => { onRockDeath(data, e) } })
+define_component('aSaucer', { lean: true, tick: saucerTick, onDeath: (data, e) => { onSaucerDeath(data, e) } })
+set_arena_wrap(1)              // the whole point: the screen is a torus
+loadStars(starfield, 0.06)     // a very slow drift, so the field reads as space rather than wallpaper
+
+function newGame() {
+  clear_world()
+  GAME.score = 0
+  GAME.lives = 3
+  GAME.wave = 0
+  GAME.rocks = 0
+  GAME.respawn = 0
+  GAME.wait = 0
+  GAME.next = SAUCER_EVERY
+  GAME.over = 0
+  hudLast.score = -1
+  hudLast.lives = -1
+  hudLast.wave = -1
+  hudLast.end = 0
+  hud_text(4, 0, 0, "")
+  hud_text(5, 0, 0, "")
+  spawnShip()
+  startWave()
+}
+
+// Re-issue a HUD line only when its value actually changed: building "SCORE " + n and re-rendering
+// the glyphs every frame, for numbers that move a few times a second, is real per-frame tax.
+interface HudLast { score: i32, lives: i32, wave: i32, end: i32 }
+let hudLast: HudLast = { score: -1, lives: -1, wave: -1, end: 0 }
+function drawHud() {
+  if (GAME.score !== hudLast.score) { hud_text(0, 6, 4, "SCORE " + GAME.score); hudLast.score = GAME.score }
+  if (GAME.lives !== hudLast.lives) { hud_text(1, 196, 4, "SHIPS " + GAME.lives); hudLast.lives = GAME.lives }
+  if (GAME.wave !== hudLast.wave) { hud_text(2, 104, 4, "WAVE " + GAME.wave); hudLast.wave = GAME.wave }
+}
+
+// SELECT toggles a perf overlay: sustained frame period (~4389 ticks = 60fps, ~8778 = 30fps), the
+// world step's own cost, and the live entity count. Worth having in THIS example specifically —
+// a late wave puts twenty-odd rocks, a saucer and a stream of shots on screen at once, and the
+// claim that none of them costs a per-frame callback is one you should be able to check. Throttled
+// to every 16th frame so the overlay's own text relayout doesn't skew what it is measuring.
+function drawPerf() {
+  hud_text(6, 4, 132, "frm~" + frame_period(2) + " stp" + step_ticks(0) + " e" + entity_count())
+}
+
+newGame()
+
+while (true) {
+  GAME.t = GAME.t + 1
+  scrollStars(GAME.t)
+  drawHud()
+  if (key_pressed(2) > 0) {
+    GAME.dbg = 1 - GAME.dbg
+    if (GAME.dbg === 0) { hud_text(6, 0, 0, "") }
+  }
+  if (GAME.dbg === 1 && (GAME.t % 16) === 0) { drawPerf() }
+
+  if (GAME.over === 1) {
+    if (hudLast.end === 0) {
+      hud_text(4, 84, 70, "GAME OVER")
+      hud_text(5, 62, 88, "START TO PLAY AGAIN")
+      hudLast.end = 1
+    }
+    if (key_pressed(3) > 0) { newGame() }
+  } else {
+    if (GAME.respawn > 0) {
+      GAME.respawn = GAME.respawn - 1
+      if (GAME.respawn === 0) { spawnShip() }
+    }
+    // Field cleared → a beat of empty sky, then the next wave, one rock bigger. The pause is worth
+    // the four lines: clearing the last rock and having the screen instantly refill reads as a
+    // glitch rather than as an achievement.
+    if (GAME.rocks <= 0) {
+      GAME.wait = GAME.wait + 1
+      if (GAME.wait > WAVE_PAUSE) {
+        GAME.wait = 0
+        startWave()
+      }
+    }
+    GAME.next = GAME.next - 1
+    if (GAME.next <= 0) {
+      spawnSaucer()
+      GAME.next = SAUCER_EVERY
+    }
+  }
+  step()
+}

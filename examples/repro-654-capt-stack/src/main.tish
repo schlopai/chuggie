@@ -1,0 +1,63 @@
+// Repro #654 stack: ~40 never-assigned Value captures + nested arrow/move.
+// Assert: no mass `let mut X = X_capt.clone()` Value locals at FunDecl entry;
+// mGBA survives ≥120 frames without stack-overflow panic.
+import { log, vblank } from 'cargo:tish_agb'
+
+let c0 = function () { return 0 }
+let c1 = function () { return 1 }
+let c2 = function () { return 2 }
+let c3 = function () { return 3 }
+let c4 = function () { return 4 }
+let c5 = function () { return 5 }
+let c6 = function () { return 6 }
+let c7 = function () { return 7 }
+let c8 = function () { return 8 }
+let c9 = function () { return 9 }
+let c10 = function () { return 10 }
+let c11 = function () { return 11 }
+let c12 = function () { return 12 }
+let c13 = function () { return 13 }
+let c14 = function () { return 14 }
+let c15 = function () { return 15 }
+let c16 = function () { return 16 }
+let c17 = function () { return 17 }
+let c18 = function () { return 18 }
+let c19 = function () { return 19 }
+let c20 = function () { return 20 }
+let c21 = function () { return 21 }
+let c22 = function () { return 22 }
+let c23 = function () { return 23 }
+let c24 = function () { return 24 }
+let c25 = function () { return 25 }
+let c26 = function () { return 26 }
+let c27 = function () { return 27 }
+let c28 = function () { return 28 }
+let c29 = function () { return 29 }
+let c30 = function () { return 30 }
+let c31 = function () { return 31 }
+let c32 = function () { return 32 }
+let c33 = function () { return 33 }
+let c34 = function () { return 34 }
+let c35 = function () { return 35 }
+let c36 = function () { return 36 }
+let c37 = function () { return 37 }
+let c38 = function () { return 38 }
+let c39 = function () { return 39 }
+
+function helper(x) { return x }
+
+function tick(n) {
+  let a = c0() + c1() + c2() + c3() + c4()
+  let b = c10() + c11() + c12()
+  let nested = () => { return c20() + c21() + helper(c22()) }
+  let moved = function () { return c30() + c31() + c32() }
+  log("tick " + n + " " + (a + b + nested() + moved()))
+}
+
+let frame: i32 = 0
+while (frame < 130) {
+  tick(frame)
+  vblank()
+  frame = frame + 1
+}
+log("repro-654-capt-stack done")

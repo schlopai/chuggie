@@ -1,0 +1,25 @@
+{
+  "name": "chuggie-engine",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Write Game Boy Advance games in tish (a TS/JS-like language → Rust) on agb 0.25.",
+  "workspaces": [
+    "examples/*"
+  ],
+  "scripts": {
+    "setup": "scripts/dev-setup.sh",
+    "clean": "scripts/clean.sh",
+    "itch": "node scripts/itch.js",
+    "vscode": "node scripts/gen-vscode.js",
+    "play": "scripts/rom.sh play",
+    "rom": "scripts/rom.sh",
+    "which-tish": "which tish"
+  },
+  "dependencies": {
+    "@vercel/og": "^0.11.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "react": "^19.2.8"
+  }
+}

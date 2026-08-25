@@ -1,0 +1,15 @@
+{
+ "columns": 20,
+ "image": "../Backgrounds/Tilesets/TilesetDesert.png",
+ "imagewidth": 320,
+ "imageheight": 192,
+ "margin": 0,
+ "spacing": 0,
+ "name": "TilesetDesert",
+ "tilecount": 240,
+ "tiledversion": "1.11.0",
+ "tilewidth": 16,
+ "tileheight": 16,
+ "type": "tileset",
+ "version": "1.10"
+}

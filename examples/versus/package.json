@@ -1,0 +1,27 @@
+{
+  "name": "versus",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "build": "python3 ../../scripts/stamp_build.py . && tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
+    "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png 700 \"100:start,140:a\"",
+    "assets": "python3 ../../scripts/gen_versus.py",
+    "clean": "rm -rf .tish .buildno src/buildid.tish \"$npm_package_name.gba\" \"$npm_package_name.sav\"",
+    "verify": "./verify.sh"
+  },
+  "devDependencies": {
+    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
+    }
+  },
+  "description": "A Street Fighter-style 1v1 fighter: frame data, hitboxes, motion commands and best-of-three rounds, with no entity system in the loop."
+}

@@ -1,0 +1,1139 @@
+// WARFORGE — a Warcraft-shaped RTS campaign for the Game Boy Advance.
+//
+// Three missions: a hero-led march with no economy, a full harvest-build-train-and-destroy map, and
+// a hold-then-kill-the-chieftain finale. The hero's level and experience persist across all three
+// through SRAM, which is what makes this a campaign rather than three skirmishes.
+//
+// ── Where the work happens ───────────────────────────────────────────────────────────────────────
+//
+// Almost none of it is here. Movement, pathing, combat and fog are NATIVE systems in
+// `crates/tish-gba-game-engine` — `flow_goal` / `set_seek` / `set_soldier` / `set_vision` — because
+// a screen of units cannot afford a tish tick each (docs/perf-rules.md §7). `packages/rts.tish`
+// owns the roster, selection, orders, buildings and the economy. This file is the mission router,
+// the input handler and the enemy commander: it runs on button presses and slow timers, never per
+// unit per frame.
+//
+// Three de-risk ROMs were built and measured before this one, in the de-risk-spike tradition:
+//   examples/rts-flow    24 units on one shared flow field, on budget (EMA 4,375 of 4,389)
+//   examples/rts-fog     the wrapping shroud layer, and the palette war it has to win
+//   examples/rts-select  cursor selection, orders, and attack-move
+//
+// ── Controls ─────────────────────────────────────────────────────────────────────────────────────
+//   D-pad   move the map cursor — ALWAYS, whether or not something is selected
+//   L / R   step back / forward through the selected thing's commands
+//   A       select what is under the cursor · on open ground, order the selection there ·
+//           while siting a building, place it
+//   B       cancel siting, else clear the selection
+//   START   run the highlighted command
+//   SELECT  select every unit you own
+// `bgtiles:`, not `background:` — the latter bakes with agb's `deduplicate`, which collapses
+// identical 8x8 tiles and SHORTENS `tile_settings`, while `tilemap_set`'s index math assumes the
+// full grid. Every tile past the shortened length then silently fails to draw: the shroud (index 9)
+// drew nothing while rock (index 8) drew fine, and the building stamps at index 16+ could never
+// have appeared at all.
+import { tiles } from 'bgtiles:../assets/wf_tiles.png'
+import { uPeasant } from 'sheet8:../assets/u_peasant.png'
+import { uFootman } from 'sheet8:../assets/u_footman.png'
+import { uArcher } from 'sheet8:../assets/u_archer.png'
+import { uHero } from 'sheet8:../assets/u_hero.png'
+import { uGrunt } from 'sheet8:../assets/u_grunt.png'
+import { uRaider } from 'sheet8:../assets/u_raider.png'
+import { uChief } from 'sheet8:../assets/u_chief.png'
+// 16px, and its own art: the cursor used to borrow a hero sprite and the game read as a
+// character walk rather than as a command cursor.
+import { curSheet } from 'sheet:../assets/cursor.png'
+import { barSheet } from 'sheet8:../assets/bars.png'
+import { iconSheet } from 'sheet:../assets/icons.png'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  sprite_new, sprite_set_pos, sprite_set_hud, sprite_set_frame, sprite_set_visible,
+  camera_set, keys_edge, ticks, log, tilemap_new, bg_parallax,
+  ui_reserve_tiles, hud_bar,
+} from 'cargo:tish_agb'
+import {
+  terrain_load, terrain_set, terrain_blit, grid_set_solid, tile_solid, world_step, frame_period, fog_init,
+  entity_x, entity_y, entity_hp, health_max, entity_alive, flow_goal, set_seek, soldier_target,
+  step_ticks,
+  seek_arrived,
+} from 'cargo:tish_gba_game_engine'
+import {
+  rtsReset, rtsPool, rtsArm, rtsRetire, rtsSweepStep, rtsAlive, rtsFreeSlot, rtsCount,
+  rtsSelClear, rtsSelOne, rtsSelAll, rtsSelCount, rtsSelHas, rtsUnitAt,
+  rtsOrderMove, rtsOrderTeam, rtsOrderStop,
+  rtsCanPlace, rtsPlace, rtsBuildAt, rtsBuildDamage, rtsBuildAlive, rtsBuildCount,
+  rtsCredit, rtsAfford, rtsCharge, rtsFoodFree, rtsSetFoodCap, rtsAddFoodCap,
+  rtsQueue, rtsQueued, rtsQueueLeft, rtsProduceStep, rtsQueueTake,
+  rtsHarvestBegin, rtsHarvestStep, rtsFogStep, rtsSetViewTeam, rtsUnitPx,
+  rtsBuildStep, rtsBuildingDone, rtsSetBuilder, rtsBuildFrac, bProg,
+  rtsBarsBuild, rtsBarsStep, rtsSelMask, rtsFreeCellNear, rtsUnitAtPx,
+  rEnt, rTeam, rKind, rLive, rGold, rWood, rFood, rFoodCap, rDeadTeam, rOrder, rDwell, rCargo,
+  bKind, bCol, bRow, bW, bH, bTeam, bHp,
+} from '../../../packages/rts'
+import { prefsInit, prefsGet, prefsSet, prefsSave } from '../../../packages/prefs'
+import {
+  K_PEASANT, K_FOOTMAN, K_ARCHER, K_HERO, K_GRUNT, K_RAIDER, K_CHIEF,
+  U_HP, U_RANGE, U_DMG, U_COOL, U_SIGHT, U_GOLD, U_WOOD, U_FOOD, U_TRAIN,
+  B_HALL, B_FARM, B_BARRACKS, B_CAMP, B_KEEP, B_TOWER, B_SMITH, B_W, B_H, B_HP,
+  B_GOLD, B_WOOD, B_FOOD, B_BUILD, TOWER_HP, TOWER_RANGE, TOWER_DMG, TOWER_COOL,
+  HERO_MAX_LV, heroHp, heroDmg, heroLevelFor,
+} from './kinds'
+import { hudDraw, hudReset, hudPaints } from './hud'
+import {
+  cmdInit, cmdCount, cmdAt, C_NAME, C_GOLD, C_WOOD, C_FOOD, C_BUILDS, OWNER_UNIT,
+  C_TRAIN_PEASANT, C_TRAIN_FOOTMAN, C_TRAIN_ARCHER, C_UPGRADE_KEEP, C_UP_WEAPON, C_UP_ARMOR,
+  C_HARVEST_GOLD, C_HARVEST_WOOD, C_STOP, C_ATTACK,
+} from './cmd'
+import {
+  M1_W, M1_H, M1_START_C, M1_START_R, M1_FOE_C, M1_FOE_R, M1_MINE_C, M1_MINE_R,
+  M1_WOOD_C, M1_WOOD_R,
+  M2_W, M2_H, M2_START_C, M2_START_R, M2_FOE_C, M2_FOE_R,
+  M3_W, M3_H, M3_START_C, M3_START_R, M3_FOE_C, M3_FOE_R, M3_MINE_C, M3_MINE_R,
+  M3_WOOD_C, M3_WOOD_R,
+  TS_COLS, GID_SHROUD, GID_HALF, GID_STUMP, GID_HALL, GID_FARM, GID_BARR, GID_CAMP,
+  GID_KEEP, GID_TOWER, GID_SMITH, GID_SCAFFOLD,
+} from './mapdata'
+import { M1_G, M1_S, M2_G, M2_S, M3_G, M3_S } from './terrain'
+
+// ── Constants ────────────────────────────────────────────────────────────────
+let STRIDE: i32 = 5 // idle + 4 walk frames per facing, the layout gen_warforge.py builds
+// 8px art wants a 6px box: a unit that collides on pixels it visually clears reads as sticky.
+let UNIT_BOX: i32 = 6
+let ANIM: i32 = 7
+// Damage one adjacent unit does to a building per siege visit. Buildings have hundreds of hit
+// points, so this is deliberately far above a unit-vs-unit hit.
+let SIEGE_DMG: i32 = 14
+let TEAM_ME: i32 = 0
+let TEAM_FOE: i32 = 1
+// Four flow fields, and they are all spoken for: the player's last order, the enemy advance, the
+// worker run to gold and the worker run to wood. This is why fields are a numbered set.
+let F_ORDER: i32 = 0
+let F_FOE: i32 = 1
+let F_GOLD: i32 = 2
+let F_WOOD: i32 = 3
+// The trip home gets its own field — see rtsHarvestStep.
+let F_HOME: i32 = 4
+
+// ⚠️ A pooled slot is NOT free. `world_step` walks every slot of every system, so 26 parked
+// entities measured at 2,718 ticks of a 4,389-tick frame doing nothing at all. Pool sizes are a
+// frame-budget decision, not a convenience: these are the numbers the missions actually need.
+// The pool must cover the FOOD CAP, not the starting roster. Mission 1 begins with a hero and three
+// peasants and a cap of 10, so a pool of 5 meant exactly one unit could ever be trained — every
+// order after that charged gold and silently produced nothing, which reads as "training is broken".
+// A pool slot costs frame time even parked, so these are sized to the cap plus the hero plus a
+// little headroom for towers, and no more.
+let POOL_ME: i32[] = [15, 10, 12]
+let POOL_FOE: i32[] = [6, 5, 7]
+let poolMe: i32 = 5
+
+// SRAM slots. The hero is the only thing that crosses a mission boundary.
+let SLOT_MISSION: i32 = 0
+let SLOT_XP: i32 = 1
+
+let sheets: i32[] = [uPeasant, uFootman, uArcher, uHero, uGrunt, uRaider, uChief]
+
+// `keys_edge()` bit positions, in the engine's button order (see tish-agb `button_of`).
+let K_A: i32 = 1
+let K_B: i32 = 2
+let K_SELECT: i32 = 4
+let K_START: i32 = 8
+let K_L: i32 = 16
+let K_R: i32 = 32
+let K_UP: i32 = 64
+let K_DOWN: i32 = 128
+let K_LEFT: i32 = 256
+let K_RIGHT: i32 = 512
+
+// ── Campaign state ───────────────────────────────────────────────────────────
+let mission: i32 = 0
+let heroXp: i32 = 0
+let heroSlot: i32 = 0 - 1
+let mapW: i32 = 0
+let mapH: i32 = 0
+let objective: i32 = 0
+let outcome: i32 = 0 // 0 playing, 1 won, 2 lost
+
+let hallCol: i32 = 0
+let hallRow: i32 = 0
+let mineCol: i32 = 0 - 1
+let mineRow: i32 = 0 - 1
+let woodCol: i32 = 0 - 1
+let woodRow: i32 = 0 - 1
+let foeCol: i32 = 0
+let foeRow: i32 = 0
+
+// The cursor lives in HALF-CELL (8px) units, not 16px terrain cells.
+//
+// Units are 8px and move a pixel at a time; the terrain grid is 16px. A cursor that jumps a whole
+// cell skips over half the positions a unit can actually occupy, so aiming at one felt like it was
+// snapping to a different grid — because it was. `curCol >> 1` recovers the terrain cell wherever
+// one is needed (building placement, orders, the flow field).
+let curCol: i32 = 0
+let curRow: i32 = 0
+let cursor: i32 = 0 - 1
+// A second bracket, parked on WHAT IS SELECTED. Without it the only bracket on screen is the
+// cursor, so after moving the cursor away there is no way to tell what you are commanding — which
+// makes correct selection look random.
+let selMark: i32 = 0 - 1
+let curFrame: i32 = 0 - 1
+let markOn: i32 = 0
+let markShown: i32 = 0 - 1
+// 1 = the panel has moved to the top of the screen to get out of the cursor's way.
+let panelTop: i32 = 0
+let barQ: i32 = 0 - 2
+let hpQ: i32 = 0 - 2
+
+// ── Command icons ────────────────────────────────────────────────────────────
+// Eight HUD sprites laid out in the panel, one per command on the open card, plus a bracket over
+// the highlighted one.
+//
+// Drawn as SPRITES, not on the UI canvas. `packages/ui`'s `uiIconAt` does exactly this internally,
+// but importing that module for one function would put its several hundred closures into `run()`'s
+// frame, and this repo has a documented 27KB-of-29KB stack ceiling whose failures RELOCATE when
+// perturbed. Eight `sprite_new` calls cost nothing and carry no such risk.
+//
+// The icon sheet's frame order is the command id order (see cmd.tish), so no lookup table is
+// needed — but a mismatch would be silent, so `iconFor` states the mapping in one place.
+let ICON_N: i32 = 8
+let ICON_X: i32 = 6
+let ICON_Y: i32 = 140  // reassigned per panel position
+let ICON_STEP: i32 = 17
+let iconSpr: i32[] = []
+let iconWas: i32[] = []
+let iconHi: i32 = 0 - 1
+let iconHiAt: i32 = 0 - 2
+
+function iconFor(cmd: i32): i32 { return cmd }
+
+function iconsBuild() {
+  let i: i32 = 0
+  while (i < ICON_N) {
+    let sp: i32 = sprite_new(iconSheet)
+    sprite_set_hud(sp, 1)
+    sprite_set_visible(sp, 0)
+    iconSpr.push(sp) iconWas.push(0 - 2)
+    i = i + 1
+  }
+  iconHi = sprite_new(curSheet)
+  sprite_set_hud(iconHi, 1)
+  sprite_set_frame(iconHi, 0)
+  sprite_set_visible(iconHi, 0)
+}
+
+// Refresh the row from the open card. Called when the card changes, not per frame.
+function iconsRefresh() {
+  let i: i32 = 0
+  while (i < ICON_N) {
+    let want: i32 = 0 - 1
+    if (cardOwner >= 0 && i < cardN && placeOn === 0) { want = iconFor(cmdAt(cardOwner, i)) }
+    if (want !== iconWas[i]) {
+      iconWas[i] = want
+      if (want < 0) {
+        sprite_set_visible(iconSpr[i], 0)
+      } else {
+        sprite_set_frame(iconSpr[i], want)
+        sprite_set_pos(iconSpr[i], ICON_X + i * ICON_STEP, ICON_Y)
+        sprite_set_visible(iconSpr[i], 1)
+      }
+    }
+    i = i + 1
+  }
+  let hiAt: i32 = 0 - 1
+  if (cardOwner >= 0 && cardN > 0 && placeOn === 0) { hiAt = cardPick }
+  if (hiAt !== iconHiAt) {
+    iconHiAt = hiAt
+    if (hiAt < 0) {
+      sprite_set_visible(iconHi, 0)
+    } else {
+      // Offset by a pixel so the bracket's corners sit OUTSIDE the icon's plate. Drawn at the
+      // same position it hides behind the icon sprite and the highlight is invisible.
+      sprite_set_pos(iconHi, ICON_X + hiAt * ICON_STEP - 1, ICON_Y - 1)
+      sprite_set_visible(iconHi, 1)
+    }
+  }
+}
+let selBuild: i32 = 0 - 1
+// ── Command card state ───────────────────────────────────────────────────────
+// `cardOwner` is the flat owner id (building kind, or OWNER_UNIT + unit kind) of whatever is
+// selected; `cardPick` is the highlighted command. `placeKind` is the building being sited, or -1 —
+// while it is set the cursor is a ghost footprint and A commits instead of ordering a move.
+let cardOwner: i32 = 0 - 1
+let cardPick: i32 = 0
+let selUnit: i32 = 0 - 1
+let placeKind: i32 = 0 - 1
+let upWeapon: i32 = 0
+let upArmor: i32 = 0
+
+prefsInit({ magic: 0x5746, version: 1, count: 4 })
+mission = prefsGet(SLOT_MISSION)
+heroXp = prefsGet(SLOT_XP)
+if (mission < 0 || mission > 2) { mission = 0 }
+
+// ── Building art ─────────────────────────────────────────────────────────────
+// A building is a rect of tiles written into the SCENE's own layer, not an entity and not a sprite.
+// It never moves and never animates, so an entity slot spent here is a unit the player cannot have.
+function stampBuilding(kind: i32, col: i32, row: i32) {
+  let base: i32 = GID_HALL
+  if (kind === B_FARM) { base = GID_FARM }
+  if (kind === B_BARRACKS) { base = GID_BARR }
+  if (kind === B_CAMP) { base = GID_CAMP }
+  if (kind === B_KEEP) { base = GID_KEEP }
+  if (kind === B_TOWER) { base = GID_TOWER }
+  if (kind === B_SMITH) { base = GID_SMITH }
+  let w: i32 = B_W[kind]
+  let h: i32 = B_H[kind]
+  let r: i32 = 0
+  while (r < h) {
+    let c: i32 = 0
+    while (c < w) {
+      terrain_set(col + c, row + r, base + r * w + c, 1)
+      c = c + 1
+    }
+    r = r + 1
+  }
+}
+
+// Paint a site's whole footprint with the scaffold tile. Solid from the first frame (rtsPlace did
+// that), so units path around a site rather than through the building that is about to exist.
+function stampSite(col: i32, row: i32, w: i32, h: i32) {
+  let r: i32 = 0
+  while (r < h) {
+    let c: i32 = 0
+    while (c < w) {
+      terrain_set(col + c, row + r, GID_SCAFFOLD, 1)
+      c = c + 1
+    }
+    r = r + 1
+  }
+}
+
+// The door cell is the bottom-centre of the stamp — where a trained unit walks out and where a
+// worker delivers. Buildings are solid, so a unit can never stand ON the door; it stands below it.
+function doorCol(id: i32): i32 { return bCol[id] + (bW[id] / 2) }
+function doorRow(id: i32): i32 { return bRow[id] + bH[id] }
+
+// `buildFrames` 0 = it is already standing (mission start); > 0 = a site a worker must finish.
+function place(kind: i32, col: i32, row: i32, team: i32, buildFrames: i32): i32 {
+  let id: i32 = rtsPlace(kind, col, row, B_W[kind], B_H[kind], team, B_HP[kind], buildFrames)
+  if (buildFrames > 0) { stampSite(col, row, B_W[kind], B_H[kind]) } else { stampBuilding(kind, col, row) }
+  if (team === TEAM_ME && buildFrames <= 0) { rtsAddFoodCap(B_FOOD[kind]) }
+  return id
+}
+
+// ── Arming ───────────────────────────────────────────────────────────────────
+function arm(team: i32, kind: i32, col: i32, row: i32): i32 {
+  let slot: i32 = rtsFreeSlot(team)
+  if (slot < 0) { return 0 - 1 }
+  let hp: i32 = U_HP[kind] + upArmor * 6
+  let dmg: i32 = U_DMG[kind] + upWeapon * 2
+  if (kind === K_HERO) {
+    hp = heroHp(heroLevelFor(heroXp)) + upArmor * 6
+    dmg = heroDmg(heroLevelFor(heroXp)) + upWeapon * 2
+  }
+  // Never stack. Two units armed at one cell sit exactly on top of each other and read as one —
+  // three peasants at a hall door, or a wave of reinforcements at one camp.
+  let cell: i32 = rtsFreeCellNear(col, row)
+  rtsArm(slot, kind, sheets[kind], (cell >> 8) & 0xFF, cell & 0xFF,
+         hp, U_RANGE[kind], dmg, U_COOL[kind], U_SIGHT[kind])
+  return slot
+}
+
+// ── Mission setup ────────────────────────────────────────────────────────────
+function loadMission(n: i32) {
+  rtsReset()
+  outcome = 0
+  objective = 0
+  selBuild = 0 - 1
+  hudReset()
+
+  if (n === 0) {
+    mapW = M1_W mapH = M1_H
+    terrain_load(mapW, mapH, M1_G, M1_S)
+    hallCol = M1_START_C hallRow = M1_START_R
+    foeCol = M1_FOE_C foeRow = M1_FOE_R
+    mineCol = M1_MINE_C mineRow = M1_MINE_R
+    woodCol = M1_WOOD_C woodRow = M1_WOOD_R
+  } else if (n === 1) {
+    mapW = M2_W mapH = M2_H
+    terrain_load(mapW, mapH, M2_G, M2_S)
+    hallCol = M2_START_C hallRow = M2_START_R
+    foeCol = M2_FOE_C foeRow = M2_FOE_R
+    // The march has no economy, so it has no mine and no treeline to send a worker to.
+    mineCol = 0 - 1 woodCol = 0 - 1
+  } else {
+    mapW = M3_W mapH = M3_H
+    terrain_load(mapW, mapH, M3_G, M3_S)
+    hallCol = M3_START_C hallRow = M3_START_R
+    foeCol = M3_FOE_C foeRow = M3_FOE_R
+    mineCol = M3_MINE_C mineRow = M3_MINE_R
+    woodCol = M3_WOOD_C woodRow = M3_WOOD_R
+  }
+  fog_init(mapW, mapH)
+  rtsSetViewTeam(TEAM_ME)
+
+  // The pools, created ONCE per mission and re-armed forever after. A spawn mid-battle builds an
+  // entity wrapper and allocates sprite VRAM on one frame (perf-rules §6); training must not.
+  poolMe = POOL_ME[n]
+  rtsPool(poolMe, uFootman, TEAM_ME, UNIT_BOX)
+  rtsPool(POOL_FOE[n], uGrunt, TEAM_FOE, UNIT_BOX)
+  rtsBarsBuild(barSheet)
+
+  if (n === 0) {
+    // Foothold — the full loop, and mission ONE on purpose.
+    //
+    // The no-economy march used to open the campaign, and the game read as "walk a character
+    // around": a hero and three soldiers on an empty map, with nothing to build and nothing to
+    // harvest. The mission that shows this is an RTS has to be the one you see first.
+    place(B_HALL, hallCol, hallRow, TEAM_ME, 0)
+    place(B_BARRACKS, hallCol + 3, hallRow + 4, TEAM_ME, 0)
+    place(B_FARM, hallCol - 1, hallRow + 4, TEAM_ME, 0)
+    rtsCredit(400, 200)
+    heroSlot = arm(TEAM_ME, K_HERO, hallCol + 2, hallRow + 2)
+    let w: i32 = 0
+    while (w < 3) {
+      // ⚠️ Clear of the mine. Spawning the crew at `hallRow + 7` put two of the three INSIDE the
+      // gold mine's solid footprint, embedded in rock, and the economy never started.
+      let s: i32 = arm(TEAM_ME, K_PEASANT, hallCol + w, hallRow + 3)
+      rtsCharge(0, 0, U_FOOD[K_PEASANT])
+      if (w < 2) {
+        rtsHarvestBegin(s, F_GOLD, mineCol, mineRow + 2, hallCol + 1, hallRow + 2, 3, STRIDE)
+      } else {
+        rtsHarvestBegin(s, F_WOOD, woodCol, woodRow + 3, hallCol + 1, hallRow + 2, 3, STRIDE)
+      }
+      w = w + 1
+    }
+    place(B_CAMP, foeCol, foeRow, TEAM_FOE, 0)
+    arm(TEAM_FOE, K_GRUNT, foeCol - 1, foeRow + 3)
+    arm(TEAM_FOE, K_GRUNT, foeCol + 1, foeRow + 3)
+    arm(TEAM_FOE, K_RAIDER, foeCol, foeRow + 4)
+  } else if (n === 1) {
+    // The Long March: a hero and three footmen, no economy and nothing to build.
+    rtsSetFoodCap(4)
+    heroSlot = arm(TEAM_ME, K_HERO, hallCol, hallRow)
+    arm(TEAM_ME, K_FOOTMAN, hallCol + 1, hallRow - 1)
+    arm(TEAM_ME, K_FOOTMAN, hallCol + 1, hallRow + 1)
+    arm(TEAM_ME, K_FOOTMAN, hallCol, hallRow + 2)
+    rtsCharge(0, 0, 4)
+    place(B_CAMP, foeCol, foeRow - 1, TEAM_FOE, 0)
+    arm(TEAM_FOE, K_GRUNT, foeCol - 2, foeRow)
+    arm(TEAM_FOE, K_GRUNT, foeCol - 2, foeRow + 2)
+    arm(TEAM_FOE, K_RAIDER, foeCol - 3, foeRow + 1)
+  } else {
+    // The Chieftain: hold the choke, then kill him.
+    place(B_HALL, hallCol, hallRow, TEAM_ME, 0)
+    place(B_BARRACKS, hallCol, hallRow + 4, TEAM_ME, 0)
+    rtsCredit(600, 300)
+    heroSlot = arm(TEAM_ME, K_HERO, hallCol + 1, hallRow + 3)
+    let w2: i32 = 0
+    while (w2 < 2) {
+      let s2: i32 = arm(TEAM_ME, K_PEASANT, hallCol + w2, hallRow + 8)
+      rtsCharge(0, 0, U_FOOD[K_PEASANT])
+      rtsHarvestBegin(s2, F_GOLD, mineCol, mineRow + 2, hallCol + 1, hallRow + 3, 90, STRIDE)
+      w2 = w2 + 1
+    }
+    arm(TEAM_ME, K_FOOTMAN, hallCol + 2, hallRow + 3)
+    rtsCharge(0, 0, 1)
+    place(B_CAMP, foeCol, foeRow - 1, TEAM_FOE, 0)
+    arm(TEAM_FOE, K_CHIEF, foeCol, foeRow + 2)
+  }
+
+  curCol = hallCol * 2
+  // One row below the base, not two: buildings are 2x2, so a cursor walked straight across from
+  // two rows down passes BELOW the enemy camp's row band and never reaches an adjacent cell.
+  curRow = (hallRow + 1) * 2
+  if (cursor < 0) { cursor = sprite_new(curSheet) }
+  sprite_set_frame(cursor, 0)
+  sprite_set_hud(cursor, 1)
+  sprite_set_visible(cursor, 1)
+  if (selMark < 0) { selMark = sprite_new(curSheet) }
+  sprite_set_hud(selMark, 1)
+  sprite_set_frame(selMark, 1)
+  sprite_set_visible(selMark, 0)
+
+  objShown = 0 - 1
+  rtsSelClear()
+}
+
+// ── The enemy commander ──────────────────────────────────────────────────────
+// It thinks on a slow timer, not per frame: an RTS AI that re-decides every frame is a boxed
+// decision per unit per frame, which is the exact cost the native systems exist to avoid.
+let aiTimer: i32 = 0
+let aiWave: i32 = 0
+
+function aiThink() {
+  if (outcome !== 0) { return }
+  // March everything it owns at the player's hall. `set_soldier` handles the fighting on arrival —
+  // the commander never issues an attack order, only a destination.
+  rtsOrderTeam(TEAM_FOE, F_FOE, hallCol + 1, hallRow + 3, STRIDE, ANIM)
+  // Mission 3 is a siege: reinforcements keep coming until the chieftain falls.
+  if (mission === 2 && rtsAlive(TEAM_FOE) < 6) {
+    let k: i32 = K_GRUNT
+    if ((aiWave & 1) === 1) { k = K_RAIDER }
+    arm(TEAM_FOE, k, foeCol, foeRow + 3)
+    aiWave = aiWave + 1
+  }
+}
+
+// ── Objectives ───────────────────────────────────────────────────────────────
+function checkOutcome() {
+  if (outcome !== 0) { return }
+  if (rtsAlive(TEAM_ME) === 0) { outcome = 2 return }
+  if (mission === 0) {
+    if (rtsBuildAlive(TEAM_FOE, B_CAMP) === 0) { outcome = 1 }
+  } else if (mission === 1) {
+    if (rtsBuildAlive(TEAM_FOE, B_CAMP) === 0) { outcome = 1 }
+  } else {
+    // The chieftain is the only enemy that matters.
+    if (chiefDead() === 1) { outcome = 1 }
+  }
+  if (rtsBuildAlive(TEAM_ME, B_HALL) === 0 && mission > 0) { outcome = 2 }
+}
+
+function chiefDead(): i32 {
+  let i: i32 = 0
+  while (i < rtsCount()) {
+    if (rLive[i] === 1 && rKind[i] === K_CHIEF) { return 0 }
+    i = i + 1
+  }
+  return 1
+}
+
+// ── Command card ─────────────────────────────────────────────────────────────
+function openCard(owner: i32) {
+  cardOwner = owner
+  cardPick = 0
+  placeKind = 0 - 1
+}
+
+// Can the player pay for command `c` right now? The card greys out what they cannot afford, which
+// is the difference between a menu that teaches the economy and one that just fails silently.
+function canAfford(c: i32): i32 {
+  if (c < 0) { return 0 }
+  return rtsAfford(C_GOLD[c], C_WOOD[c], C_FOOD[c])
+}
+
+function runCommand(c: i32) {
+  if (c < 0) { return }
+  if (c === C_TRAIN_PEASANT) { tryTrain(selBuild, K_PEASANT) return }
+  if (c === C_TRAIN_FOOTMAN) { tryTrain(selBuild, K_FOOTMAN) return }
+  if (c === C_TRAIN_ARCHER) { tryTrain(selBuild, K_ARCHER) return }
+  if (c === C_STOP) { rtsOrderStop() return }
+  if (c === C_ATTACK) {
+    // Attack-move needs a DESTINATION, so it hands the pad back to the cursor and waits for A.
+    // Firing it at wherever the cursor happened to be left is how an order system feels random.
+    return
+  }
+  if (c === C_HARVEST_GOLD && selUnit >= 0 && mineCol >= 0) {
+    rtsHarvestBegin(selUnit, F_GOLD, mineCol, mineRow + 2, hallCol + 1, hallRow + 2, 3, STRIDE)
+    return
+  }
+  if (c === C_HARVEST_WOOD && selUnit >= 0 && woodCol >= 0) {
+    rtsHarvestBegin(selUnit, F_WOOD, woodCol, woodRow + 3, hallCol + 1, hallRow + 2, 3, STRIDE)
+    return
+  }
+  if (c === C_UPGRADE_KEEP) {
+    if (selBuild < 0 || rtsAfford(C_GOLD[c], C_WOOD[c], 0) === 0) { return }
+    rtsCharge(C_GOLD[c], C_WOOD[c], 0)
+    // The keep replaces the hall IN PLACE: same footprint, more hit points, more food.
+    bKind[selBuild] = B_KEEP
+    bHp[selBuild] = B_HP[B_KEEP]
+    rtsAddFoodCap(B_FOOD[B_KEEP] - B_FOOD[B_HALL])
+    stampBuilding(B_KEEP, bCol[selBuild], bRow[selBuild])
+    openCard(B_KEEP)
+    return
+  }
+  if (c === C_UP_WEAPON || c === C_UP_ARMOR) {
+    if (rtsAfford(C_GOLD[c], C_WOOD[c], 0) === 0) { return }
+    rtsCharge(C_GOLD[c], C_WOOD[c], 0)
+    // Upgrades apply to units armed AFTERWARDS. Re-arming the living would reset their hit points,
+    // and a blacksmith that heals the army is a different game.
+    if (c === C_UP_WEAPON) { upWeapon = upWeapon + 1 } else { upArmor = upArmor + 1 }
+    return
+  }
+  // Anything left is a build order: enter siting mode.
+  let b: i32 = C_BUILDS[c]
+  if (b >= 0 && canAfford(c) === 1) { placeKind = b }
+}
+
+// Commit a building at the cursor. Charges only on success, so a rejected site costs nothing.
+// Returns 1 when the building went down.
+//
+// ⚠️ It must NOT write `placeKind` itself. It is CALLED with `placeKind` as an argument, and in
+// tish that argument read holds a borrow of the module variable which is still live while the
+// callee runs — writing it there panics `RefCell already borrowed` (tish_core/src/vmref.rs) at
+// runtime. The caller owns the clear.
+function tryPlace(kind: i32, col: i32, row: i32): i32 {
+  if (rtsCanPlace(col, row, B_W[kind], B_H[kind], mapW, mapH) === 0) { return 0 }
+  // The footprint must also be clear TERRAIN — `rtsCanPlace` only knows about other buildings.
+  let r: i32 = 0
+  while (r < B_H[kind]) {
+    let c2: i32 = 0
+    while (c2 < B_W[kind]) {
+      if (tileBlocked(col + c2, row + r) === 1) { return 0 }
+      c2 = c2 + 1
+    }
+    r = r + 1
+  }
+  if (rtsAfford(B_GOLD[kind], B_WOOD[kind], 0) === 0) { return 0 }
+  rtsCharge(B_GOLD[kind], B_WOOD[kind], 0)
+  let site: i32 = place(kind, col, row, TEAM_ME, B_BUILD[kind])
+  // Bind the peasant that ordered it and walk it to the site. It builds only while standing there,
+  // so an interrupted worker really does stall the job — which is the point of construction being
+  // a process rather than a purchase.
+  if (selUnit >= 0 && rLive[selUnit] === 1 && rKind[selUnit] === K_PEASANT) {
+    rtsSetBuilder(site, selUnit)
+    flow_goal(F_ORDER, col, row + B_H[kind])
+    set_seek(rEnt[selUnit], F_ORDER, 14, STRIDE, ANIM)
+  }
+  return 1
+}
+
+// A finished site becomes the real building: swap the scaffold for the art, apply its food, and for
+// a tower arm the pooled defender that makes it shoot.
+//
+// A tower is a building the combat system can SEE: a pooled unit armed at the tower's foot with no
+// move order. That reuses `set_soldier` whole rather than teaching combat about rectangles — and it
+// must not exist until the tower does, or a half-built tower shoots.
+function finishSite(id: i32) {
+  let kind: i32 = bKind[id]
+  stampBuilding(kind, bCol[id], bRow[id])
+  if (bTeam[id] === TEAM_ME) { rtsAddFoodCap(B_FOOD[kind]) }
+  if (kind === B_TOWER) {
+    let g: i32 = rtsFreeSlot(TEAM_ME)
+    if (g >= 0) {
+      rtsArm(g, K_ARCHER, uArcher, bCol[id], bRow[id] + bH[id], TOWER_HP, TOWER_RANGE,
+             TOWER_DMG + upWeapon * 2, TOWER_COOL, U_SIGHT[K_ARCHER])
+    }
+  }
+}
+
+// Is this cell already taken? Buildings, rock, forest and the mine all say yes.
+function tileBlocked(col: i32, row: i32): i32 {
+  if (rtsBuildAt(col, row) >= 0) { return 1 }
+  if (tile_solid(col, row) === 1) { return 1 }
+  return 0
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function tryTrain(id: i32, kind: i32) {
+  if (rtsQueued(id) >= 0) { return }
+  if (rtsFreeSlot(TEAM_ME) < 0) { return }
+  if (rtsAfford(U_GOLD[kind], U_WOOD[kind], U_FOOD[kind]) === 0) { return }
+  rtsCharge(U_GOLD[kind], U_WOOD[kind], U_FOOD[kind])
+  rtsQueue(id, kind, U_TRAIN[kind])
+}
+
+// A unit adjacent to an enemy building, with nothing else to fight, chews on the building.
+// Buildings are not entities, so the engine's combat cannot see them — this is the one place the
+// game closes that loop itself.
+//
+// ⚠️ ONE unit per visit, not the whole roster. Scanning every unit costs six boxed calls each
+// (`soldier_target`, two positions, up to four `rtsBuildAt`) — about 42 calls, ~4,900 ticks, landing
+// on one frame in eight. That single spike held the EMA at 4,982 against a 4,389 budget while every
+// other frame was comfortably inside it: the *average* frame was fine and the game still ran at
+// ~52fps. A periodic spike is invisible to an average and obvious in `frame_period(2)`.
+let siegeAt: i32 = 0
+
+function siegeStep() {
+  if (rtsCount() <= 0) { return }
+  // FOUR slots per visit, not one.
+  //
+  // One-per-visit was a perf fix (a full roster scan is ~42 boxed calls and spiked the frame), but
+  // it made razing absurd: round-robin over a 21-slot roster reaches a given unit every 21 visits,
+  // so an army standing on a building landed one hit every ~168 frames and a 300 HP camp took the
+  // better part of a minute of wall time. Four keeps the scan bounded while letting a couple of
+  // units level a building in seconds, which is what "attacking a building" has to feel like.
+  let n: i32 = 0
+  while (n < 4) {
+    siegeAt = siegeAt + 1
+    if (siegeAt >= rtsCount()) { siegeAt = 0 }
+    let i: i32 = siegeAt
+    if (rLive[i] === 1 && soldier_target(rEnt[i]) < 0) {
+      let uc: i32 = (entity_x(rEnt[i]) + 5) / 16
+      let ur: i32 = (entity_y(rEnt[i]) + 5) / 16
+      let b: i32 = nearBuilding(uc, ur, rTeam[i])
+      if (b >= 0) {
+        if (rtsBuildDamage(b, SIEGE_DMG) === 1) { razeBuilding(b) }
+      }
+    }
+    n = n + 1
+  }
+}
+
+// An enemy building on any of the EIGHT cells around (col,row).
+//
+// Four was not enough. Units ordered to a cell beside a building settle wherever their arrive radius
+// puts them, which is routinely the DIAGONAL neighbour of the building's corner — the army stood
+// next to the enemy camp for a thousand frames without touching it, because the corner it was
+// touching was not one of the four.
+function nearBuilding(col: i32, row: i32, team: i32): i32 {
+  let dc: i32 = 0 - 1
+  while (dc <= 1) {
+    let dr: i32 = 0 - 1
+    while (dr <= 1) {
+      if (dc !== 0 || dr !== 0) {
+        let b: i32 = rtsBuildAt(col + dc, row + dr)
+        if (b >= 0 && bTeam[b] !== team && bHp[b] > 0) { return b }
+      }
+      dr = dr + 1
+    }
+    dc = dc + 1
+  }
+  return 0 - 1
+}
+
+// Repaint a destroyed building as ground. `rtsBuildDamage` has already cleared its solid footprint —
+// a crater that still blocks pathing is the classic RTS bug where an army stands outside a ruin it
+// cannot walk into.
+function razeBuilding(id: i32) {
+  let r: i32 = 0
+  while (r < bH[id]) {
+    let c: i32 = 0
+    while (c < bW[id]) {
+      terrain_set(bCol[id] + c, bRow[id] + r, GID_STUMP, 0)
+      c = c + 1
+    }
+    r = r + 1
+  }
+}
+
+function objLine() {
+  if (outcome === 1) { return "VICTORY" }
+  if (outcome === 2) { return "DEFEAT" }
+  // Short on purpose: the objective sits in the last ~90px of a 240px bar at a 7px font, which is
+  // about twelve characters. "Break the camp" ran off the edge.
+  if (mission === 0) { return "TAKE HOLD" }
+  if (mission === 1) { return "BREAK CAMP" }
+  return "KILL CHIEF"
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+// The shroud layer is built HERE, before any `scene_stream`, and never rebuilt.
+//
+// ⚠️ The order is load-bearing. `tilemap_new` uploads its asset's palettes to all sixteen background
+// banks, so whichever of the two runs LAST owns the colours on screen. Built after the scene, the
+// whole map renders in the shroud tileset's palette — a green field came out orange, which is
+// exactly what it did. Built first, `scene_stream` puts the map's palette back, and the shroud's two
+// cells survive it because they are flat black. examples/rts-fog measured all three arrangements.
+// Warm the UI canvas BEFORE the shroud layer takes its tiles. Left to grow on demand, the canvas
+// allocates mid-frame and — measured here — spilled into the shroud layer's tiles: the HUD's text
+// came out truncated and patches of black fog turned orange. Two symptoms, one cause, and neither
+// of them looks like "the HUD is too big".
+//
+// ⚠️ Keep this modest. `tileReserve` is a cliff at 512 (20KB → 40KB of VRAM); 320 is what
+// jrpg-party's full-screen canvas uses; two 12px bars of text need most of that.
+ui_reserve_tiles(384)
+
+// Terrain and shroud are two layers from ONE asset, so there is only ever one background palette
+// in play. `tilemap_new` uploads its asset's palettes; doing it twice with the same asset is
+// harmless, which is the entire point of not mixing a `scene:` atlas in here.
+// ONE tilemap layer, carrying terrain and fog together.
+//
+// A separate shroud layer over the terrain is the obvious design and was built that way first. It
+// works in isolation (examples/rts-fog) but here — a second `tilemap_new` layer with the UI canvas
+// also holding a slot — it would not come to the front for any priority or creation order tried,
+// while `fog_state` reported perfectly correct values the whole time. Hiding the terrain layer was
+// what proved the shroud was being painted at all. Folding the fog into `terrain_blit` costs one
+// blit instead of two and deletes the question.
+let empty: i32[] = []
+let terrBg: i32 = tilemap_new(tiles, TS_COLS, 0, 0, empty, 2)
+bg_parallax(terrBg, 256, 256)
+
+// The command tables, once. Costs are passed in so `cmd.tish` never imports the stat file — it
+// describes the MENU, not the balance.
+cmdInit(B_FARM, B_BARRACKS, B_TOWER, B_SMITH,
+        B_GOLD[B_FARM], B_WOOD[B_FARM], B_GOLD[B_BARRACKS], B_WOOD[B_BARRACKS],
+        B_GOLD[B_TOWER], B_WOOD[B_TOWER], B_GOLD[B_SMITH], B_WOOD[B_SMITH],
+        B_GOLD[B_KEEP], B_WOOD[B_KEEP],
+        U_GOLD[K_PEASANT], U_WOOD[K_PEASANT], U_GOLD[K_FOOTMAN], U_WOOD[K_FOOTMAN],
+        U_GOLD[K_ARCHER], U_WOOD[K_ARCHER])
+
+// The command-icon sprites, once. After `ui_reserve_tiles` so the canvas claims its tiles first.
+iconsBuild()
+
+loadMission(mission)
+
+let frameNo: i32 = 0
+let peak: i32 = 0
+let stamp: i32 = ticks()
+let hold: i32 = 0
+let worker: i32 = 0
+let endHold: i32 = 0
+let hudSel: i32 = 0
+let hudSig: i32 = 0 - 1
+let hudWant: i32 = 0
+let hudTrain: i32 = 0 - 1
+let cardN: i32 = 0
+let cardOk: i32 = 0
+let placeOn: i32 = 0
+let cardCmd: i32 = 0 - 1
+let objShown: i32 = 0 - 1
+let fogX: i32 = 0 - 9999
+let fogY: i32 = 0 - 9999
+let objCache = ""
+
+while (true) {
+  // ── Cursor ─────────────────────────────────────────────────────────────────
+  // ONE call for the whole pad. Six `key_pressed` calls were six boxed dispatches a frame at ~117
+  // ticks each — more than the entire enemy AI costs.
+  let ed: i32 = keys_edge()
+  let dc: i32 = 0
+  let dr: i32 = 0
+  if ((ed & K_RIGHT) !== 0) { dc = 1 }
+  if ((ed & K_LEFT) !== 0) { dc = 0 - 1 }
+  if ((ed & K_DOWN) !== 0) { dr = 1 }
+  if ((ed & K_UP) !== 0) { dr = 0 - 1 }
+  if (hold > 0) { hold = hold - 1 }
+  // ── One meaning per control, always ────────────────────────────────────────
+  //
+  //   d-pad   the map cursor. ALWAYS, selected or not.
+  //   L / R   step the command card of whatever is selected.
+  //   A       select what is under the cursor, or order the selection there.
+  //   START   run the highlighted command.
+  //
+  // An earlier version gave the d-pad to the panel while something was selected. It was faithful to
+  // the classic GBA wargames and it was confusing here: the same key did two different things depending on
+  // state you had to remember, and the cursor freezing read as the game hanging. A control that
+  // never changes meaning needs no mode indicator and cannot be misread.
+  if ((dc !== 0 || dr !== 0) && hold === 0) {
+    hold = 4
+    curCol = curCol + dc
+    curRow = curRow + dr
+    if (curCol < 2) { curCol = 2 }
+    if (curRow < 2) { curRow = 2 }
+    if (curCol > mapW * 2 - 4) { curCol = mapW * 2 - 4 }
+    if (curRow > mapH * 2 - 4) { curRow = mapH * 2 - 4 }
+  }
+
+  // ── A: select, or order ────────────────────────────────────────────────────
+  if ((ed & K_A) !== 0) {
+    if (placeKind >= 0) {
+      // Siting a building: A commits it here. `pk` is a LOCAL copy — see tryPlace's note on why
+      // passing the module variable straight in panics the runtime.
+      let pk: i32 = placeKind
+      if (tryPlace(pk, curCol >> 1, curRow >> 1) === 1) { placeKind = 0 - 1 }
+    } else {
+      let hit: i32 = rtsUnitAtPx(curCol * 8 + 4, curRow * 8 + 4)
+      if (hit >= 0 && rTeam[hit] === TEAM_ME) {
+        rtsSelOne(hit)
+        selUnit = hit
+        selBuild = 0 - 1
+        openCard(OWNER_UNIT + rKind[hit])
+      } else {
+        let b: i32 = rtsBuildAt(curCol >> 1, curRow >> 1)
+        if (b >= 0 && bTeam[b] === TEAM_ME) {
+          selBuild = b
+          selUnit = 0 - 1
+          rtsSelClear()
+          openCard(bKind[b])
+        } else if (rtsSelCount() > 0) {
+          // ONE flow field for the whole order, however many units it covers.
+          rtsOrderMove(F_ORDER, curCol >> 1, curRow >> 1, STRIDE, ANIM)
+        }
+      }
+    }
+  }
+  // L walks the command card. It used to select the whole army; that moved to SELECT, because a
+  // card you cannot reach is a card that does not exist.
+  // L back, R forward — through whatever the selection can do. Both wrap.
+  let step: i32 = 0
+  if ((ed & K_L) !== 0) { step = 0 - 1 }
+  if ((ed & K_R) !== 0) { step = 1 }
+  if (step !== 0 && cardOwner >= 0) {
+    let n: i32 = cmdCount(cardOwner)
+    if (n > 0) {
+      cardPick = cardPick + step
+      if (cardPick < 0) { cardPick = n - 1 }
+      if (cardPick >= n) { cardPick = 0 }
+    }
+  }
+  if ((ed & K_B) !== 0) {
+    if (placeKind >= 0) {
+      placeKind = 0 - 1        // back out of siting, keep the selection
+    } else {
+      rtsOrderStop() rtsSelClear() selBuild = 0 - 1 selUnit = 0 - 1 cardOwner = 0 - 1
+    }
+  }
+  // Select the whole army, and open the card its units share.
+  if ((ed & K_SELECT) !== 0) {
+    rtsSelAll(TEAM_ME)
+    selBuild = 0 - 1
+    selUnit = 0 - 1
+    openCard(OWNER_UNIT + K_FOOTMAN)
+  }
+
+  // ── START: train from the selected building ────────────────────────────────
+  if ((ed & K_START) !== 0 && cardOwner >= 0) {
+    // Locals first: `runCommand` can call `openCard`, which writes both of these, and an argument
+    // built from them would still be holding a borrow when it does.
+    let co: i32 = cardOwner
+    let cp: i32 = cardPick
+    runCommand(cmdAt(co, cp))
+  }
+
+  // ── Camera ─────────────────────────────────────────────────────────────────
+  let cx: i32 = curCol * 8 - 120
+  let cy: i32 = curRow * 8 - 80
+  if (cx < 0) { cx = 0 }
+  if (cy < 0) { cy = 0 }
+  if (cx > mapW * 16 - 240) { cx = mapW * 16 - 240 }
+  if (cy > mapH * 16 - 160) { cy = mapH * 16 - 160 }
+  camera_set(cx, cy)
+  sprite_set_pos(cursor, curCol * 8 - cx - 4, curRow * 8 - cy - 4)
+  // Slow pulse so the cursor stays findable on a busy field without animating every frame.
+  //
+  // Gated: the frame changes 4 times a second, so writing it 60 times a second is 56 wasted sprite
+  // writes. Same rule the HP bars follow — a sprite write is cheap, and 60 of them a second for
+  // nothing is not.
+  let cf: i32 = (frameNo >> 4) & 1
+  if (cf !== curFrame) {
+    curFrame = cf
+    sprite_set_frame(cursor, cf)
+  }
+  // Park the selection marker on whatever is selected, in screen space like the cursor.
+  if (selBuild >= 0 && bHp[selBuild] > 0) {
+    sprite_set_pos(selMark, bCol[selBuild] * 16 - cx + 8, bRow[selBuild] * 16 - cy + 8)
+    markOn = 1
+  } else if (selUnit >= 0 && rLive[selUnit] === 1) {
+    sprite_set_pos(selMark, entity_x(rEnt[selUnit]) + 3 - cx - 4, entity_y(rEnt[selUnit]) + 3 - cy - 4)
+    markOn = 1
+  } else {
+    markOn = 0
+  }
+  // Visibility is a LATCH, not a per-frame write: with nothing selected this was calling
+  // `sprite_set_visible(0)` sixty times a second to keep a sprite hidden that was already hidden.
+  if (markOn !== markShown) {
+    markShown = markOn
+    sprite_set_visible(selMark, markOn)
+  }
+
+  world_step()
+  rtsBarsStep(rtsSelMask())
+
+  // ── Slow work, ONE JOB PER FRAME ───────────────────────────────────────────
+  // Every call below crosses a module boundary, and a boxed call is ~117 ticks plus ~28 per
+  // argument (docs/perf-rules.md §2). Running all of this every frame measured at ~4,000 ticks of
+  // bookkeeping on top of a 2,700-tick world_step — over budget before the game did anything.
+  //
+  // None of it needs 60Hz. A harvest trip takes seconds, a build takes minutes, a death showing up
+  // two frames late is invisible. So the loop takes ONE job per frame on an eight-phase rotation
+  // and the whole tail costs one call instead of a dozen.
+  let phase: i32 = frameNo & 7
+  if (phase === 0) {
+    // Reap the dead. Four slots a call, so the roster is covered every few rotations.
+    if (rtsSweepStep(4) > 0) {
+      if (rDeadTeam === TEAM_FOE) { heroXp = heroXp + 4 } else { rtsFoodFree(1) }
+    }
+  } else if (phase === 1) {
+    // One worker advanced per visit, not all of them.
+    //
+    // ⚠️ Gated on the mission that HAS an economy, by name. This used to read `mission > 0` because
+    // the no-economy march was mission 0; reordering the missions left the gate behind and the
+    // harvest loop simply never ran — peasants stood at the mine, arrived, with a dwell that never
+    // counted down.
+    if (mission !== 1) {
+      worker = worker + 1
+      if (worker >= poolMe) { worker = 0 }
+      if (rLive[worker] === 1 && rKind[worker] === K_PEASANT) {
+        let got: i32 = 0
+        if (worker < 2 || mission === 2) {
+          got = rtsHarvestStep(worker, F_GOLD, F_HOME, mineCol, mineRow + 2, 3, 10, STRIDE)
+          if (got > 0) { rtsCredit(got, 0) }
+        } else {
+          got = rtsHarvestStep(worker, F_WOOD, F_HOME, woodCol, woodRow + 3, 3, 10, STRIDE)
+          if (got > 0) { rtsCredit(0, got) }
+        }
+      }
+    }
+  } else if (phase === 2) {
+    // Production: one building finishes at a time, and the unit walks out of its door.
+    // 8 = the rotation's period, so a build time in the stat table means frames.
+    let done: i32 = rtsProduceStep(8)
+    if (done >= 0) {
+      let kind: i32 = rtsQueueTake(done)
+      if (arm(TEAM_ME, kind, doorCol(done), doorRow(done)) < 0) {
+        // The pool was exhausted between queueing and completion. Refund rather than pocket it —
+        // taking a player's gold and handing back nothing is the worst failure mode a build has.
+        rtsCredit(U_GOLD[kind], U_WOOD[kind])
+        rtsFoodFree(U_FOOD[kind])
+      }
+    }
+  } else if (phase === 3) {
+    checkOutcome()
+    // The objective line is a STRING: rebuilding it per frame allocates per frame, and it changes
+    // at most three times in a mission.
+    if (outcome !== objShown) {
+      objShown = outcome
+      objCache = objLine()
+      // The signature cannot see a string, so tell the HUD explicitly that its text changed —
+      // otherwise the objective line stays blank for the whole mission.
+      hudReset()
+    }
+  } else if (phase === 4) {
+    // Cache the card's display form once per rotation. Building the label string every frame would
+    // allocate every frame, and the card changes only on input.
+    cardN = 0
+    cardOk = 0
+    cardCmd = 0 - 1
+    placeOn = 0
+    if (placeKind >= 0) { placeOn = 1 }
+    if (cardOwner >= 0) {
+      cardN = cmdCount(cardOwner)
+      if (cardN > 0) {
+        if (cardPick >= cardN) { cardPick = 0 }
+        let cc: i32 = cmdAt(cardOwner, cardPick)
+        cardCmd = cc
+        cardOk = canAfford(cc)
+        if (cc === C_STOP || cc === C_ATTACK || cc === C_HARVEST_GOLD || cc === C_HARVEST_WOOD) {
+          cardOk = 1
+        }
+      }
+    }
+    // Cache what the HUD shows. The panel repaints on a signature change, so refreshing its inputs
+    // eight times a second is indistinguishable from sixty and costs a seventh as much.
+    hudSel = rtsSelCount()
+    hudTrain = 0 - 1
+    if (selBuild >= 0 && rtsQueued(selBuild) >= 0) { hudTrain = rtsQueueLeft(selBuild) }
+
+    // Everything the panel displays, folded into one integer, computed HERE — after every input
+    // above has settled — and compared against `hudSig` in the frame loop.
+    //
+    // The frame loop must not compute this itself: it reads eight variables imported from
+    // packages/rts, and an imported module `let` is a boxed read, so asking "did anything change"
+    // cost 443 ticks a frame on its own.
+    //
+    // ⚠️ The countdown goes in as SECONDS. Feeding a live per-frame counter into a repaint
+    // signature is what took this game from 4,376 to 7,292 ticks.
+    // ── Busy meter ────────────────────────────────────────────────────────
+    // What is the selected thing DOING? A building trains; a site is being built. Either way the
+    // player gets a bar instead of having to infer progress from nothing happening.
+    //
+    // Quantised to 32 steps: `hud_bar` re-renders only when the filled width changes, but the CALL
+    // itself is boxed (8 arguments, ~310 ticks), so the call is gated too.
+    let q: i32 = 0 - 1
+    if (selBuild >= 0 && bHp[selBuild] > 0) {
+      if (rtsBuildingDone(selBuild) === 0) {
+        q = rtsBuildFrac(selBuild, 32)          // under construction
+      } else if (rtsQueued(selBuild) >= 0) {
+        let left: i32 = rtsQueueLeft(selBuild)
+        let full: i32 = U_TRAIN[rtsQueued(selBuild)]
+        if (full > 0) { q = ((full - left) * 32) / full }
+      }
+    }
+    // ── Health of the selected thing ──────────────────────────────────────
+    // Slot 1, beside the busy meter. A player who selects something should be told how hurt it is
+    // without hunting for the overhead bar, and buildings have no overhead bar at all.
+    let hq: i32 = 0 - 1
+    if (selUnit >= 0 && rLive[selUnit] === 1) {
+      let mx: i32 = health_max(rEnt[selUnit])
+      if (mx > 0) { hq = (entity_hp(rEnt[selUnit]) * 32) / mx }
+    } else if (selBuild >= 0 && bHp[selBuild] > 0) {
+      let bmx: i32 = B_HP[bKind[selBuild]]
+      if (bmx > 0) { hq = (bHp[selBuild] * 32) / bmx }
+    }
+    if (hq !== hpQ) {
+      hpQ = hq
+      if (hq < 0) {
+        hud_bar(1, 0, 0, 0, 0, 0, 0, 0)
+      } else {
+        // Green / amber / red, the same reading as the overhead bars so the two agree.
+        let hfg: i32 = 0x5CB048
+        if (hq <= 16) { hfg = 0xE2B83E }
+        if (hq <= 8) { hfg = 0xCE4234 }
+        let hy: i32 = 118
+        if (panelTop === 1) { hy = 52 }
+        hud_bar(1, 160, hy, 64, 5, hq / 32.0, hfg, 0x101A2E)
+      }
+    }
+
+    if (q !== barQ) {
+      barQ = q
+      if (q < 0) {
+        hud_bar(0, 0, 0, 0, 0, 0, 0, 0)         // w = 0 frees the slot
+      } else {
+        // Gold while training, green while building — the colour says which kind of busy it is.
+        let fg: i32 = 0xF2D06B
+        if (rtsBuildingDone(selBuild) === 0) { fg = 0x5CB048 }
+        // ⚠️ 32.0, not 32: both operands typed i32 makes this an integer division, `frac` arrives as 0
+        // and the bar renders empty. `hud_bar` wants a real 0..1.
+        let by: i32 = 118
+        if (panelTop === 1) { by = 52 }
+        hud_bar(0, 8, by, 64, 5, q / 32.0, fg, 0x101A2E)
+      }
+    }
+
+    let curScrY: i32 = curRow * 8 - cy
+    let wantTop: i32 = 0
+    if (curScrY > 96) { wantTop = 1 }
+    panelTop = wantTop
+    ICON_Y = 140
+    if (panelTop === 1) { ICON_Y = 32 }
+    iconsRefresh()
+
+    hudWant = rGold + rWood * 1009 + rFood * 65537 + rFoodCap * 131
+    hudWant = hudWant ^ (hudSel * 2654435) ^ ((objective + outcome * 8) * 7919)
+    hudWant = hudWant ^ (cardN * 313) ^ (cardPick * 131) ^ (cardCmd * 17)
+    hudWant = hudWant ^ (cardOk * 3) ^ (placeOn * 4099) ^ ((hudTrain / 60) * 1553)
+    hudWant = hudWant ^ (panelTop * 65521)
+  } else if (phase === 5) {
+    // 8 = the rotation's period, so B_BUILD is in frames.
+    let built: i32 = rtsBuildStep(8, K_PEASANT)
+    if (built >= 0) { finishSite(built) }
+    // Buildings take damage from whatever stands on their doorstep. Buildings are not entities, so
+    // the engine's combat cannot see them — this is the one place the game closes the loop itself.
+    siegeStep()
+  } else if (phase === 7) {
+    // Hide enemies standing in fog. Sprites draw over the shroud layer, so without this an enemy
+    // army is fully visible marching through solid black.
+    rtsFogStep(TEAM_FOE, 4)
+  } else if (phase === 6) {
+    aiTimer = aiTimer - 1
+    if (aiTimer <= 0) {
+      aiTimer = 30
+      aiThink()
+    }
+  }
+
+  // ── Fog and HUD ────────────────────────────────────────────────────────────
+  // Both stay per-frame: the shroud must not lag the camera by even one frame, and `hudDraw` exits
+  // on an unchanged signature before it touches the canvas.
+  // Skip the call outright while the view is still: the blit already writes zero cells then, but
+  // the call and its boxed arguments are not free (perf-rules §2). It still refreshes on a timer so
+  // a unit walking within a static view opens the shroud ahead of it.
+  if (cx !== fogX || cy !== fogY || (frameNo & 7) === 3) {
+    fogX = cx fogY = cy
+    terrain_blit(terrBg, tiles, TS_COLS, cx, cy, GID_SHROUD)
+  }
+  if (hudWant !== hudSig) {
+    hudSig = hudWant
+    hudDraw(body, rGold, rWood, rFood, rFoodCap, hudSel, objective + outcome * 8, objCache, hudTrain,
+          cardN, cardPick, cardCmd, cardOk, placeOn, panelTop)
+  }
+
+
+  // ── Mission end ────────────────────────────────────────────────────────────
+  if (outcome !== 0) {
+    endHold = endHold + 1
+    if (endHold > 180) {
+      endHold = 0
+      if (outcome === 1) {
+        mission = mission + 1
+        if (mission > 2) { mission = 0 heroXp = 0 }
+      }
+      prefsSet(SLOT_MISSION, mission)
+      prefsSet(SLOT_XP, heroXp)
+      prefsSave()
+      loadMission(mission)
+    }
+  }
+
+  let now: i32 = ticks()
+  let per: i32 = (now - stamp) & 0xFFFF
+  stamp = now
+  if (per > peak) { peak = per }
+  frameNo = frameNo + 1
+  if ((frameNo & 63) === 0) {
+    log("P" + peak + " W" + step_ticks(0) + " E" + frame_period(2) + " M" + mission + " O" + outcome + " G" + rGold + " L" + rWood 
+        + " A" + rtsAlive(TEAM_ME) + " F" + rtsAlive(TEAM_FOE) + " H" + hudPaints() + " B" + rtsBuildAlive(TEAM_ME, 0 - 1) + "/" + rtsBuildCount())
+    peak = 0
+  }
+}

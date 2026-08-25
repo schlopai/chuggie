@@ -1,0 +1,22 @@
+// A Ninja Adventure-style player. The ninja sheet is 5 frames per row (idle + 4 walk)
+// and 4 rows (down, up, left, right — the pack gives explicit left AND right, so no
+// flipping). facing() picks the row; movement picks the walk clip vs. the idle frame.
+import { input_x, input_y } from 'cargo:tish_agb'
+
+function animate(e) {
+  let base = e.facing() * 5           // 0 down, 1 up, 2 left, 3 right -> row start
+  if (e.gridMoving()) {
+    e.play(base + 1, 4, 6, true)      // walk cycle (4 frames)
+  } else {
+    e.play(base, 1, 1, false)         // idle frame
+  }
+}
+
+export const Player = {
+  update: ({ this }) => {
+    if (!this.gridMoving()) {
+      this.gridStep(input_x(), input_y())
+    }
+    animate(this)
+  }
+}

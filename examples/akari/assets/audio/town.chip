@@ -1,0 +1,71 @@
+# Willow Vale — the village theme.
+#
+# Replaces town.wav: 51 seconds of recorded music, 1.06 MB of a 4.47 MB ROM. As notes it is under a
+# kilobyte and plays on the GBA's four hardware channels, so it also costs no per-frame mixing.
+#
+# 16 bars in C major, eight rows to the bar (eighth notes), at 9 frames a row — about 100 BPM.
+# One bar per line, so a dropped row is visible as a short line rather than audible as drift three
+# bars later. Chords under each section: C Am F G | C Am F G | C Am F G | C Am F G.
+tempo 9
+loop 0
+
+# A triangle for the bass: strong fundamental, quiet harmonics, so it sits under the melody instead
+# of fighting it. The two squares carry everything anyone will actually hum.
+wave tri 0123456789ABCDEFFEDCBA9876543210
+
+inst lead  square duty=2 vol=11 decay=0
+inst harm  square duty=1 vol=6  decay=0
+inst bass  wave   table=tri vol=1
+
+# ── A section: the tune everyone remembers ───────────────────────────────────────────────────────
+ch1 lead | E4 .  G4 .  C5 .  G4 .  |
+ch1      | A4 .  C5 .  E5 .  C5 .  |
+ch1      | F4 .  A4 .  C5 .  A4 .  |
+ch1      | G4 .  B4 .  D5 .  G4 .  |
+ch1      | C5 .  B4 .  A4 .  G4 .  |
+ch1      | A4 .  G4 .  E4 .  C4 .  |
+ch1      | F4 .  G4 .  A4 .  C5 .  |
+ch1      | G4 .  .  .  .  .  -  .  |
+# ── B section: lifts an octave, then comes home ──────────────────────────────────────────────────
+ch1      | E5 .  D5 .  C5 .  D5 .  |
+ch1      | E5 .  .  .  C5 .  .  .  |
+ch1      | D5 .  C5 .  A4 .  G4 .  |
+ch1      | B4 .  .  .  D5 .  .  .  |
+ch1      | E5 .  G5 .  E5 .  C5 .  |
+ch1      | A4 .  C5 .  E5 .  .  .  |
+ch1      | D5 .  C5 .  B4 .  A4 .  |
+ch1      | C5 .  .  .  .  .  -  .  |
+
+ch2 harm | C4 .  E4 .  G4 .  E4 .  |
+ch2      | A3 .  C4 .  E4 .  C4 .  |
+ch2      | F3 .  A3 .  C4 .  A3 .  |
+ch2      | G3 .  B3 .  D4 .  B3 .  |
+ch2      | C4 .  E4 .  G4 .  E4 .  |
+ch2      | A3 .  C4 .  E4 .  C4 .  |
+ch2      | F3 .  A3 .  C4 .  A3 .  |
+ch2      | G3 .  B3 .  D4 .  .  .  |
+ch2      | C4 .  G4 .  C4 .  G4 .  |
+ch2      | A3 .  E4 .  A3 .  E4 .  |
+ch2      | F3 .  C4 .  F3 .  C4 .  |
+ch2      | G3 .  D4 .  G3 .  D4 .  |
+ch2      | C4 .  G4 .  C4 .  G4 .  |
+ch2      | A3 .  E4 .  A3 .  E4 .  |
+ch2      | F3 .  C4 .  G3 .  D4 .  |
+ch2      | C4 .  .  .  .  .  -  .  |
+
+ch3 bass | C2 .  .  .  G2 .  .  .  |
+ch3      | A1 .  .  .  E2 .  .  .  |
+ch3      | F1 .  .  .  C2 .  .  .  |
+ch3      | G1 .  .  .  D2 .  .  .  |
+ch3      | C2 .  .  .  G2 .  .  .  |
+ch3      | A1 .  .  .  E2 .  .  .  |
+ch3      | F1 .  .  .  C2 .  .  .  |
+ch3      | G1 .  .  .  G2 .  .  .  |
+ch3      | C2 .  .  .  G2 .  .  .  |
+ch3      | A1 .  .  .  E2 .  .  .  |
+ch3      | F1 .  .  .  C2 .  .  .  |
+ch3      | G1 .  .  .  D2 .  .  .  |
+ch3      | C2 .  .  .  G2 .  .  .  |
+ch3      | A1 .  .  .  E2 .  .  .  |
+ch3      | F1 .  .  .  G1 .  .  .  |
+ch3      | C2 .  .  .  .  .  -  .  |

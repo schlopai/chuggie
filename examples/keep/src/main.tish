@@ -1,0 +1,425 @@
+// keep — one dungeon room, and every lock in it.
+//
+// The acceptance test for `packages/keylock.tish`, which is new — and, more to the point, **the
+// engine review's structural test**: it said a genre is proven when *someone else's* example can be
+// built on the package without touching it, and named this extraction as the cheapest way to check.
+// So the dungeon-doors spike, where these rules were originally worked out against a real dungeon map,
+// is deliberately UNTOUCHED and still passes. This room was built on the package afterwards.
+//
+// ── WHAT IS ON SCREEN ─────────────────────────────────────────────────────────────────────────
+//
+//   * a LOCKED door        — needs a key; the key is lying on the floor
+//   * a BOMBABLE wall      — a key does nothing; it wants a blast
+//   * a FALSE door         — looks identical to the locked one and never opens
+//   * a SHUTTER            — no key will ever open it; it lifts when the room is solved
+//   * two BLOCKS and two SOCKETS — pushing both blocks home is what solves the room
+//
+// The four rules the package exists to enforce are each visible here, and each is asserted by
+// `verify.sh`: a door opens on BOTH sides at once, keys are one global counter, the Magic Key spends
+// nothing, and a shutter cannot be forced.
+//
+// ── AND IT REMEMBERS ──────────────────────────────────────────────────────────────────────────
+//
+// `keylock` holds no save code; it maps each door's open state onto a `flags.tish` id. So this room
+// persists through the same versioned, checksummed SRAM the rest of the engine uses — proven by
+// running the ROM twice. Two packages composing is the point.
+
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  backdrop, ui_begin, ui_rect, ui_text, ui_clear_rect, ui_reserve_tiles,
+  frame, keys_edge, audio_defer, log
+} from 'cargo:tish_agb'
+import {
+  klInit, klAddDoor, klPair, klDoorRoom, klTryOpen, klBomb, klClearRoom, klDoorCount,
+  klGiveKey, klKeys, klGiveMagic, klHasMagic, klIsOpen, klDoorKind, klDoorAt,
+  klAddBlock, klAddSocket, klPush, klBlockAt, klBlockCount, klBlockCol, klBlockRow,
+  klSocketCount, klSocketCol, klSocketRow, klSocketsFilled, klSocketsSolved, klLoad,
+  KL_LOCKED, KL_BOMBABLE, KL_FALSE, KL_SHUTTER,
+  KL_OK, KL_ALREADY, KL_NEED_KEY, KL_NEED_BOMB, KL_IMPOSSIBLE
+} from '../../../packages/keylock'
+import { flagsInit, flagsSave, flagsFresh, flagOn, flagSet } from '../../../packages/flags'
+import { chipCoin, chipCancel, chipChime, chipBlip, chipPop } from '../../../packages/chipsfx'
+
+let COLS: i32 = 13
+let ROWS: i32 = 8
+let CELL: i32 = 16
+let OX: i32 = 16
+let OY: i32 = 26
+
+// The room, as a wall mask. 1 = wall.
+let WALL: i32[] = []
+
+// Flag ids: 0..31 belong to keylock's doors (flagBase 0); the game's own start at 40.
+let F_KEY_TAKEN: i32 = 40
+let F_MAGIC: i32 = 41
+let F_SOLVED: i32 = 42
+
+let KEY_C: i32 = 3
+let KEY_R: i32 = 5
+let MAGIC_C: i32 = 9
+let MAGIC_R: i32 = 6
+
+//   0 px 1 py 2 t 3 human 4 msgT 5 sig 6 bombs
+let P: i32[] = [2, 2, 0, 0, 0, 0 - 1, 2, 0]
+let P_C: i32 = 0
+let P_R: i32 = 1
+let P_T: i32 = 2
+let P_HUMAN: i32 = 3
+let P_MSGT: i32 = 4
+let P_SIG: i32 = 5
+let P_BOMB: i32 = 6
+let P_STEP: i32 = 7
+let MSG = ""
+
+let BG: i32 = 0x0E1018
+let FLOOR: i32 = 0x2A2438
+let WALLC: i32 = 0x574A6E
+let INK: i32 = 0xE8ECF8
+let DIM: i32 = 0x8890B0
+let GOLD: i32 = 0xFFD060
+let GOOD: i32 = 0x60D080
+let BAD: i32 = 0xE06060
+let BLOCKC: i32 = 0xC08850
+let SOCKC: i32 = 0x4A6EA0
+let YOU: i32 = 0x70C0FF
+
+backdrop(BG)
+ui_reserve_tiles(320)
+ui_begin()
+
+let i: i32 = 0
+while (i < COLS * ROWS) {
+  WALL.push(0)
+  i = i + 1
+}
+function wallAt(c: i32, r: i32): i32 {
+  if (c < 0 || r < 0 || c >= COLS || r >= ROWS) { return 1 }
+  return WALL[r * COLS + c]
+}
+function setWall(c: i32, r: i32) { WALL[r * COLS + c] = 1 }
+
+// A border, plus an inner partition the doors sit in.
+let e: i32 = 0
+while (e < COLS) { setWall(e, 0)  setWall(e, ROWS - 1)  e = e + 1 }
+e = 0
+while (e < ROWS) { setWall(0, e)  setWall(COLS - 1, e)  e = e + 1 }
+e = 1
+while (e < ROWS - 1) { setWall(6, e)  e = e + 1 }
+
+flagsInit({ magic: 0xC0DE, version: 1, count: 2, base: 0 })
+klInit({ flagBase: 0 })
+
+// The partition's doors. Each is ONE doorway with two halves — the west side and the east side —
+// paired so opening either opens both (rule 1).
+let dLockW: i32 = klAddDoor(6, 2, KL_LOCKED)
+let dLockE: i32 = klAddDoor(6, 2, KL_LOCKED)
+klPair(dLockW, dLockE)
+let dBomb: i32 = klAddDoor(6, 4, KL_BOMBABLE)
+let dFalse: i32 = klAddDoor(6, 6, KL_FALSE)
+let dShut: i32 = klAddDoor(6, 3, KL_SHUTTER)
+klDoorRoom(dShut, 0)
+
+klAddBlock(3, 2)
+klAddBlock(4, 6)
+klAddSocket(2, 6)
+klAddSocket(4, 2)
+
+klLoad()
+if (flagsFresh() === 0) {
+  MSG = "The keep remembers."
+} else {
+  MSG = "A cold keep."
+}
+P[P_MSGT] = 100
+// `lockE` is the SAME DOOR seen from the next room. It is logged separately on purpose: a door
+// that opens on one side and stays shut on the other is the classic dungeon bug, and `klPair` is
+// the whole reason it cannot happen here. The two numbers must always agree.
+log("KEEP boot fresh=" + flagsFresh() + " lockW=" + klIsOpen(dLockW) + " lockE=" + klIsOpen(dLockE)
+  + " bomb=" + klIsOpen(dBomb) + " shutter=" + klIsOpen(dShut))
+
+function say(m) { MSG = m  P[P_MSGT] = 70 }
+
+function blockedForPush(c: i32, r: i32): i32 {
+  if (wallAt(c, r) === 1) { return 1 }
+  return 0
+}
+
+// ── painting ─────────────────────────────────────────────────────────────────────────────────
+let NUMS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+function numStr(n: i32) {
+  if (n <= 0) { return "0" }
+  let s = ""
+  let v: i32 = n
+  while (v > 0) {
+    s = NUMS[v % 10] + s
+    v = (v / 10) | 0
+  }
+  return s
+}
+
+function paint() {
+  ui_clear_rect(0, 0, 240, 160)
+  ui_text(small, 6, 4, "KEEP", GOLD)
+  ui_text(small, 50, 4, "keys " + numStr(klKeys()), INK)
+  ui_text(small, 96, 4, "bombs " + numStr(P[P_BOMB]), INK)
+  if (klHasMagic() === 1) { ui_text(small, 152, 4, "MAGIC KEY", GOOD) }
+  ui_text(small, 200, 4, numStr(klSocketsFilled()) + "/" + numStr(klSocketCount()), DIM)
+
+  let r: i32 = 0
+  while (r < ROWS) {
+    let c: i32 = 0
+    while (c < COLS) {
+      let x: i32 = OX + c * CELL
+      let y: i32 = OY + r * CELL
+      let col: i32 = FLOOR
+      if (wallAt(c, r) === 1) { col = WALLC }
+      ui_rect(x, y, CELL - 1, CELL - 1, col, 1)
+      c = c + 1
+    }
+    r = r + 1
+  }
+
+  // Sockets under everything else.
+  let s: i32 = 0
+  while (s < klSocketCount()) {
+    ui_rect(OX + klSocketCol(s) * CELL + 3, OY + klSocketRow(s) * CELL + 3, CELL - 7, CELL - 7, SOCKC, 1)
+    s = s + 1
+  }
+
+  // Doors, coloured by what they are and whether they are open.
+  // ⚠️ NOT a hard-coded count. This loop was `d < 4` against five doors, and the one it dropped was
+  // the SHUTTER — the door whose whole point is that it opens on its own. It sat invisible while the
+  // log said it had opened, which looks exactly like the feature not working.
+  let d: i32 = 0
+  while (d < klDoorCount()) {
+    let id: i32 = d
+    let x: i32 = OX + 6 * CELL
+    let y: i32 = OY + klDoorRowOf(id) * CELL
+    let col: i32 = BAD
+    if (klIsOpen(id) === 1) { col = GOOD }
+    else if (klDoorKind(id) === KL_BOMBABLE) { col = 0xB07040 }
+    else if (klDoorKind(id) === KL_SHUTTER) { col = 0x8060B0 }
+    ui_rect(x + 2, y + 2, CELL - 5, CELL - 5, col, 1)
+    d = d + 1
+  }
+
+  // Pickups.
+  if (flagOn(F_KEY_TAKEN) === 0) {
+    ui_rect(OX + KEY_C * CELL + 5, OY + KEY_R * CELL + 5, 6, 6, GOLD, 1)
+  }
+  if (flagOn(F_MAGIC) === 0) {
+    ui_rect(OX + MAGIC_C * CELL + 5, OY + MAGIC_R * CELL + 5, 6, 6, GOOD, 1)
+  }
+
+  // Blocks.
+  let b: i32 = 0
+  while (b < klBlockCount()) {
+    ui_rect(OX + klBlockCol(b) * CELL + 2, OY + klBlockRow(b) * CELL + 2, CELL - 5, CELL - 5, BLOCKC, 1)
+    b = b + 1
+  }
+
+  ui_rect(OX + P[P_C] * CELL + 4, OY + P[P_R] * CELL + 4, CELL - 9, CELL - 9, YOU, 1)
+
+  ui_rect(0, 142, 240, 18, 0x1A2038, 1)
+  if (P[P_MSGT] > 0) { ui_text(small, 6, 147, MSG, INK) }
+  else { ui_text(small, 6, 147, "d-pad move/push  A open  B bomb  START save", DIM) }
+}
+
+// The doors all sit in column 6; this is their row, by id, in the order they were added.
+function klDoorRowOf(id: i32): i32 {
+  if (id === 0) { return 2 }
+  if (id === 1) { return 2 }
+  if (id === 2) { return 4 }
+  if (id === 3) { return 6 }
+  return 3
+}
+
+paint()
+
+// The attract player walks a fixed script so a headless run exercises every lock in order.
+// ⚠️ THE ROUTE MUST GO THROUGH THE DOOR IT OPENED. The first script sent the walker straight back
+// west across row 6 — which is the FALSE door — and it stood there retrying it for thousands of
+// frames, logging `kind=2 res=4` over and over. A false door is not a lock and no amount of keys or
+// Magic Keys will ever change that; the way back is the bombable door on row 4.
+//   key -> bomb the wall -> east -> magic key -> back west through the hole ->
+//   push a block west onto its socket -> push the other east onto its socket
+//   ... and finally the LOCKED door, carrying the Magic Key: it must open and spend nothing.
+// ⚠️ AND IT DETOURS AROUND THE SOCKET IT JUST FILLED. Routing along row 2 to reach the locked door
+// walks straight back into the block standing on (4,2) — which PUSHES IT OFF, unsolving the room a
+// second after solving it. The way east is row 3.
+let SC_C: i32[] = [3, 5, 7, 9, 7, 5, 5, 3, 2, 3, 5, 7]
+let SC_R: i32[] = [5, 4, 4, 6, 4, 4, 6, 6, 2, 3, 2, 2]
+let SC_N: i32 = 12
+
+while (true) {
+  P[P_T] = P[P_T] + 1
+  if (P[P_MSGT] > 0) { P[P_MSGT] = P[P_MSGT] - 1 }
+  let k: i32 = keys_edge()
+  if (k > 0) { P[P_HUMAN] = 1 }
+
+  let dc: i32 = 0
+  let dr: i32 = 0
+  if ((k & 256) > 0) { dc = 0 - 1 }
+  if ((k & 512) > 0) { dc = 1 }
+  if ((k & 64) > 0) { dr = 0 - 1 }
+  if ((k & 128) > 0) { dr = 1 }
+
+  if (dc !== 0 || dr !== 0) {
+    let nc: i32 = P[P_C] + dc
+    let nr: i32 = P[P_R] + dr
+    let blk: i32 = klBlockAt(nc, nr)
+    if (blk >= 0) {
+      // Walking into a block pushes it, if it has somewhere to go.
+      if (klPush(nc, nr, dc, dr, blockedForPush) === 1) {
+        P[P_C] = nc
+        P[P_R] = nr
+        chipBlip()
+        if (klSocketsSolved() === 1 && flagOn(F_SOLVED) === 0) {
+          flagSet(F_SOLVED, 1)
+          let n: i32 = klClearRoom(0)
+          say("The shutter grinds open.")
+          chipChime()
+          log("KEEP solved, shutters opened=" + n)
+        }
+      } else { chipCancel() }
+    } else {
+      let door: i32 = klDoorAt(nc, nr)
+      if (door >= 0 && klIsOpen(door) === 0) { chipCancel() }
+      else if (wallAt(nc, nr) === 1 && door < 0) { chipCancel() }
+      else { P[P_C] = nc  P[P_R] = nr }
+    }
+    // Pickups.
+    if (P[P_C] === KEY_C && P[P_R] === KEY_R && flagOn(F_KEY_TAKEN) === 0) {
+      flagSet(F_KEY_TAKEN, 1)
+      klGiveKey(1)
+      say("A small key.")
+      chipCoin()
+    }
+    if (P[P_C] === MAGIC_C && P[P_R] === MAGIC_R && flagOn(F_MAGIC) === 0) {
+      flagSet(F_MAGIC, 1)
+      klGiveMagic()
+      say("The Magic Key. It never runs out.")
+      chipCoin()
+    }
+  }
+
+  if ((k & 1) > 0) {
+    // A: try the door you are facing — here, any adjacent one.
+    let id: i32 = klDoorAt(P[P_C] + 1, P[P_R])
+    if (id < 0) { id = klDoorAt(P[P_C] - 1, P[P_R]) }
+    if (id < 0) { say("Nothing to open.")  chipCancel() }
+    else {
+      let before: i32 = klKeys()
+      let res: i32 = klTryOpen(id)
+      if (res === KL_OK) { say("It opens.")  chipChime() }
+      else if (res === KL_ALREADY) { say("Already open.") }
+      else if (res === KL_NEED_KEY) { say("It is locked.")  chipCancel() }
+      else if (res === KL_NEED_BOMB) { say("Cracked. A blast might do it.")  chipCancel() }
+      else { say("It will not budge.")  chipCancel() }
+      log("KEEP open id=" + id + " kind=" + klDoorKind(id) + " res=" + res
+        + " keysBefore=" + before + " keysAfter=" + klKeys() + " magic=" + klHasMagic())
+    }
+  }
+
+  if ((k & 2) > 0 && P[P_BOMB] > 0) {
+    P[P_BOMB] = P[P_BOMB] - 1
+    let n: i32 = klBomb(P[P_C] + 1, P[P_R])
+    if (n === 0) { n = klBomb(P[P_C] - 1, P[P_R]) }
+    if (n > 0) { say("The wall gives way.")  chipPop() }
+    else { say("The blast does nothing here.")  chipCancel() }
+    log("KEEP bomb at " + P[P_C] + "," + P[P_R] + " opened=" + n)
+  }
+
+  if ((k & 8) > 0) {
+    flagsSave()
+    say("Saved.")
+    log("KEEP saved")
+  }
+
+  // ── the attract script ────────────────────────────────────────────────────────────────────
+  if (P[P_HUMAN] === 0 && (P[P_T] % 34) === 0) {
+    // ⚠️ THE STEP ADVANCES ON ARRIVAL, NOT ON A TIMER. Written as `step = t / 34` the walker got one
+    // move per target and never reached any of them — it drifted two cells and the ROM logged
+    // nothing for 1,400 frames while looking like it was playing.
+    let step: i32 = P[P_STEP]
+    if (step < SC_N) {
+      let tc: i32 = SC_C[step]
+      let tr: i32 = SC_R[step]
+      if (P[P_C] === tc && P[P_R] === tr) {
+        P[P_STEP] = P[P_STEP] + 1
+        // The last waypoint is also where the attract run SAVES. A player presses START; the walker
+        // has no reason to, and without this the demo could never prove the half of `keylock` that
+        // matters most — that the door states survive a power cycle, because they are `flags.tish`
+        // ids and not private state. Run the ROM twice and the second boot reports fresh=0.
+        if (P[P_STEP] === SC_N) {
+          flagsSave()
+          log("KEEP attract saved lock=" + klIsOpen(dLockW) + " bomb=" + klIsOpen(dBomb)
+            + " shutter=" + klIsOpen(dShut))
+        }
+      }
+      if (P[P_C] < tc) { k = 512 } else if (P[P_C] > tc) { k = 256 }
+      else if (P[P_R] < tr) { k = 128 } else if (P[P_R] > tr) { k = 64 }
+      else { k = 1 }
+      // Re-run the same handling the pad would have taken.
+      let ac: i32 = 0
+      let ar: i32 = 0
+      if ((k & 256) > 0) { ac = 0 - 1 }
+      if ((k & 512) > 0) { ac = 1 }
+      if ((k & 64) > 0) { ar = 0 - 1 }
+      if ((k & 128) > 0) { ar = 1 }
+      if (ac !== 0 || ar !== 0) {
+        let nc2: i32 = P[P_C] + ac
+        let nr2: i32 = P[P_R] + ar
+        let b2: i32 = klBlockAt(nc2, nr2)
+        if (b2 >= 0) {
+          if (klPush(nc2, nr2, ac, ar, blockedForPush) === 1) {
+            P[P_C] = nc2
+            P[P_R] = nr2
+            if (klSocketsSolved() === 1 && flagOn(F_SOLVED) === 0) {
+              flagSet(F_SOLVED, 1)
+              let nn: i32 = klClearRoom(0)
+              say("The shutter grinds open.")
+              log("KEEP solved, shutters opened=" + nn)
+            }
+          }
+        } else {
+          let dd: i32 = klDoorAt(nc2, nr2)
+          if (dd >= 0 && klIsOpen(dd) === 0) {
+            let rr: i32 = klTryOpen(dd)
+            log("KEEP open id=" + dd + " kind=" + klDoorKind(dd) + " res=" + rr
+              + " keysAfter=" + klKeys() + " magic=" + klHasMagic())
+            if (rr === KL_NEED_BOMB && P[P_BOMB] > 0) {
+              P[P_BOMB] = P[P_BOMB] - 1
+              let bn: i32 = klBomb(nc2, nr2)
+              log("KEEP bomb at " + nc2 + "," + nr2 + " opened=" + bn)
+            }
+          } else if (wallAt(nc2, nr2) === 0 || dd >= 0) {
+            P[P_C] = nc2
+            P[P_R] = nr2
+          }
+        }
+        if (P[P_C] === KEY_C && P[P_R] === KEY_R && flagOn(F_KEY_TAKEN) === 0) {
+          flagSet(F_KEY_TAKEN, 1)
+          klGiveKey(1)
+          log("KEEP took key, keys=" + klKeys())
+        }
+        if (P[P_C] === MAGIC_C && P[P_R] === MAGIC_R && flagOn(F_MAGIC) === 0) {
+          flagSet(F_MAGIC, 1)
+          klGiveMagic()
+          log("KEEP took MAGIC KEY")
+        }
+      }
+    }
+  }
+
+  let sig: i32 = P[P_C] * 131 + P[P_R] * 17 + klKeys() * 7 + klSocketsFilled() * 23
+    + klIsOpen(0) + klIsOpen(2) * 2 + klIsOpen(3) * 4 + klHasMagic() * 8 + P[P_BOMB] * 3
+    + P[P_MSGT]
+  if (P[P_SIG] !== sig) {
+    P[P_SIG] = sig
+    audio_defer(1)
+    paint()
+    audio_defer(0)
+  }
+  frame()
+}

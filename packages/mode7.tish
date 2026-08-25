@@ -1,0 +1,351 @@
+// mode7.tish — a 3D GROUND PLANE, and things standing on it.
+//
+// The GBA has no 3D, but it does have one affine background whose transform can be rewritten between
+// scanlines. Give every scanline a matrix whose scale is 1/depth and the plane recedes: that is
+// perspective, done by the display hardware for the cost of one DMA channel and a 160-entry table.
+// This package is the camera that drives it, plus the projection that puts flat sprites on the
+// resulting floor as BILLBOARDS — which is how a 2D character stands in a 3D scene.
+//
+//     import * as m7 from '../../../packages/mode7'
+//     import { floor } from 'affine:../assets/floor.png'
+//
+//     m7.m7Ground(floor, 64, 64)        // the plane: a 64x64-tile world of that texture
+//     m7.m7Lens(56, 140.0)              // horizon scanline, focal length
+//     while (true) {
+//       m7.m7Orbit(256.0, 256.0, 90.0, m7.m7Yaw() + 1)
+//       m7.m7Commit()                   // ONE native call: hands the camera to the renderer
+//       m7.m7Place(hero, heroX, heroZ, 32, 32)
+//       frame()
+//     }
+//
+// ── Why the projection is done HERE rather than through the natives ──────────────────────────────
+// tish-agb also exposes `mode7_screen_x/y/scale`, which project a ground point natively. They exist
+// for games not using this package; this package does not call them. Each is a boxed call, so a
+// billboard would cost three, and a handful of characters would spend most of a frame's budget
+// crossing into Rust to be told where they are. The package already holds the camera, so it can do
+// the same arithmetic in tish for nothing — the natives are then only needed for the one thing tish
+// cannot do, which is rendering.
+//
+// ── Two things that will bite ────────────────────────────────────────────────────────────────────
+// ⚠️ A Mode 7 floor and `bg_bands` CANNOT COEXIST. agb holds one DMA slot per frame (`add_dma` is
+//    `next_dma = Some(..)`, last writer wins) and its HBlank transfer hardcodes channel 0.
+// ⚠️ Heavy work in the commit window corrupts the FLOOR, not just the frame rate. agb arms the DMA
+//    LAST — vblank, then objects, then backgrounds, then the DMA — so a text re-layout or a big tile
+//    upload can push the arm past the moment the screen starts drawing, and the top scanlines then
+//    render with the previous matrix. Budget your changing HUD text accordingly.
+import {
+  affine_bg_new, mode7_camera, mode7_visible,
+  mode7_billboard, mode7_billboard_at, mode7_billboards_draw, mode7_reset,
+  sprite_set_pos, sprite_set_visible, sprite_set_depth,
+} from 'cargo:tish_agb'
+
+// The camera. A typed struct so the per-frame reads are native field loads.
+//
+// `x`/`z` are a position on the plane in texture pixels; `yaw` is a heading in 1/256 of a turn
+// (64 = a quarter turn), which is the renderer's own resolution — agb's sine table has 256 entries,
+// so a finer angle here would not survive the trip. `height` is how far the camera floats above the
+// ground, `horizon` the scanline the ground converges to, and `focal` the focal length in pixels:
+// smaller is a wider, more vertiginous lens.
+interface Cam {
+  bg: i32,
+  x: f64, z: f64,
+  yaw: i32,
+  // sin and cos of `yaw`, cached. Every projection needs both, and recomputing them per billboard
+  // meant two table lookups and two calls each — which, with a handful of characters, was enough
+  // extra per-frame work to arm the HBlank DMA late and tear the floor. Yaw only changes when a
+  // setter changes it, so they are computed there instead.
+  sy: f64, cy: f64,
+  height: f64,
+  horizon: i32,
+  focal: f64,
+  // ⚠️ Declared HERE or it does not exist. tish does not treat a field used but undeclared as an
+  // error: it reads back null, the initializer's value for it is discarded, and the arithmetic
+  // downstream quietly goes NaN. This one was written, passed to the renderer, and silently ignored.
+  haze: i32
+}
+let CAM: Cam = {
+  bg: -1, x: 0.0, z: 0.0, yaw: 0, sy: 0.0, cy: 1.0,
+  height: 24.0, horizon: 56, focal: 140.0, haze: 0
+}
+
+// The one place yaw is written, so the cached sin/cos can never disagree with it.
+function setYaw(y: i32) {
+  let a = y - Math.floor(y / 256) * 256
+  CAM.yaw = a
+  CAM.sy = m7Sin(a)
+  CAM.cy = m7Cos(a)
+}
+
+// Half the screen, in pixels — the column the camera looks down.
+const HALF_W = 120.0
+
+// Nearer than this and a point is behind the camera (or so close it projects off the world). The
+// projection divides by depth, so this is also what keeps it from dividing by ~0.
+const NEAR = 1.0
+
+// sin over a QUARTER turn, indexed in 1/256ths: entry i is sin(i / 256 of a turn), i in 0..=64.
+// The other three quadrants come from symmetry in `m7Sin`, so this is a quarter of the storage and
+// exactly the angles the renderer can represent.
+let SIN_Q: f64[] = [
+  0.00000, 0.02454, 0.04907, 0.07356, 0.09802, 0.12241, 0.14673, 0.17096,
+  0.19509, 0.21910, 0.24298, 0.26671, 0.29028, 0.31368, 0.33689, 0.35990,
+  0.38268, 0.40524, 0.42756, 0.44961, 0.47140, 0.49290, 0.51410, 0.53500,
+  0.55557, 0.57581, 0.59570, 0.61523, 0.63439, 0.65317, 0.67156, 0.68954,
+  0.70711, 0.72425, 0.74095, 0.75721, 0.77301, 0.78835, 0.80321, 0.81758,
+  0.83147, 0.84485, 0.85773, 0.87009, 0.88192, 0.89322, 0.90399, 0.91421,
+  0.92388, 0.93299, 0.94154, 0.94953, 0.95694, 0.96378, 0.97003, 0.97570,
+  0.98079, 0.98528, 0.98918, 0.99248, 0.99518, 0.99729, 0.99880, 0.99970,
+  1.00000,
+]
+
+/// sin of an angle in 1/256 of a turn.
+export function m7Sin(a256: i32): f64 {
+  let a = a256 - Math.floor(a256 / 256) * 256
+  if (a < 64) { return SIN_Q[a] }
+  if (a < 128) { return SIN_Q[128 - a] }
+  if (a < 192) { return 0.0 - SIN_Q[a - 128] }
+  return 0.0 - SIN_Q[256 - a]
+}
+
+/// cos of an angle in 1/256 of a turn.
+export function m7Cos(a256: i32): f64 {
+  return m7Sin(a256 + 64)
+}
+
+// ── The plane ────────────────────────────────────────────────────────────────────────────────────
+
+/// Create the ground plane from an `affine:` (256-colour) import, tiled across `wTiles`x`hTiles`.
+///
+/// The texture is TOP-DOWN — a plan view of the ground. Do not draw perspective into it: the camera
+/// supplies that, and a texture that already recedes would have it applied twice.
+export function m7Ground(asset: i32, wTiles: i32, hTiles: i32): i32 {
+  CAM.bg = affine_bg_new(asset, wTiles, hTiles)
+  return CAM.bg
+}
+
+/// Show or hide the ground plane.
+export function m7Visible(on: i32) {
+  if (CAM.bg >= 0) { mode7_visible(CAM.bg, on) }
+}
+
+/// Set the lens: the scanline the ground converges to, and the focal length in pixels.
+export function m7Lens(horizon: i32, focal: f64) {
+  CAM.horizon = horizon
+  CAM.focal = focal
+}
+
+/// Place the camera outright.
+export function m7Set(x: f64, z: f64, yaw: i32, height: f64) {
+  CAM.x = x
+  CAM.z = z
+  CAM.height = height
+  setYaw(yaw)
+}
+
+/// Put the camera on a circle of `radius` around `(cx, cz)`, facing the centre.
+///
+/// This is the shot this whole package exists for — a scene viewed from an angle, orbiting. Yaw is
+/// both where the camera sits on the circle and which way it looks, so one number moves the shot.
+export function m7Orbit(cx: f64, cz: f64, radius: f64, yaw: i32) {
+  setYaw(yaw)
+  // Standing back along the view direction from the centre puts the centre in front of the camera.
+  CAM.x = cx - CAM.sy * radius
+  CAM.z = cz - CAM.cy * radius
+}
+
+/// Turn by `d` in 1/256ths, wrapping.
+export function m7Turn(d: i32) {
+  setYaw(CAM.yaw + d)
+}
+
+/// Walk: `fwd` along the heading, `side` across it.
+export function m7Move(fwd: f64, side: f64) {
+  CAM.x = CAM.x + CAM.sy * fwd + CAM.cy * side
+  CAM.z = CAM.z + CAM.cy * fwd - CAM.sy * side
+}
+
+export function m7Height(h: f64) { CAM.height = h }
+export function m7X(): f64 { return CAM.x }
+export function m7Z(): f64 { return CAM.z }
+export function m7Yaw(): i32 { return CAM.yaw }
+
+/// Hand the camera to the renderer. ONE native call; call it once a frame, before `frame()`.
+/// Retire `rows` scanlines below the horizon into the sky colour — distance haze.
+///
+/// The rows just under the horizon are where this renderer looks worst: `k` is largest there, so one
+/// screen pixel steps many texels, and high-contrast detail (a kerb, a lane marking) aliases into
+/// coloured speckle. There is no mipmapping available to fix it properly. Giving up the worst few
+/// rows costs a sliver of draw distance and removes the shimmer completely — which is what the
+/// hardware's own era did, with a haze band on the horizon.
+///
+/// Free: it only moves where the sky run ends, and does not touch the cached depth column.
+export function m7Haze(rows: i32) {
+  CAM.haze = rows
+}
+
+export function m7Commit() {
+  if (CAM.bg < 0) { return }
+  mode7_camera(CAM.bg, CAM.x, CAM.z, CAM.yaw, CAM.height, CAM.horizon, CAM.focal, CAM.haze)
+}
+
+// ── Standing on it ───────────────────────────────────────────────────────────────────────────────
+//
+// The projection, for a ground point `(wx, wz)`: rotate its offset from the camera into camera space
+// to get `depth` along the view direction and `lateral` across it, then divide. A thing `n` world
+// units long at that depth covers `n * focal / depth` pixels of screen, which is what `m7ScaleAt`
+// returns — the number that decides how big a billboard should be drawn.
+
+// Last projection, kept so the three accessors below can share one computation instead of each
+// redoing it. A typed struct, so this is three field loads rather than three calls into anything.
+interface Proj { x: f64, y: f64, scale: f64, ok: i32 }
+let P: Proj = { x: 0.0, y: 0.0, scale: 0.0, ok: 0 }
+
+function project(wx: f64, wz: f64) {
+  let s = CAM.sy
+  let c = CAM.cy
+  let dx = wx - CAM.x
+  let dz = wz - CAM.z
+  let depth = dx * s + dz * c
+  if (depth <= NEAR) {
+    P.ok = 0
+    return
+  }
+  let lateral = dx * c - dz * s
+  P.x = HALF_W + lateral * CAM.focal / depth
+  P.y = CAM.horizon + CAM.focal * CAM.height / depth
+  P.scale = CAM.focal / depth
+  P.ok = 1
+}
+
+/// Project a ground point. 1 if it is in front of the camera, 0 if it is behind (and the readbacks
+/// below are then meaningless).
+export function m7Project(wx: f64, wz: f64): i32 {
+  project(wx, wz)
+  return P.ok
+}
+
+export function m7ScreenX(): f64 { return P.x }
+export function m7ScreenY(): f64 { return P.y }
+export function m7Scale(): f64 { return P.scale }
+
+/// The scale factor at a ground point: multiply a world size by it to get pixels.
+export function m7ScaleAt(wx: f64, wz: f64): f64 {
+  project(wx, wz)
+  if (P.ok === 0) { return 0.0 }
+  return P.scale
+}
+
+/// A depth key for `sprite_set_depth`, so overlapping billboards sort back-to-front.
+///
+/// Nearer is a HIGHER number, which is the order `sprite_set_depth` wants. It is derived from the
+/// projected row rather than from the distance, so it agrees with what the floor is doing even when
+/// the camera is low and the perspective is extreme.
+export function m7DepthAt(wx: f64, wz: f64): i32 {
+  project(wx, wz)
+  if (P.ok === 0) { return 0 }
+  return Math.floor(P.y)
+}
+
+/// Stand a sprite on the ground at `(wx, wz)`.
+///
+/// The sprite is placed so the BOTTOM CENTRE of its `w`x`h` cell is the ground point — feet on the
+/// floor, which is the only anchor that stays put as the camera moves. Sprites behind the camera or
+/// off the sides are hidden rather than parked at an edge, because a billboard that clings to the
+/// screen edge reads as a bug and a hidden one reads as out of shot.
+///
+/// Returns 1 if it was placed, 0 if culled. The sprite must be a HUD sprite (`sprite_set_hud`):
+/// these are screen-space coordinates, and the camera here is not the tile-scroll camera.
+export function m7Place(sprite: i32, wx: f64, wz: f64, w: i32, h: i32): i32 {
+  project(wx, wz)
+  if (P.ok === 0) {
+    sprite_set_visible(sprite, 0)
+    return 0
+  }
+  let sx = Math.floor(P.x) - Math.floor(w / 2)
+  let sy = Math.floor(P.y) - h
+  if (sx < 0 - w || sx > 240 || sy < 0 - h || sy > 160) {
+    sprite_set_visible(sprite, 0)
+    return 0
+  }
+  sprite_set_pos(sprite, sx, sy)
+  sprite_set_depth(sprite, Math.floor(P.y))
+  sprite_set_visible(sprite, 1)
+  return 1
+}
+
+// ── Billboards the package owns ──────────────────────────────────────────────────────────────────
+//
+// ⚠️ Registered once, then drawn from MODULE arrays — not passed in every frame.
+//
+// A typed `i32[]`/`f64[]` PARAMETER arrives boxed, so every `sprites[i]`, `xs[i]`, `ws[i]` inside a
+// per-frame loop is a boxed read, and the extern calls made with those values lose their typed
+// lowering too. Measured on four billboards: `m7PlaceAll` cost ~730 ticks EACH, taking the frame
+// from 4589 ticks (no drops, a locked 60fps) to 7517 (64 of every 128 frames dropped, so about
+// 31fps). The rendering was innocent — `render` and `commit` barely moved. It was the argument
+// passing.
+//
+// Owning the arrays makes them typed module state, so the loop below is native reads and typed
+// externs. Positions are pushed in only when something actually moves, which for a character
+// standing on a mat is almost never.
+/// Register a sprite as a billboard of a `w`x`h` cell. Returns its index, for `m7BillboardAt`.
+export function m7Billboard(sprite: i32, w: i32, h: i32): i32 {
+  return mode7_billboard(sprite, w, h)
+}
+
+/// Move a registered billboard. Call only when it actually moves.
+export function m7BillboardAt(i: i32, wx: f64, wz: f64) {
+  mode7_billboard_at(i, wx, wz)
+}
+
+/// Project and place every registered billboard. ONE call per frame, and the only one you need.
+/// Tear the Mode 7 scene down: forget every affine layer and every billboard.
+///
+/// ⚠️ `bg_clear` does NOT do this — it predates both arrays. A game that leaves a race and comes back
+/// registers its billboards again, and the arrays only ever grew, so the second race projected two
+/// karts onto each sprite and the third three. Call this in the scene's `leave`.
+export function m7Reset() {
+  mode7_reset()
+  CAM.bg = -1
+}
+
+export function m7DrawBillboards() {
+  mode7_billboards_draw(CAM.bg)
+}
+
+/// ⚠️ SLOW — prefer `m7Billboard` + `m7DrawBillboards`. Kept for one-off placement, but see the note
+/// above: passing the arrays in every frame costs ~730 ticks per billboard.
+///
+/// Stand a whole cast on the ground in ONE call: `sprites[i]`, a `ws[i]`x`hs[i]` cell, goes to
+/// `(xs[i], zs[i])`. Sizes are per sprite because a cast is rarely all one cell size.
+///
+/// Prefer this to a loop of `m7Place`. Every call from a game into a package is a boxed dispatch,
+/// and per-frame boxed calls are the scarce resource here in a way that arithmetic is not — on a
+/// Mode 7 frame, going over budget does not drop a frame, it arms the scanline DMA late and tears
+/// the floor. Four billboards placed individually was already enough to do that.
+export function m7PlaceAll(sprites: i32[], xs: f64[], zs: f64[], ws: i32[], hs: i32[]) {
+  let s = CAM.sy
+  let c = CAM.cy
+  let n = sprites.length
+  let i = 0
+  while (i < n) {
+    let w = ws[i]
+    let h = hs[i]
+    let dx = xs[i] - CAM.x
+    let dz = zs[i] - CAM.z
+    let depth = dx * s + dz * c
+    if (depth <= NEAR) {
+      sprite_set_visible(sprites[i], 0)
+    } else {
+      let px = Math.floor(HALF_W + (dx * c - dz * s) * CAM.focal / depth) - Math.floor(w / 2)
+      let py = Math.floor(CAM.horizon + CAM.focal * CAM.height / depth)
+      if (px < 0 - w || px > 240 || py < 0 || py - h > 160) {
+        sprite_set_visible(sprites[i], 0)
+      } else {
+        sprite_set_pos(sprites[i], px, py - h)
+        sprite_set_depth(sprites[i], py)
+        sprite_set_visible(sprites[i], 1)
+      }
+    }
+    i = i + 1
+  }
+}

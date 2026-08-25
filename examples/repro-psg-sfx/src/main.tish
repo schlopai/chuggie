@@ -1,0 +1,56 @@
+// repro-psg-sfx — does a PSG sound effect damage the music it borrows a channel from?
+//
+// rap-dojo plays a short note when the player answers correctly, via `chip_borrow` + `psg_square`.
+// Whichever channel it borrows, the music is using that channel for something, and the reported
+// symptom was "it plays another song over the song, so I can't hear it".
+//
+// This is that, isolated: a plain four-note-per-bar lead on pulse channel 1, a held pad on pulse 2,
+// a noise backbeat on 4 — and an SFX fired every 40 frames on a channel chosen by SFX_CH. Nothing
+// else runs. If borrowing a channel damages the music, it shows up here as the lead's own frequency
+// changing or dropping out, with no gameplay to hide it.
+//
+//   SFX_CH 0  no effect at all (the control)
+//   SFX_CH 1  the lead's channel
+//   SFX_CH 2  the pad's channel
+//   SFX_CH 4  the noise channel
+//
+// ── THE ANSWER, measured over nine seconds of audio (FFT band energy vs the control) ─────────────
+//
+//     SFX ch | lead C5 500-560Hz | pad C3 125-140Hz
+//        0   |      1.00x        |      1.00x        (control)
+//        1   |      1.41x        |      0.98x        adds a competing note in the melody register
+//        2   |      1.01x        |      0.26x        DESTROYS the pad
+//        4   |      1.06x        |      1.00x        harmless
+//
+// Borrowing a channel does not politely share it — it SILENCES whatever is there until the
+// sequencer's next note-on for that voice. So the damage is proportional to how LONG the music's
+// notes are: the pad is one held four-beat note, so a five-frame borrow kills it for the rest of the
+// bar (0.26x). The lead's notes are short and restart quickly, so it survives — but the effect note
+// itself is then sitting in the melody register, which is audible as a second tune over the first.
+//
+// Only the noise channel is safe, and only because a percussive part has nothing to sustain.
+// Conclusion: pitched feedback over a PSG arrangement costs you a voice. Take the tick.
+import { tune } from 'deck:../assets/tune.deck'
+import { frame, chip_borrow, psg_square, psg_noise, hud_text } from 'cargo:tish_agb'
+import { deckPlay } from '../../../packages/deck'
+
+let SFX_CH: i32 = 4
+let SFX_EVERY: i32 = 40
+
+deckPlay(tune)
+hud_text(0, 6, 140, "sfx ch " + SFX_CH + " every " + SFX_EVERY + "f")
+
+let t: i32 = 0
+while (true) {
+  t = t + 1
+  if (t - Math.floor(t / SFX_EVERY) * SFX_EVERY === 0 && SFX_CH > 0) {
+    chip_borrow(SFX_CH, 5)
+    if (SFX_CH === 4) {
+      psg_noise(11, 6, 8, 4, 0, 1)
+    } else {
+      // The same shape rap-dojo uses to echo the player's note back.
+      psg_square(SFX_CH, 79, 2, 7, 6, 8)
+    }
+  }
+  frame()
+}

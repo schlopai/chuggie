@@ -1,0 +1,51 @@
+// Probe: does a bare module-level `let X: i32` read back correctly after being
+// reassigned from inside functions on the GBA target?
+//
+// History: the topdown RPG port wrapped every module scalar in a 1-element i32[] because "a bare
+// module let reassigned from inside a function reads back unreliably on this target".
+// its sibling port's design wants bare typed scalars. This probe
+// decides it: if all cases print PASS, the wrapper idiom is dead; if any prints FAIL,
+// file the repro upstream (tishlang/tish) and keep wrappers.
+import { log, vblank } from 'cargo:tish_agb'
+
+let A: i32 = 0            // written and read across function boundaries
+let B: i32 = 100          // written by one function, read by another
+let C: i32 = 0            // accumulated across frames in the game-loop shape
+let SUM: i32 = 0
+
+function bumpA() {
+  A = A + 1
+}
+
+function writeB(v: i32) {
+  B = v
+}
+
+function readB(): i32 {
+  return B
+}
+
+function tick() {
+  C = C + 2
+  SUM = SUM + C
+}
+
+bumpA()
+bumpA()
+bumpA()
+if (A === 3) { log("case1 PASS A=" + A) } else { log("case1 FAIL A=" + A + " want 3") }
+
+writeB(42)
+let got: i32 = readB()
+if (got === 42) { log("case2 PASS B=" + got) } else { log("case2 FAIL B=" + got + " want 42") }
+
+let f: i32 = 0
+while (f < 5) {
+  tick()
+  vblank()
+  f = f + 1
+}
+// C = 2,4,6,8,10 -> 10; SUM = 2+4+6+8+10 = 30
+if (C === 10) { log("case3 PASS C=" + C) } else { log("case3 FAIL C=" + C + " want 10") }
+if (SUM === 30) { log("case4 PASS SUM=" + SUM) } else { log("case4 FAIL SUM=" + SUM + " want 30") }
+log("probe done")

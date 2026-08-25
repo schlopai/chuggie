@@ -1,0 +1,13 @@
+[package]
+name = "p0-hecs"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# P0c gate: does hecs (the candidate ECS for tish-engine) compile no_std for the
+# no-atomics thumbv4t target? Its transitive deps (hashbrown/spin/foldhash) are
+# the risk — foldhash in particular needs atomics (proven in P0a).
+
+[dependencies]
+agb = "0.25.0"
+hecs = { version = "0.11", default-features = false }

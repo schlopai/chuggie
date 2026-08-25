@@ -1,0 +1,331 @@
+// SPECTRA — a puzzle-platformer whose verb is the palette.
+//
+// The world is painted in more colours than the screen shows at once. Your lantern holds four, and
+// what is not in your lens is not there — not merely invisible, but not solid. L and R turn the
+// lantern between three lenses; holding BOTH opens WHITE, where all three bands are real together,
+// which is the only way past some gaps and the worst possible moment for every hazard in the room.
+//
+// Almost none of that is in this file. The lens is `packages/chroma`, the character controller is
+// `packages/platformer`, the physics and entities are the engine crates, and the rooms are Tiled
+// maps baked into ROM by `scene:`. What is HERE is the wiring: which room, who is in it, and what
+// happens when the player touches something.
+//
+// ⚠️ THE MAIN LOOP CALLS `step()` AND NOTHING ELSE. It does NOT call `frame()`, and that is worth
+// two frames a second of every sixty: `world_step` already ends by rendering and waiting for vblank,
+// so a loop written `step(); frame()` presents TWICE and waits TWICE — a locked 30fps no matter how
+// little the game does. Measured here with an empty scene and no entities: step 4,369 ticks and
+// frame 4,385, each a whole vblank; dropping the `frame()` took this game's period from 8,778 to
+// 4,389, which is 60fps exactly. `frame()` is for the case the engine docs describe — a menu that
+// presents WITHOUT stepping, to hold the world still.
+//
+// ⚠️ THE OTHER THING WORTH READING THIS FILE FOR is the order inside `buildRoom`. `scene_stream`
+// builds the map's layers and re-derives the backdrop from the atlas as it goes, so the lens has to
+// be lit AFTER `loadSceneRom` — not before, and not once at boot. Lit first, it is overwritten
+// before the first frame draws, and the symptom is a game that looks entirely correct and whose lens
+// button does nothing on the frame you enter a room.
+import { r01 } from 'scene:../assets/r01.tmj'
+import { r02 } from 'scene:../assets/r02.tmj'
+import { r03 } from 'scene:../assets/r03.tmj'
+import { r04 } from 'scene:../assets/r04.tmj'
+import { r05 } from 'scene:../assets/r05.tmj'
+import { r06 } from 'scene:../assets/r06.tmj'
+import { r07 } from 'scene:../assets/r07.tmj'
+import { r08 } from 'scene:../assets/r08.tmj'
+import { r09 } from 'scene:../assets/r09.tmj'
+import { r10 } from 'scene:../assets/r10.tmj'
+import { r11 } from 'scene:../assets/r11.tmj'
+import { r12 } from 'scene:../assets/r12.tmj'
+import { heroSheet } from 'sheet32:../assets/hero.png'
+import { stalkerSheet } from 'sheet32:../assets/stalker.png'
+import { sprite_new, sprite_set_frame, sprite_set_visible, log, keys_held } from 'cargo:tish_agb'
+import { set_transform } from 'cargo:tish_gba_game_engine'
+import {
+  mount, create, loadScene, loadSceneRom, step, entityApi, entityRefs, entityX, entityY, hudText,
+  mapSpawnCount, mapSpawnKind, mapSpawnCol, mapSpawnRow
+} from '../../../packages/engine'
+import * as components from './components'
+import {
+  Player, Stalker, Prism, Pad, Exit, BOX_W, BOX_H, SPR_OX, SPR_OY,
+  TAG_PLAYER, takeSignals
+} from './components'
+import {
+  ROOMS, R_NAME, R_LENS, R_H, R_START, R_CELL, LENS, LENS_NAME, LENS_BACKDROP, LAYER_BAND
+} from './rooms'
+import {
+  chromaInit, chromaSetBackdrop, chromaBegin, chromaCell, chromaEnd, chromaUpdate,
+  chromaLens, chromaMask, chromaLumens, chromaHazardSpan, chromaRepaint
+} from '../../../packages/chroma'
+
+let TILE: i32 = 16
+
+// WHITE costs 2 lumens a frame out of 600, so a full lantern is five seconds of it. That number is
+// the tuning knob for the whole third act: high enough that WHITE solves a room, low enough that it
+// cannot solve one twice.
+let LUMEN_MAX: i32 = 600
+let LUMEN_DRAIN: i32 = 2
+
+// Spawn kinds, in the order `KINDS` lists them in the generator.
+let K_PLAYER: i32 = 0
+let K_PRISM: i32 = 1
+let K_STALKER: i32 = 2
+let K_PAD: i32 = 3
+let K_DOOR: i32 = 4
+
+// The shift animation — hero.png frames 14..17, played by hand rather than through the platformer's
+// clip table.
+let SHIFT_FIRST: i32 = 14
+let SHIFT_LEN: i32 = 4
+
+// Trim the entity wrapper to what a platformer actually calls: no grid stepping, no top-down
+// movement, no engine dialogue. That is 23 of the wrapper's ~55 method closures, on a 140 KB heap.
+// Must run before the first spawn — a wrapper keeps whatever API it was born with.
+entityApi({ grid: 0, topdown: 0, dialogue: 0, extra: 0 })
+entityRefs(1)
+mount(components)
+
+chromaInit(LAYER_BAND, LUMEN_MAX, LUMEN_DRAIN)
+
+// The four lens backdrops, once. A lens changes this and nothing else about the palette, because
+// `backdrop` is the only colour on this machine that can be aimed BY NAME — see the long note at the
+// top of packages/chroma.tish for what happened to the version that recoloured the whole bank.
+let li: i32 = 0
+while (li < LENS) {
+  chromaSetBackdrop(li, LENS_BACKDROP[li])
+  li = li + 1
+}
+
+// ── Room state ──────────────────────────────────────────────────────────────────────────────────
+let cur: i32 = 0
+let heroId: i32 = 0 - 1
+let heroSpr: i32 = 0 - 1
+let stalkerId: i32 = 0 - 1
+let stalkerSpr: i32 = 0 - 1
+let stalkerBand: i32 = 3
+let stalkerX: i32 = 0
+let stalkerY: i32 = 0
+let shiftFor: i32 = 0
+let deaths: i32 = 0
+let warping: i32 = 0
+let dying: i32 = 0
+
+// SELECT skips to the next room. A debug affordance kept in the shipped ROM on purpose: it is the
+// only way `verify.sh` can prove all twelve rooms load, and a gauntlet whose later rooms are
+// unreachable from a test is a gauntlet whose later rooms rot.
+//
+// Latched here rather than read through `keys_edge()` — see the note on `CH_PREV` in
+// packages/chroma.tish for why that returns nothing useful this late in a frame.
+let BIT_SELECT: i32 = 4
+let selPrev: i32 = 0
+
+// A repaint pad fires once and is spent; `padDone` is what stops it firing again every frame the
+// player stands on it, which would otherwise repaint the room back and forth forever.
+let padDone: i32 = 0
+
+/// Stream room `i`'s map. An if-chain rather than a table because a tish array of scene handles is a
+/// boxed `Value` per entry, and this runs once per room load.
+function streamRoom(i: i32) {
+  if (i === 0) { loadSceneRom(r01) return }
+  if (i === 1) { loadSceneRom(r02) return }
+  if (i === 2) { loadSceneRom(r03) return }
+  if (i === 3) { loadSceneRom(r04) return }
+  if (i === 4) { loadSceneRom(r05) return }
+  if (i === 5) { loadSceneRom(r06) return }
+  if (i === 6) { loadSceneRom(r07) return }
+  if (i === 7) { loadSceneRom(r08) return }
+  if (i === 8) { loadSceneRom(r09) return }
+  if (i === 9) { loadSceneRom(r10) return }
+  if (i === 10) { loadSceneRom(r11) return }
+  loadSceneRom(r12)
+}
+
+function spawnHero(col: i32, row: i32) {
+  let e = create()
+  e.setPos(col * TILE, row * TILE)
+  heroSpr = sprite_new(heroSheet)
+  e.setSprite(heroSpr)
+  e.spriteOffset(SPR_OX, SPR_OY)
+  e.platformer(BOX_W, BOX_H)
+  e.setTag(TAG_PLAYER)
+  e.behave(Player, {})
+  e.follow()
+  heroId = e.id
+}
+
+// ⚠️ DEFINED ABOVE ITS CALLER ON PURPOSE. tish does not hoist a function declaration, and
+// `loadScene(buildRoom)` runs at module init — so a `syncStalker` declared further down the file is
+// a name that does not exist yet when `buildRoom` first runs. It throws, the screen stays white, and
+// NOTHING is printed: no error, no traceback, not even the `log()` on the next line. Cost an hour.
+/// The stalker's band, pushed only on the frames the lens actually turns. Out of band it is neither
+/// drawn nor touchable — which IS the stealth mechanic rather than a decoration on it: in the wrong
+/// lens the eye is not hidden from you, you are hidden from the eye.
+///
+/// It is PARKED off the map rather than put to sleep, because there is no "sleep" to put it to — the
+/// engine has  in none of its ABI, and a despawn/respawn pair per lens change is the
+/// single most expensive thing a frame can do ( rebuilds ~30 closures and 
+/// reallocates VRAM). Moving the transform is two stores, and the collider follows it out of the
+/// room.
+function syncStalker() {
+  if (stalkerId < 0) { return }
+  if ((chromaMask() & (1 << (stalkerBand - 1))) !== 0) {
+    set_transform(stalkerId, stalkerX, stalkerY)
+    sprite_set_visible(stalkerSpr, 1)
+  } else {
+    set_transform(stalkerId, 0 - 512, 0 - 512)
+    sprite_set_visible(stalkerSpr, 0)
+  }
+}
+
+
+function buildRoom() {
+  streamRoom(cur)
+  stalkerId = 0 - 1
+  padDone = 0
+
+  // The lens, AFTER the stream. See the warning at the top of this file.
+  chromaBegin()
+  let ci: i32 = R_START[cur]
+  let cn: i32 = R_START[cur + 1]
+  while (ci < cn) {
+    chromaCell(R_CELL[ci])
+    ci = ci + 1
+  }
+  chromaEnd(R_LENS[cur])
+
+  let n: i32 = mapSpawnCount()
+  let i: i32 = 0
+  while (i < n) {
+    let k: i32 = mapSpawnKind(i)
+    let c: i32 = mapSpawnCol(i)
+    let r: i32 = mapSpawnRow(i)
+    if (k === K_PLAYER) { spawnHero(c, r) }
+    if (k === K_PRISM) {
+      let p = create()
+      p.setPos(c * TILE, r * TILE)
+      p.setCollider(TILE, TILE)
+      p.behave(Prism, {})
+    }
+    if (k === K_STALKER) {
+      let s = create()
+      s.setPos(c * TILE, r * TILE)
+      let ss: i32 = sprite_new(stalkerSheet)
+      s.setSprite(ss)
+      stalkerSpr = ss
+      stalkerX = c * TILE
+      stalkerY = r * TILE
+      s.spriteOffset(0 - 8, 0 - 8)
+      s.setCollider(TILE, TILE)
+      s.behave(Stalker, {})
+      stalkerId = s.id
+      // Band C in every room that has one, so the player learns one rule rather than a lookup: the
+      // eye is green, and green is the lens that can see you.
+      stalkerBand = 3
+      sprite_set_frame(ss, (stalkerBand - 1) * 4)
+    }
+    if (k === K_PAD) {
+      let d = create()
+      d.setPos(c * TILE, r * TILE)
+      d.setCollider(TILE, TILE)
+      d.behave(Pad, {})
+    }
+    if (k === K_DOOR) {
+      let x = create()
+      x.setPos(c * TILE, r * TILE)
+      x.setCollider(TILE, TILE)
+      x.behave(Exit, {})
+    }
+    i = i + 1
+  }
+  // The room's starting lens decides where the stalker begins — without this it stands in the
+  // middle of a room whose lens cannot see it.
+  syncStalker()
+  log("room " + cur + " " + R_NAME[cur])
+}
+
+loadScene(buildRoom)
+
+let hud: i32 = 0 - 1
+
+while (true) {
+  step()
+
+  // The player's tile footprint, which is what the crush probe needs.
+  let px: i32 = entityX(heroId)
+  let py: i32 = entityY(heroId)
+  let c0: i32 = px / TILE
+  let c1: i32 = (px + BOX_W - 1) / TILE
+  let r0: i32 = py / TILE
+  let r1: i32 = (py + BOX_H - 1) / TILE
+
+  if (chromaUpdate(c0, r0, c1, r1) === 1) {
+    shiftFor = SHIFT_LEN * 3
+    syncStalker()
+  }
+
+  // The shift animation rides over whatever the platformer is playing: four frames on a three-frame
+  // step, so it lasts exactly as long as the lens flash.
+  if (shiftFor > 0) {
+    shiftFor = shiftFor - 1
+    sprite_set_frame(heroSpr, SHIFT_FIRST + (SHIFT_LEN - 1 - shiftFor / 3))
+  }
+
+  // Band teeth, checked against the player's feet rather than the whole box — brushing a tooth on
+  // the way past a ledge is not a death; the tile you are STANDING in is the one that bites.
+  let sig: i32 = takeSignals()
+  let died: i32 = 0
+  if (chromaHazardSpan(c0, c1, r1) === 1) { died = 1 }
+  // Falling out of the room. Measured against THIS room's height: a fixed threshold either kills a
+  // tall room's player mid-climb or leaves a short room's player falling through nothing for four
+  // seconds before the game admits it.
+  if (py > R_H[cur] * TILE + 24) { died = 1 }
+  if ((sig & 2) !== 0) { died = 1 }
+
+  if (died === 1 && dying === 0 && warping === 0) {
+    dying = 1
+    warping = 1
+    deaths = deaths + 1
+    log("died " + deaths + " room " + cur)
+  }
+
+  // The repaint pad: one shot, moving the room's band C into band A. Irreversible within the room,
+  // undone only by leaving and coming back — which is what makes it a decision.
+  if ((sig & 4) !== 0 && padDone === 0) {
+    padDone = 1
+    log("repaint " + chromaRepaint(0, 0, 63, 63, 3, 1))
+  }
+
+  let kh: i32 = keys_held()
+  let selEdge: i32 = kh & (0 - 1 - selPrev) & BIT_SELECT
+  selPrev = kh
+  if (selEdge !== 0 && warping === 0) {
+    warping = 1
+    cur = cur + 1
+    if (cur >= ROOMS) { cur = 0 }
+    log("skip to " + cur)
+  }
+
+  if ((sig & 1) !== 0 && warping === 0) {
+    warping = 1
+    cur = cur + 1
+    if (cur >= ROOMS) { cur = 0 }
+    log("exit to " + cur)
+  }
+
+  // Room changes happen HERE, between steps — never inside a hook, which would tear down the entity
+  // whose `update` is still on the stack.
+  if (warping === 1) {
+    warping = 0
+    dying = 0
+    loadScene(buildRoom)
+    hud = 0 - 1
+  }
+
+  // The HUD is one word and it only redraws when it changes. `hud_text` re-shapes glyphs and
+  // allocates sprite VRAM the moment the string differs, so a lens name redrawn every frame would
+  // cost more than the game under it.
+  let lens: i32 = chromaLens()
+  if (lens !== hud) {
+    hud = lens
+    hudText(0, 8, 6, LENS_NAME[lens])
+  }
+
+}

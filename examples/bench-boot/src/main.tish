@@ -1,0 +1,118 @@
+// bench-boot — WHERE do the seconds before the first frame go?
+//
+// The isoboard SRPG example shows its first pixel on frame 70 (~1.2s). akari takes 465 (~7.8s), the topdown RPG port 380,
+// sunny-land 548. That is a black screen for the length of a GBA BIOS intro, twice over, and it is
+// the first thing anyone experiences. The usual suspects are all wrong: it does not track ROM size
+// (akari is 4.5MB and the topdown RPG port 2.7MB, but shop-demo is 2.1MB and boots in 46 frames), it is not the
+// `packages/` UI stack (ui-demo, shop-demo and rpg-menu import all of it and boot under 70), and it
+// is not map size (akari's boot scene is 3,600 tiles — smaller than the big overworld's 38,400).
+//
+// So this bench does what a marker inside a game cannot: it boots ONE STAGE AT A TIME and lets the
+// emulator timestamp each one. Every stage logs `BB <name>` on entry; the harness prefixes the
+// emulated frame, so the cost of a stage is the difference between consecutive markers. Frames, not
+// ticks, on purpose: tish-agb's `ticks()` is Timer2, which wraps every ~250ms and cannot even
+// represent a 7-second boot.
+//
+// Module init is the one stage a game can never measure from inside itself — asset registration runs
+// before main.tish's first statement, so a `log()` at the top reports the total and attributes
+// nothing. That is what `floor.tish` is for: an import-free ROM whose only cost is the runtime, so
+// (this ROM's first marker − floor's) is the price of registering assets.
+//
+//   ./run.sh                    # build both, print the attribution table
+//
+// The assets are deliberately the SLOW GAMES' OWN — akari's sheets and scenes, plus a LOCAL copy of
+// the big 240x80 overworld map (see assets/ — copied here when its source game moved to its own
+// repo). A bench that profiles assets nobody ships measures a game that does not exist.
+import { log, backdrop, frame, sprite_new, sprite_clear, bg_clear, ui_clear } from 'cargo:tish_agb'
+import { uiInit } from '../../../packages/ui'
+import { dialogInit } from '../../../packages/dialog'
+import { mount, entityApi, loadSceneRom, create } from '../../../packages/engine'
+import * as behaviours from './behaviours'
+
+// ── the imports under test ────────────────────────────────────────────────────────────────────
+// 14 sprite sheets, matching akari's count. `sheet:`/`sheet32:`/`sheet64:` expand to
+// `include_aseprite_inner!`, so the pixels are converted at BUILD time; what remains at boot is one
+// `__asset_register_sheet` per import. Whether that is 14 O(1) pushes or something quadratic is
+// exactly the kind of thing this stage exists to answer.
+import { hero } from 'sheet64:../../akari/assets/hero.png'
+import { hero32 } from 'sheet32:../../akari/assets/debug-hero32.png'
+import { hero64 } from 'sheet64:../../akari/assets/debug-hero64.png'
+import { slimeSheet } from 'sheet32:../../akari/assets/slime.png'
+import { batSheet } from 'sheet32:../../akari/assets/bat.png'
+import { skeletonSheet } from 'sheet32:../../akari/assets/skeleton.png'
+import { bossSheet } from 'sheet32:../../akari/assets/boss.png'
+import { elderSheet } from 'sheet32:../../akari/assets/elder.png'
+import { womanSheet } from 'sheet32:../../akari/assets/woman.png'
+import { merchantSheet } from 'sheet32:../../akari/assets/merchant.png'
+import { senseiSheet } from 'sheet32:../../akari/assets/sensei.png'
+import { heartsSheet } from 'sheet32:../../akari/assets/hearts.png'
+import { itemsSheet } from 'sheet32:../../akari/assets/items.png'
+import { faces } from 'sheet32:../../akari/assets/faces32.png'
+
+// Two scenes at opposite ends of the size range, so the streaming stage reports a SLOPE and not just
+// a number: akari's town is 40x30x3 = 3,600 tiles, the local overworld 240x80x2 = 38,400.
+import { townScene } from 'scene:../../akari/assets/town.tmj'
+import { overworldScene } from 'scene:../assets/overworld.tmj'
+
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+
+// Module init is over by the time the first statement runs, so this marker carries its whole cost.
+log("BB modules")
+
+backdrop(0x101018)
+log("BB backdrop")
+
+// akari passes `tileReserve: 224`, documented as a ~35K allocation deliberately moved to boot. If
+// that allocation is also SLOW, moving it to boot traded a crash for a stall, and this stage says so.
+uiInit({ font: body, sheet: faces, icons: 6, iconSize: 32, tileReserve: 0 })
+log("BB uiInit")
+
+uiInit({ font: body, sheet: faces, icons: 6, iconSize: 32, tileReserve: 224 })
+log("BB tileReserve224")
+
+dialogInit({ font: body, bodyW: 176, cacheShapes: 1 })
+log("BB dialogInit")
+
+entityApi({ grid: 0, platformer: 0, extra: 0 })
+mount(behaviours)
+log("BB mount")
+
+// The scene stages are cumulative on purpose — a game loads its second scene onto a heap the first
+// one already touched, and a stream measured on a virgin heap is not the stream a player waits for.
+loadSceneRom(townScene)
+log("BB scene-small")
+
+sprite_clear()
+bg_clear()
+ui_clear()
+loadSceneRom(overworldScene)
+log("BB scene-big")
+
+// A scene's worth of entities. Spawning is the other half of a load, and the pooled wrapper means
+// this should be nearly free — "nearly" being the claim under test. Wrapped in a function because a
+// top-level `let` that a loop reassigns is promoted to a boxed cell by the tish codegen, which both
+// fails to compile here and would price the loop differently from the one a game actually writes.
+function spawnMany(n) {
+  let k = 0
+  while (k < n) {
+    let e = create()
+    e.setSprite(sprite_new(slimeSheet))
+    e.setPos(16 + k * 4, 32)
+    k = k + 1
+  }
+}
+spawnMany(24)
+log("BB spawn24")
+
+frame()
+log("BB frame1")
+
+function runFrames(n) {
+  let k = 0
+  while (k < n) { frame(); k = k + 1 }
+}
+runFrames(8)
+log("BB frame9")
+
+log("BB done")
+while (true) { frame() }

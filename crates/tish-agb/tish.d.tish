@@ -1,0 +1,304 @@
+// Typed-extern declarations for `cargo:tish_agb`. Auto-loaded by the tish compiler when a game imports
+// the crate; a matching call lowers to a direct `tish_agb::<name>_typed(..)` Rust call (no boxing).
+declare fn sprite_new(sheet: i32): i32
+declare fn sprite_new(sheet: i32, frame: i32): i32
+declare fn sprite_set_frame(sp: i32, frame: i32): void
+declare fn sprite_set_pos(handle: i32, x: i32, y: i32): void
+// hflip is an int (0/1), not a bool — the boxed export reads a Bool as 0, which is why every
+// caller already passes `f ? 1 : 0`. Boolean call sites simply keep the boxed path.
+declare fn sprite_set_flip(handle: i32, hflip: i32): void
+declare fn bg_scroll(handle: i32, x: i32, y: i32): void
+// Per-cell tilemap write, for grid games that change cells at runtime. Four tile entries instead
+// of an agb Object rebuild — see native_tilemap_set for why that difference decides whether a
+// 7x9 board fits in a frame.
+declare fn tilemap_set(handle: i32, tileset: i32, cols: i32, col: i32, row: i32, gid: i32): void
+// Per-cell write on a STREAMED layer (`tilemap_stream` / `scene:`), for a tile that changes during
+// play — a bombed wall, a burnt bush, a crater. `bg_set_tile_typed` has existed in the crate all
+// along with nothing declaring it, so every caller was paying a boxed dispatch plus four boxed
+// arguments for what is a bounds check and a store. Terrain destruction writes these by the hundred,
+// which is what made the difference worth having.
+declare fn bg_set_tile(layer: i32, col: i32, row: i32, gid: i32): void
+// Show or hide one STREAMED map layer, indexed the same way `bg_set_tile` indexes them (0 =
+// frontmost, in the order the .tmj emits). The counterpart to `scene_bg_visible`, which only reaches
+// a scene's wrapping parallax backdrops. A hidden layer is skipped in the frame loop and hands its
+// background slot back, so a map may carry more layers than the four the hardware shows as long as
+// they are not all lit at once — which is how `examples/spectra` gives each colour band a layer.
+declare fn stream_visible(layer: i32, visible: i32): void
+// Read back a background palette entry as 0xRRGGBB (-1 if unknown). The ONLY reliable way to learn
+// which index holds which colour: agb's assignment is nondeterministic across builds, so a hardcoded
+// or measured-and-baked index is wrong the next time you compile. Look yours up at boot, then you
+// can rewrite exactly those entries to swap a whole palette.
+declare fn bg_pal_get(bank: i32, index: i32): i32
+// Read/write SPRITE palette entries (OBJ palette RAM). The only way to make a sprite follow a
+// palette swap — agb has background palette setters and no object equivalent, so a repainted scene
+// otherwise leaves its characters in the old colours. Find your index with obj_pal_get first.
+declare fn obj_pal_get(bank: i32, index: i32): i32
+declare fn obj_pal_set(bank: i32, index: i32, colour: i32): void
+// ── Per-pixel destructible terrain ───────────────────────────────────────────────────────────────
+// An artillery-game ground layer: a solid mass you carve craters out of one PIXEL at a time. Nothing
+// else in the crate can do it — there is no bitmap mode, a streamed layer's cell is 16x16,
+// `tilemap_set8` is 8x8 but caps at 256x256, and the UI canvas can fill a pixel but never clear one
+// (its palette allocator starts at index 1 and can never hand back the transparent 0).
+//
+// Occupancy is a bitmap in RAM, so `terrain_solid` is a bit test rather than a VRAM read. Tiles are
+// allocated only where terrain exists, so a mostly-empty arena costs a few hundred of them.
+// These are declared typed because a carve writes thousands of pixels through one call and a fill
+// runs per shot; a boxed dispatch here would be the frame.
+declare fn terrain_new(w: i32, h: i32): void
+declare fn terrain_palette(index: i32, color: i32): void
+declare fn terrain_pal_bank(bank: i32, index: i32, color: i32): void
+declare fn terrain_disc(cx: i32, cy: i32, r: i32, mat: i32): void
+declare fn terrain_planet(cx: i32, cy: i32, r: i32, pal4: i32, seed: i32, band: i32, nbands: i32): void
+declare fn terrain_carve(cx: i32, cy: i32, r: i32): void
+declare fn terrain_solid(x: i32, y: i32): i32
+// Solid pixels within `r` of a point — the enclosed mass a shell-theorem gravity model needs
+// so a hollowed world stops pulling from a core that is no longer there.
+declare fn terrain_mass(cx: i32, cy: i32, r: i32): i32
+declare fn terrain_clear(): void
+declare fn bg_parallax(handle: i32, mulX: i32, mulY: i32): void
+declare fn bg_set_visible(handle: i32, visible: i32): void
+// Make this background's palettes the ones on screen. The GBA shares one BG palette bank across
+// every layer, so two backgrounds kept alive at once take turns rather than coexisting.
+declare fn bg_use_palettes(handle: i32): void
+declare fn fade(level: i32): void
+// The same whole-screen ramp toward WHITE. `fx_flash` also brightens but DECAYS on its own — this
+// one stays where you put it, because a transition owns its ramp frame by frame.
+declare fn fade_white(level: i32): void
+// Alpha blending (BLDALPHA), weights 0..16; pass -1 to switch it off. Top layer = sprites, bottom =
+// backgrounds + backdrop, so this is a ghost / a glass pane / a dimmed panel.
+// ⚠️ NOT a scene crossfade: blending needs both images resident, and a scene change tears the old
+// one down first. This blends layers WITHIN one scene.
+declare fn blend_alpha(top: i32, bottom: i32): void
+// Pixelate: `bg`/`obj` are block sizes 0 (off) .. 15 (16px). Free — the hardware blocks at scanout.
+declare fn mosaic(bg: i32, obj: i32): void
+// Fill whole CANVAS CELLS with one shared solid tile, at any size. `ui_rect`'s filled path draws
+// anything <= 48px tall as exact pixels (right for chrome, which must land on the pixel), which
+// allocates a tile per cell — fine once, fatal for a full-screen curtain repainted every frame.
+// Use this for opaque covers; use ui_rect for chrome. ⚠️ Snaps OUT to whole cells.
+declare fn ui_fill_cells(x: i32, y: i32, w: i32, h: i32, color: i32): void
+// ⚠️ BLDCNT IS ONE EFFECT FOR THE WHOLE SCREEN. fade, fade_white, fx_flash and blend_alpha all share
+// it; the engine resolves them in that priority order rather than letting call order decide, so a
+// live fade silently suppresses the rest. Ramp one at a time.
+
+// ── Hardware windows (WIN0 / WIN1 / WINOUT) ──────────────────────────────────────────────────────
+// The window unit answers one question per pixel: which layers may draw here? Two rectangles say
+// what happens INSIDE them, WINOUT says what happens everywhere else. That is a spotlight, a lit
+// room in a dark level, an iris wipe and a stealth vision cone — none of which `fade`/`fx_flash`
+// can do, because those are whole-screen.
+//
+// ⚠️ THE LAYER MASK IS BY DRAW ORDER, NOT BY HANDLE: bit 0..3 are the nth background actually SHOWN
+// this frame, bit 4 objects, bit 5 blending. A background's slot depends on what else is visible
+// (a dialog opening changes it), so a mask keyed to a handle would quietly point at another layer.
+declare fn win_rect(id: i32, x: i32, y: i32, w: i32, h: i32): void
+// WIN0 as a CIRCLE: the hardware window is a rectangle, so the left/right edges are rewritten every
+// scanline by HBlank DMA. ⚠️ There is ONE HBlank DMA slot per frame — a circle window and a
+// `bg_bands` banded layer cannot both run on the same frame.
+declare fn win_circle(cx: i32, cy: i32, r: i32): void
+declare fn win_off(id: i32): void
+declare fn win_in_layers(id: i32, mask: i32): void
+// The darkness: pass 0 and everything outside every window falls back to the backdrop colour.
+declare fn win_out_layers(mask: i32): void
+
+// ── Hardware effects ───────────────────────────────────────────────────────
+// Fireworks, impact and drama, owned and stepped by the engine so a game fires one call and never
+// touches the effect again. Particles are HUD sprites (screen space, front priority); the shake is
+// an offset applied at compose time rather than a redraw; the flash is the same BLDY register the
+// fade uses, brightening instead of darkening.
+//
+// fx_flash decays by one level per frame on its own — set 12 and it falls off over 12 frames.
+declare fn fx_flash(level: i32): void
+// ONE shake spring drives the camera, the UI canvas AND the HUD sprites — so it is visible on a
+// scrolling map and on a screen drawn entirely in sprites, which a canvas-only shake is not.
+//
+//   fx_bump       the primitive: an impulse in 8.8 pixels/frame. Bumps ADD, so three impacts in one
+//                 resolution sum into one bigger, longer shake instead of the last one cancelling
+//                 the decay of the ones before it. packages/feel's feelBump delegates straight here.
+//   fx_shake      the convenience form: `power` pixels of peak, settling in about `frames` frames.
+//                 `power` adds like a bump; `frames` sets the damping, so the last caller wins it.
+//   fx_shake_stop settle now and put every surface back square. Scene teardown wants this, not
+//                 fx_clear, unless it also means to kill the particles and the flash.
+declare fn fx_bump(ax: i32, ay: i32): void
+declare fn fx_shake(power: i32, frames: i32): void
+declare fn fx_shake_stop(): void
+// speed/gravity are 1/256ths of a pixel per frame. gravity 0 drifts, ~24 falls like fireworks.
+declare fn fx_burst(sheet: i32, frame: i32, x: i32, y: i32, count: i32, speed: i32, gravity: i32, life: i32): void
+declare fn fx_active(): i32
+declare fn fx_clear(): void
+//
+// ── Emitters ───────────────────────────────────────────────────────────────
+// `fx_burst` is a bang. An EMITTER is a source that keeps going — rain, snow, fire, smoke, a
+// fountain, a torch that follows an NPC — with a fractional rate, so twelve drops a second is
+// expressible without every game keeping the same accumulator.
+//
+// THE LIBRARY OWNS THE SPRITE BUDGET, and that is the point of it living here. The GBA has 128 OAM
+// entries for the whole machine — player, NPCs, HUD, every text_draw slot, every particle — and
+// nothing arbitrates them. An emitter that would exceed its share emits fewer particles this frame.
+// There is no error to handle: a caller could not do anything useful with one.
+//
+//   fx_spawn      start an effect from a preset. Returns a handle, or 0 if none was free.
+//                 `scale` is 1/256ths over the preset's size/speed/count; 256 is as authored.
+//   fx_set        retune a live emitter by field (FXE_* below). Moving one is FXE_X / FXE_Y.
+//   fx_stop       stop emitting; particles already out live their lives (a torch thinning out).
+//   fx_kill       stop AND drop this emitter's particles now (scene teardown).
+//   fx_budget     cap the effects layer, or -1 to size it from what the game is using. `reserve`
+//                 is entries always kept free for sprites that do not exist yet; -1 keeps 16.
+//   fx_headroom   particles the layer may still spawn. Only needed to scale an effect to the room.
+//   fx_emitters   how many emitters are alive, for a scene asserting it cleaned up.
+//
+// Presets (fx_spawn's first argument): 0 BURST · 1 CONFETTI · 2 RAIN · 3 SNOW · 4 FIRE · 5 SMOKE
+// · 6 SPARKLE · 7 FOUNTAIN. BURST and CONFETTI are one-shots and retire themselves.
+// Fields (fx_set): 0 X · 1 Y · 2 W · 3 H · 4 SHAPE · 5 DIR · 6 SPREAD · 7 SPEED · 8 SPEEDVAR
+// · 9 GRAVITY · 10 DRAG · 11 WIND · 12 LIFE · 13 RATE · 14 MAX · 15 FRAME0 · 16 FRAMEN · 17 DURATION.
+// Shapes (FXE_SHAPE): 0 POINT · 1 BOX (w x h) · 2 RING (radius w) · 3 LINE (length w).
+// `packages/fx.tish` gives all of these names; it is constants only, so it carries no function cost.
+//
+// DIR is 0..255 around the circle (64 down, 192 up) or -1 for omnidirectional. DRAG is velocity
+// retained per frame out of 256, so 256 is frictionless and 250 is smoke slowing to a stop. RATE is
+// particles per frame in 8.8 — 256 is one a frame, 26 is about one every ten.
+//
+// There is NO per-particle alpha, and there cannot be: BLDCNT holds one blend mode and the engine
+// spends it on the scene fade. Use FRAME0..FRAMEN instead — the particle walks its sheet frames as
+// its life runs out, which is how a sprite fades on this machine.
+declare fn fx_spawn(preset: i32, sheet: i32, frame: i32, x: i32, y: i32, scale: i32): i32
+declare fn fx_set(id: i32, field: i32, value: i32): void
+declare fn fx_stop(id: i32): void
+declare fn fx_kill(id: i32): void
+declare fn fx_budget(max: i32, reserve: i32): void
+declare fn fx_headroom(): i32
+declare fn fx_emitters(): i32
+declare fn ui_scroll(x: i32, y: i32): void
+declare fn input_x(): i32
+declare fn input_y(): i32
+declare fn key_pressed(code: i32): i32
+declare fn key_held(code: i32): i32
+
+// Raw cartridge SRAM window, byte addressed. Offsets are 0-based within a region that starts above
+// the fixed save records, so the two cannot collide. Writes are slow and flash carts need a sector
+// erase: flush on scene transitions, never per frame.
+declare fn sram_read_u8(off: i32): i32
+declare fn sram_write_u8(off: i32, v: i32): i32
+declare fn sram_commit(): i32
+declare fn sram_size(): i32
+// Link port, multi-player mode. See the block comment in lib.rs and packages/link.tish.
+declare fn sio_link_open(baud: i32): i32
+declare fn sio_link_id(): i32
+declare fn sio_link_master(): i32
+declare fn sio_link_ready(): i32
+declare fn sio_link_busy(): i32
+declare fn sio_link_error(): i32
+declare fn sio_link_send(word: i32): i32
+declare fn sio_link_recv(slot: i32): i32
+
+// ui_rect's SIX-ARGUMENT form, typed. Every extern is called through a `&[Value]` slice, so without a
+// declaration each of these six numbers is boxed into a Value::Number at the call site — and ui_rect
+// is the single most-called native in card-gba's frame (254 six-arg call sites; paintCell alone boxes
+// 147 numbers, cardBody 36, cardRim 29, drawGrid5 24).
+//
+// Typed lowering matches on EXACT arity, so this cannot disturb the 5-arg outline form used inside
+// packages/ui.tish — those keep the boxed path and behave exactly as before.
+declare fn ui_rect(x: i32, y: i32, w: i32, h: i32, color: i32, filled: i32): void
+// #615 WANTED the FIVE-argument outline form typable alongside the six, each dispatching to its own
+// symbol (`ui_rect_typed_5` / `ui_rect_typed_6`). Both of those functions exist in lib.rs, but the
+// compiler in this tree lowers BOTH declarations to one unsuffixed `ui_rect_typed`, which is not a
+// symbol anything exports — 24 E0425s in the topdown RPG port alone, and `ui_rect` has 16 five-arg and 55 six-arg
+// call sites across packages/ui, shop, menu, feel and drop, so nothing that draws a box builds.
+//
+// A single unsuffixed symbol cannot serve both arities, so there is no shim; the fix is in the
+// compiler's overload lowering. Until it lands, the five-arg form stays undeclared and takes the
+// boxed path — which is exactly what it did before, so this costs an optimisation and nothing else.
+// Restore the line below once the compiler emits the suffixed symbols.
+//
+// declare fn ui_rect(x: i32, y: i32, w: i32, h: i32, color: i32): void
+
+// Sprites/camera/input/canvas scalar surface + the zero-arg per-frame family —
+// every one was paying a namespace get_prop + value_call for zero or pure-i32 args.
+declare fn audio_pump(): void
+declare fn audio_reserve(): void
+declare fn camera_set(a0: i32, a1: i32): void
+declare fn camera_x(): i32
+declare fn camera_y(): i32
+declare fn deck_frame(): i32
+declare fn frame(): void
+declare fn key_live(a0: i32): i32
+declare fn key_released(a0: i32): i32
+declare fn keys_edge(): i32
+declare fn keys_held(): i32
+declare fn map_solid_at(a0: i32, a1: i32): i32
+declare fn sprite_set_depth(a0: i32, a1: i32): void
+declare fn sprite_set_hud(a0: i32, a1: i32): void
+declare fn sprite_set_priority(a0: i32, a1: i32): void
+declare fn sprite_set_sheet(handle: i32, sheet: i32, frame: i32): void
+declare fn sprite_set_visible(a0: i32, a1: i32): void
+declare fn text_height(a0: i32): i32
+declare fn ticks(): i32
+declare fn timer_read(): i32
+declare fn ui_begin(): void
+declare fn ui_clear_rect(a0: i32, a1: i32, a2: i32, a3: i32): void
+
+// ── Adaptive music ───────────────────────────────────────────────────────────────────────────────
+// `deck_pause` freezes the playhead WITHOUT losing it. It replaces the `deck_stop()` + `deck_play()`
+// hush that two games wrote by hand around a UI canvas build: that pair loses the position AND
+// resets the intensity to 0, so the music came back at the wrong point of the song and the wrong
+// threat level.
+//
+// `audio_duck` pulls the music down under dialogue or a stinger via the PSG master volume, so it
+// attenuates every voice at once and cannot desync from the notes the way per-voice scaling can.
+// Its attack/release step sizes are divided ONCE at call time, never per frame.
+declare fn deck_pause(on: i32): void
+declare fn deck_paused(): i32
+// A one-shot with volume, panning and pitch — all Q8 (256 = 1.0), panning -256 left .. +256 right.
+// Positional audio is built from this; `packages/sfx.tish` turns a world position into the three.
+declare fn sound_play_ex(wav: i32, volume: i32, panning: i32, pitch: i32): void
+declare fn audio_duck(depth: i32, attack: i32, hold: i32, release: i32): void
+declare fn audio_duck_level(): i32
+
+// ── Native UI layout (packages/ui.tish) ──────────────────────────────────────────────────────────
+// The flex solver, off the boxed path. `interface LNode` is all-i32, so the whole pass ports to a
+// flat native pool: measure + arrange become ordinary Rust arithmetic with no `Value` anywhere.
+// The boxed version cost ~2,000 ticks PER NODE and had to interleave `audio_pump()` just to keep
+// the music going through it.
+//
+// Usage per render: `lay_reset()`, one `lay_push(...)` per node in PARENT-BEFORE-CHILD order
+// (it returns the index and links itself to `parent`), `lay_set_measured` for each leaf (text and
+// icon extents come from the font, which is tish's business), then `lay_solve(x,y,w,h)` and read
+// the geometry back with `lay_x/y/w/h/hide`. `lay_content/lay_view` give a scroll container the
+// two numbers a scrollbar needs.
+declare fn lay_reset(): void
+declare fn lay_push(kind: i32, dir: i32, gap: i32, pad: i32, fw: i32, fh: i32, grow: i32, am: i32, jm: i32, scroll: i32, sy: i32, parent: i32): i32
+declare fn lay_set_measured(i: i32, mw: i32, mh: i32): void
+declare fn lay_solve(x: i32, y: i32, w: i32, h: i32): void
+declare fn lay_x(i: i32): i32
+declare fn lay_y(i: i32): i32
+declare fn lay_w(i: i32): i32
+declare fn lay_h(i: i32): i32
+declare fn lay_hide(i: i32): i32
+declare fn lay_mw(i: i32): i32
+declare fn lay_mh(i: i32): i32
+declare fn lay_content(i: i32): i32
+declare fn lay_view(i: i32): i32
+declare fn lay_count(): i32
+// Paint state, resolved once at flatten so the paint pass needs nothing from tish. `align` is an id
+// (0 left, 1 centre, 2 right); colours are already-resolved RGB, and -1 means "none".
+// `paintKind`: 0 container, 1 text, 2 icon, 3 custom (the game paints it after ui_paint_all).
+declare fn lay_set_paint(i: i32, paintKind: i32, col: i32, shadowc: i32, fillc: i32, borderc: i32, font: i32, align: i32, useW: i32, shadowOff: i32, sel: i32): void
+// ⚠️ NO `declare` for lay_set_text ON PURPOSE. It takes a string, and no other extern in this
+// engine does — the typed fast path for string params is untested here, so this one call goes
+// through the boxed namespace path instead. That is the right trade: text is uploaded once per node
+// per SCREEN, while `ui_paint_all` (which is declared) runs per frame.
+// ⚠️ ONE crossing per FRAME instead of several per node. The boxed pass re-read text, font, colour,
+// align and geometry off a `Value` node for every node of every redraw.
+declare fn ui_paint_all(): void
+// ⚠️ Paint forward until a node the native pass cannot draw (icon / custom / reveal-ellipsis text),
+// returning ITS index. Order is load-bearing — a container borders before its children — so the
+// caller paints that one node itself and calls again from the next index.
+declare fn ui_paint_from(start: i32): i32
+declare fn ui_free(): void
+declare fn chip_note(ch: i32): i32
+declare fn chip_row(): i32
+declare fn chip_rows(): i32
+
+// The canvas's live cell count — what `tileReserve` must cover. See `ui_tiles_used` in lib.rs.
+declare fn ui_tiles_used(): i32
+// Pre-size agb's shared live-tile map at boot (opt-in; see the native's doc). Games with a
+// heavy scene + full-screen UI peak of 308..614 live tiles pass 600; everyone else, nothing.
+declare fn bg_tile_map_reserve(n: i32): void

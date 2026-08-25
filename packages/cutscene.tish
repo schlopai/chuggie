@@ -1,0 +1,102 @@
+// cutscene.tish — a small scripted-sequence API for the chuggie-engine engine.
+//
+// A cutscene is written as a plain SEQUENCE of blocking calls — each `cut*` owns its own vsync loop
+// (it calls `present()` every frame, so actors keep animating + rendering) and returns only when
+// its action finishes. That reads like a script and needs no interpreter.
+//
+// ⚠️ THE #553 CONSTRAINT NO LONGER HOLDS — measured 2026-08-01.
+//
+// This file used to say a timeline-as-array was "a trap on device" because "an array-RETURNING tish
+// function hangs the GBA codegen (#553)", and that claim is why every cutscene in this repo is
+// imperative. It was never tested; #553 has no regression test anywhere in the tish tree, unlike
+// #556 and #558 which are fixed and tested.
+//
+// `examples/probe-arrayret` now tests it. On device, all three of these PASS:
+//   - a same-module function returning a constructed array of numbers
+//   - an IMPORTED function returning a constructed array of numbers
+//   - an IMPORTED function returning an array of OBJECTS, walked element by element and
+//     checksummed on their fields — which is exactly a `[{op, a, b}, …]` timeline
+//
+// So a data-driven cutscene format IS possible. The one real constraint found is much narrower:
+// an imported array-returning function fails to COMPILE when called during module initialisation
+// (`cannot find value 'fn__mNN' in this scope`) — call it from inside a function, or build the
+// array inline at top level. See the probe's README.
+//
+// The imperative API below is kept because it works and every existing scene uses it; it is no
+// longer the only option, and a timeline interpreter is now a legitimate design.
+//
+//     import { cutWait, cutSay, cutWalk, cutFace } from '../../../packages/cutscene'
+//     function opening() {
+//       cutWait(30)
+//       cutSay(["A shadow stirs..."], "Elder")
+//       cutWalk(elder.id, 120, 96, 70, 0)   // walk to (120,96) over 70 frames, facing down
+//       cutFace(elder.id, 0)
+//       cutSay(["Take this blade."], "Elder")
+//       gameState.hasSword = true
+//     }
+//
+// Dialogue uses packages/dialog (call `dialogInit` once at boot before any `cutSay`).
+//
+// By DEFAULT an actor is an engine entity on a 5-frames-per-row sheet (row = facing, col 0 = idle,
+// cols 1-4 = walk; pass `face` as 0 down / 1 up / 2 left / 3 right), positioned with
+// `set_transform` and presented with `world_step`. None of that is required any more — three hooks
+// (`cutSetAnim`, `cutSetMover`, `cutSetStep`) let a game that draws with raw sprites and presents
+// with plain `frame()` use every verb here. `examples/iso-cutscene` is that case.
+//
+// Freeze the player by not attaching (or gating) its component while the cutscene runs.
+// ── this file is now a thin ENTITY layer over `./cutscene-core` ───────────────────────────────
+//
+// The sequencer moved to `packages/cutscene-core.tish`, which imports no game-engine crate and no
+// dialogue package. This file adds the three things that need them — the 5-frame animation driver,
+// `set_transform` positioning, `world_step` presentation — plus `cutWalk`, the one verb that must
+// read an actor back and therefore genuinely requires an engine entity.
+//
+// Every existing scene is unchanged: importing this file installs exactly the defaults that used to
+// be hardcoded. A game that cannot link the engine crate (schlopai/chuggie-engine#58, #63) imports
+// `./cutscene-core` directly and supplies its own hooks.
+//
+// ⚠️ Re-exported rather than re-implemented. A game importing `packages/cutscene` gets the same
+// names it always did; there is exactly one implementation of each verb, in core.
+import { world_step, set_transform, anim_play, entity_x, entity_y } from 'cargo:tish_gba_game_engine'
+import { dialogSay, dialogUpdate, dialogActive, dialogResult } from './dialog'
+import {
+  cutSetAnim, cutSetMover, cutSetStep, cutSetDialog,
+  cutWait, cutSay, cutWalkFrom, cutFace, cutFadeOut, cutFadeIn, cutPan, cutChoose,
+  cutSetFlag, cutFlag, cutFlagCount, WALK, FADE_MAX
+} from './cutscene-core'
+
+export {
+  cutSetAnim, cutSetMover, cutSetStep, cutSetDialog,
+  cutWait, cutSay, cutWalkFrom, cutFace, cutFadeOut, cutFadeIn, cutPan, cutChoose,
+  cutSetFlag, cutFlag, cutFlagCount, WALK, FADE_MAX
+}
+
+
+// The default animation driver: a 5-frames-per-row orthogonal sheet, row = facing, col 0 = idle,
+// cols 1-4 = walk. Installed below, so a game that wants a different layout still calls
+// `cutSetAnim` and overrides it exactly as before.
+function walkAnim5(e, face, moving) {
+  let base = face * WALK
+  if (moving) { anim_play(e, base + 1, 4, 6, true) }
+  else { anim_play(e, base, 1, 1, false) }
+}
+
+function placeEntity(e, x, y) { set_transform(e, x, y) }
+function stepWorld() { world_step() }
+
+// Install the entity-backed defaults at module init. This is what makes importing THIS file
+// behave exactly as it did before the split.
+cutSetAnim(walkAnim5)
+cutSetMover(placeEntity)
+cutSetStep(stepWorld)
+cutSetDialog({ say: dialogSay, update: dialogUpdate, active: dialogActive, result: dialogResult })
+
+// Walk entity `e` from where it is to (x, y) over `frames`, playing the walk cycle for `face`,
+// then settle on the idle frame.
+//
+// ⚠️ THE ONE VERB THAT CANNOT LIVE IN CORE. It reads the start position with `entity_x`/`entity_y`,
+// so `e` must be an engine entity. A raw-sprite game uses `cutWalkFrom`, which takes the start
+// explicitly and never reads the actor back — that is the whole reason it exists.
+export function cutWalk(e, x, y, frames, face) {
+  cutWalkFrom(e, entity_x(e), entity_y(e), x, y, frames, face)
+}

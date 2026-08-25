@@ -1,0 +1,835 @@
+// ringside — a Punch-Out-style bout, seen over the player's shoulder.
+//
+// ── WHAT IS DIFFERENT ABOUT THIS CAMERA ───────────────────────────────────────────────────────
+//
+// The corpus is side-view, top-down or isometric. `packages/fpview.tish` was the first thing that
+// rendered INTO the screen; this is the second, and it is the opposite kind. A grid crawler renders
+// into the screen and moves; a boxing game renders into the screen and does not move at all. There
+// is no locomotion axis, no facing and no hitbox geometry — the whole game is a timeline, and a
+// punch resolves by comparing one table column against a stance.
+//
+// ── THE SHAPE OF THE LOOP ─────────────────────────────────────────────────────────────────────
+//
+// No entity system, no scene package, no `engine.tish`. `packages/scene.tish` dispatches through an
+// array of boxed objects, which is a `get_prop` per field per frame to replace a seven-way `if` on
+// an `i32`. `versus` and `rap-dojo` both skip it deliberately and this game has less headroom, not
+// more. The mode is an integer.
+//
+//     boxTick() -> react(ev) -> drawFighters() -> hudUpdate() -> frame()
+//
+// ── THE THREE THINGS THAT KEEP IT AT 60 FPS ───────────────────────────────────────────────────
+//
+//   * Every module scalar is `let X: i32`. An untyped one is a thread-local Cell<f64> on a chip
+//     with no FPU and costs ~20% of a frame. `verify.sh` gates this.
+//   * `sprite_set_frame` is never called with an unchanged pose. Each of the seven sprites keeps
+//     its last cell; an idle frame is seven compares and zero native calls, instead of ~130 ticks
+//     each. That alone is the difference between standing still costing 900 ticks and costing none.
+//   * There is no `%` and no `/` anywhere on the hot path. Every duration is a countdown.
+
+import { log, frame, ticks, sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_hud,
+         sprite_set_visible, bg_new, camera_set, key_pressed, ui_begin, ui_clear_rect, ui_rect,
+         text_draw, text_width, fade, audio_pump } from 'cargo:tish_agb'
+import { FEEL_MAX, FB_CALLOUT, FB_FLASH, FB_BURST, FS_KIND, FS_BASEY, FS_FLASHW, FS_DONE, FS_KEY,
+         FP_PLACE, FP_DESTROY, FP_BUFF, FP_LANE, FP_ILLEGAL, FP_VICTORY, FP_DEFEAT,
+         SFX_CURSOR, SFX_PLACE, SFX_WIN, SFX_DESTROY, SFX_ILLEGAL,
+         feelPlay, feelTick, feelSlot, feelColour, feelStop, feelPlaySfx, feelFrozen, feelBump,
+         feelCalloutAnchor, feelCalloutShadow, feelCalloutDraw, feelCalloutHide,
+         feelIntensity } from '../../../packages/feel'
+import { boxInit, boxRoundReset, boxTick, boxSetFrozen, boxFreeze, boxSetDifficulty, boxSeed,
+         boxPlayerView, boxOppView, boxCountView, boxAtkField, boxTellFrames,
+         PS_IDLE, PS_JAB, PS_BODY, PS_UPPER, PS_DODGE_L, PS_DODGE_R, PS_DUCK, PS_BLOCK,
+         PS_HURT, PS_DOWN, PS_GASSED,
+         OS_BOB, OS_TELL, OS_WIND, OS_STRIKE, OS_RECOVER, OS_VULN, OS_GUARD, OS_HURT,
+         OS_STUN, OS_DOWN, OS_TAUNT, A_KIND,
+         EV_P_LAND, EV_P_BLOCKED, EV_P_COUNTER, EV_STAR, EV_O_LAND, EV_O_GUARDED,
+         EV_P_DODGE, EV_O_STUN, EV_O_DOWN, EV_P_DOWN, EV_O_OUT, EV_P_OUT, EV_TELL,
+         EV_COUNT } from '../../../packages/boxing'
+import { defineBruno, K_LEFT, K_RIGHT, K_BODY, K_HIGH } from './opponent'
+import { hudInit, hudUpdate, hudDirty, hudHide, hudShow } from './hud'
+import { BUILD_ID } from './buildid'
+import { oppArt } from 'sheet64:../assets/opponent.png'
+import { oppLoArt } from 'sheet6432:../assets/opponent_lo.png'
+import { playerArt } from 'sheet6432:../assets/player.png'
+import { gloveArt } from 'sheet32:../assets/gloves.png'
+import { sparkArt } from 'sheet32:../assets/spark.png'
+import { ringImg } from 'background:../assets/ring.png'
+import { big } from 'font:../../../assets/fonts/kenney-high-square.ttf@16'
+import { OU_BOB_A, OU_BOB_B, OU_TELL_L, OU_TELL_R, OU_TELL_BODY, OU_TELL_HIGH,
+         OU_STRIKE_L, OU_STRIKE_R, OU_STRIKE_BODY, OU_GUARD, OU_HURT, OU_STUN,
+         OU_TAUNT, OU_DOWN, OL_STAND, OL_BOB, OL_CROUCH, OL_WIDE, OL_DOWN,
+         PP_IDLE_A, PP_IDLE_B, PP_DUCK, PP_BLOCK, PP_DODGE_L, PP_DODGE_R,
+         PP_PUNCH_L, PP_PUNCH_R, PP_HURT, PP_DOWN, PP_GASSED,
+         GC_P_JAB, GC_P_BODY, GC_P_UPPER, GC_O_STRIKE, GC_O_BIG, GC_NONE,
+         OPP_X, OPP_UP_Y, OPP_LO_Y, PL_X, PL_Y, GLOVE_HOME_X, GLOVE_HOME_Y } from './frames'
+
+// ── modes ─────────────────────────────────────────────────────────────────────────────────────
+let M_TITLE: i32 = 0
+let M_INTRO: i32 = 1
+let M_FIGHT: i32 = 2
+let M_DOWN: i32 = 3
+let M_ROUNDEND: i32 = 4
+let M_RESULT: i32 = 5
+
+let mode: i32 = 0
+let modeT: i32 = 0
+let roundNo: i32 = 1
+let clockF: i32 = 0
+let clockSec: i32 = 0
+let secTick: i32 = 60
+let ROUND_SECONDS: i32 = 60
+let result: i32 = 0          // 1 player wins, 2 opponent wins
+let resultKind: i32 = 0      // 0 decision, 1 KO, 2 TKO
+let dmgDealt: i32 = 0
+let dmgTaken: i32 = 0
+let roundsWon: i32 = 0
+let roundsLost: i32 = 0
+
+// ── sprites. Created ONCE at boot and never destroyed. `sprite_set_visible(h, 0)` does NOT free a
+//    sprite's Object, so a game that hides and re-creates leaks VRAM until agb panics.
+let oppUL: i32 = 0
+let oppUR: i32 = 0
+let oppLL: i32 = 0
+let oppLR: i32 = 0
+let plL: i32 = 0
+let plR: i32 = 0
+let gloveSpr: i32 = 0
+let sparkSpr: i32 = 0
+
+// last-drawn cells, so an unchanged pose costs a compare instead of ~130 ticks
+let lastOU: i32 = 0 - 1
+let lastOL: i32 = 0 - 1
+let lastPP: i32 = 0 - 1
+let lastGC: i32 = 0 - 1
+
+// ── juice. All of it pooled or global; nothing here is ever spawned.
+let sparkT: i32 = 0
+let sparkX: i32 = 0
+let sparkY: i32 = 0
+let bobT: i32 = 0
+let crowd: i32 = 0           // excitement, decays; drives the crowd swell
+let bannerT: i32 = 0
+
+let peak: i32 = 0
+let perfT: i32 = 64
+let showPerf: i32 = 0
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// boot
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+camera_set(0, 0)
+bg_new(ringImg)
+
+boxInit()
+defineBruno()
+boxSetDifficulty(0)
+boxSeed(20260814)
+
+oppUL = sprite_new(oppArt)
+oppUR = sprite_new(oppArt)
+oppLL = sprite_new(oppLoArt)
+oppLR = sprite_new(oppLoArt)
+plL = sprite_new(playerArt)
+plR = sprite_new(playerArt)
+gloveSpr = sprite_new(gloveArt)
+sparkSpr = sprite_new(sparkArt)
+
+// ⚠️ WORLD-space, NOT hud. `feel.tish` drives its shake through the `fx_bump` SPRING, which offsets
+// the CAMERA — and a `sprite_set_hud(h, 1)` sprite ignores the camera by definition, so the fighters
+// would have sat perfectly still through every impact. camera_set(0, 0) means world == screen here,
+// so this costs nothing and buys the spring for free. The HUD digits stay screen-space below, which
+// is the behaviour you actually want: the fighters shake, the clock does not.
+sprite_set_hud(oppUL, 0)
+sprite_set_hud(oppUR, 0)
+sprite_set_hud(oppLL, 0)
+sprite_set_hud(oppLR, 0)
+sprite_set_hud(plL, 0)
+sprite_set_hud(plR, 0)
+sprite_set_hud(gloveSpr, 0)
+sprite_set_hud(sparkSpr, 0)
+sprite_set_visible(gloveSpr, 0)
+sprite_set_visible(sparkSpr, 0)
+
+// Positions once, here, and never again. Neither fighter translates — a dodge is a different POSE,
+// not a different position — and the impact shake is the camera spring, so `drawFighters` only ever
+// touches cells. That is six `sprite_set_pos` calls for the whole program.
+sprite_set_pos(plL, PL_X, PL_Y)
+sprite_set_pos(plR, PL_X + 64, PL_Y)
+sprite_set_pos(oppUL, OPP_X, OPP_UP_Y)
+sprite_set_pos(oppUR, OPP_X + 64, OPP_UP_Y)
+sprite_set_pos(oppLL, OPP_X, OPP_LO_Y)
+sprite_set_pos(oppLR, OPP_X + 64, OPP_LO_Y)
+
+// Call-outs rise from just above the ropes and are drawn as SPRITES, so they float over the crowd
+// without owning any of those pixels — which is what makes them usable here at all (see paintFeel).
+feelCalloutAnchor(104, 3)
+feelCalloutShadow(0x120c18)
+feelIntensity(256)
+
+hudInit(120, 100, 12)
+hudHide()
+boxRoundReset(1)
+boxSetFrozen(1)
+
+log("ringside build " + BUILD_ID)
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// drawing
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+// Which upper-band pose the opponent is showing. This is the whole readability contract: a TELL
+// must be a large, unmistakable silhouette, and it must be the SAME silhouette every time that
+// attack comes out, or the player is memorising noise instead of learning a pattern.
+function oppUpperPose(ost: i32, kind: i32): i32 {
+  if (ost === OS_DOWN) {
+    return OU_DOWN
+  }
+  if (ost === OS_HURT) {
+    return OU_HURT
+  }
+  if (ost === OS_STUN) {
+    return OU_STUN
+  }
+  if (ost === OS_GUARD) {
+    return OU_GUARD
+  }
+  if (ost === OS_TAUNT) {
+    return OU_TAUNT
+  }
+  if (ost === OS_TELL || ost === OS_WIND) {
+    if (kind === K_LEFT) {
+      return OU_TELL_L
+    }
+    if (kind === K_RIGHT) {
+      return OU_TELL_R
+    }
+    if (kind === K_BODY) {
+      return OU_TELL_BODY
+    }
+    return OU_TELL_HIGH
+  }
+  if (ost === OS_STRIKE) {
+    if (kind === K_LEFT) {
+      return OU_STRIKE_L
+    }
+    if (kind === K_RIGHT) {
+      return OU_STRIKE_R
+    }
+    return OU_STRIKE_BODY
+  }
+  if (ost === OS_VULN || ost === OS_RECOVER) {
+    return OU_BOB_B
+  }
+  // ⚠️ THE IDLE BOB IS STAGGERED, AND THAT IS NOT COSMETIC.
+  //
+  // agb frees a sprite's tile VRAM only AT COMMIT, so a frame that re-points a cell transiently
+  // holds BOTH the old tiles and the new ones. Six 64x64 cells (opponent upper, opponent lower,
+  // player) swapping on the same frame is 12 KB of transient on top of 17.9 KB steady — and with
+  // the banner's text sprites still resident that crosses the 32 KB arena and agb panics with
+  // `SpriteFull`. It took ~2 seconds of idle bobbing to hit, on an innocent frame, and the state
+  // machines were provably healthy at the time.
+  //
+  // So: the opponent's upper band flips at bobT 0 and 12, the player at 6 and 18, and the lower
+  // band does not animate at all. No two cells ever change on the same frame, and the worst-case
+  // transient is one band — 4 KB, not 12.
+  if (bobT < 12) {
+    return OU_BOB_A
+  }
+  return OU_BOB_B
+}
+
+function oppLowerPose(ost: i32, kind: i32): i32 {
+  if (ost === OS_DOWN) {
+    return OL_DOWN
+  }
+  if (ost === OS_TAUNT || ost === OS_STUN) {
+    return OL_WIDE
+  }
+  if (ost === OS_TELL || ost === OS_WIND || ost === OS_STRIKE) {
+    if (kind === K_BODY) {
+      return OL_CROUCH
+    }
+    return OL_WIDE
+  }
+  // deliberately static: legs barely move in a boxing stance, and animating them would be a third
+  // pair of cells competing for the same commit-frame VRAM as the two that actually read
+  return OL_STAND
+}
+
+function playerPose(pst: i32): i32 {
+  if (pst === PS_DOWN) {
+    return PP_DOWN
+  }
+  if (pst === PS_GASSED) {
+    return PP_GASSED
+  }
+  if (pst === PS_HURT) {
+    return PP_HURT
+  }
+  if (pst === PS_DUCK) {
+    return PP_DUCK
+  }
+  if (pst === PS_BLOCK) {
+    return PP_BLOCK
+  }
+  if (pst === PS_DODGE_L) {
+    return PP_DODGE_L
+  }
+  if (pst === PS_DODGE_R) {
+    return PP_DODGE_R
+  }
+  if (pst === PS_JAB || pst === PS_UPPER) {
+    return PP_PUNCH_R
+  }
+  if (pst === PS_BODY) {
+    return PP_PUNCH_L
+  }
+  // offset from the opponent's phase by six frames, so the two never re-point together
+  if (bobT >= 6 && bobT < 18) {
+    return PP_IDLE_B
+  }
+  return PP_IDLE_A
+}
+
+// Which glove overlay, if any, is in flight. ONE sprite, re-pointed — never one per punch.
+function gloveCell(pst: i32, ost: i32): i32 {
+  if (pst === PS_UPPER) {
+    return GC_P_UPPER
+  }
+  if (pst === PS_JAB) {
+    return GC_P_JAB
+  }
+  if (pst === PS_BODY) {
+    return GC_P_BODY
+  }
+  if (ost === OS_STRIKE) {
+    return GC_O_STRIKE
+  }
+  return GC_NONE
+}
+
+function drawFighters(pv: i32, ov: i32) {
+  let pst: i32 = (pv >> 17) & 15
+  let ost: i32 = (ov >> 9) & 15
+  let atk: i32 = (ov >> 13) & 31
+  let ot: i32 = (ov >> 18) & 127
+
+  // No shake code here any more. `feel.tish` pushes a SPRING through `fx_bump`, the engine steps it
+  // in Rust, and it offsets the camera — so the fighters move for free and, unlike the hand-rolled
+  // decaying alternation this replaced, three impacts in one frame SUM into one bigger shake instead
+  // of the third overwriting the first two. That property is the whole reason feel uses a spring.
+
+  // ⚠️ ONE crossing for the attack's kind, not three. `boxAtkField` is a call into the package that
+  // touches module state — ~117 ticks of a 4,389-tick frame — and the two pose functions plus
+  // gloveCell were each asking for the same number every frame. Fetching it once here took the
+  // worst frame from ~3,740 ticks to ~3,400: a tenth of the entire frame budget, for a value that
+  // cannot change between two statements.
+  let kind: i32 = boxAtkField(atk, A_KIND)
+
+  let up: i32 = oppUpperPose(ost, kind)
+  if (up !== lastOU) {
+    sprite_set_frame(oppUL, up << 1)
+    sprite_set_frame(oppUR, (up << 1) + 1)
+    lastOU = up
+  }
+
+  let lo: i32 = oppLowerPose(ost, kind)
+  if (lo !== lastOL) {
+    sprite_set_frame(oppLL, lo << 1)
+    sprite_set_frame(oppLR, (lo << 1) + 1)
+    lastOL = lo
+  }
+
+  let pp: i32 = playerPose(pst)
+  if (pp !== lastPP) {
+    sprite_set_frame(plL, pp << 1)
+    sprite_set_frame(plR, (pp << 1) + 1)
+    lastPP = pp
+  }
+
+  let gc: i32 = gloveCell(pst, ost)
+  if (gc !== lastGC) {
+    if (gc === GC_NONE) {
+      sprite_set_visible(gloveSpr, 0)
+    } else {
+      sprite_set_frame(gloveSpr, gc)
+      sprite_set_pos(gloveSpr, GLOVE_HOME_X, GLOVE_HOME_Y)
+      sprite_set_visible(gloveSpr, 1)
+    }
+    lastGC = gc
+  }
+
+  // the spark is a POOL of one: pre-created, parked hidden, never spawned
+  if (sparkT > 0) {
+    sparkT = sparkT - 1
+    let f: i32 = 3 - (sparkT >> 1)
+    if (f < 0) {
+      f = 0
+    }
+    if (f > 3) {
+      f = 3
+    }
+    sprite_set_frame(sparkSpr, f)
+    sprite_set_pos(sparkSpr, sparkX, sparkY)
+    if (sparkT === 0) {
+      sprite_set_visible(sparkSpr, 0)
+    }
+  }
+}
+
+function popSpark(x: i32, y: i32) {
+  sparkX = x
+  sparkY = y
+  sparkT = 8
+  sprite_set_visible(sparkSpr, 1)
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// events -> feel
+//
+// ── PRESETS ARE MATCHED BY SHAPE, NOT BY NAME ─────────────────────────────────────────────────
+//
+// `packages/feel.tish` came out of a card game, so its seven presets are named for card events —
+// PLACE, DESTROY, BUFF, LANE, ILLEGAL, VICTORY, DEFEAT. The *kinds* underneath them (callout, burst,
+// flash, spring bump, hit-stop, PSG note) are entirely generic, and so are their envelopes, so this
+// game reads the table as effect shapes and ignores what the rows are called:
+//
+//   FP_PLACE     bump 2 + sfx                                 -> a punch lands
+//   FP_ILLEGAL   bump 4 + sfx                                 -> a punch into a guard, or a block
+//   FP_DESTROY   freeze 4 + bump 6 + sfx + callout             -> a COUNTER, the game's best moment
+//   FP_BUFF      bump 2 + sfx + callout                        -> a star earned
+//   FP_LANE      flash + bump 3 + sfx + callout                -> a knockdown
+//   FP_VICTORY   flash + bump 8 + freeze 6 + sfx + callout     -> the bout won
+//   FP_DEFEAT    flash + sfx + callout                         -> the bout lost
+//
+// Not one line of feel.tish was changed to do this, which is the test `docs/review-2026-08-14.md`
+// §6 proposes for whether a package is real. It passes — with one honest caveat below.
+//
+// ── ⚠️ THE ONE PART THAT DOES NOT PORT: FB_BURST ──────────────────────────────────────────────
+//
+// `feelBurstDraw(i, bg)` erases its expanding ring by REPAINTING every radius in a caller-supplied
+// solid colour. That is right for a card board, which has a flat panel under the ring. This game's
+// background is a drawn crowd and a ring floor, and there is no single colour that erases it — the
+// ring would leave 1px coloured rectangles across the crowd. Two of the presets above (DESTROY,
+// VICTORY) contain a burst row; those slots simply go undrawn, which is harmless.
+//
+// So the impact flash stays a pooled SPRITE (`popSpark`), which composites over anything. FB_FLASH
+// works because feel leaves the erase to the caller, who can use `ui_clear_rect` — transparent, not
+// a colour. That difference between the two kinds is the whole finding.
+//
+// ── AUDIO ─────────────────────────────────────────────────────────────────────────────────────
+//
+// `chipsfx` is NOT imported: feel.tish inlines its own PSG voices for a measured reason (its header
+// records that importing chipsfx cost Queen's Blood 10,496 bytes of heap), and taking both would
+// pay for two copies of the same thing. There is still no mixer, so this is a priority list rather
+// than a soundscape — see this example's README.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+// The word the next call-out will draw. feel owns the rise, the fade and the colour ramp; the
+// caller owns the vocabulary, which is exactly the right seam.
+let W_NONE: i32 = 0
+let W_COUNTER: i32 = 1
+let W_STAR: i32 = 2
+let W_DOWN: i32 = 3
+let W_KO: i32 = 4
+let W_TKO: i32 = 5
+let W_CHAMP: i32 = 6
+let callWord: i32 = 0
+
+// ⚠️ FEEL IS STEPPED ONLY WHILE SOMETHING IS PLAYING, AND THAT IS WORTH ~1,100 TICKS A FRAME.
+//
+// `feelTick()` walks all six slots every call. In a card game that is free — a turn-based frame has
+// almost nothing else in it. Here it lands on top of a seven-sprite composite, a delta HUD and two
+// state machines, and measuring it showed EVERY window rise by ~1,100 ticks (a quarter of the 4,389
+// budget) whether or not any effect was on screen. Eleven of twenty-three windows went over budget
+// **in attract mode, with the player not touching the pad** — which is what proved it was per-frame
+// rather than per-event.
+//
+// So the game tracks its own liveness: any successful `feelPlay` arms a countdown longer than the
+// longest preset (delay 8 + duration 48 = 56 frames), and feel is stepped only while it is armed.
+// The spring is safe to skip because it is stepped in Rust by the engine, not by feelTick; and
+// hit-stop is safe because it can only exist while an effect is live, which is exactly when the
+// countdown is running.
+// How long each preset can still need stepping, read off feel's own row table (delay + duration of
+// its longest row, rounded up). A blanket 64 was the first version and it was wasteful in exactly
+// the wrong place: FP_PLACE and FP_ILLEGAL are a spring bump and a PSG note, both of which are
+// FIRE-AND-FORGET — zero duration, nothing to step — yet a jab was arming sixty-four frames of
+// six-slot walking. Those are the two that fire most often, several times a second.
+//
+//                  PLACE DESTROY BUFF LANE ILLEGAL VICTORY DEFEAT
+let FEEL_LIFE: i32[] = [3,   58,    52,  56,    3,     62,    58]
+let feelBusy: i32 = 0
+
+function play(preset: i32, x: i32, y: i32, mag: i32) {
+  if (feelPlay(preset, x, y, mag) === 1) {
+    let life: i32 = FEEL_LIFE[preset]
+    if (life > feelBusy) {
+      feelBusy = life
+    }
+  }
+}
+
+function react(ev: i32) {
+  if (ev === 0) {
+    return
+  }
+  let cv: i32 = boxCountView()
+  let hy: i32 = (cv >> 7) & 255
+  let mag: i32 = (cv >> 15) & 63
+
+  // ── THE FREQUENT EVENTS DO NOT GO THROUGH THE PLAYER, AND THAT IS FEEL'S OWN ARGUMENT.
+  //
+  // feel.tish's header describes MMF_Player as the thing that fires "a whole composed row range" —
+  // its value is composing MANY effects from one call site. An ordinary punch is TWO effects, a
+  // spring and a note, and for two the player is pure overhead: walking the preset table, rolling
+  // chance, finding free slots, and arming the keyframe machinery that then has to be stepped.
+  //
+  // Measured: `feelPlay` on a two-row preset cost ~1,000 ticks more than the two calls below, and
+  // the opponent throws a punch every ~130 frames — one dropped frame per punch, forever.
+  //
+  // `feelBump` and `feelPlaySfx` are still feel's API and still feel's spring and feel's PSG. Only
+  // the composition layer is skipped, and only where there is nothing to compose.
+  if ((ev & EV_P_COUNTER) !== 0) {
+    popSpark(104, hy)
+    callWord = W_COUNTER
+    play(FP_DESTROY, 104, hy, mag)          // freeze + bump + sfx + callout: six things, one call
+    crowd = 60
+  } else if ((ev & EV_P_LAND) !== 0) {
+    popSpark(104, hy)
+    feelBump(0, 3 + (mag >> 2))
+    feelPlaySfx(SFX_DESTROY)
+    crowd = crowd + 12
+  } else if ((ev & EV_P_BLOCKED) !== 0) {
+    feelBump(2, 0)
+    feelPlaySfx(SFX_ILLEGAL)
+  }
+
+  if ((ev & EV_O_LAND) !== 0) {
+    popSpark(112, hy)
+    feelBump(0 - 4, 5)
+    feelPlaySfx(SFX_ILLEGAL)
+    crowd = crowd + 20
+  } else if ((ev & EV_O_GUARDED) !== 0) {
+    feelBump(0 - 2, 0)
+    feelPlaySfx(SFX_ILLEGAL)
+  }
+
+  if ((ev & EV_P_DODGE) !== 0) {
+    feelPlaySfx(SFX_CURSOR)
+    crowd = crowd + 8
+  }
+  if ((ev & EV_STAR) !== 0) {
+    callWord = W_STAR
+    play(FP_BUFF, 104, 60, 1)
+  }
+  if ((ev & EV_TELL) !== 0) {
+    crowd = crowd + 4
+  }
+  if ((ev & EV_COUNT) !== 0) {
+    feelPlaySfx(SFX_PLACE)
+  }
+
+  if ((ev & EV_O_DOWN) !== 0 || (ev & EV_P_DOWN) !== 0) {
+    callWord = W_DOWN
+    play(FP_LANE, 120, 60, 8)
+    crowd = 90
+    mode = M_DOWN
+    modeT = 0
+  }
+  if ((ev & EV_O_OUT) !== 0) {
+    endBout(1, 1)
+  }
+  if ((ev & EV_P_OUT) !== 0) {
+    endBout(2, 1)
+  }
+}
+
+// ── drawing what feelTick asked for ───────────────────────────────────────────────────────────
+//
+// KEYFRAMES, NOT FRAMES. `feelTick()` returns a BITMASK of the slots that crossed into a new
+// keyframe, and it is zero on nearly every frame — which is the point: a canvas repaint measures and
+// blits into background tiles, so six repaints across an effect's life reads as motion at a
+// fortieth of the cost of doing it every frame.
+function paintFeel(mask: i32) {
+  if (mask === 0) {
+    return
+  }
+  let i: i32 = 0
+  while (i < FEEL_MAX) {
+    if ((mask & (1 << i)) !== 0) {
+      let kind: i32 = feelSlot(i, FS_KIND)
+      if (kind === FB_FLASH) {
+        // Erased with `ui_clear_rect` — TRANSPARENT — across its widest reach, not its current one,
+        // or the previous longer bar leaves two stubs behind. Transparency is why this kind works
+        // over a drawn background and FB_BURST does not.
+        let fy: i32 = feelSlot(i, FS_BASEY)
+        ui_clear_rect(0, fy, 240, 6)
+        if (feelSlot(i, FS_DONE) === 0) {
+          let w: i32 = feelSlot(i, FS_FLASHW)
+          if (w > 240) {
+            w = 240
+          }
+          ui_rect(120 - (w >> 1), fy, w, 3, feelColour(i, 0xffe89a, 0x6a4a2a), 1)
+        }
+      } else if (kind === FB_CALLOUT) {
+        // SPRITES, not canvas. Nothing underneath is touched, so the word floats over the crowd
+        // without this screen having to keep a band empty for it.
+        if (callWord === W_COUNTER) {
+          feelCalloutDraw(i, big, 2, "COUNTER!", 0xffe89a, 0x6a4a2a)
+        } else if (callWord === W_STAR) {
+          feelCalloutDraw(i, big, 2, "STAR!", 0xffe89a, 0x6a4a2a)
+        } else if (callWord === W_DOWN) {
+          feelCalloutDraw(i, big, 2, "DOWN!", 0xff8a6a, 0x6a3a2a)
+        } else if (callWord === W_KO) {
+          feelCalloutDraw(i, big, 2, "K.O.", 0xffe89a, 0x6a4a2a)
+        } else if (callWord === W_TKO) {
+          feelCalloutDraw(i, big, 2, "T.K.O.", 0xff8a6a, 0x6a3a2a)
+        } else if (callWord === W_CHAMP) {
+          feelCalloutDraw(i, big, 2, "CHAMPION", 0xffe89a, 0x6a4a2a)
+        }
+      }
+    }
+    i = i + 1
+  }
+}
+
+function endBout(who: i32, kind: i32) {
+  hudHide()
+  result = who
+  resultKind = kind
+  mode = M_RESULT
+  modeT = 0
+  // The result screen is a feel preset, not hand-placed text: VICTORY is flash + a big spring + six
+  // frames of hit-stop + a call-out, and DEFEAT is a slower flash and a quieter one. Reaching for
+  // the table means the ending is composed the same way every other beat in the game is.
+  if (who === 1) {
+    callWord = W_KO
+    if (kind === 0) {
+      callWord = W_CHAMP
+    }
+    play(FP_VICTORY, 120, 60, 12)
+  } else {
+    callWord = W_TKO
+    play(FP_DEFEAT, 120, 60, 12)
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// banners. WORDS go on the canvas or through text_draw; only NUMBERS are sprites.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+function banner(s: string, y: i32) {
+  let w: i32 = text_width(big, s)
+  text_draw(big, 0, 120 - (w >> 1), y, s)
+}
+
+// slot 1 — a second line that can outlive the first, e.g. "PRESS START" under the title
+function banner2(s: string, y: i32) {
+  let w: i32 = text_width(big, s)
+  text_draw(big, 1, 120 - (w >> 1), y, s)
+}
+
+function bannerClear() {
+  text_draw(big, 0, 0, 0, "")
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// the loop
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// round flow
+//
+// ⚠️ tish has NO HOISTING — a function must be defined before the statement that calls it, so every
+// definition in this file sits above the loop rather than below it (versus/src/main.tish:435).
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+function startRound() {
+  boxSetFrozen(1)
+  clockSec = ROUND_SECONDS
+  secTick = 60
+  mode = M_INTRO
+  modeT = 110
+  bannerClear()
+  banner("ROUND", 56)
+  feelPlaySfx(SFX_WIN)
+}
+
+function endRound() {
+  boxSetFrozen(1)
+  mode = M_ROUNDEND
+  modeT = 110
+  banner("END ROUND", 56)
+  feelPlaySfx(SFX_WIN)
+}
+
+function decision() {
+  // scored on remaining health as a PERCENTAGE, so the bigger fighter does not win by being bigger
+  let pv: i32 = boxPlayerView()
+  let ov: i32 = boxOppView()
+  let php: i32 = pv & 511
+  let ohp: i32 = ov & 511
+  if (php > ohp) {
+    endBout(1, 0)
+  } else {
+    endBout(2, 0)     // a draw goes to the champion; the challenger has to take the title
+  }
+}
+
+// ── the title screen is the first thing painted, after every function it needs exists
+ui_begin()
+banner("RINGSIDE", 54)
+banner2("PRESS START", 92)
+
+while (true) {
+  let t0: i32 = ticks()
+
+  bobT = bobT + 1
+  if (bobT >= 24) {
+    bobT = 0
+  }
+  if (crowd > 0) {
+    crowd = crowd - 1
+  }
+
+  // feel drives the juice layer: the spring (stepped in Rust by the engine, free), the hit-stop, and
+  // the keyframe mask for anything that draws. Gated on feelBusy — see the note above `play`.
+  let fmask: i32 = 0
+  let stopped: i32 = 0
+  if (feelBusy > 0) {
+    feelBusy = feelBusy - 1
+    fmask = feelTick()
+    stopped = feelFrozen()
+  }
+
+  if (mode === M_TITLE) {
+    if (key_pressed(3) === 1) {
+      text_draw(big, 1, 0, 0, "")
+      roundNo = 1
+      roundsWon = 0
+      roundsLost = 0
+      boxRoundReset(1)
+      hudShow()
+      startRound()
+    }
+    let pv0: i32 = boxPlayerView()
+    let ov0: i32 = boxOppView()
+    drawFighters(pv0, ov0)
+  } else if (mode === M_INTRO) {
+    modeT = modeT - 1
+    if (modeT === 50) {
+      banner("BOX!", 60)
+      feelPlaySfx(SFX_WIN)
+    }
+    if (modeT <= 0) {
+      bannerClear()
+      boxSetFrozen(0)
+      mode = M_FIGHT
+    }
+    let pv1: i32 = boxPlayerView()
+    let ov1: i32 = boxOppView()
+    drawFighters(pv1, ov1)
+    hudUpdate(pv1, ov1, boxCountView(), clockSec, roundNo)
+  } else if (mode === M_FIGHT) {
+    // the clock: a countdown with its own second counter, NEVER `clockF % 60`
+    secTick = secTick - 1
+    if (secTick <= 0) {
+      secTick = 60
+      clockSec = clockSec - 1
+      if (clockSec <= 0) {
+        clockSec = 0
+        endRound()
+      }
+    }
+    let ev: i32 = 0
+    if (stopped === 0) {
+      ev = boxTick()
+    }
+    react(ev)
+    let pv: i32 = boxPlayerView()
+    let ov: i32 = boxOppView()
+    drawFighters(pv, ov)
+    // ⚠️ react() can END THE BOUT, and it runs before this line. Without the re-check, hudHide()
+    // cleared the canvas and this repainted both bars straight back over the result screen.
+    if (mode === M_FIGHT) {
+      hudUpdate(pv, ov, boxCountView(), clockSec, roundNo)
+    }
+  } else if (mode === M_DOWN) {
+    let ev2: i32 = 0
+    if (stopped === 0) {
+      ev2 = boxTick()
+    }
+    react(ev2)
+    let pv2: i32 = boxPlayerView()
+    let ov2: i32 = boxOppView()
+    let cv2: i32 = boxCountView()
+    drawFighters(pv2, ov2)
+    if (mode === M_DOWN) {
+      hudUpdate(pv2, ov2, cv2, clockSec, roundNo)
+    }
+    if ((cv2 & 31) === 0 && mode === M_DOWN) {
+      bannerClear()
+      mode = M_FIGHT
+    }
+  } else if (mode === M_ROUNDEND) {
+    modeT = modeT - 1
+    if (modeT <= 0) {
+      bannerClear()
+      if (roundNo >= 3) {
+        decision()
+      } else {
+        roundNo = roundNo + 1
+        boxRoundReset(roundNo)
+        hudShow()
+        startRound()
+      }
+    }
+    let pv3: i32 = boxPlayerView()
+    let ov3: i32 = boxOppView()
+    drawFighters(pv3, ov3)
+  } else {
+    modeT = modeT + 1
+    if (modeT === 1) {
+      if (result === 1) {
+        banner2("CHAMPION", 46)
+      } else {
+        banner2("TRY AGAIN", 46)
+      }
+    }
+    if (modeT > 240 || key_pressed(3) === 1) {
+      bannerClear()
+      text_draw(big, 1, 0, 0, "")
+      feelStop()
+      feelCalloutHide(2)
+      mode = M_TITLE
+      modeT = 0
+      boxRoundReset(1)
+      boxSetFrozen(1)
+      banner("RINGSIDE", 54)
+      banner2("PRESS START", 92)
+    }
+  }
+
+  paintFeel(fmask)
+
+  // SELECT toggles the perf overlay. It is `log()`, never `text_draw`: `frame_stats()` returns a
+  // STRING, and a text-based perf counter costs more than the game it is measuring.
+  if (key_pressed(2) === 1) {
+    showPerf = 1 - showPerf
+  }
+  let d: i32 = (ticks() - t0) & 0xFFFF
+  if (d > peak) {
+    peak = d
+  }
+  perfT = perfT - 1
+  if (perfT <= 0) {
+    perfT = 64
+    if (showPerf === 1) {
+      log("P" + peak)
+    }
+    peak = 0
+  }
+
+  audio_pump()
+  frame()
+}

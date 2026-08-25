@@ -1,0 +1,356 @@
+// units.tish — flat SoA for six fighters + typed free-mover (walk / double-tap dash / run).
+// Mover mirrors packages/topdown.tish but keeps state in i32[] and drives natives
+// (no entity wrapper / get_prop on the hot path).
+
+import {
+  spawn, set_transform, set_collider, attach_sprite, set_sprite_offset,
+  set_topdown, topdown_speed, topdown_move, topdown_facing,
+  set_tag, set_health, set_hp, entity_hp, entity_x, entity_y, heal
+} from 'cargo:tish_gba_game_engine'
+import { sprite_new, sprite_set_frame, sprite_set_visible } from 'cargo:tish_agb'
+import {
+  SPAWN_A_X, SPAWN_A_Y, SPAWN_H_X, SPAWN_H_Y, GY_A_X, GY_A_Y, GY_H_X, GY_H_Y
+} from './arena'
+
+export let UNITS: i32 = 6
+export let TEAM_A: i32 = 0
+export let TEAM_H: i32 = 1
+export let TAG_ALLIANCE: i32 = 1
+export let TAG_HORDE: i32 = 2
+
+export let U_ENT: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_TEAM: i32[] = [0, 0, 0, 1, 1, 1]
+export let U_CLASS: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_SPEC: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_ALIVE: i32[] = [1, 1, 1, 1, 1, 1]
+export let U_TAG: i32[] = [1, 1, 1, 2, 2, 2]
+export let U_POWER: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_ROOT: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_SLOW: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_STUN: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_ABSORB: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_REZ: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_GCD: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_CAST: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_ROLE: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_PET: i32[] = [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1]
+// Number of slots currently on cooldown per unit — lets the 12-slot CD walk be skipped entirely
+// on the (common) frames where a unit has nothing ticking.
+export let U_CDN: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_XS: i32[] = [0, 0, 0, 0, 0, 0]
+export let U_YS: i32[] = [0, 0, 0, 0, 0, 0]
+
+// Per-unit skill CD: 12 slots × 6 units, indexed u*12+slot
+export let U_CD: i32[] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+
+export let PLAYER: i32 = 0
+export let targetId: i32 = 0 - 1
+
+export function setTarget(id: i32) { targetId = id }
+
+// Typed mover state per unit (player + bots that dash). 10 ints × 6.
+// [walk, dash, ddx, ddy, tap, tx, ty, pix, piy, run]
+let MV: i32[] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+let MV_STRIDE: i32 = 10
+let M_WALK: i32 = 0
+let M_DASH: i32 = 1
+let M_DDX: i32 = 2
+let M_DDY: i32 = 3
+let M_TAP: i32 = 4
+let M_TX: i32 = 5
+let M_TY: i32 = 6
+let M_PIX: i32 = 7
+let M_PIY: i32 = 8
+let M_RUN: i32 = 9
+
+export let TD_IDLE: i32 = 0
+export let TD_WALK: i32 = 1
+export let TD_DASH: i32 = 2
+export let TD_RUN: i32 = 3
+
+// Speeds as integer tenths of a pixel (engine takes f64 px/frame via soft float — pass whole numbers).
+let WALK_SPD: i32 = 1
+let DASH_SPD: i32 = 3
+let RUN_SPD: i32 = 2
+let DASH_FRAMES: i32 = 10
+let TAP_WINDOW: i32 = 12
+let CARRIER_SPD: i32 = 1
+let REZ_FRAMES: i32 = 90
+let MAX_HP: i32 = 40
+let MAX_POWER: i32 = 100
+
+let unitSpr: i32[] = [0, 0, 0, 0, 0, 0]
+let sheetHandle: i32 = 0
+
+function mvAt(u: i32, f: i32): i32 { return MV[Math.imul(u, MV_STRIDE) + f] }
+function mvSet(u: i32, f: i32, v: i32) { MV[Math.imul(u, MV_STRIDE) + f] = v }
+
+export function unitFrame(u: i32): i32 {
+  // Alliance classes 0..8, Horde 9..17
+  let fr: i32 = U_CLASS[u]
+  if (U_TEAM[u] === TEAM_H) { fr = fr + 9 }
+  return fr
+}
+
+export function unitRefreshSprite(u: i32) {
+  sprite_set_frame(unitSpr[u], unitFrame(u))
+}
+
+export function unitsInit(sheet: i32) {
+  sheetHandle = sheet
+  let i: i32 = 0
+  while (i < UNITS) {
+    let team: i32 = 0
+    if (i >= 3) { team = 1 }
+    U_TEAM[i] = team
+    if (team === TEAM_A) { U_TAG[i] = TAG_ALLIANCE } else { U_TAG[i] = TAG_HORDE }
+    U_ALIVE[i] = 1
+    U_POWER[i] = 50
+    U_ROOT[i] = 0
+    U_SLOW[i] = 0
+    U_STUN[i] = 0
+    U_ABSORB[i] = 0
+    U_REZ[i] = 0
+    U_GCD[i] = 0
+    U_CAST[i] = 0
+    U_PET[i] = 0 - 1
+    let e: i32 = spawn()
+    U_ENT[i] = e
+    unitSpr[i] = sprite_new(sheet)
+    set_transform(e, spawnX(team), spawnY(team))
+    set_collider(e, 14, 14)
+    set_topdown(e)
+    topdown_speed(e, WALK_SPD)
+    set_tag(e, U_TAG[i])
+    set_health(e, MAX_HP, 12)
+    attach_sprite(e, unitSpr[i])
+    set_sprite_offset(e, 0 - 8, 0 - 8)
+    unitRefreshSprite(i)
+    mvSet(i, M_WALK, WALK_SPD)
+    mvSet(i, M_DASH, 0)
+    mvSet(i, M_DDX, 0)
+    mvSet(i, M_DDY, 0)
+    mvSet(i, M_TAP, 0)
+    mvSet(i, M_TX, 0)
+    mvSet(i, M_TY, 0)
+    mvSet(i, M_PIX, 0)
+    mvSet(i, M_PIY, 0)
+    mvSet(i, M_RUN, 0)
+    U_CDN[i] = 0
+    let s: i32 = 0
+    while (s < 12) { U_CD[Math.imul(i, 12) + s] = 0; s = s + 1 }
+    i = i + 1
+  }
+  targetId = 0 - 1
+}
+
+export function spawnX(team: i32): i32 {
+  if (team === TEAM_A) { return SPAWN_A_X }
+  return SPAWN_H_X
+}
+export function spawnY(team: i32): i32 {
+  if (team === TEAM_A) { return SPAWN_A_Y }
+  return SPAWN_H_Y
+}
+export function gyX(team: i32): i32 {
+  if (team === TEAM_A) { return GY_A_X }
+  return GY_H_X
+}
+export function gyY(team: i32): i32 {
+  if (team === TEAM_A) { return GY_A_Y }
+  return GY_H_Y
+}
+
+export function posX(e: i32): i32 { return (entity_x(e) | 0) }
+export function posY(e: i32): i32 { return (entity_y(e) | 0) }
+
+export function unitSyncPos() {
+  let i: i32 = 0
+  while (i < UNITS) {
+    U_XS[i] = posX(U_ENT[i])
+    U_YS[i] = posY(U_ENT[i])
+    i = i + 1
+  }
+}
+
+export function foeTagFor(team: i32): i32 {
+  if (team === TEAM_A) { return TAG_HORDE }
+  return TAG_ALLIANCE
+}
+
+export function allyTagFor(team: i32): i32 {
+  if (team === TEAM_A) { return TAG_ALLIANCE }
+  return TAG_HORDE
+}
+
+export function indexOfEnt(e: i32): i32 {
+  let i: i32 = 0
+  while (i < UNITS) {
+    if (U_ENT[i] === e) { return i }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+/// Drive free mover. Returns TD_IDLE/WALK/DASH/RUN. `carrier` slows to walk-only.
+export function unitDrive(u: i32, ix: i32, iy: i32, busy: i32, carrier: i32): i32 {
+  if (U_ALIVE[u] === 0) { return TD_IDLE }
+  if (U_STUN[u] > 0) { U_STUN[u] = U_STUN[u] - 1; topdown_move(U_ENT[u], 0, 0); return TD_IDLE }
+  if (U_ROOT[u] > 0) { U_ROOT[u] = U_ROOT[u] - 1; busy = 1 }
+  if (U_SLOW[u] > 0) { U_SLOW[u] = U_SLOW[u] - 1 }
+
+  let tap: i32 = mvAt(u, M_TAP)
+  if (tap > 0) { mvSet(u, M_TAP, tap - 1) }
+
+  let pix: i32 = mvAt(u, M_PIX)
+  let piy: i32 = mvAt(u, M_PIY)
+  let fresh: i32 = 0
+  if ((ix !== 0 || iy !== 0) && pix === 0 && piy === 0) { fresh = 1 }
+  if (fresh !== 0) {
+    let dash: i32 = mvAt(u, M_DASH)
+    if (tap > 0 && ix === mvAt(u, M_TX) && iy === mvAt(u, M_TY) && busy === 0 && dash <= 0 && carrier === 0) {
+      mvSet(u, M_DASH, DASH_FRAMES)
+      mvSet(u, M_DDX, ix)
+      mvSet(u, M_DDY, iy)
+      mvSet(u, M_TAP, 0)
+      mvSet(u, M_RUN, 0)
+      topdown_speed(U_ENT[u], DASH_SPD)
+    } else {
+      mvSet(u, M_TAP, TAP_WINDOW)
+      mvSet(u, M_TX, ix)
+      mvSet(u, M_TY, iy)
+    }
+  }
+  mvSet(u, M_PIX, ix)
+  mvSet(u, M_PIY, iy)
+
+  if (busy !== 0) { topdown_move(U_ENT[u], 0, 0); return TD_IDLE }
+
+  let dashLeft: i32 = mvAt(u, M_DASH)
+  if (dashLeft > 0) {
+    mvSet(u, M_DASH, dashLeft - 1)
+    topdown_move(U_ENT[u], mvAt(u, M_DDX), mvAt(u, M_DDY))
+    if (mvAt(u, M_DASH) <= 0) {
+      if (ix !== 0 || iy !== 0) {
+        mvSet(u, M_RUN, 1)
+        topdown_speed(U_ENT[u], RUN_SPD)
+      } else {
+        mvSet(u, M_RUN, 0)
+        topdown_speed(U_ENT[u], walkSpd(u, carrier))
+      }
+    }
+    return TD_DASH
+  }
+
+  if (mvAt(u, M_RUN) !== 0 && carrier === 0) {
+    if (ix === 0 && iy === 0) {
+      mvSet(u, M_RUN, 0)
+      topdown_speed(U_ENT[u], walkSpd(u, carrier))
+      return TD_IDLE
+    }
+    topdown_move(U_ENT[u], ix, iy)
+    return TD_RUN
+  }
+
+  topdown_speed(U_ENT[u], walkSpd(u, carrier))
+  topdown_move(U_ENT[u], ix, iy)
+  if (ix !== 0 || iy !== 0) { return TD_WALK }
+  return TD_IDLE
+}
+
+function walkSpd(u: i32, carrier: i32): i32 {
+  if (carrier !== 0) { return CARRIER_SPD }
+  if (U_SLOW[u] > 0) { return 1 }
+  return WALK_SPD
+}
+
+export function unitTickCDs(u: i32) {
+  if (U_GCD[u] > 0) { U_GCD[u] = U_GCD[u] - 1 }
+  if (U_CAST[u] > 0) { U_CAST[u] = U_CAST[u] - 1 }
+  let live: i32 = 0
+  let s: i32 = 0
+  while (s < 12) {
+    let i: i32 = Math.imul(u, 12) + s
+    if (U_CD[i] > 0) { U_CD[i] = U_CD[i] - 1; if (U_CD[i] > 0) { live = live + 1 } }
+    s = s + 1
+  }
+  U_CDN[u] = live
+  // Power regen
+  if (U_ALIVE[u] !== 0 && U_POWER[u] < MAX_POWER) {
+    if ((u & 3) === 0) { U_POWER[u] = U_POWER[u] + 1 }
+  }
+}
+
+export function unitFacing(u: i32): i32 { return topdown_facing(U_ENT[u]) }
+
+export function unitHp(u: i32): i32 { return entity_hp(U_ENT[u]) }
+
+export function unitKill(u: i32) {
+  U_ALIVE[u] = 0
+  U_REZ[u] = REZ_FRAMES
+  sprite_set_visible(unitSpr[u], 0)
+  set_hp(U_ENT[u], 0)
+  set_transform(U_ENT[u], gyX(U_TEAM[u]), gyY(U_TEAM[u]))
+  U_XS[u] = gyX(U_TEAM[u])
+  U_YS[u] = gyY(U_TEAM[u])
+}
+
+export function unitRezTick(u: i32) {
+  if (U_ALIVE[u] !== 0) { return }
+  if (U_REZ[u] > 0) { U_REZ[u] = U_REZ[u] - 1 }
+  if (U_REZ[u] <= 0) {
+    U_ALIVE[u] = 1
+    set_transform(U_ENT[u], spawnX(U_TEAM[u]), spawnY(U_TEAM[u]))
+    U_XS[u] = spawnX(U_TEAM[u])
+    U_YS[u] = spawnY(U_TEAM[u])
+    set_health(U_ENT[u], MAX_HP, 12)
+    U_POWER[u] = 40
+    U_ROOT[u] = 0
+    U_SLOW[u] = 0
+    U_STUN[u] = 0
+    U_ABSORB[u] = 0
+    sprite_set_visible(unitSpr[u], 1)
+  }
+}
+
+export function unitApplyDamage(u: i32, amount: i32) {
+  if (U_ALIVE[u] === 0) { return }
+  let dmg: i32 = amount
+  if (U_ABSORB[u] > 0) {
+    if (U_ABSORB[u] >= dmg) {
+      U_ABSORB[u] = U_ABSORB[u] - dmg
+      return
+    }
+    dmg = dmg - U_ABSORB[u]
+    U_ABSORB[u] = 0
+  }
+  let hp: i32 = entity_hp(U_ENT[u]) - dmg
+  if (hp < 0) { hp = 0 }
+  set_hp(U_ENT[u], hp)
+  if (hp <= 0) { unitKill(u) }
+}
+
+export function unitHeal(u: i32, amount: i32) {
+  if (U_ALIVE[u] === 0) { return }
+  heal(U_ENT[u], amount)
+}
+
+export function unitSetClass(u: i32, cls: i32, spec: i32) {
+  U_CLASS[u] = cls
+  U_SPEC[u] = spec
+  unitRefreshSprite(u)
+}

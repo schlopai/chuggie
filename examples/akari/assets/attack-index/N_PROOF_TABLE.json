@@ -1,0 +1,210 @@
+{
+  "DN": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          9
+        ],
+        "angle": 0
+      },
+      "slash": null,
+      "role": "windup"
+    },
+    {
+      "blade": {
+        "grip": [
+          12,
+          24
+        ],
+        "angle": -153
+      },
+      "slash": {
+        "piece": "WIDE_A",
+        "offset": [
+          -8,
+          -16
+        ]
+      },
+      "role": "strike"
+    },
+    {
+      "blade": {
+        "grip": [
+          12,
+          23
+        ],
+        "angle": -150
+      },
+      "slash": null,
+      "role": "follow"
+    },
+    {
+      "blade": {
+        "grip": [
+          12,
+          23
+        ],
+        "angle": -150
+      },
+      "slash": null,
+      "role": "follow"
+    }
+  ],
+  "UP": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          9
+        ],
+        "angle": 0
+      },
+      "slash": null,
+      "role": "windup"
+    },
+    {
+      "blade": {
+        "grip": [
+          10,
+          9
+        ],
+        "angle": -41
+      },
+      "slash": {
+        "piece": "WIDE_A",
+        "offset": [
+          -8,
+          -16
+        ]
+      },
+      "role": "strike"
+    },
+    {
+      "blade": {
+        "grip": [
+          10,
+          11
+        ],
+        "angle": -50
+      },
+      "slash": null,
+      "role": "follow"
+    },
+    {
+      "blade": {
+        "grip": [
+          10,
+          11
+        ],
+        "angle": -50
+      },
+      "slash": null,
+      "role": "follow"
+    }
+  ],
+  "LF": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          9
+        ],
+        "angle": 0
+      },
+      "slash": null,
+      "role": "windup"
+    },
+    {
+      "blade": {
+        "grip": [
+          8,
+          18
+        ],
+        "angle": -104
+      },
+      "slash": {
+        "piece": "TALL_L",
+        "offset": [
+          -8,
+          -12
+        ]
+      },
+      "role": "strike"
+    },
+    {
+      "blade": {
+        "grip": [
+          7,
+          21
+        ],
+        "angle": -119
+      },
+      "slash": null,
+      "role": "follow"
+    },
+    {
+      "blade": {
+        "grip": [
+          7,
+          20
+        ],
+        "angle": -114
+      },
+      "slash": null,
+      "role": "follow"
+    }
+  ],
+  "RT": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          9
+        ],
+        "angle": 0
+      },
+      "slash": null,
+      "role": "windup"
+    },
+    {
+      "blade": {
+        "grip": [
+          23,
+          18
+        ],
+        "angle": 106
+      },
+      "slash": {
+        "piece": "WIDE_B",
+        "offset": [
+          0,
+          -16
+        ]
+      },
+      "role": "strike"
+    },
+    {
+      "blade": {
+        "grip": [
+          24,
+          21
+        ],
+        "angle": 122
+      },
+      "slash": null,
+      "role": "follow"
+    },
+    {
+      "blade": {
+        "grip": [
+          24,
+          20
+        ],
+        "angle": 117
+      },
+      "slash": null,
+      "role": "follow"
+    }
+  ]
+}

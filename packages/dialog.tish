@@ -1,0 +1,669 @@
+// dialog.tish — a chat / cutscene DIALOG BOX built on the packages/ui.tish layout engine.
+//
+// This is the high-level, game-facing dialogue component the plan calls for: a bordered box pinned to
+// the bottom of the screen with an optional PORTRAIT, a speaker name, a word-wrapped body that TYPES
+// itself out (uiReveal — cheap per-frame, no full re-layout), multi-page advance, and an optional list
+// of CHOICES. It is a non-blocking STATE MACHINE: call `dialogSay(...)` to open, then `dialogUpdate()`
+// once per frame from your game loop; it owns nothing but the UI canvas + one pooled portrait sprite.
+//
+// It deliberately does NOT touch the low-level tish-agb `dialogue_*` box (akari still uses
+// that). This is the layout-driven dialogue path: themeable, portrait-capable, and driven by the
+// same flex tree as every other menu.
+//
+//   dialogInit({ font, bodyW?, moreGlyph?, arrowAnim?, cursorSheet?, cursorFrame?, cursorGutter?, blip? })
+//        cursorSheet/cursorFrame: a sprite sheet + the ► arrow's frame → choices get a sprite CURSOR
+//        (in a fixed gutter, no text shift) instead of a "> " prefix. Omit to keep the "> " fallback.
+//        blip: optional `wav:` handle — RPG typewriter chirp played once per revealed character.
+//        blipChip: 1 to chirp on the PSG synth instead (no sample, no mixer voice). Wins over blip.
+//   dialogSay(text, { speaker?, portrait?, portraitSize?, side?, pos?, choices?, onChoose?, arrowAnim? })
+//        text: a string (one page) OR an array of strings (pages, advanced with A).
+//        portrait: an icon frame in the uiInit `sheet` (drawn via the UI icon pool); omit for none.
+//        side:  "left" (default) | "right" — which side the portrait sits on (visual-novel flip).
+//        pos:   "bottom" (default) | "top" — pin the box to the bottom or top of the screen.
+//        choices: array of strings shown after the LAST page finishes typing; A confirms one.
+//        onChoose: (index) => {}  called with the chosen index when a choice is picked.
+//        arrowAnim: "blink" (default) | "bounce" | "none" — the continue-arrow animation for this box.
+//   dialogWarm(text, opts) -> pre-solve a box SHAPE (same opts as dialogSay) so its first open replays a
+//        baked display list instead of laying out. Costs nothing on screen; call it at scene load.
+//   dialogUpdate() -> 1 while a box is open, else 0.   Advances the typewriter and reads input (A / d-pad).
+//   dialogActive() -> 1 if a box is open.
+//   dialogPhase()  -> 0 typing, 1 page shown (awaiting advance), 2 choosing.
+//   dialogResult() -> the index chosen at the last `choices` prompt (-1 if none).
+//   dialogAdvance()      -> perform the A action programmatically (skip typing / turn page / confirm).
+//   dialogMove(delta)    -> move the choice cursor (for scripted cutscenes / self-play demos).
+import {
+  uiRender, uiReveal, uiRevealWarm, uiHideIcons, uiRelayoutRows, uiStreamBegin, uiStreamStep,
+  uiBake, uiBaked, uiBakeText, uiBakeIcon, uiBakeFreeAll, uiReplayBegin, uiReplayStep,
+  uiRowText, makeCursor, makeArrow, makePointer, pointerAtRow, pointerHide, col2, uiKeys, uiKeyDown
+} from './ui'
+import { DIALOG_CPTR, dialogReset, memMark } from './scene_hooks'
+import { ui_text, ui_hide, text_height, text_wrap_height, sound_play } from 'cargo:tish_agb'
+import { chipBlip } from './chipsfx'
+export { dialogReset } from './scene_hooks'
+
+let BTN_A: i32 = 0
+let STREAM_BUDGET: i32 = 6
+// A baked box is 4-6 draw ops, so it lands in one or two frames.
+let REPLAY_BUDGET: i32 = 3
+
+// A prop value, or a default when absent (null/undefined) — NOT `||`, since 0 is a valid value.
+function pick(v, d) {
+  if (v === null) { return d }
+  if (typeof v === 'undefined') { return d }
+  return v
+}
+function present(v) {
+  if (v === null) { return 0 }
+  if (typeof v === 'undefined') { return 0 }
+  return 1
+}
+
+let CFG = {
+  font: -1, bodyW: 176, moreGlyph: "▼", arrowAnim: "blink", arrowFont: -1, blip: -1, blipChip: 0,
+  cursorSheet: -1, cursorFrame: 0, speed: 2,
+  // Choice-page behaviour (configurable — see dialogInit/dialogSay):
+  //   instantChoices: 0 = the last page TYPES then the menu appears (classic); 1 = show text+menu at once.
+  //   choiceLock: frames the menu ignores A after it appears (anti-misclick; 0 = off).
+  instantChoices: 0, choiceLock: 8,
+  // typewriter: 1 = type the body out char-by-char (classic); 0 = show each page FULLY at once (no reveal).
+  // Off = one text-shape per page at box-open instead of a shape on the first typed char + a re-shape when
+  // typing ends → no BGM hitch during typing (the shaping spike is the audio-glitch cause). Also snappier.
+  typewriter: 1,
+  cacheShapes: 3,
+}
+
+// The continue-arrow is its own reusable widget (packages/ui makeArrow): blink/bounce, sized by font.
+// One instance, reconfigured per box (glyph/anim can change per dialogSay).
+let ARROW = null
+// Choice cursor handle lives in scene_hooks.DIALOG_CPTR so loadScene can reset it without
+// merge-importing this whole module into every engine game.
+let CGUTTER: i32 = 10
+
+// phase: 0 = typing the current page, 1 = page fully shown, waiting for A to advance/close,
+//        2 = last page shown with a choices list, waiting for A to confirm a choice.
+let D = {
+  active: 0, pages: [], page: 0, speaker: "", portrait: -1, psize: 32, side: "left", pos: "bottom",
+  rev: 0, full: 0, phase: 0, speed: 2, lock: 0, instantChoices: 0, choiceLock: 8, choices: null, cur: null, onChoose: null,
+  blipWait: 0, streaming: 0, replay: 0, _arrowRec: null,
+  body: { text: "", color: "text", wrap: true, w: 176, reveal: 0 }, result: -1, _selChoice: null,
+  _chTexts: null, _choiceBlock: null,
+  // Chrome (border, fill, portrait, speaker, reserved body/choice slots) is on the canvas and its
+  // geometry is valid → a page turn patches the body in place instead of re-laying-out the tree.
+  chrome: 0,
+  // Reserved body height for THIS box: the tallest page, so every page of the box lays out
+  // identically (an SRPG dialogue window does not resize between pages).
+  bodyH: 0,
+}
+
+// Recolour + repaint ONLY the two affected choice lines on a cursor move — NOT a full uiRender (which
+// re-lays-out + redraws the whole box, including the wrapped body paragraph = ~½ second). The choice
+// glyphs don't move, so repainting them in the new colour overwrites cleanly (multi-colour canvas).
+function moveChoiceHi(oldi, newi) {
+  if (present(D._chTexts) === 0) { return }
+  let no = D._chTexts[oldi]
+  if (present(no._x) === 1) { no.color = "text"; ui_text(CFG.font, no._x, no._y, no.text, col2("text"), 512) }
+  let nn = D._chTexts[newi]
+  if (present(nn._x) === 1) { nn.color = "selected"; ui_text(CFG.font, nn._x, nn._y, nn.text, col2("selected"), 512) }
+  D._selChoice = nn
+}
+
+// Point / hide the choice cursor (top-level fns — sprite ops must not live in a closure; see tish#561).
+function ensureChoiceCursor() {
+  if (present(DIALOG_CPTR.v) === 1) { return }
+  if (CFG.cursorSheet < 0) { return }
+  DIALOG_CPTR.v = makePointer({ sheet: CFG.cursorSheet, frame: CFG.cursorFrame, anim: "bob" })
+}
+function paintChoiceCursor() {
+  ensureChoiceCursor()
+  if (present(DIALOG_CPTR.v) === 0) { return }
+  let c = D._selChoice
+  if (present(c) === 0) { return }
+  if (present(c._x) === 0) { return }
+  pointerAtRow(DIALOG_CPTR.v, c._x - CGUTTER, c._y, c._h)
+}
+function hideChoiceCursor() { if (present(DIALOG_CPTR.v) === 1) { pointerHide(DIALOG_CPTR.v) } }
+
+// dialogInit — set the body font + box metrics. Call once, after uiInit (the portrait is drawn from
+// the same icon sheet uiInit was given).
+// dialogSpeed(cps) / dialogSpeedGet() — read and change the typewriter rate after dialogInit, which is what
+// an options screen's "Text speed" row drives. Chars per frame (1 = classic crawl). A box already open keeps
+// the rate it started with (it captured CFG.speed), so the change shows on the next one.
+export function dialogSpeed(cps) {
+  if (cps < 1) { cps = 1 }
+  CFG.speed = cps
+}
+export function dialogSpeedGet() { return CFG.speed }
+
+export function dialogInit(cfg) {
+  CFG.font = pick(cfg.font, -1)
+  CFG.bodyW = pick(cfg.bodyW, 176)
+  CFG.moreGlyph = pick(cfg.moreGlyph, "▼")
+  CFG.arrowAnim = pick(cfg.arrowAnim, "blink")
+  CFG.arrowFont = pick(cfg.arrowFont, CFG.font)   // a smaller font here makes a smaller arrow
+  CFG.blip = pick(cfg.blip, -1)
+  CFG.blipChip = pick(cfg.blipChip, 0)
+  CFG.cursorSheet = pick(cfg.cursorSheet, -1)
+  CFG.cursorFrame = pick(cfg.cursorFrame, 0)
+  CFG.speed = pick(cfg.speed, 2)   // typewriter chars per frame (1 = classic; higher = faster)
+  CFG.instantChoices = 0
+  if (pick(cfg.instantChoices, 0)) { CFG.instantChoices = 1 }   // show choice page's menu without typing
+  CFG.typewriter = 0
+  if (pick(cfg.typewriter, 1)) { CFG.typewriter = 1 }           // false/0 → no char-by-char reveal (instant text)
+  CFG.choiceLock = pick(cfg.choiceLock, 8)                       // anti-misclick settle frames (0 = off)
+  // How many solved box shapes may stay resident. A shape is ~15-20K of node objects plus its display
+  // list, and a shape is per (speaker/portrait/choice-count/BODY HEIGHT) — so a chatty game with 1-, 2- and
+  // 3-line boxes has several, and left uncapped they accumulate until an allocation fails mid-conversation.
+  // 3 covers the shapes a scene actually alternates between; drop it to 1 in a game with little heap to
+  // spare (each new shape then re-solves, a few frames on an open, which is what it cost before baking).
+  CFG.cacheShapes = pick(cfg.cacheShapes, 3)
+  ARROW = makeArrow({ glyph: CFG.moreGlyph, font: CFG.arrowFont, color: "dim", anim: CFG.arrowAnim })
+  CGUTTER = pick(cfg.cursorGutter, 10)
+  dialogReset()
+}
+
+// dialogReset — in scene_hooks.tish (re-exported above).
+
+// Tear the box down; keep the UI bg allocated so the next dialog/pause open is cheap.
+function closeBox() {
+  D.active = 0
+  D.streaming = 0
+  // `ui_hide` blanks the canvas tiles, so the chrome is gone — the next box must paint itself.
+  D.chrome = 0
+  if (present(ARROW) === 1) { ARROW.hide() }
+  hideChoiceCursor()
+  uiHideIcons()
+  ui_hide()
+  // cacheShapes 0 = keep nothing between boxes. A solved shape is ~20K, and holding it through GAMEPLAY
+  // is holding it during the scene loads, entity spawns and menu warms that need the heap — the crash
+  // reported after a conversation ended, not during one. The next box re-solves (a few frames on an open).
+  if (CFG.cacheShapes === 0) { dialogFree() }
+  memMark("dialog close")
+}
+
+// Build the flex tree for the current state: a bottom-pinned bordered row of [portrait?, content col].
+// The content col is [speaker?, body, (choices | continue-arrow)].
+// On the LAST page with choices, the choice block is ALWAYS reserved (spacers while typing) so
+// finishTyping can paint labels in place without a second full uiRender of the body.
+// A box with choices reserves the menu's height on EVERY page, not just the last one — the window
+// then has the same shape all the way through, which is what lets a page turn skip re-layout.
+function wantsChoiceSlot() {
+  if (present(D.choices) === 0) { return 0 }
+  return 1
+}
+
+function buildChoiceLabels() {
+  D._selChoice = null
+  D._chTexts = []
+  let citems = []
+  let ci = 0
+  while (ci < D.choices.length) {
+    let cc = "text"
+    let label = D.choices[ci]
+    if (CFG.cursorSheet < 0) {
+      if (ci === D.cur.index()) { label = "> " + label } else { label = "  " + label }
+    }
+    let node = { text: label, color: cc, font: CFG.font }
+    if (ci === D.cur.index()) { node.color = "selected"; D._selChoice = node }
+    D._chTexts.push(node)
+    citems.push({ dir: "row", align: "center", children: [{ w: CGUTTER, h: 1, children: [] }, node] })
+    ci = ci + 1
+  }
+  let block = { dir: "col", gap: 1, children: citems }
+  D._choiceBlock = block
+  return block
+}
+
+function buildChoiceSpacers() {
+  let lh = text_height(CFG.font)
+  if (lh < 1) { lh = 8 }
+  let citems = []
+  let ci = 0
+  while (ci < D.choices.length) {
+    citems.push({ h: lh, w: CGUTTER + 40, children: [] })
+    ci = ci + 1
+  }
+  let block = { dir: "col", gap: 1, children: citems }
+  D._choiceBlock = block
+  return block
+}
+
+// ── Baked chrome, one record per box SHAPE ────────────────────────────────────
+// A dialog box's geometry is a function of its shape, not its content: does it have a speaker line, a
+// portrait (and which side / size), where is it pinned, how tall is the reserved body, how many choice
+// rows, is it multi-page. Everything else — the speaker's name, the portrait's face, the page text — is
+// a string or a frame drawn INTO fixed boxes. So each shape is laid out exactly once, baked to a
+// display list (`uiBake`), and every later box of that shape is a replay plus a few slot writes.
+//
+// Each record owns its OWN nodes: node geometry is written by the bake, so sharing one body node across
+// shapes would leave whichever baked last holding the geometry (and the other patching the wrong box).
+let CHROME = { keys: [], recs: [] }
+
+function shapeKey() {
+  let sp = 0
+  if (D.speaker !== "") { sp = 1 }
+  let po = 0
+  if (D.portrait >= 0) { po = 1 }
+  let nch = 0
+  if (present(D.choices) === 1) { nch = D.choices.length }
+  let multi = 0
+  if (D.pages.length > 1) { multi = 1 }
+  return "dlg" + sp + "." + po + "." + D.psize + "." + D.side + "." + D.pos + "." + D.bodyH + "." + nch + "." + multi + "." + CFG.font + "." + CFG.bodyW
+}
+
+function chromeIndex(key) {
+  let i = 0
+  while (i < CHROME.keys.length) {
+    if (CHROME.keys[i] === key) { return i }
+    i = i + 1
+  }
+  return -1
+}
+
+function chromeFor(key) {
+  let i = chromeIndex(key)
+  if (i < 0) { return null }
+  return CHROME.recs[i]
+}
+
+// dialogFree — give every solved box shape back to the heap (its nodes and its baked display list).
+// Boxes are kept solved so a re-open costs nothing, which is right until something BIGGER wants the
+// memory: a shop tab is ~40K of node tree plus its paint, and a greet box still holding ~35K left the
+// quantity prompt with nothing to allocate. So a screen that is taking over for a while calls this, and
+// the next box pays its one-time solve again (a few frames, on an open the player is waiting for anyway).
+export function dialogFree() {
+  CHROME.keys = []
+  CHROME.recs = []
+  D.chrome = 0
+  D.replay = 0
+  D.body = null
+  D._choiceBlock = null
+  D._arrowRec = null
+  uiBakeFreeAll()
+}
+
+// Build the flex tree for a shape: a pinned bordered row of [portrait?, content col], where the content
+// col is [speaker?, body, arrow row?, choice slot?]. Text starts EMPTY — the open fills the slots.
+// The choice slot is always spacers here; `showChoicesInPlace` paints real labels into it at phase 2.
+function buildChrome(key) {
+  // Bound the cache BEFORE allocating another shape's worth of nodes. Flushing all of them (rather than
+  // evicting one) keeps the display-list pool a simple append-only array; the shapes that are still in use
+  // re-solve on their next open, and the alternative — a conversation that quietly accumulates 20K per box
+  // height until it can't allocate — is not a trade worth the bookkeeping.
+  if (CHROME.keys.length >= CFG.cacheShapes) { dialogFree() }
+  let rec = {
+    key: key, tree: null, box: null, col: null, body: null, speaker: null, portrait: null,
+    arrow: null, block: null
+  }
+  // The speaker line takes a FIXED width so its geometry doesn't move with the name (and so an opaque
+  // in-place rewrite covers the previous, possibly longer, name).
+  rec.body = { text: "", color: "text", wrap: true, w: CFG.bodyW, h: D.bodyH, font: CFG.font, reveal: 0 }
+  let content = []
+  if (D.speaker !== "") {
+    rec.speaker = { text: "", color: "accent", font: CFG.font, w: CFG.bodyW }
+    content.push(rec.speaker)
+  }
+  content.push(rec.body)
+  // The continue arrow is a SPRITE, so it needs no row in the layout: it parks in the box's bottom-right
+  // corner (see placeArrow), which keeps a whole line of window height that an empty reserved row used to
+  // waste on every box. A single-page choice box has nothing to advance to and gets no arrow at all.
+  if (wantsChoiceSlot() === 0 || D.pages.length > 1) { rec.arrow = ARROW.node() }
+  if (wantsChoiceSlot() === 1) { rec.block = buildChoiceSpacers() }
+  if (rec.block !== null) { content.push(rec.block) }
+  let col = { dir: "col", grow: 1, gap: 2, children: content }
+  rec.col = col
+  let row = []
+  if (D.portrait >= 0) { rec.portrait = { icon: D.portrait, size: D.psize } }
+  if (rec.portrait !== null && D.side === "right") {
+    row.push(col)
+    row.push(rec.portrait)
+  } else {
+    if (rec.portrait !== null) { row.push(rec.portrait) }
+    row.push(col)
+  }
+  let box = { dir: "row", pad: 8, gap: 6, fill: "panel", border: "border", children: row }
+  rec.box = box
+  let just = "end"
+  if (D.pos === "top") { just = "start" }
+  rec.tree = { dir: "col", justify: just, children: [box] }
+  let at = chromeIndex(key)
+  if (at >= 0) { CHROME.recs[at] = rec } else { CHROME.keys.push(key); CHROME.recs.push(rec) }
+  return rec
+}
+
+// Park the continue-arrow sprite in the bottom-right corner of the box's CONTENT column, the way the reference SRPG
+// rides it on the window edge. Anchored to the column, not the box, so a right-side portrait (visual-novel
+// flip) doesn't end up with the arrow on top of the face. Needs only solved geometry → once per shape.
+function placeArrow(rec) {
+  if (rec.arrow === null) { return }
+  if (rec.col === null) { return }
+  if (present(rec.col._x) === 0) { return }
+  let s = rec.arrow.w
+  rec.arrow._x = rec.col._x + rec.col._w - s
+  rec.arrow._y = rec.col._y + rec.col._h + 1
+}
+
+// The tree for the CURRENT state, for the fallback path (a shape that refused to bake).
+function buildTree() {
+  let rec = chromeFor(shapeKey())
+  if (rec === null) { rec = buildChrome(shapeKey()) }
+  // A baked shape drops its tree; rebuilding it means a fresh record (its nodes carry the geometry).
+  if (rec.tree === null) { rec = buildChrome(shapeKey()) }
+  D._arrowRec = rec
+  rec.body.reveal = D.rev
+  rec.body.text = D.pages[D.page]
+  if (rec.speaker !== null) { rec.speaker.text = D.speaker }
+  if (rec.portrait !== null) { rec.portrait.icon = D.portrait }
+  D.body = rec.body
+  D._choiceBlock = rec.block
+  return rec.tree
+}
+
+// Paint choice labels into the reserved spacer box — no body reshape / full uiRender. Rows are
+// written opaquely (uiRelayoutRows, not uiRelayoutAt): a tile-aligned rect clear here sheared the
+// bottom pixel rows of the body paragraph sitting directly above the menu.
+function showChoicesInPlace() {
+  let slot = D._choiceBlock
+  if (present(slot) === 0) { uiRender(buildTree()); return }
+  if (present(slot._x) === 0) { uiRender(buildTree()); return }
+  let block = buildChoiceLabels()
+  uiRelayoutRows(block, slot._x, slot._y, slot._w, slot._h, "panel")
+  paintChoiceCursor()
+}
+
+// Reserve the body box at the height of the box's TALLEST page, so no page changes the window shape.
+function measureBodyH() {
+  let h = 0
+  let i = 0
+  while (i < D.pages.length) {
+    let ph = text_wrap_height(CFG.font, D.pages[i], CFG.bodyW)
+    if (ph > h) { h = ph }
+    i = i + 1
+  }
+  if (h < 1) { h = text_height(CFG.font) }
+  return h
+}
+
+// Lay out the box for the current page. Streams paint across frames (null bg — don't wipe the map).
+// Once the chrome is up, a page turn NEVER re-lays-out: the border, fill, portrait, speaker and the
+// reserved body/choice slots are already on the canvas at valid geometry, so the new page is one
+// opaque in-place write into the body box (re-layout of this tree measures ~4 frames of CPU).
+function layoutPage() {
+  D.rev = 0
+  D.phase = 0
+  D.streaming = 0
+  ARROW.hide()
+  hideChoiceCursor()
+  D.full = D.pages[D.page].length
+  if (D.instantChoices === 1) {
+    if (isLastPage() === 1) {
+      if (present(D.choices) === 1) {
+        D.rev = D.full
+        D.phase = 2
+        D.lock = D.choiceLock
+      }
+    }
+  }
+  if (CFG.typewriter === 0) {
+    D.rev = D.full
+    if (isLastPage() === 1) {
+      if (present(D.choices) === 1) { D.phase = 2; D.lock = D.choiceLock }
+      else { D.phase = 1; ARROW.reset() }
+    } else {
+      D.phase = 1
+      ARROW.reset()
+    }
+  }
+  // Chrome already resident at valid geometry → swap the body text in place (SRPG-style page turn).
+  if (D.chrome === 1) { pageInPlace(); return }
+  openChrome()
+}
+
+// Put this box on screen. Its shape was almost certainly laid out already — on this boot, by an earlier
+// conversation — in which case there is NO layout: fill the speaker / portrait / body slots and replay
+// the baked display list.
+function openChrome() {
+  let key = shapeKey()
+  let rec = chromeFor(key)
+  if (rec === null) { rec = buildChrome(key) }
+  // A baked record dropped its tree. If that bake has since been released (dialogFree, for a screen that
+  // needed the heap more), there is nothing left to re-bake FROM — build the shape again.
+  if (rec.tree === null) { if (uiBaked(key) === 0) { rec = buildChrome(key) } }
+  D.body = rec.body
+  D._choiceBlock = rec.block
+  D._arrowRec = rec
+  if (rec.arrow !== null) { ARROW._node = rec.arrow }
+  if (uiBaked(key) === 0) {
+    if (uiBake(key, rec.tree) === 0) {
+      // Shape refused to bake — fall back to the streamed tree render (which lays out in its first step,
+      // so the arrow can only be placed once that finishes).
+      D.replay = 0
+      D.streaming = 1
+      uiStreamBegin(buildTree(), null)
+      return
+    }
+    // Baked: the display list draws the box now, so the containers/spacers the solver needed are dead
+    // weight on a 256K heap. Keep only the nodes something still patches (body, speaker, portrait,
+    // choice slot, arrow) — each of those kept its geometry from the bake.
+    rec.tree = null
+    placeArrow(rec)
+  }
+  if (rec.speaker !== null) { uiBakeText(rec.speaker, D.speaker) }
+  if (rec.portrait !== null) { uiBakeIcon(rec.portrait, D.portrait) }
+  // The typewriter draws the body itself, so the baked op holds "" until the page is meant to be up.
+  let shown = ""
+  if (D.rev >= D.full) { shown = D.pages[D.page] }
+  uiBakeText(rec.body, shown)
+  rec.body.text = D.pages[D.page]   // the NODE always carries the full page (uiReveal reads it)
+  rec.body.reveal = D.rev
+  rec.body._rev = 0
+  D.replay = 1
+  D.streaming = 1
+  uiReplayBegin(key)
+}
+
+// Repaint just the body box for the current page. `uiRowText` with the panel fill does one opaque
+// wrapped write over the reserved area, so the previous page is erased and the new one drawn in the
+// same pass — no wipe flash, no re-measure, chrome untouched.
+function pageInPlace() {
+  if (D.rev >= D.full) {
+    uiRowText(D.body, D.pages[D.page], "text", "panel")
+    if (D.phase === 2) { showChoicesInPlace() } else { ARROW.reset() }
+    return
+  }
+  // Typewriter: clear the reserved area, then let uiReveal type into it (shape once up front so the
+  // first typed character isn't a spike that starves the mixer).
+  uiRowText(D.body, "", "text", "panel")
+  D.body.text = D.pages[D.page]
+  D.body._rev = 0
+  uiRevealWarm(D.body)
+}
+
+function isLastPage() {
+  if (D.page + 1 >= D.pages.length) { return 1 }
+  return 0
+}
+
+// Snap the current page to fully-typed. Phase 1 needs no re-render (arrow slot already reserved).
+// Phase 2 paints choices into the reserved spacer slot — never a second full body uiRender.
+function finishTyping() {
+  D.rev = D.full
+  uiReveal(D.body, D.rev)
+  if (isLastPage() === 1 && present(D.choices) === 1) {
+    D.phase = 2
+    D.lock = D.choiceLock
+    ARROW.hide()
+    showChoicesInPlace()
+  } else {
+    D.phase = 1
+    ARROW.reset()
+  }
+}
+
+// The "A" action, shared by live input (dialogUpdate) and scripted advance (dialogAdvance).
+function doAdvance() {
+  if (D.active === 0) { return }
+  if (D.phase === 0) { finishTyping(); return }
+  if (D.phase === 1) {
+    if (isLastPage() === 1) { closeBox() } else { D.page = D.page + 1; layoutPage() }
+    return
+  }
+  D.result = D.cur.index()
+  let cb = D.onChoose
+  closeBox()
+  if (present(cb) === 1) { cb(D.result) }
+}
+
+export function dialogSay(text, opts) {
+  let o = pick(opts, {})
+  if (typeof text === 'string') { D.pages = [text] } else { D.pages = text }
+  D.page = 0
+  D.speaker = pick(o.speaker, "")
+  D.portrait = pick(o.portrait, -1)
+  D.psize = pick(o.portraitSize, 32)
+  D.side = pick(o.side, "left")
+  D.pos = pick(o.pos, "bottom")
+  D.choices = pick(o.choices, null)
+  D.onChoose = pick(o.onChoose, null)
+  D.speed = pick(o.speed, CFG.speed)
+  if (D.speed < 1) { D.speed = 1 }
+  D.instantChoices = 0
+  if (pick(o.instantChoices, CFG.instantChoices)) { D.instantChoices = 1 }
+  D.choiceLock = pick(o.choiceLock, CFG.choiceLock)
+  D.result = -1
+  D.active = 1
+  D.blipWait = 0
+  D.chrome = 0
+  D.bodyH = measureBodyH()
+  ARROW.anim = pick(o.arrowAnim, CFG.arrowAnim)
+  if (present(D.choices) === 1) { D.cur = makeCursor(1, D.choices.length) }
+  layoutPage()
+}
+
+// dialogWarm(text, opts) — pre-solve a box SHAPE (same options as dialogSay) so its first real open is
+// a replay instead of a ~7-frame layout. Call it at scene load for the shapes a scene uses: a
+// speaker+portrait box, a Yes/No prompt, a narration banner. `text` is only used for the reserved body
+// height, which quantises to whole lines — warming with ANY two-line string covers every two-line box
+// of that shape. Never touches the canvas, so it is safe to call while a scene is on screen.
+export function dialogWarm(text, opts) {
+  if (D.active === 1) { return 0 }
+  let o = pick(opts, {})
+  let sPages = D.pages
+  let sPage = D.page
+  let sSpeaker = D.speaker
+  let sPortrait = D.portrait
+  let sPsize = D.psize
+  let sSide = D.side
+  let sPos = D.pos
+  let sChoices = D.choices
+  let sBodyH = D.bodyH
+  if (typeof text === 'string') { D.pages = [text] } else { D.pages = text }
+  D.page = 0
+  D.speaker = pick(o.speaker, "")
+  D.portrait = pick(o.portrait, -1)
+  D.psize = pick(o.portraitSize, 32)
+  D.side = pick(o.side, "left")
+  D.pos = pick(o.pos, "bottom")
+  D.choices = pick(o.choices, null)
+  D.bodyH = measureBodyH()
+  let key = shapeKey()
+  let rec = chromeFor(key)
+  if (rec === null) { rec = buildChrome(key) }
+  let ok = 1
+  if (uiBaked(key) === 0) {
+    ok = uiBake(key, rec.tree)
+    if (ok === 1) { rec.tree = null; placeArrow(rec) }
+  }
+  D.pages = sPages
+  D.page = sPage
+  D.speaker = sSpeaker
+  D.portrait = sPortrait
+  D.psize = sPsize
+  D.side = sSide
+  D.pos = sPos
+  D.choices = sChoices
+  D.bodyH = sBodyH
+  return ok
+}
+
+export function dialogActive() { return D.active }
+export function dialogPhase() { return D.phase }
+export function dialogResult() { return D.result }
+export function dialogAdvance() { doAdvance() }
+
+export function dialogMove(delta) {
+  if (D.active === 0) { return }
+  if (D.phase !== 2) { return }
+  let old = D.cur.index()
+  let i = old + delta
+  if (i < 0) { i = 0 }
+  if (i >= D.choices.length) { i = D.choices.length - 1 }
+  if (i === old) { return }
+  D.cur.setIndex(i)
+  moveChoiceHi(old, i)
+  paintChoiceCursor()
+}
+
+// dialogUpdate — drive one frame. Streams page open; uses uiKeys (one pad read). Choice moves
+// recolour in place; finishTyping no longer full-repaints the body.
+export function dialogUpdate() {
+  if (D.active === 0) { return 0 }
+
+  // Page still painting in — advance paint batches; no input until the box is on screen.
+  if (D.streaming === 1) {
+    let done = 0
+    if (D.replay === 1) { done = uiReplayStep(REPLAY_BUDGET) } else { done = uiStreamStep(STREAM_BUDGET) }
+    if (done === 1) {
+      D.streaming = 0
+      D.chrome = 1
+      if (D.replay === 0) { placeArrow(D._arrowRec) }
+      if (D.phase === 0) { uiRevealWarm(D.body) }
+      if (D.phase === 1) { ARROW.reset() }
+      // A box that opens straight into its choices (instantChoices / typewriter off): the baked chrome
+      // reserves the slot with spacers, so the labels are painted in place now. A streamed fallback tree
+      // already carries them — only paint the cursor there.
+      if (D.phase === 2) {
+        if (D.replay === 1) { showChoicesInPlace() } else { paintChoiceCursor() }
+      }
+    }
+    return 1
+  }
+
+  let k = uiKeys()
+  let a = uiKeyDown(k, BTN_A)
+
+  if (D.phase === 0) {
+    if (a > 0) {
+      finishTyping()
+    } else {
+      if (D.rev < D.full) {
+        D.rev = D.rev + D.speed
+        if (D.rev > D.full) { D.rev = D.full }
+        uiReveal(D.body, D.rev)
+        if (CFG.blipChip > 0 || CFG.blip >= 0) {
+          if (D.blipWait <= 0) {
+            if (CFG.blipChip > 0) { chipBlip() } else { sound_play(CFG.blip) }
+            D.blipWait = 3
+          } else {
+            D.blipWait = D.blipWait - 1
+          }
+        }
+        if (D.rev >= D.full) { finishTyping() }
+      }
+    }
+    return 1
+  }
+
+  if (D.phase === 1) {
+    hideChoiceCursor()
+    ARROW.tick()
+    if (a > 0) { doAdvance() }
+    return 1
+  }
+
+  if (D.lock > 0) { D.lock = D.lock - 1 }
+  let oldc = D.cur.index()
+  if (D.cur.navBits(k) > 0) { moveChoiceHi(oldc, D.cur.index()) }
+  paintChoiceCursor()
+  if (a > 0 && D.lock === 0) { doAdvance() }
+  return 1
+}

@@ -1,0 +1,756 @@
+{
+ "group": "FX",
+ "count": 75,
+ "assets": [
+  {
+   "file": "FX/AllPreview.png",
+   "name": "AllPreview",
+   "category": "FX",
+   "dims": [
+    735,
+    549
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Attack/CircularSlash/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Attack/CircularSlash",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Attack/Claw/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Attack/Claw",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Attack/ClawDouble/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Attack/ClawDouble",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Attack/Cut/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Attack/Cut",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Attack/CutDouble/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Attack/CutDouble",
+   "dims": [
+    160,
+    32
+   ],
+   "type": "sheet-16(10x2)"
+  },
+  {
+   "file": "FX/Attack/CutX/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Attack/CutX",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Attack/SlashCurved/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Attack/SlashCurved",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Attack/SlashDoubleCurved/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Attack/SlashDoubleCurved",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Elemental/Explosion/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Elemental/Explosion",
+   "dims": [
+    360,
+    40
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Flam/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Elemental/Flam",
+   "dims": [
+    200,
+    30
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Ice/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Elemental/Ice",
+   "dims": [
+    320,
+    32
+   ],
+   "type": "sheet-16(20x2)"
+  },
+  {
+   "file": "FX/Elemental/Ice/SpriteSheetB.png",
+   "name": "SpriteSheetB",
+   "category": "Elemental/Ice",
+   "dims": [
+    288,
+    32
+   ],
+   "type": "sheet-16(18x2)"
+  },
+  {
+   "file": "FX/Elemental/Ice/SpriteSheetFlake.png",
+   "name": "SpriteSheetFlake",
+   "category": "Elemental/Ice",
+   "dims": [
+    288,
+    32
+   ],
+   "type": "sheet-16(18x2)"
+  },
+  {
+   "file": "FX/Elemental/Plant/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Elemental/Plant",
+   "dims": [
+    240,
+    28
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Plant/SpriteSheetB.png",
+   "name": "SpriteSheetB",
+   "category": "Elemental/Plant",
+   "dims": [
+    210,
+    26
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Rock/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Elemental/Rock",
+   "dims": [
+    420,
+    30
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Rock/SpriteSheetB.png",
+   "name": "SpriteSheetB",
+   "category": "Elemental/Rock",
+   "dims": [
+    420,
+    30
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/RockSpike/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Elemental/RockSpike",
+   "dims": [
+    540,
+    48
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Thunder/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Elemental/Thunder",
+   "dims": [
+    160,
+    28
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/Water/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Elemental/Water",
+   "dims": [
+    440,
+    33
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Elemental/WaterPillar/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Elemental/WaterPillar",
+   "dims": [
+    270,
+    41
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Environment/Fog.png",
+   "name": "Fog",
+   "category": "Environment",
+   "dims": [
+    320,
+    180
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Environment/Raylight.png",
+   "name": "Raylight",
+   "category": "Environment",
+   "dims": [
+    216,
+    102
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Magic/Aura/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Magic/Aura",
+   "dims": [
+    125,
+    24
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Magic/Boost/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Magic/Boost",
+   "dims": [
+    424,
+    35
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Magic/Circle/SpriteSheetOrange.png",
+   "name": "SpriteSheetOrange",
+   "category": "Magic/Circle",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Magic/Circle/SpriteSheetSpark.png",
+   "name": "SpriteSheetSpark",
+   "category": "Magic/Circle",
+   "dims": [
+    192,
+    32
+   ],
+   "type": "sheet-16(12x2)"
+  },
+  {
+   "file": "FX/Magic/Circle/SpriteSheetSpark2.png",
+   "name": "SpriteSheetSpark2",
+   "category": "Magic/Circle",
+   "dims": [
+    160,
+    32
+   ],
+   "type": "sheet-16(10x2)"
+  },
+  {
+   "file": "FX/Magic/Circle/SpriteSheetWhite.png",
+   "name": "SpriteSheetWhite",
+   "category": "Magic/Circle",
+   "dims": [
+    128,
+    32
+   ],
+   "type": "sheet-16(8x2)"
+  },
+  {
+   "file": "FX/Magic/Shield/SpriteSheetBlue.png",
+   "name": "SpriteSheetBlue",
+   "category": "Magic/Shield",
+   "dims": [
+    144,
+    26
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Magic/Shield/SpriteSheetYellow.png",
+   "name": "SpriteSheetYellow",
+   "category": "Magic/Shield",
+   "dims": [
+    144,
+    26
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Magic/Spark/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Magic/Spark",
+   "dims": [
+    270,
+    35
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Magic/Spirit/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Magic/Spirit",
+   "dims": [
+    160,
+    32
+   ],
+   "type": "sheet-16(10x2)"
+  },
+  {
+   "file": "FX/Magic/Spirit/SpriteSheetBlue.png",
+   "name": "SpriteSheetBlue",
+   "category": "Magic/Spirit",
+   "dims": [
+    160,
+    32
+   ],
+   "type": "sheet-16(10x2)"
+  },
+  {
+   "file": "FX/Magic/Spirit/SpriteSheetDouble.png",
+   "name": "SpriteSheetDouble",
+   "category": "Magic/Spirit",
+   "dims": [
+    160,
+    32
+   ],
+   "type": "sheet-16(10x2)"
+  },
+  {
+   "file": "FX/Particle/AllPreview.png",
+   "name": "AllPreview",
+   "category": "Particle",
+   "dims": [
+    147,
+    267
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Bamboo.png",
+   "name": "Bamboo",
+   "category": "Particle",
+   "dims": [
+    96,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Clouds.png",
+   "name": "Clouds",
+   "category": "Particle",
+   "dims": [
+    80,
+    36
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Fire.png",
+   "name": "Fire",
+   "category": "Particle",
+   "dims": [
+    96,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Grass.png",
+   "name": "Grass",
+   "category": "Particle",
+   "dims": [
+    72,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Leaf.png",
+   "name": "Leaf",
+   "category": "Particle",
+   "dims": [
+    72,
+    7
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/LeafPink.png",
+   "name": "LeafPink",
+   "category": "Particle",
+   "dims": [
+    72,
+    7
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Rain.png",
+   "name": "Rain",
+   "category": "Particle",
+   "dims": [
+    24,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/RainOnFloor.png",
+   "name": "RainOnFloor",
+   "category": "Particle",
+   "dims": [
+    24,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Rock.png",
+   "name": "Rock",
+   "category": "Particle",
+   "dims": [
+    80,
+    16
+   ],
+   "type": "strip-h(5)"
+  },
+  {
+   "file": "FX/Particle/RockGray.png",
+   "name": "RockGray",
+   "category": "Particle",
+   "dims": [
+    80,
+    16
+   ],
+   "type": "strip-h(5)"
+  },
+  {
+   "file": "FX/Particle/Snow.png",
+   "name": "Snow",
+   "category": "Particle",
+   "dims": [
+    56,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Spark.png",
+   "name": "Spark",
+   "category": "Particle",
+   "dims": [
+    70,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Vase.png",
+   "name": "Vase",
+   "category": "Particle",
+   "dims": [
+    84,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Particle/Wood.png",
+   "name": "Wood",
+   "category": "Particle",
+   "dims": [
+    96,
+    16
+   ],
+   "type": "strip-h(6)"
+  },
+  {
+   "file": "FX/Projectile/AllPreview.png",
+   "name": "AllPreview",
+   "category": "Projectile",
+   "dims": [
+    151,
+    263
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/Arrow.png",
+   "name": "Arrow",
+   "category": "Projectile",
+   "dims": [
+    13,
+    5
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/BigEnergyBall.png",
+   "name": "BigEnergyBall",
+   "category": "Projectile",
+   "dims": [
+    96,
+    24
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/BigKunai.png",
+   "name": "BigKunai",
+   "category": "Projectile",
+   "dims": [
+    35,
+    9
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/BigShuriken.png",
+   "name": "BigShuriken",
+   "category": "Projectile",
+   "dims": [
+    46,
+    23
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/CanonBall.png",
+   "name": "CanonBall",
+   "category": "Projectile",
+   "dims": [
+    80,
+    16
+   ],
+   "type": "strip-h(5)"
+  },
+  {
+   "file": "FX/Projectile/EnergyBall.png",
+   "name": "EnergyBall",
+   "category": "Projectile",
+   "dims": [
+    64,
+    16
+   ],
+   "type": "strip-h(4)"
+  },
+  {
+   "file": "FX/Projectile/Fireball.png",
+   "name": "Fireball",
+   "category": "Projectile",
+   "dims": [
+    64,
+    16
+   ],
+   "type": "strip-h(4)"
+  },
+  {
+   "file": "FX/Projectile/IceSpike.png",
+   "name": "IceSpike",
+   "category": "Projectile",
+   "dims": [
+    144,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/Kunai.png",
+   "name": "Kunai",
+   "category": "Projectile",
+   "dims": [
+    14,
+    5
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/Kunai/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Projectile/Kunai",
+   "dims": [
+    650,
+    59
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/PlantSpike.png",
+   "name": "PlantSpike",
+   "category": "Projectile",
+   "dims": [
+    96,
+    20
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/Shuriken.png",
+   "name": "Shuriken",
+   "category": "Projectile",
+   "dims": [
+    32,
+    16
+   ],
+   "type": "strip-h(2)"
+  },
+  {
+   "file": "FX/Projectile/Shuriken/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Projectile/Shuriken",
+   "dims": [
+    690,
+    54
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Projectile/ShurikenMagic.png",
+   "name": "ShurikenMagic",
+   "category": "Projectile",
+   "dims": [
+    32,
+    16
+   ],
+   "type": "strip-h(2)"
+  },
+  {
+   "file": "FX/Projectile/SpriteSheetRock.png",
+   "name": "SpriteSheetRock",
+   "category": "Projectile",
+   "dims": [
+    64,
+    16
+   ],
+   "type": "strip-h(4)"
+  },
+  {
+   "file": "FX/Slash/SpriteSheetArc.png",
+   "name": "SpriteSheetArc",
+   "category": "Slash",
+   "dims": [
+    228,
+    34
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Slash/SpriteSheetCircular.png",
+   "name": "SpriteSheetCircular",
+   "category": "Slash",
+   "dims": [
+    378,
+    55
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Slash/SpriteSheetMulti.png",
+   "name": "SpriteSheetMulti",
+   "category": "Slash",
+   "dims": [
+    270,
+    30
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Slash/SpriteSheetSlash01.png",
+   "name": "SpriteSheetSlash01",
+   "category": "Slash",
+   "dims": [
+    130,
+    32
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Slash/SpriteSheetSlash02.png",
+   "name": "SpriteSheetSlash02",
+   "category": "Slash",
+   "dims": [
+    396,
+    50
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Slash/SpriteSheetSlash03.png",
+   "name": "SpriteSheetSlash03",
+   "category": "Slash",
+   "dims": [
+    228,
+    42
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "FX/Smoke/Smoke/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Smoke/Smoke",
+   "dims": [
+    192,
+    32
+   ],
+   "type": "sheet-16(12x2)"
+  },
+  {
+   "file": "FX/Smoke/SmokeCircular/SpriteSheet.png",
+   "name": "SpriteSheet",
+   "category": "Smoke/SmokeCircular",
+   "dims": [
+    240,
+    14
+   ],
+   "type": "irregular"
+  }
+ ]
+}

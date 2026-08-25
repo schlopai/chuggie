@@ -1,0 +1,835 @@
+// packages/rts — the real-time strategy kit.
+//
+// What this owns: the roster, selection, orders, buildings, the economy ledger and production
+// queues. What it does NOT own: movement, pathing, combat, fog. Those are native systems in
+// `crates/tish-gba-game-engine` (`flow_goal` / `set_seek` / `set_soldier` / `set_vision`), because
+// a screen of units cannot afford a tish tick each — see docs/perf-rules.md §7, and the three
+// measurements in examples/rts-flow, examples/rts-fog and examples/rts-select.
+//
+// The division is the same one the rest of the engine draws: the engine resolves per-frame movement
+// and combat deterministically in Rust, and the game decides *what to order*. Everything here runs
+// on player input or on a slow timer; nothing here runs per unit per frame.
+//
+// ── Three rules this file is built around, all of them measured ──────────────────────────────────
+//
+// 1. **Units are entities; buildings are not.** The ceiling is ~20-25 live entities at 60fps. A
+//    building never moves, never animates and needs no body, so it is a stamped tilemap rect, a
+//    solid footprint and a row in a flat array. Spending an entity slot on scenery costs a unit.
+//
+// 2. **Units are POOLED, never spawned mid-battle.** A spawn builds an entity's method wrapper and
+//    allocates sprite VRAM on one frame (perf-rules §6). `rtsInit` creates the whole roster up
+//    front and training re-arms a dormant slot.
+//
+// 3. **Every scalar and array is typed.** An untyped `let` is a soft-float `Cell<f64>` and an
+//    untyped array is 28 bytes an element (perf-rules §1).
+import {
+  spawn, despawn, set_transform, attach_sprite, set_collider, set_topdown, topdown_speed, set_health,
+  set_soldier, set_seek, clear_seek, set_vision, seek_arrived, entity_alive, fog_state,
+  set_sleeping,
+  entity_x, entity_y, entity_hp, health_max, flow_goal, grid_set_solid, tile_solid,
+} from 'cargo:tish_gba_game_engine'
+import { sprite_new, sprite_set_visible, sprite_set_sheet, sprite_set_pos, sprite_set_frame,
+  sprite_set_hud } from 'cargo:tish_agb'
+
+// ── Roster ───────────────────────────────────────────────────────────────────
+// Parallel typed columns indexed by slot. This is the shape every roster in this repo uses
+// (examples/warsong/src/units.tish): no structs, because a typed struct assignment COPIES and every
+// write to the copy is silently discarded.
+export let rEnt: i32[] = []
+export let rTeam: i32[] = []
+export let rKind: i32[] = []
+export let rLive: i32[] = [] // 1 = in play, 0 = a dormant pool slot
+export let rOrder: i32[] = [] // RO_* below
+export let rHome: i32[] = [] // packed home cell (col << 8 | row), where a worker returns cargo
+export let rCargo: i32[] = [] // resource units currently carried
+export let rDwell: i32[] = [] // frames left on the current harvest/build action
+
+export let RO_IDLE: i32 = 0
+export let RO_MOVE: i32 = 1
+export let RO_HARVEST: i32 = 2
+export let RO_RETURN: i32 = 3
+
+let rCount: i32 = 0
+// The engine owns the entity, tish-agb owns the sprite. Keeping the handle here means a caller
+// never has to hold both to hide a pooled unit.
+let rSprite: i32[] = []
+
+// ── Economy ──────────────────────────────────────────────────────────────────
+export let rGold: i32 = 0
+export let rWood: i32 = 0
+export let rFood: i32 = 0 // used
+export let rFoodCap: i32 = 0
+
+// ── Buildings ────────────────────────────────────────────────────────────────
+// Flat columns again. A building is a rect of cells, not an entity.
+export let bKind: i32[] = []
+export let bCol: i32[] = []
+export let bRow: i32[] = []
+export let bW: i32[] = []
+export let bH: i32[] = []
+export let bTeam: i32[] = []
+export let bHp: i32[] = []
+export let bQueue: i32[] = [] // unit kind in production, or -1
+export let bTimer: i32[] = [] // frames left on it
+// Construction. A building is placed as a SITE and becomes real only when a worker has finished
+// it: `bProg < bProgMax` means scaffolding, not a barracks. Anything that asks "do I have a
+// barracks" must ask `rtsBuildingDone` too, or a site the player merely paid for would satisfy a
+// win condition or unlock a unit it has not actually built.
+export let bProg: i32[] = []
+export let bProgMax: i32[] = []
+export let bBuilder: i32[] = [] // roster slot working this site, or -1
+let bCount: i32 = 0
+
+// ── Selection ────────────────────────────────────────────────────────────────
+// A bitmask over roster slots, not a list: "is slot k selected" is a shift and an and, and the
+// whole selection fits in a register. Caps the player's army at 32, which is well past the
+// entity ceiling anyway.
+let rSel: i32 = 0
+
+// Which team's eyes the fog is drawn through. Only this team's units reveal.
+//
+// ⚠️ Without it, `set_vision` is applied to everyone and the ENEMY army cheerfully reveals the map
+// on the player's behalf — the shroud lifts wherever the enemy walks, which is precisely backwards
+// and looks, from the outside, like fog that simply does not work.
+let rViewTeam: i32 = 0
+
+export function rtsSetViewTeam(team: i32) { rViewTeam = team }
+
+export function rtsReset() {
+  rCount = 0
+  bCount = 0
+  rSel = 0
+  rGold = 0
+  rWood = 0
+  rFood = 0
+  rFoodCap = 0
+  // The roster SURVIVES a mission change. Only the claim is released.
+  //
+  // Despawning every entity and re-spawning it next mission churned an entity, a sprite and their
+  // allocations per slot per load; the SECOND transition died in the allocator
+  // (alloc.rs handle_alloc_error) about 1,700 frames in. Reusing the slots removes the churn
+  // entirely — and a pool that is torn down and rebuilt was never a pool.
+  //
+  // Every slot is parked dormant here; `rtsPool` re-claims them below and re-points their team and
+  // art. `world_step` skips a sleeping slot, so a roster larger than this mission needs costs
+  // nothing (that was the earlier 6,632-vs-4,377 finding, and `set_sleeping` is what fixed it).
+  let i: i32 = 0
+  while (i < rEnt.length) {
+    rLive[i] = 0
+    rOrder[i] = RO_IDLE
+    rCargo[i] = 0
+    rDwell[i] = 0
+    set_vision(rEnt[i], 0)
+    clear_seek(rEnt[i])
+    set_transform(rEnt[i], 0 - 64, 0 - 64)
+    sprite_set_visible(rSprite[i], 0)
+    set_sleeping(rEnt[i], 1)
+    i = i + 1
+  }
+  while (bKind.length > 0) {
+    bKind.pop() bCol.pop() bRow.pop() bW.pop() bH.pop()
+    bTeam.pop() bHp.pop() bQueue.pop() bTimer.pop()
+    bProg.pop() bProgMax.pop() bBuilder.pop()
+  }
+}
+
+// Create the whole roster ONCE, dormant. `count` slots share one sheet handle per call; call it per
+// side. Returns the first slot index so the caller can address its own block.
+// `box` is the collider edge in px. It travels with the ART: an 8px sprite in a 10px box catches
+// on corners it visually clears, and the flow field's corridor centring is measured against this
+// box, not against the sprite.
+// Claims `count` slots for `team`, REUSING any the previous mission left behind and spawning only
+// the shortfall. Call it per side, in the same order every mission.
+export function rtsPool(count: i32, sheet: i32, team: i32, box: i32): i32 {
+  let first: i32 = rCount
+  let i: i32 = 0
+  while (i < count) {
+    let slot: i32 = rCount
+    if (slot < rEnt.length) {
+      // Reuse: the entity and its sprite already exist, so only the ownership changes.
+      rTeam[slot] = team
+      rKind[slot] = 0
+      rLive[slot] = 0
+      sprite_set_sheet(rSprite[slot], sheet, 0)
+      set_collider(rEnt[slot], box, box)
+      rCount = rCount + 1
+      i = i + 1
+      continue
+    }
+    let e: i32 = spawn()
+    let sp: i32 = sprite_new(sheet)
+    attach_sprite(e, sp)
+    set_collider(e, box, box)
+    set_topdown(e)
+    topdown_speed(e, 1)
+    // Parked off-map and hidden until armed. `sprite_set_visible(h, 0)` does NOT free the sprite's
+    // VRAM (perf-rules §4) — which is exactly what a pool wants: the allocation happens here, once.
+    set_transform(e, 0 - 64, 0 - 64)
+    sprite_set_visible(sp, 0)
+    // Dormant: the engine skips it entirely until it is armed. Without this a pool is a frame-rate
+    // tax, and the game has to choose between an army and 60fps.
+    set_sleeping(e, 1)
+    rEnt.push(e) rSprite.push(sp) rTeam.push(team) rKind.push(0) rLive.push(0)
+    rOrder.push(RO_IDLE) rHome.push(0) rCargo.push(0) rDwell.push(0)
+    rCount = rCount + 1
+    i = i + 1
+  }
+  return first
+}
+
+export function rtsCount(): i32 { return rCount }
+
+// Bring a dormant slot into play. This is what "train a footman" resolves to — no spawn, no VRAM.
+// `sheet` re-points the pooled sprite at this kind's art. Re-pointing is how one pool holds mixed
+// kinds: `sprite_set_visible(h, 0)` does not free a sprite's VRAM, so a pool of separate hidden
+// sprites per kind would hold all of them at once (perf-rules §4).
+export function rtsArm(slot: i32, kind: i32, sheet: i32, col: i32, row: i32, hp: i32, rangePx: i32,
+                       dmg: i32, cooldown: i32, sight: i32): i32 {
+  if (slot < 0 || slot >= rCount) { return 0 }
+  let e: i32 = rEnt[slot]
+  set_sleeping(e, 0)
+  sprite_set_sheet(rSprite[slot], sheet, 0)
+  set_transform(e, col * 16 + 3, row * 16 + 3)
+  set_health(e, hp, 0)
+  set_soldier(e, rTeam[slot], rangePx, dmg, cooldown)
+  if (sight > 0 && rTeam[slot] === rViewTeam) { set_vision(e, sight) }
+  sprite_set_visible(entitySprite(slot), 1)
+  rKind[slot] = kind
+  rLive[slot] = 1
+  rOrder[slot] = RO_IDLE
+  rCargo[slot] = 0
+  rDwell[slot] = 0
+  return 1
+}
+
+function entitySprite(slot: i32): i32 { return rSprite[slot] }
+
+// First dormant slot on a team, or -1. Production asks this before charging the player.
+export function rtsFreeSlot(team: i32): i32 {
+  let i: i32 = 0
+  while (i < rCount) {
+    if (rTeam[i] === team && rLive[i] === 0) { return i }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+// Retire a slot back to the pool. Called from the death sweep, never from a hot loop.
+export function rtsRetire(slot: i32) {
+  if (slot < 0 || slot >= rCount) { return }
+  rLive[slot] = 0
+  rOrder[slot] = RO_IDLE
+  set_vision(rEnt[slot], 0)
+  clear_seek(rEnt[slot])
+  set_sleeping(rEnt[slot], 1)
+  set_transform(rEnt[slot], 0 - 64, 0 - 64)
+  sprite_set_visible(entitySprite(slot), 0)
+  rSel = rSel & (0 - 1 - (1 << slot))
+}
+
+// Reap anything the engine killed — on a ROTATING BUDGET, not over the whole roster every frame.
+//
+// `entity_alive` and `entity_hp` are boxed calls at ~117 ticks each (docs/perf-rules.md §2), so a
+// full sweep of a 26-slot roster is ~50 boxed calls a frame — measured at 6,700 ticks against a
+// 4,389 budget in warforge, i.e. the sweep alone cost more than the whole rest of the game. Walking
+// `slice` slots per call covers the roster every few frames instead, and a death that lands a few
+// frames late is not something a player can see.
+//
+// Returns how many died on THIS call, so a caller accumulating XP or food still gets every one.
+let sweepAt: i32 = 0
+
+export function rtsSweepStep(slice: i32): i32 {
+  let dead: i32 = 0
+  let n: i32 = 0
+  while (n < slice && rCount > 0) {
+    if (sweepAt >= rCount) { sweepAt = 0 }
+    let i: i32 = sweepAt
+    sweepAt = sweepAt + 1
+    if (rLive[i] === 1) {
+      // One boxed call, not two: a dead entity is despawned by the engine, and a live one with no
+      // hit points left is despawned on the frame after — so `entity_alive` alone converges.
+      if (entity_alive(rEnt[i]) === 0) {
+        rtsRetire(i)
+        rDeadTeam = rTeam[i]
+        dead = dead + 1
+      }
+    }
+    n = n + 1
+  }
+  return dead
+}
+
+// Which team the last reaped slot belonged to. A caller that pays XP for kills needs it, and
+// returning a pair from `rtsSweepStep` would mean boxing one.
+export let rDeadTeam: i32 = 0 - 1
+
+// Hide units the player cannot currently see, a few slots per call.
+//
+// The shroud is a background layer and sprites draw over backgrounds, so fog hides TERRAIN for free
+// and hides nothing else: without this an enemy army is perfectly visible marching through solid
+// black, which gives away everything fog exists to conceal. Only cells that are VISIBLE right now
+// count — an explored-but-unwatched cell shows its terrain and not who is standing on it.
+//
+// Budgeted like every other sweep here: `fog_state` is a boxed call, and a roster-wide scan every
+// frame is the shape of cost that eats a frame quietly.
+let fogAt: i32 = 0
+
+export function rtsFogStep(team: i32, slice: i32) {
+  let n: i32 = 0
+  while (n < slice && rCount > 0) {
+    if (fogAt >= rCount) { fogAt = 0 }
+    let i: i32 = fogAt
+    fogAt = fogAt + 1
+    if (rLive[i] === 1 && rTeam[i] === team) {
+      let col: i32 = (entity_x(rEnt[i]) + 3) / 16
+      let row: i32 = (entity_y(rEnt[i]) + 3) / 16
+      if (fog_state(col, row) === 2) {
+        sprite_set_visible(rSprite[i], 1)
+      } else {
+        sprite_set_visible(rSprite[i], 0)
+      }
+    }
+    n = n + 1
+  }
+}
+
+export function rtsAlive(team: i32): i32 {
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < rCount) {
+    if (rLive[i] === 1 && rTeam[i] === team) { n = n + 1 }
+    i = i + 1
+  }
+  return n
+}
+
+// ── Selection ────────────────────────────────────────────────────────────────
+// ⚠️ Every mask test below parenthesises the `&`: `===` binds TIGHTER, so `(m >> k) & 1 === 1` is
+// `(m >> k) & (1 === 1)` and quietly evaluates to nothing useful.
+export function rtsSelClear() { rSel = 0 }
+export function rtsSelMask(): i32 { return rSel }
+export function rtsSelOne(slot: i32) { rSel = 1 << slot }
+export function rtsSelAdd(slot: i32) { rSel = rSel | (1 << slot) }
+export function rtsSelHas(slot: i32): i32 {
+  if (((rSel >> slot) & 1) === 1) { return 1 }
+  return 0
+}
+
+export function rtsSelAll(team: i32) {
+  rSel = 0
+  let i: i32 = 0
+  while (i < rCount) {
+    if (rLive[i] === 1 && rTeam[i] === team) { rSel = rSel | (1 << i) }
+    i = i + 1
+  }
+}
+
+// Everything on `team` sharing the selection's unit kind — the "select all footmen" verb, which on a
+// d-pad matters far more than a drag box.
+export function rtsSelKindOf(team: i32, slot: i32) {
+  let kind: i32 = rKind[slot]
+  rSel = 0
+  let i: i32 = 0
+  while (i < rCount) {
+    if (rLive[i] === 1 && rTeam[i] === team && rKind[i] === kind) { rSel = rSel | (1 << i) }
+    i = i + 1
+  }
+}
+
+export function rtsSelCount(): i32 {
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < rCount) {
+    if (((rSel >> i) & 1) === 1) { n = n + 1 }
+    i = i + 1
+  }
+  return n
+}
+
+// The live unit under a cell, or -1. Cheap enough to run on a button press; never per frame.
+// The live unit nearest a PIXEL point, or -1. `rtsUnitAt` is the cell-shaped wrapper.
+//
+// Pixel-shaped because units are 8px and move a pixel at a time while the terrain grid is 16px: a
+// unit standing between two cells belongs to neither, and a cell-index comparison makes it
+// unselectable. The cursor asks about where it actually is.
+export function rtsUnitAtPx(px: i32, py: i32): i32 {
+  let best: i32 = 0 - 1
+  let bestD: i32 = 10   // forgiving to aim at, too tight to grab a neighbour
+  let i: i32 = 0
+  while (i < rCount) {
+    if (rLive[i] === 1) {
+      let ux: i32 = entity_x(rEnt[i]) + 3
+      let uy: i32 = entity_y(rEnt[i]) + 3
+      let dx: i32 = ux - px
+      if (dx < 0) { dx = 0 - dx }
+      let dy: i32 = uy - py
+      if (dy < 0) { dy = 0 - dy }
+      let d: i32 = dx + dy
+      if (d < bestD) { bestD = d best = i }
+    }
+    i = i + 1
+  }
+  return best
+}
+
+export function rtsUnitAt(col: i32, row: i32): i32 {
+  return rtsUnitAtPx(col * 16 + 8, row * 16 + 8)
+}
+
+// Where slot `i` is, in whole pixels — so a caller can draw a marker on it without knowing that a
+// transform is a collider's top-left.
+export function rtsUnitPx(slot: i32, axis: i32): i32 {
+  if (slot < 0 || slot >= rCount) { return 0 - 999 }
+  if (axis === 0) { return entity_x(rEnt[slot]) + 3 }
+  return entity_y(rEnt[slot]) + 3
+}
+
+// The nearest cell to (col,row) with solid ground and NO live unit standing in it, packed as
+// `(col << 8) | row`.
+//
+// Units are placed by cell but move in pixels, so two of them armed at the same cell — three
+// peasants at a town hall door, a wave of reinforcements at one camp — land exactly on top of each
+// other and read as one unit. Every placement goes through here instead.
+//
+// A packed return rather than two out-params: tish has no tuples, and a second call to recompute
+// the row would double the search.
+export function rtsFreeCellNear(col: i32, row: i32): i32 {
+  let ring: i32 = 0
+  while (ring < 4) {
+    let dc: i32 = 0 - ring
+    while (dc <= ring) {
+      let dr: i32 = 0 - ring
+      while (dr <= ring) {
+        // Only the ring's edge is new; the interior was covered by a smaller ring.
+        let onEdge: i32 = 0
+        if (dc === ring || dc === 0 - ring || dr === ring || dr === 0 - ring) { onEdge = 1 }
+        if (onEdge === 1) {
+          let c: i32 = col + dc
+          let r: i32 = row + dr
+          if (c >= 0 && r >= 0 && tile_solid(c, r) === 0 && rtsUnitAt(c, r) < 0) {
+            return (c << 8) | r
+          }
+        }
+        dr = dr + 1
+      }
+      dc = dc + 1
+    }
+    ring = ring + 1
+  }
+  // Nothing free within three cells: place it anyway rather than silently dropping the unit the
+  // player just paid for.
+  return (col << 8) | row
+}
+
+// ── Orders ───────────────────────────────────────────────────────────────────
+// ONE flow field per order, however many units it covers. This is the whole reason the RTS fits in a
+// frame: `flow_goal` is a single breadth-first search and every unit then reads it in O(1).
+//
+// Arrive radii are STAGGERED per unit so a group settles into a blob rather than stacking in one
+// 16px cell. Physical separation (making units push each other) was measured in examples/rts-flow
+// and rejected: 6,626 ticks against a 4,389 budget, and units wedge in corridors.
+export function rtsOrderMove(field: i32, col: i32, row: i32, stride: i32, animSpeed: i32): i32 {
+  flow_goal(field, col, row)
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < rCount) {
+    if (rLive[i] === 1 && ((rSel >> i) & 1) === 1) {
+      set_seek(rEnt[i], field, 8 + (n - ((n / 6) * 6)) * 7, stride, animSpeed)
+      rOrder[i] = RO_MOVE
+      n = n + 1
+    }
+    i = i + 1
+  }
+  return n
+}
+
+// March a whole team on a point — the enemy commander's only movement verb, and the reason fields
+// are a numbered set: the AI's advance and the player's last order coexist without disturbing
+// each other.
+export function rtsOrderTeam(team: i32, field: i32, col: i32, row: i32, stride: i32,
+                             animSpeed: i32): i32 {
+  flow_goal(field, col, row)
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < rCount) {
+    if (rLive[i] === 1 && rTeam[i] === team) {
+      set_seek(rEnt[i], field, 8 + (n - ((n / 6) * 6)) * 7, stride, animSpeed)
+      rOrder[i] = RO_MOVE
+      n = n + 1
+    }
+    i = i + 1
+  }
+  return n
+}
+
+export function rtsOrderStop() {
+  let i: i32 = 0
+  while (i < rCount) {
+    if (rLive[i] === 1 && ((rSel >> i) & 1) === 1) {
+      clear_seek(rEnt[i])
+      rOrder[i] = RO_IDLE
+    }
+    i = i + 1
+  }
+}
+
+// ── Buildings ────────────────────────────────────────────────────────────────
+export function rtsBuildCount(): i32 { return bCount }
+
+// Can a `w x h` building stand with its top-left at (col,row)? Rejects overlap with another
+// building and anything off the map. Terrain is checked by the caller against its own map, because
+// only the game knows whether its trees are scenery or lumber.
+export function rtsCanPlace(col: i32, row: i32, w: i32, h: i32, mapW: i32, mapH: i32): i32 {
+  if (col < 1 || row < 1) { return 0 }
+  if (col + w > mapW - 1 || row + h > mapH - 1) { return 0 }
+  let i: i32 = 0
+  while (i < bCount) {
+    if (bHp[i] > 0) {
+      if (col < bCol[i] + bW[i] && col + w > bCol[i] && row < bRow[i] + bH[i] && row + h > bRow[i]) {
+        return 0
+      }
+    }
+    i = i + 1
+  }
+  return 1
+}
+
+// Stamp a building: record it and mark its footprint solid so units path AROUND it. The tiles
+// themselves are the caller's business — this owns collision and bookkeeping, not art.
+// `buildFrames` 0 = already finished (mission-start buildings); > 0 = a site a worker must build.
+export function rtsPlace(kind: i32, col: i32, row: i32, w: i32, h: i32, team: i32,
+                         hp: i32, buildFrames: i32): i32 {
+  let id: i32 = bCount
+  bKind.push(kind) bCol.push(col) bRow.push(row) bW.push(w) bH.push(h)
+  bTeam.push(team) bHp.push(hp) bQueue.push(0 - 1) bTimer.push(0)
+  bProg.push(buildFrames) bProgMax.push(buildFrames) bBuilder.push(0 - 1)
+  bCount = bCount + 1
+  let r: i32 = 0
+  while (r < h) {
+    let c: i32 = 0
+    while (c < w) {
+      grid_set_solid(col + c, row + r, 1)
+      c = c + 1
+    }
+    r = r + 1
+  }
+  return id
+}
+
+// A building at a cell, or -1.
+export function rtsBuildAt(col: i32, row: i32): i32 {
+  let i: i32 = 0
+  while (i < bCount) {
+    if (bHp[i] > 0 && col >= bCol[i] && col < bCol[i] + bW[i]
+        && row >= bRow[i] && row < bRow[i] + bH[i]) {
+      return i
+    }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+export function rtsBuildDamage(id: i32, amount: i32): i32 {
+  if (id < 0 || id >= bCount) { return 0 }
+  bHp[id] = bHp[id] - amount
+  if (bHp[id] <= 0) {
+    bHp[id] = 0
+    // Rubble is walkable. A destroyed building that still blocks pathing is the classic RTS bug
+    // where an army stands outside a crater it cannot enter.
+    let r: i32 = 0
+    while (r < bH[id]) {
+      let c: i32 = 0
+      while (c < bW[id]) {
+        grid_set_solid(bCol[id] + c, bRow[id] + r, 0)
+        c = c + 1
+      }
+      r = r + 1
+    }
+    return 1
+  }
+  return 0
+}
+
+// Completed buildings only. A site under construction is not a barracks.
+export function rtsBuildAlive(team: i32, kind: i32): i32 {
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < bCount) {
+    if (bHp[i] > 0 && bTeam[i] === team && bProg[i] <= 0) {
+      if (kind < 0 || bKind[i] === kind) { n = n + 1 }
+    }
+    i = i + 1
+  }
+  return n
+}
+
+// 1 when building `id` is finished and usable.
+export function rtsBuildingDone(id: i32): i32 {
+  if (id < 0 || id >= bCount) { return 0 }
+  if (bProg[id] <= 0) { return 1 }
+  return 0
+}
+
+// Fill fraction of a site's progress, 0..denom. For a progress bar without a divide at the caller.
+export function rtsBuildFrac(id: i32, denom: i32): i32 {
+  if (id < 0 || id >= bCount || bProgMax[id] <= 0) { return denom }
+  let doneF: i32 = bProgMax[id] - bProg[id]
+  return (doneF * denom) / bProgMax[id]
+}
+
+export function rtsSetBuilder(id: i32, slot: i32) {
+  if (id >= 0 && id < bCount) { bBuilder[id] = slot }
+}
+
+// Advance every site whose builder is standing next to it. `dt` is FRAMES, not calls — this is
+// stepped from a rotation that reaches it every few frames, and the same parameter written as
+// "one per call" has now produced an 8x-too-slow timer twice in this codebase (`dwell`, and
+// production before it). Returns the id that just completed, or -1.
+export function rtsBuildStep(dt: i32, workerKind: i32): i32 {
+  let i: i32 = 0
+  while (i < bCount) {
+    if (bProg[i] > 0 && bHp[i] > 0) {
+      // ANY live worker of the right kind standing at the site advances it — not only the one that
+      // ordered it.
+      //
+      // Binding a single builder is one point of failure: if that worker dies, is re-tasked, or
+      // simply stops a few pixels outside a tight radius, the site sits there forever and the
+      // player has no way to tell why. Warcraft lets any peasant resume a job, and that rule is
+      // also what makes the feature debuggable.
+      let cxp: i32 = bCol[i] * 16 + bW[i] * 8
+      let cyp: i32 = bRow[i] * 16 + bH[i] * 8
+      let k: i32 = 0
+      let working: i32 = 0
+      while (k < rCount && working === 0) {
+        if (rLive[k] === 1 && rKind[k] === workerKind && rTeam[k] === bTeam[i]) {
+          let dx: i32 = entity_x(rEnt[k]) + 3 - cxp
+          if (dx < 0) { dx = 0 - dx }
+          let dy: i32 = entity_y(rEnt[k]) + 3 - cyp
+          if (dy < 0) { dy = 0 - dy }
+          // Generous on purpose: a worker that halts a pixel outside a tight test stands next to a
+          // site it never finishes, which is indistinguishable from the feature being broken.
+          if (dx + dy < 56) { working = 1 }
+        }
+        k = k + 1
+      }
+      if (working === 1) {
+        bProg[i] = bProg[i] - dt
+        if (bProg[i] <= 0) {
+          bProg[i] = 0
+          bBuilder[i] = 0 - 1
+          return i
+        }
+      }
+    }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+// ── Economy and production ───────────────────────────────────────────────────
+export function rtsCredit(gold: i32, wood: i32) {
+  rGold = rGold + gold
+  rWood = rWood + wood
+}
+
+export function rtsAfford(gold: i32, wood: i32, food: i32): i32 {
+  if (rGold < gold || rWood < wood) { return 0 }
+  if (rFood + food > rFoodCap) { return 0 }
+  return 1
+}
+
+export function rtsCharge(gold: i32, wood: i32, food: i32) {
+  rGold = rGold - gold
+  rWood = rWood - wood
+  rFood = rFood + food
+}
+
+export function rtsFoodFree(food: i32) {
+  rFood = rFood - food
+  if (rFood < 0) { rFood = 0 }
+}
+
+export function rtsSetFoodCap(cap: i32) { rFoodCap = cap }
+
+// Add to the cap from inside the package.
+//
+// ⚠️ Callers must NOT write `rtsSetFoodCap(rFoodCap + n)`. Reading an exported module variable in
+// the argument of a call that then writes it takes a borrow that is still live when the callee
+// takes a mutable one — tish panics with `RefCell already borrowed` from vmref.rs, at runtime, on
+// whichever frame the call happens.
+export function rtsAddFoodCap(delta: i32) { rFoodCap = rFoodCap + delta }
+
+// Queue a unit at a building. One deep, like Warcraft 2 — a queue of five is a UI feature that
+// costs a list per building and buys nothing on a screen this size.
+export function rtsQueue(id: i32, kind: i32, frames: i32): i32 {
+  if (id < 0 || id >= bCount || bHp[id] <= 0) { return 0 }
+  if (bQueue[id] >= 0) { return 0 }
+  bQueue[id] = kind
+  bTimer[id] = frames
+  return 1
+}
+
+export function rtsQueued(id: i32): i32 {
+  if (id < 0 || id >= bCount) { return 0 - 1 }
+  return bQueue[id]
+}
+
+export function rtsQueueLeft(id: i32): i32 {
+  if (id < 0 || id >= bCount) { return 0 }
+  return bTimer[id]
+}
+
+// Tick every production queue one frame. Returns the building id that just finished (or -1) so the
+// caller can arm a pool slot at its door — the kit does not place the unit, because only the game
+// knows where its door is.
+// `dt` is how many FRAMES have passed since the last call — not 1.
+//
+// ⚠️ This is stepped from a rotation that reaches it every few frames, so decrementing by one per
+// call made every build time eight times longer than its number said: a 180-frame peasant took
+// 1,440 frames to appear, which reads as "training is broken" because the player has long since
+// given up. Same trap as `dwell` in the harvest loop.
+export function rtsProduceStep(dt: i32): i32 {
+  let i: i32 = 0
+  while (i < bCount) {
+    if (bQueue[i] >= 0 && bHp[i] > 0) {
+      bTimer[i] = bTimer[i] - dt
+      if (bTimer[i] <= 0) { return i }
+    }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+export function rtsQueueTake(id: i32): i32 {
+  let kind: i32 = bQueue[id]
+  bQueue[id] = 0 - 1
+  bTimer[id] = 0
+  return kind
+}
+
+// ── Overhead health bars ─────────────────────────────────────────────────────
+// One world-space sprite per roster slot, from a sheet of nine baked fill frames.
+//
+// Every rule here is from examples/warsong/src/hpbar.tish, which is the measured version of this:
+//   * WORLD space (`sprite_set_hud(s, 0)`) so the camera scrolls the bars for free.
+//   * BAKED frames — a bar drawn per unit per frame is a pixel loop and a VRAM write.
+//   * The frame is rewritten only when the STEP changes, not when hp changes; visibility likewise.
+//   * The hp -> step divide runs only when hp actually moved. The ARM7TDMI has no divide
+//     instruction, so a per-unit-per-frame division is a software call each; hp changes on hits,
+//     which is rare, and between hits this costs one `sprite_set_pos`.
+//
+// `entity_hp` / `health_max` / `entity_x` are imported straight from `cargo:` so they lower to
+// typed calls. Routed through a tish wrapper they would each be a ~117-tick boxed dispatch.
+let barSpr: i32[] = []
+let barHp: i32[] = []
+let barStep: i32[] = []
+let barVis: i32[] = []
+
+// GROW-ONLY, and idempotent. Called on every mission load.
+//
+// ⚠️ Rebuilding the pool each mission allocated a fresh sprite per roster slot and released none of
+// the previous set: the second mission transition panicked the allocator (alloc.rs handle_alloc_error)
+// a couple of thousand frames in. A pool that is rebuilt is not a pool. Sprites already made are
+// reused, and only the shortfall is allocated.
+export function rtsBarsBuild(sheet: i32) {
+  let i: i32 = barSpr.length
+  while (i < rCount) {
+    let sp: i32 = sprite_new(sheet)
+    sprite_set_hud(sp, 0)
+    sprite_set_visible(sp, 0)
+    barSpr.push(sp) barHp.push(0 - 1) barStep.push(0 - 1) barVis.push(0)
+    i = i + 1
+  }
+  // Reset the caches so a reused bar repaints for its new occupant rather than keeping the last
+  // mission's fill.
+  let k: i32 = 0
+  while (k < barSpr.length) {
+    barHp[k] = 0 - 1
+    barStep[k] = 0 - 1
+    barVis[k] = 0
+    sprite_set_visible(barSpr[k], 0)
+    k = k + 1
+  }
+}
+
+// `selMask` is the current selection, so a selected unit shows its bar even at full health —
+// Warcraft's rule, and the reason a healthy army is not a wall of green bars.
+export function rtsBarsStep(selMask: i32) {
+  let i: i32 = 0
+  while (i < rCount) {
+    let show: i32 = 0
+    if (rLive[i] === 1 && i < barSpr.length) {
+      let hp: i32 = entity_hp(rEnt[i])
+      let mx: i32 = health_max(rEnt[i])
+      if (hp !== barHp[i]) {
+        barHp[i] = hp
+        let st: i32 = 0
+        if (mx > 0) { st = (hp * 8) / mx }
+        if (st < 0) { st = 0 }
+        if (st > 8) { st = 8 }
+        if (st !== barStep[i]) {
+          barStep[i] = st
+          sprite_set_frame(barSpr[i], st)
+        }
+      }
+      if (hp < mx) { show = 1 }
+      if (((selMask >> i) & 1) === 1) { show = 1 }
+      if (show === 1) {
+        sprite_set_pos(barSpr[i], entity_x(rEnt[i]) - 1, entity_y(rEnt[i]) - 6)
+      }
+    }
+    if (show !== barVis[i]) {
+      barVis[i] = show
+      sprite_set_visible(barSpr[i], show)
+    }
+    i = i + 1
+  }
+}
+
+// ── Harvest ──────────────────────────────────────────────────────────────────
+// A worker's loop is a state machine over the roster columns, stepped on a BUDGET rather than for
+// every worker every frame. `rtsHarvestStep` advances one worker per call; a game rotates through
+// them, so eight workers cost one worker's worth of tish per frame.
+export function rtsHarvestStep(slot: i32, field: i32, homeField: i32, nodeCol: i32,
+                               nodeRow: i32, dwell: i32, load: i32, stride: i32): i32 {
+  if (slot < 0 || slot >= rCount || rLive[slot] !== 1) { return 0 }
+  let e: i32 = rEnt[slot]
+  if (rOrder[slot] === RO_HARVEST) {
+    if (seek_arrived(e) === 1) {
+      if (rDwell[slot] > 0) {
+        rDwell[slot] = rDwell[slot] - 1
+      } else {
+        rCargo[slot] = load
+        rOrder[slot] = RO_RETURN
+        // The RETURN leg gets its own field. Sharing one with the outbound leg means each worker
+        // re-goals it as it turns around, and the crew follows whoever moved last.
+        flow_goal(homeField, (rHome[slot] >> 8) & 0xFF, rHome[slot] & 0xFF)
+        set_seek(e, homeField, 12, stride, 6)
+      }
+    }
+    return 0
+  }
+  if (rOrder[slot] === RO_RETURN) {
+    if (seek_arrived(e) === 1) {
+      let got: i32 = rCargo[slot]
+      rCargo[slot] = 0
+      rDwell[slot] = dwell
+      rOrder[slot] = RO_HARVEST
+      flow_goal(field, nodeCol, nodeRow)
+      set_seek(e, field, 12, stride, 6)
+      return got
+    }
+  }
+  return 0
+}
+
+// Put a worker on a resource node, remembering where to bring it back to.
+export function rtsHarvestBegin(slot: i32, field: i32, nodeCol: i32, nodeRow: i32,
+                                homeCol: i32, homeRow: i32, dwell: i32, stride: i32) {
+  if (slot < 0 || slot >= rCount) { return }
+  rHome[slot] = (homeCol << 8) | homeRow
+  rDwell[slot] = dwell
+  rOrder[slot] = RO_HARVEST
+  flow_goal(field, nodeCol, nodeRow)
+  set_seek(rEnt[slot], field, 12, stride, 6)
+}

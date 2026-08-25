@@ -1,0 +1,867 @@
+// fighter.tish — a frame-data character engine for 1v1 versus fighting games.
+//
+// Two fighters, a floor, and a table of moves. Everything a fighting game is actually made of —
+// startup/active/recovery, hitboxes that exist for three frames, blockstun that is shorter than
+// hitstun, pushback, hit-stop, cancels — is data in here, not code in the game.
+//
+//   import * as fighter from '../../../packages/fighter'
+//
+//   fighter.fighterDefChar(0, heroArt, 120, 300, 230, 0 - 1150, 62, 13, 52)
+//   fighter.fighterDefMove(0, fighter.MV_LP, F_ATK1, 3, 3, 6, 8, KIND_MID)
+//   fighter.fighterDefBox (0, fighter.MV_LP, 10, 44, 26, 14, 12, 6, 220, 4)
+//   fighter.fighterSpawn(0, 0, bodySprite, fxSprite)
+//   ...
+//   let ev: i32 = fighter.fighterTick()      // advances BOTH fighters, returns an event mask
+//   fighter.fighterDraw()                     // sprites; separate so shake can go between them
+//
+// ── This does not use the entity system, and that is the point ───────────────────────────────────
+// `create()`/`behave()` dispatch through a boxed `Value` trampoline: ~42 ticks per callback plus
+// ~28 per argument, and the practical ceiling is about six callbacks a frame. A fighter needs to
+// evaluate two state machines, two hitboxes, two hurtboxes and a push-out every frame at 60fps,
+// forever, and it needs to do it BEFORE the game gets to spend anything on presentation. So state
+// lives in flat `i32[]` arrays here and `fighterTick` is one compiled function with no callbacks in
+// it at all — the same shape as packages/feel.tish, and the same reason.
+//
+// ── Positions are 8.8 fixed point ────────────────────────────────────────────────────────────────
+// A walk speed of "one and a bit pixels per frame" is not expressible in integers, and rounding it
+// to 1 makes every character walk at the same speed. `x` and `y` are in 1/256ths of a pixel; only
+// `fighterDraw` and the hitbox tests round to whole pixels.
+//
+// ── The fighter's origin is its FEET, not its top-left ───────────────────────────────────────────
+// Every box in here is measured from the point the character stands on: `hbY` is height ABOVE the
+// feet, hurtboxes hang down to the feet, gravity stops at the floor. Sprite cells are bottom-aligned
+// to match (see scripts/gen_versus.py), so a taller character needs no per-character draw offset.
+import { sprite_set_frame, sprite_set_pos, sprite_set_flip, sprite_set_visible } from 'cargo:tish_agb'
+import { BTN_LP, BTN_HP, motionFrame, DASH_FWD, DASH_BACK } from './motion'
+
+// ── states ───────────────────────────────────────────────────────────────────────────────────────
+export let FS_IDLE: i32 = 0
+export let FS_WALK_F: i32 = 1
+export let FS_WALK_B: i32 = 2
+export let FS_CROUCH: i32 = 3
+export let FS_JUMP: i32 = 4
+export let FS_ATTACK: i32 = 5
+export let FS_HITSTUN: i32 = 6
+export let FS_BLOCKSTUN: i32 = 7
+export let FS_KO: i32 = 8
+export let FS_WIN: i32 = 9
+export let FS_FROZEN: i32 = 10        // the intro/outro lock: drawn, never acts
+export let FS_DASH_F: i32 = 11        // forward dash — cancellable into an attack, which is the point
+export let FS_DASH_B: i32 = 12        // back dash — invulnerable while it starts, and it cannot attack
+
+// ── move slots ───────────────────────────────────────────────────────────────────────────────────
+export let MV_LP: i32 = 0
+export let MV_HP: i32 = 1
+export let MV_LK: i32 = 2
+export let MV_HK: i32 = 3
+export let MV_CR_LP: i32 = 4          // crouching light
+export let MV_CR_HK: i32 = 5          // crouching heavy — the sweep
+export let MV_SP1: i32 = 6            // motion special
+export let MV_SP2: i32 = 7            // motion special
+export let MV_THROW: i32 = 8
+let MOVES: i32 = 9
+
+// ── how a move may be guarded ────────────────────────────────────────────────────────────────────
+export let KIND_MID: i32 = 0          // blocked standing or crouching
+export let KIND_LOW: i32 = 1          // must be blocked crouching
+export let KIND_OVERHEAD: i32 = 2     // must be blocked standing
+export let KIND_UNBLOCKABLE: i32 = 3  // throws
+
+// ── events returned by fighterTick ───────────────────────────────────────────────────────────────
+export let EV_P1_HIT: i32 = 1         // player 0 LANDED a hit
+export let EV_P2_HIT: i32 = 2
+export let EV_P1_BLOCK: i32 = 4       // player 0's attack WAS BLOCKED
+export let EV_P2_BLOCK: i32 = 8
+export let EV_P1_KO: i32 = 16         // player 0 was knocked out
+export let EV_P2_KO: i32 = 32
+export let EV_WHIFF: i32 = 64
+export let EV_COUNTER: i32 = 128      // hit an opponent who was in their own attack's startup
+
+let NCHAR: i32 = 4
+
+// ── character table: CH[chr * CW + field] ────────────────────────────────────────────────────────
+let CW: i32 = 8
+let C_SHEET: i32 = 0
+let C_MAXHP: i32 = 1
+let C_WALKF: i32 = 2                  // 8.8 px/frame
+let C_WALKB: i32 = 3
+let C_JUMPVY: i32 = 4                 // 8.8, negative is up
+let C_GRAV: i32 = 5
+let C_HALFW: i32 = 6                  // hurtbox half-width, px
+let C_TALL: i32 = 7                   // standing hurtbox height, px
+let CH: i32[] = []
+
+// ── move table: MT[(chr * MOVES + mv) * MW + field] ──────────────────────────────────────────────
+let MW: i32 = 21
+let M_CLIP: i32 = 0                   // first body pose of the move's clip
+let M_START: i32 = 1
+let M_ACTIVE: i32 = 2
+let M_RECOV: i32 = 3
+let M_HBX: i32 = 4                    // hitbox: near edge, px forward of the fighter's centre
+let M_HBY: i32 = 5                    // top edge, px above the feet
+let M_HBW: i32 = 6
+let M_HBH: i32 = 7
+let M_DMG: i32 = 8
+let M_HSTUN: i32 = 9
+let M_BSTUN: i32 = 10
+let M_PUSH: i32 = 11                  // 8.8 px/frame of pushback applied to the victim
+let M_HSTOP: i32 = 12                 // frames both fighters freeze on contact
+let M_KIND: i32 = 13
+let M_CANCEL: i32 = 14                // bitmask of move slots this may cancel into, on hit
+let M_COST: i32 = 15                  // meter, 0..100
+let M_MOTION: i32 = 16                // MOT_* required, 0 = a plain button press
+let M_BTN: i32 = 17                   // BTN_* mask that triggers it
+let M_AIROK: i32 = 18
+let M_DEFINED: i32 = 19
+let M_CLIPN: i32 = 20                 // poses in the clip: 3 (one per phase) or 1 (a held pose)
+let MT: i32[] = []
+
+// ── FX overlay: which neighbouring 64x64 window an attack pose's overhang was cut from, in cell
+// units, indexed [chr * 10 + (pose - 11)]. (0, 0) = the pose needs no overlay. See frames.tish.
+let FXX: i32[] = []
+let FXY: i32[] = []
+
+// ── per-fighter state: F[p * FW + field] ─────────────────────────────────────────────────────────
+let FW: i32 = 24
+let S_CHR: i32 = 0
+let S_BODY: i32 = 1                   // sprite handle
+let S_FX: i32 = 2
+let S_X: i32 = 3                      // 8.8
+let S_Y: i32 = 4                      // 8.8, the feet
+let S_VY: i32 = 5
+let S_FACE: i32 = 6                   // -1 / +1
+let S_STATE: i32 = 7
+let S_HP: i32 = 8
+let S_METER: i32 = 9
+let S_COMBO: i32 = 10
+let S_MOVE: i32 = 11
+let S_PHASE: i32 = 12                 // 0 startup, 1 active, 2 recovery
+let S_PHASET: i32 = 13
+let S_HITDONE: i32 = 14
+let S_STUN: i32 = 15
+let S_POSE: i32 = 16                  // body cell to draw
+let S_GROUND: i32 = 17
+let S_ANIMT: i32 = 18
+let S_LASTHP: i32 = 19                // for the HUD's "did anything change" test
+let S_WINS: i32 = 20
+let S_VX: i32 = 21                    // 8.8 — a jump keeps its horizontal speed
+let S_DIR: i32 = 22                   // this frame's numpad direction, read once and reused
+let S_DASHT: i32 = 23                 // frames left in a dash
+let F: i32[] = []
+
+// ── globals ──────────────────────────────────────────────────────────────────────────────────────
+let G_FREEZE: i32 = 0
+let G_LEFT: i32 = 1
+let G_RIGHT: i32 = 2
+let G_FLOOR: i32 = 3
+let G_PUSH: i32 = 4
+let G_HITX: i32 = 5
+let G_HITY: i32 = 6
+let G_EV: i32 = 7
+let G: i32[] = [0, 16, 224, 132, 22, 0, 0, 0]
+
+// Dashes. A forward dash exists to close distance and to be CANCELLED out of — that is what makes
+// running attacks a thing — so it is short and it may be interrupted after a few frames. A back
+// dash exists to escape, so it is longer and it is invulnerable while it leaves.
+let DASH_F_FRAMES: i32 = 15
+let DASH_B_FRAMES: i32 = 18
+let DASH_F_MUL: i32 = 3               // multiples of the character's walk speed
+let DASH_B_MUL: i32 = 3
+let DASH_F_FREE: i32 = 4              // frames before a forward dash may be cancelled into an attack
+let DASH_B_INVULN: i32 = 8            // frames of a back dash that pass through everything
+
+// Combo damage scaling, in 1/256ths, indexed by hits already landed in the string. A combo that did
+// full damage per hit would make one opening the whole round; this is why long strings are stylish
+// rather than lethal, and it is one table rather than a rule anybody has to remember.
+let DASH_NONE_LOCAL: i32 = 0
+let SCALE: i32[] = [256, 256, 230, 205, 180, 160, 142, 128, 116, 106, 98, 92, 87, 83, 80, 77]
+
+// Body pose indices — these mirror the generated examples/versus/src/frames.tish, and the two must
+// agree. They live here as well because the package cannot import a game's file.
+let P_IDLE: i32 = 0
+let P_WALK: i32 = 4
+let P_JUMP: i32 = 8
+let P_FALL: i32 = 9
+let P_CROUCH: i32 = 10
+let P_FX_FIRST: i32 = 11
+let P_FX_LAST: i32 = 20
+let P_BLOCK: i32 = 21
+let P_HIT: i32 = 22
+let P_KO: i32 = 23
+let P_FX_CELL: i32 = 24
+
+// Numpad direction -> unit x/y, as tables. Deriving them with `%` and `/` on a signed int is one
+// truncation-semantics argument away from a fighter that walks the wrong way, and this is read
+// four times a frame.
+//                  0   1   2   3   4  5  6  7  8  9
+let DIRX: i32[] = [ 0, 0 - 1, 0, 1, 0 - 1, 0, 1, 0 - 1, 0, 1]
+let DIRY: i32[] = [ 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 1, 1, 1]
+
+let i: i32 = 0
+while (i < NCHAR * CW) { CH.push(0) i = i + 1 }
+i = 0
+while (i < NCHAR * MOVES * MW) { MT.push(0) i = i + 1 }
+i = 0
+while (i < NCHAR * 10) { FXX.push(0) FXY.push(0) i = i + 1 }
+i = 0
+while (i < 2 * FW) { F.push(0) i = i + 1 }
+
+// ── authoring ────────────────────────────────────────────────────────────────────────────────────
+
+// One character's physics and body. Speeds are 8.8 fixed point: 256 is one pixel per frame.
+export function fighterDefChar(chr: i32, sheet: i32, maxHp: i32, walkF: i32, walkB: i32,
+                               jumpVy: i32, grav: i32, halfW: i32, tall: i32) {
+  let b: i32 = chr * CW
+  CH[b + C_SHEET] = sheet
+  CH[b + C_MAXHP] = maxHp
+  CH[b + C_WALKF] = walkF
+  CH[b + C_WALKB] = walkB
+  CH[b + C_JUMPVY] = jumpVy
+  CH[b + C_GRAV] = grav
+  CH[b + C_HALFW] = halfW
+  CH[b + C_TALL] = tall
+}
+
+// A move's timing and animation. `clip` is the first of `clipn` consecutive body poses and the
+// fighter shows one per phase, so startup/active/recovery read directly off the sprite. The
+// crouching attacks pass clipn = 1: the sheet has a single crouching-attack pose, and stepping off
+// the end of it would show the standing punch mid-crouch.
+export function fighterDefMove(chr: i32, mv: i32, clip: i32, clipn: i32, startup: i32, active: i32,
+                               recovery: i32, dmg: i32, kind: i32) {
+  let b: i32 = (chr * MOVES + mv) * MW
+  MT[b + M_CLIP] = clip
+  MT[b + M_CLIPN] = clipn
+  MT[b + M_START] = startup
+  MT[b + M_ACTIVE] = active
+  MT[b + M_RECOV] = recovery
+  MT[b + M_DMG] = dmg
+  MT[b + M_KIND] = kind
+  MT[b + M_DEFINED] = 1
+}
+
+// The move's hitbox and what landing it does to the victim. Split from `fighterDefMove` on purpose:
+// one call with eighteen arguments is a call nobody can read, and tish does not check arity — a
+// dropped argument silently becomes a zero-damage move (see scripts/arity_check.py).
+export function fighterDefBox(chr: i32, mv: i32, hbX: i32, hbY: i32, hbW: i32, hbH: i32,
+                              hitStun: i32, blockStun: i32, push: i32, hitStop: i32) {
+  let b: i32 = (chr * MOVES + mv) * MW
+  MT[b + M_HBX] = hbX
+  MT[b + M_HBY] = hbY
+  MT[b + M_HBW] = hbW
+  MT[b + M_HBH] = hbH
+  MT[b + M_HSTUN] = hitStun
+  MT[b + M_BSTUN] = blockStun
+  MT[b + M_PUSH] = push
+  MT[b + M_HSTOP] = hitStop
+}
+
+// Which button (a BTN_* mask) triggers the move, and — for a special — the motion that must precede
+// it and what it costs in meter. Buttons alone: pass motion 0.
+export function fighterDefInput(chr: i32, mv: i32, motion: i32, btn: i32, cost: i32, airOk: i32) {
+  let b: i32 = (chr * MOVES + mv) * MW
+  MT[b + M_MOTION] = motion
+  MT[b + M_BTN] = btn
+  MT[b + M_COST] = cost
+  MT[b + M_AIROK] = airOk
+}
+
+// Moves this one may be cancelled into once it has CONNECTED — the bitmask is over move slots,
+// `(1 << MV_HP) | (1 << MV_SP1)`. Cancels are what turn three separate pokes into a combo.
+export function fighterDefCancel(chr: i32, mv: i32, mask: i32) {
+  MT[(chr * MOVES + mv) * MW + M_CANCEL] = mask
+}
+
+// Which neighbouring cell an attack pose's overhang was cut into: dx +1 in front, -1 behind, dy -1
+// above; (0, 0) = none. The generator works this out per frame; see examples/versus/src/frames.tish.
+export function fighterDefFxCell(chr: i32, pose: i32, dx: i32, dy: i32) {
+  FXX[chr * 10 + (pose - P_FX_FIRST)] = dx
+  FXY[chr * 10 + (pose - P_FX_FIRST)] = dy
+}
+
+// ── lifecycle ────────────────────────────────────────────────────────────────────────────────────
+export function fighterSetStage(left: i32, right: i32, floorY: i32) {
+  G[G_LEFT] = left
+  G[G_RIGHT] = right
+  G[G_FLOOR] = floorY
+}
+
+export function fighterSetPushRange(px: i32) { G[G_PUSH] = px }
+
+// Bind a player slot to a character and the two sprites that draw it.
+export function fighterSpawn(p: i32, chr: i32, bodySpr: i32, fxSpr: i32) {
+  let b: i32 = p * FW
+  F[b + S_CHR] = chr
+  F[b + S_BODY] = bodySpr
+  F[b + S_FX] = fxSpr
+  F[b + S_WINS] = 0
+}
+
+// Put a fighter back on its start mark with full health. Rounds call this; a match calls
+// `fighterResetWins` as well.
+export function fighterRoundReset(p: i32, x: i32, facing: i32) {
+  let b: i32 = p * FW
+  F[b + S_X] = x << 8
+  F[b + S_Y] = G[G_FLOOR] << 8
+  F[b + S_VY] = 0
+  F[b + S_VX] = 0
+  F[b + S_FACE] = facing
+  F[b + S_STATE] = FS_FROZEN
+  F[b + S_HP] = CH[F[b + S_CHR] * CW + C_MAXHP]
+  F[b + S_LASTHP] = 0 - 1
+  F[b + S_METER] = 0
+  F[b + S_COMBO] = 0
+  F[b + S_MOVE] = 0 - 1
+  F[b + S_PHASE] = 0
+  F[b + S_PHASET] = 0
+  F[b + S_HITDONE] = 0
+  F[b + S_STUN] = 0
+  F[b + S_POSE] = P_IDLE
+  F[b + S_GROUND] = 1
+  F[b + S_ANIMT] = 0
+  F[b + S_DASHT] = 0
+  G[G_FREEZE] = 0
+}
+
+export function fighterResetWins() {
+  F[0 * FW + S_WINS] = 0
+  F[1 * FW + S_WINS] = 0
+}
+
+// Hand control back after the "FIGHT!" banner (or take it away for a KO pose).
+export function fighterSetFrozen(p: i32, on: i32) {
+  let b: i32 = p * FW
+  if (on === 1) { F[b + S_STATE] = FS_FROZEN }
+  else if (F[b + S_STATE] === FS_FROZEN) { F[b + S_STATE] = FS_IDLE }
+}
+
+export function fighterFreeze(frames: i32) { G[G_FREEZE] = frames }
+
+// ── reads ────────────────────────────────────────────────────────────────────────────────────────
+export function fighterHp(p: i32): i32 { return F[p * FW + S_HP] }
+export function fighterMaxHp(p: i32): i32 { return CH[F[p * FW + S_CHR] * CW + C_MAXHP] }
+export function fighterMeter(p: i32): i32 { return F[p * FW + S_METER] }
+export function fighterState(p: i32): i32 { return F[p * FW + S_STATE] }
+export function fighterCombo(p: i32): i32 { return F[p * FW + S_COMBO] }
+export function fighterWins(p: i32): i32 { return F[p * FW + S_WINS] }
+export function fighterAddWin(p: i32) { F[p * FW + S_WINS] = F[p * FW + S_WINS] + 1 }
+
+// End the strings. The combo counter is a celebration, and a celebration that is still on screen
+// during the results is just stale HUD.
+export function fighterClearCombos() {
+  F[0 * FW + S_COMBO] = 0
+  F[1 * FW + S_COMBO] = 0
+}
+export function fighterX(p: i32): i32 { return F[p * FW + S_X] >> 8 }
+export function fighterY(p: i32): i32 { return F[p * FW + S_Y] >> 8 }
+export function fighterFacing(p: i32): i32 { return F[p * FW + S_FACE] }
+export function fighterChar(p: i32): i32 { return F[p * FW + S_CHR] }
+export function fighterLastHitX(): i32 { return G[G_HITX] }
+export function fighterLastHitY(): i32 { return G[G_HITY] }
+export function fighterFrozen(): i32 { return G[G_FREEZE] }
+
+// Everything the CPU opponent looks at, in one crossing:
+//   bits 0..8    gap in pixels     bits 9..12  its own state
+//   bits 13..16  the foe's state   bit  17     its facing (1 = right)
+export function fighterAiView(me: i32, foe: i32): i32 {
+  let g: i32 = fighterGap()
+  if (g > 511) { g = 511 }
+  let f: i32 = 0
+  if (F[me * FW + S_FACE] > 0) { f = 1 }
+  return g | (F[me * FW + S_STATE] << 9) | (F[foe * FW + S_STATE] << 13) | (f << 17)
+}
+
+// Everything the HUD shows for one fighter, in one crossing:
+//   bits 0..8  hp   bits 9..15  meter   bits 16..17  rounds won   bits 18..23  combo
+export function fighterHudView(p: i32): i32 {
+  let b: i32 = p * FW
+  let c: i32 = F[b + S_COMBO]
+  if (c > 63) { c = 63 }
+  return F[b + S_HP] | (F[b + S_METER] << 9) | (F[b + S_WINS] << 16) | (c << 18)
+}
+
+// Distance between the two fighters in whole pixels — what a CPU opponent spaces itself with.
+export function fighterGap(): i32 {
+  let d: i32 = (F[0 * FW + S_X] >> 8) - (F[1 * FW + S_X] >> 8)
+  if (d < 0) { return 0 - d }
+  return d
+}
+
+// ── the frame ────────────────────────────────────────────────────────────────────────────────────
+
+// Advance both fighters one frame. Returns a bitmask of EV_*; the caller turns those into sparks,
+// screen shake and round flow. Hit-stop is honoured here, so a caller that just loops on this gets
+// the freeze on impact for free.
+export function fighterTick(): i32 {
+  if (G[G_FREEZE] > 0) {
+    G[G_FREEZE] = G[G_FREEZE] - 1
+    poseOf(0)
+    poseOf(1)
+    return 0
+  }
+  G[G_EV] = 0
+  step(0)
+  step(1)
+  resolve(0, 1)
+  resolve(1, 0)
+  pushApart()
+  faceOff()
+  poseOf(0)
+  poseOf(1)
+  return G[G_EV]
+}
+
+function step(p: i32) {
+  let b: i32 = p * FW
+  let st: i32 = F[b + S_STATE]
+  if (st === FS_KO) { return }
+  if (st === FS_WIN) { return }
+
+  F[b + S_ANIMT] = F[b + S_ANIMT] + 1
+
+  if (st === FS_FROZEN) { return }
+
+  if (st === FS_HITSTUN) {
+    F[b + S_STUN] = F[b + S_STUN] - 1
+    if (F[b + S_STUN] <= 0) { F[b + S_STATE] = FS_IDLE F[b + S_COMBO] = 0 }
+    gravity(p)
+    return
+  }
+  if (st === FS_BLOCKSTUN) {
+    F[b + S_STUN] = F[b + S_STUN] - 1
+    if (F[b + S_STUN] <= 0) { F[b + S_STATE] = FS_IDLE }
+    gravity(p)
+    return
+  }
+
+  if (st === FS_DASH_F || st === FS_DASH_B) {
+    F[b + S_DASHT] = F[b + S_DASHT] - 1
+    F[b + S_X] = F[b + S_X] + F[b + S_VX]
+    clampX(p)
+    if (F[b + S_DASHT] <= 0) { F[b + S_STATE] = FS_IDLE F[b + S_VX] = 0 return }
+    // A forward dash may be cancelled into an attack once it is properly moving — a back dash may
+    // not, or it would be a free escape with a hitbox on the end of it.
+    if (st === FS_DASH_F) {
+      if (F[b + S_DASHT] < DASH_F_FRAMES - DASH_F_FREE) {
+        let dw: i32 = motionFrame(p, F[b + S_FACE])
+        F[b + S_DIR] = dw & 15
+        if (tryStart(p, 0, (dw >> 4) & 15, dw, (dw >> 16) & 15) === 1) { F[b + S_VX] = 0 }
+      }
+    }
+    return
+  }
+
+  if (st === FS_ATTACK) {
+    F[b + S_PHASET] = F[b + S_PHASET] - 1
+    if (F[b + S_PHASET] <= 0) {
+      let mb: i32 = (F[b + S_CHR] * MOVES + F[b + S_MOVE]) * MW
+      let ph: i32 = F[b + S_PHASE] + 1
+      F[b + S_PHASE] = ph
+      if (ph === 1) { F[b + S_PHASET] = MT[mb + M_ACTIVE] }
+      else if (ph === 2) { F[b + S_PHASET] = MT[mb + M_RECOV] }
+      else {
+        F[b + S_STATE] = FS_IDLE
+        F[b + S_MOVE] = 0 - 1
+        if (F[b + S_HITDONE] === 0) { G[G_EV] = G[G_EV] | EV_WHIFF }
+      }
+    }
+    // A cancel may interrupt active or recovery once the move has connected.
+    if (F[b + S_HITDONE] === 1) {
+      let cw: i32 = motionFrame(p, F[b + S_FACE])
+      F[b + S_DIR] = cw & 15
+      tryStart(p, 1, (cw >> 4) & 15, cw, (cw >> 16) & 15)
+    }
+    gravity(p)
+    return
+  }
+
+  // Actionable: read the pad — ONCE, as one packed word. See the note on motionFrame.
+  let w: i32 = motionFrame(p, F[b + S_FACE])
+  let dir: i32 = w & 15
+  F[b + S_DIR] = dir
+  let dx: i32 = DIRX[dir]
+  let dy: i32 = DIRY[dir]
+  let rel: i32 = dx * F[b + S_FACE]
+
+  if (tryStart(p, 0, (w >> 4) & 15, w, (w >> 16) & 15) === 1) { gravity(p) return }
+
+  // Dashes come from a double tap on the horizontal (see motion.tish) and beat walking to the punch.
+  let dash: i32 = (w >> 20) & 3
+  if (dash !== DASH_NONE_LOCAL) {
+    if (F[b + S_GROUND] === 1) {
+      if (dash === DASH_FWD) {
+        F[b + S_STATE] = FS_DASH_F
+        F[b + S_DASHT] = DASH_F_FRAMES
+        F[b + S_VX] = F[b + S_FACE] * CH[F[b + S_CHR] * CW + C_WALKF] * DASH_F_MUL
+      } else {
+        F[b + S_STATE] = FS_DASH_B
+        F[b + S_DASHT] = DASH_B_FRAMES
+        F[b + S_VX] = 0 - F[b + S_FACE] * CH[F[b + S_CHR] * CW + C_WALKB] * DASH_B_MUL
+      }
+      F[b + S_X] = F[b + S_X] + F[b + S_VX]
+      clampX(p)
+      return
+    }
+  }
+
+  if (F[b + S_GROUND] === 1) {
+    if (dy > 0) {
+      F[b + S_VY] = CH[F[b + S_CHR] * CW + C_JUMPVY]
+      F[b + S_VX] = dx * 150
+      F[b + S_GROUND] = 0
+      F[b + S_STATE] = FS_JUMP
+    } else if (dy < 0) {
+      F[b + S_STATE] = FS_CROUCH
+    } else if (rel > 0) {
+      F[b + S_STATE] = FS_WALK_F
+      F[b + S_X] = F[b + S_X] + F[b + S_FACE] * CH[F[b + S_CHR] * CW + C_WALKF]
+    } else if (rel < 0) {
+      F[b + S_STATE] = FS_WALK_B
+      F[b + S_X] = F[b + S_X] - F[b + S_FACE] * CH[F[b + S_CHR] * CW + C_WALKB]
+    } else {
+      F[b + S_STATE] = FS_IDLE
+    }
+  }
+  gravity(p)
+  clampX(p)
+}
+
+function gravity(p: i32) {
+  let b: i32 = p * FW
+  if (F[b + S_GROUND] === 1) { return }
+  F[b + S_VY] = F[b + S_VY] + CH[F[b + S_CHR] * CW + C_GRAV]
+  F[b + S_Y] = F[b + S_Y] + F[b + S_VY]
+  F[b + S_X] = F[b + S_X] + F[b + S_VX]
+  if (F[b + S_Y] >= (G[G_FLOOR] << 8)) {
+    F[b + S_Y] = G[G_FLOOR] << 8
+    F[b + S_VY] = 0
+    F[b + S_VX] = 0
+    F[b + S_GROUND] = 1
+    if (F[b + S_STATE] === FS_JUMP) { F[b + S_STATE] = FS_IDLE }
+  }
+  clampX(p)
+}
+
+function clampX(p: i32) {
+  let b: i32 = p * FW
+  if (F[b + S_X] < (G[G_LEFT] << 8)) { F[b + S_X] = G[G_LEFT] << 8 }
+  if (F[b + S_X] > (G[G_RIGHT] << 8)) { F[b + S_X] = G[G_RIGHT] << 8 }
+}
+
+// Choose and start a move, if the pad is asking for one and the fighter is allowed to. `cancelling`
+// restricts the choice to the current move's cancel list. Returns 1 if a move started.
+// Choose and start a move, if the pad is asking for one and the fighter is allowed to. `cancelling`
+// restricts the choice to the current move's cancel list. Returns 1 if a move started.
+//
+// ⚠️ THE FIRST LINE IS THE OPTIMISATION. Nothing here can produce a move without a button, so on a
+// frame where none was pressed and none is buffered there is nothing to decide — and that is the
+// overwhelming majority of frames. Walking the nine move slots unconditionally, through three nested
+// calls, cost about 4,500 Timer2 ticks against a 4,389-tick frame: the fighter spent more than a
+// whole frame deciding not to punch, and the stage's band DMA turned that into a shredded backdrop.
+// The three checks are also ONE function rather than four, because a tish call is a boxed `Value`
+// dispatch rather than a jump — only leaf functions that touch no module state lower to real Rust
+// fns (`family`/`mirror` here do; everything holding an array does not).
+function tryStart(p: i32, cancelling: i32, edge: i32, pad: i32, mot: i32): i32 {
+  if (edge === 0) {
+    if (((pad >> 8) & 255) === 0) { return 0 }
+  }
+  let b: i32 = p * FW
+  let chr: i32 = F[b + S_CHR]
+  let allow: i32 = 0 - 1
+  if (cancelling === 1) { allow = MT[(chr * MOVES + F[b + S_MOVE]) * MW + M_CANCEL] }
+
+  let crouching: i32 = 0
+  if (F[b + S_STATE] === FS_CROUCH) { crouching = 1 }
+  let airborne: i32 = 0
+  if (F[b + S_GROUND] === 0) { airborne = 1 }
+
+  let mv: i32 = 0 - 1
+  let near: i32 = (pad >> 8) & 15
+  let buf: i32 = (pad >> 12) & 15
+
+  // A throw first: "both punches at once" is two presses inside a two-frame window, the only way to
+  // get a fifth action out of a four-button pad, and it must not be eaten by the plain punch.
+  if (airborne === 0) {
+    if (crouching === 0) {
+      if (MT[(chr * MOVES + MV_THROW) * MW + M_DEFINED] === 1) {
+        if ((near & BTN_LP) > 0) {
+          if ((near & BTN_HP) > 0) { mv = MV_THROW }
+        }
+      }
+    }
+  }
+
+  // Then specials: a quarter-circle + punch must not come out as a plain punch.
+  if (mv < 0) {
+    if (mot !== 0) {
+      let sp: i32 = MV_SP1
+      while (sp <= MV_SP2) {
+        let sb: i32 = (chr * MOVES + sp) * MW
+        if (MT[sb + M_DEFINED] === 1) {
+          if (MT[sb + M_MOTION] === mot) {
+            if ((buf & MT[sb + M_BTN]) > 0) {
+              if (airborne === 0 || MT[sb + M_AIROK] === 1) { mv = sp sp = MV_SP2 }
+            }
+          }
+        }
+        sp = sp + 1
+      }
+    }
+  }
+
+  // Then normals, in slot order — the crouching pair only while crouching, the standing four only
+  // while not.
+  if (mv < 0) {
+    if (edge > 0) {
+      let nm: i32 = 0
+      while (nm < MV_SP1) {
+        let nb: i32 = (chr * MOVES + nm) * MW
+        if (MT[nb + M_DEFINED] === 1) {
+          if (airborne === 0 || MT[nb + M_AIROK] === 1) {
+            let want: i32 = 0
+            if (nm === MV_CR_LP || nm === MV_CR_HK) { want = crouching }
+            else if (crouching === 0) { want = 1 }
+            if (want === 1) {
+              if ((edge & MT[nb + M_BTN]) > 0) { mv = nm nm = MV_SP1 }
+            }
+          }
+        }
+        nm = nm + 1
+      }
+    }
+  }
+
+  if (mv < 0) { return 0 }
+  if (cancelling === 1) {
+    if ((allow & (1 << mv)) === 0) { return 0 }
+  }
+
+  let mb: i32 = (chr * MOVES + mv) * MW
+  if (MT[mb + M_COST] > F[b + S_METER]) { return 0 }
+  F[b + S_METER] = F[b + S_METER] - MT[mb + M_COST]
+  F[b + S_STATE] = FS_ATTACK
+  F[b + S_MOVE] = mv
+  F[b + S_PHASE] = 0
+  F[b + S_PHASET] = MT[mb + M_START]
+  F[b + S_HITDONE] = 0
+  return 1
+}
+
+// ── contact ──────────────────────────────────────────────────────────────────────────────────────
+function resolve(a: i32, d: i32) {
+  let ab: i32 = a * FW
+  if (F[ab + S_STATE] !== FS_ATTACK) { return }
+  if (F[ab + S_PHASE] !== 1) { return }
+  if (F[ab + S_HITDONE] === 1) { return }
+
+  let mb: i32 = (F[ab + S_CHR] * MOVES + F[ab + S_MOVE]) * MW
+  let ax: i32 = F[ab + S_X] >> 8
+  let ay: i32 = F[ab + S_Y] >> 8
+  let face: i32 = F[ab + S_FACE]
+  // The hitbox is authored facing right and mirrored here, which is why no move is ever written
+  // twice. `near`/`far` are ordered after the mirror so the AABB test does not need to care.
+  let e0: i32 = ax + face * MT[mb + M_HBX]
+  let e1: i32 = ax + face * (MT[mb + M_HBX] + MT[mb + M_HBW])
+  let hx0: i32 = e0
+  let hx1: i32 = e1
+  if (e1 < e0) { hx0 = e1 hx1 = e0 }
+  let hy1: i32 = ay - MT[mb + M_HBY]
+  let hy0: i32 = hy1 - MT[mb + M_HBH]
+
+  let db: i32 = d * FW
+  let dstate: i32 = F[db + S_STATE]
+  if (dstate === FS_KO) { return }
+  // The escape frames of a back dash pass through everything. Checked BEFORE the boxes so a
+  // whiffed punish reads as a whiff rather than as a hit that did nothing.
+  if (dstate === FS_DASH_B) {
+    if (F[db + S_DASHT] > DASH_B_FRAMES - DASH_B_INVULN) { return }
+  }
+  let dx: i32 = F[db + S_X] >> 8
+  let dy: i32 = F[db + S_Y] >> 8
+  let half: i32 = CH[F[db + S_CHR] * CW + C_HALFW]
+  let tall: i32 = CH[F[db + S_CHR] * CW + C_TALL]
+  let ducking: i32 = 0
+  if (dstate === FS_CROUCH) { ducking = 1 }
+  if (ducking === 1) { tall = (tall * 5) >> 3 }
+  let ux0: i32 = dx - half
+  let ux1: i32 = dx + half
+  let uy0: i32 = dy - tall
+  let uy1: i32 = dy
+
+  if (hx1 < ux0) { return }
+  if (hx0 > ux1) { return }
+  if (hy1 < uy0) { return }
+  if (hy0 > uy1) { return }
+
+  F[ab + S_HITDONE] = 1
+  G[G_HITX] = (hx0 + hx1) >> 1
+  G[G_HITY] = (uy0 + uy1) >> 1
+
+  // Blocking is decided HERE, not by a block state the player enters. Holding away from the
+  // opponent while grounded and not attacking guards; whether it guards THIS move depends on the
+  // move's kind and whether the defender is crouching.
+  let guard: i32 = 0
+  let ddx: i32 = DIRX[F[db + S_DIR]]
+  if (ddx * F[db + S_FACE] < 0) {
+    if (F[db + S_GROUND] === 1) {
+      if (dstate !== FS_ATTACK) {
+        let kind: i32 = MT[mb + M_KIND]
+        if (kind === KIND_MID) { guard = 1 }
+        else if (kind === KIND_LOW) { guard = ducking }
+        else if (kind === KIND_OVERHEAD) { if (ducking === 0) { guard = 1 } }
+      }
+    }
+  }
+
+  let push: i32 = MT[mb + M_PUSH]
+  if (guard === 1) {
+    F[db + S_STATE] = FS_BLOCKSTUN
+    F[db + S_STUN] = MT[mb + M_BSTUN]
+    F[db + S_HP] = F[db + S_HP] - (MT[mb + M_DMG] >> 3)
+    F[db + S_X] = F[db + S_X] - F[db + S_FACE] * push
+    F[ab + S_X] = F[ab + S_X] - F[ab + S_FACE] * (push >> 1)
+    F[ab + S_METER] = meterAdd(F[ab + S_METER], 2)
+    F[db + S_METER] = meterAdd(F[db + S_METER], 3)
+    G[G_FREEZE] = MT[mb + M_HSTOP] >> 1
+    if (a === 0) { G[G_EV] = G[G_EV] | EV_P1_BLOCK } else { G[G_EV] = G[G_EV] | EV_P2_BLOCK }
+  } else {
+    if (dstate === FS_ATTACK) {
+      if (F[db + S_PHASE] === 0) { G[G_EV] = G[G_EV] | EV_COUNTER }
+    }
+    F[db + S_STATE] = FS_HITSTUN
+    F[db + S_STUN] = MT[mb + M_HSTUN]
+    F[db + S_MOVE] = 0 - 1
+    // Scaled by how long the string already is — see SCALE.
+    let sc: i32 = F[ab + S_COMBO]
+    if (sc > 15) { sc = 15 }
+    let dealt: i32 = (MT[mb + M_DMG] * SCALE[sc]) >> 8
+    if (dealt < 1) { dealt = 1 }
+    F[db + S_HP] = F[db + S_HP] - dealt
+    F[db + S_X] = F[db + S_X] - F[db + S_FACE] * push
+    F[ab + S_COMBO] = F[ab + S_COMBO] + 1
+    F[ab + S_METER] = meterAdd(F[ab + S_METER], 6)
+    F[db + S_METER] = meterAdd(F[db + S_METER], 4)
+    G[G_FREEZE] = MT[mb + M_HSTOP]
+    if (a === 0) { G[G_EV] = G[G_EV] | EV_P1_HIT } else { G[G_EV] = G[G_EV] | EV_P2_HIT }
+    if (F[db + S_HP] <= 0) {
+      F[db + S_HP] = 0
+      F[db + S_STATE] = FS_KO
+      F[ab + S_STATE] = FS_WIN
+      if (d === 0) { G[G_EV] = G[G_EV] | EV_P1_KO } else { G[G_EV] = G[G_EV] | EV_P2_KO }
+    }
+  }
+  clampX(a)
+  clampX(d)
+}
+
+function meterAdd(m: i32, n: i32): i32 {
+  let v: i32 = m + n
+  if (v > 100) { return 100 }
+  return v
+}
+
+// Two bodies may not occupy the same column. Splitting the overlap evenly (rather than moving only
+// the one that walked in) is what stops a cornered fighter from being walked through.
+function pushApart() {
+  let x0: i32 = F[0 * FW + S_X] >> 8
+  let x1: i32 = F[1 * FW + S_X] >> 8
+  let d: i32 = x1 - x0
+  let sign: i32 = 1
+  if (d < 0) { sign = 0 - 1 d = 0 - d }
+  if (d >= G[G_PUSH]) { return }
+  let fix: i32 = ((G[G_PUSH] - d) << 8) >> 1
+  F[0 * FW + S_X] = F[0 * FW + S_X] - sign * fix
+  F[1 * FW + S_X] = F[1 * FW + S_X] + sign * fix
+  clampX(0)
+  clampX(1)
+}
+
+// Fighters turn to face each other, but only while both are on the ground and neither is committed
+// to a move — otherwise an attack's hitbox would swap sides mid-swing.
+function faceOff() {
+  if (F[0 * FW + S_STATE] === FS_ATTACK) { return }
+  if (F[1 * FW + S_STATE] === FS_ATTACK) { return }
+  if (F[0 * FW + S_GROUND] === 0) { return }
+  if (F[1 * FW + S_GROUND] === 0) { return }
+  let d: i32 = (F[1 * FW + S_X] >> 8) - (F[0 * FW + S_X] >> 8)
+  if (d > 2) { F[0 * FW + S_FACE] = 1 F[1 * FW + S_FACE] = 0 - 1 }
+  else if (d < 0 - 2) { F[0 * FW + S_FACE] = 0 - 1 F[1 * FW + S_FACE] = 1 }
+}
+
+// ── presentation ─────────────────────────────────────────────────────────────────────────────────
+function poseOf(p: i32) {
+  let b: i32 = p * FW
+  let st: i32 = F[b + S_STATE]
+  let t: i32 = F[b + S_ANIMT]
+  if (st === FS_ATTACK) {
+    let mb: i32 = (F[b + S_CHR] * MOVES + F[b + S_MOVE]) * MW
+    let step: i32 = F[b + S_PHASE]
+    if (step >= MT[mb + M_CLIPN]) { step = MT[mb + M_CLIPN] - 1 }
+    F[b + S_POSE] = MT[mb + M_CLIP] + step
+  } else if (st === FS_HITSTUN) { F[b + S_POSE] = P_HIT }
+  else if (st === FS_BLOCKSTUN) { F[b + S_POSE] = P_BLOCK }
+  else if (st === FS_KO) { F[b + S_POSE] = P_KO }
+  else if (st === FS_CROUCH) { F[b + S_POSE] = P_CROUCH }
+  else if (st === FS_JUMP) {
+    if (F[b + S_VY] < 0) { F[b + S_POSE] = P_JUMP } else { F[b + S_POSE] = P_FALL }
+  }
+  else if (st === FS_DASH_F) { F[b + S_POSE] = P_WALK + ((t >> 1) & 3) }
+  else if (st === FS_DASH_B) { F[b + S_POSE] = P_JUMP }
+  else if (st === FS_WALK_F) { F[b + S_POSE] = P_WALK + ((t >> 2) & 3) }
+  else if (st === FS_WALK_B) { F[b + S_POSE] = P_WALK + (3 - ((t >> 2) & 3)) }
+  else { F[b + S_POSE] = P_IDLE + ((t >> 3) & 3) }
+}
+
+// Place both fighters' sprites, offset by (ox, oy) pixels.
+//
+// ⚠️ THE OFFSET IS WHY THIS TAKES ARGUMENTS. The obvious way to shake the screen on impact is to
+// jitter the camera, and on a stage whose parallax comes from `bg_bands` that visibly SHREDS the
+// backdrop: the per-scanline DMA table is rebuilt from the camera inside `frame()`, so a frame that
+// commits even slightly into the visible scan re-arms the DMA halfway down the screen, and the rows
+// above and below it then carry offsets from two different cameras. A camera that drifts by a pixel
+// hides that; one that jumps seven pixels every frame turns it into a comb of torn stripes. So the
+// shake moves the FIGHTERS, not the view — which is also what a fighting game actually wants, since
+// the impact belongs to the characters rather than to the sky behind them.
+export function fighterDraw(ox: i32, oy: i32) {
+  drawOne(0, ox, oy)
+  drawOne(1, ox, oy)
+}
+
+function drawOne(p: i32, ox: i32, oy: i32) {
+  let b: i32 = p * FW
+  let x: i32 = F[b + S_X] >> 8
+  let y: i32 = F[b + S_Y] >> 8
+  let face: i32 = F[b + S_FACE]
+  let pose: i32 = F[b + S_POSE]
+  let flip: i32 = 0
+  if (face < 0) { flip = 1 }
+
+  sprite_set_frame(F[b + S_BODY], pose)
+  sprite_set_flip(F[b + S_BODY], flip)
+  sprite_set_pos(F[b + S_BODY], x - 32 + ox, y - 62 + oy)
+
+  // The overlay is whichever neighbouring 64x64 window of the source frame did not fit beside the
+  // body — a sword arc in front, or a raised blade above. `dx`/`dy` are in cell units, authored
+  // facing right; facing left mirrors the OFFSET and the CELL together, which is the only way the
+  // two halves stay joined. See scripts/gen_versus.py.
+  let fdx: i32 = 0
+  let fdy: i32 = 0
+  if (pose >= P_FX_FIRST) {
+    if (pose <= P_FX_LAST) {
+      fdx = FXX[F[b + S_CHR] * 10 + (pose - P_FX_FIRST)]
+      fdy = FXY[F[b + S_CHR] * 10 + (pose - P_FX_FIRST)]
+    }
+  }
+  if (fdx === 0) {
+    if (fdy === 0) {
+      sprite_set_visible(F[b + S_FX], 0)
+      return
+    }
+  }
+  let fx: i32 = x - 32 + fdx * 64
+  let fflip: i32 = 0
+  if (face < 0) { fx = x - 32 - fdx * 64 fflip = 1 }
+  sprite_set_visible(F[b + S_FX], 1)
+  sprite_set_frame(F[b + S_FX], P_FX_CELL + (pose - P_FX_FIRST))
+  sprite_set_flip(F[b + S_FX], fflip)
+  sprite_set_pos(F[b + S_FX], fx + ox, y - 62 + fdy * 64 + oy)
+}

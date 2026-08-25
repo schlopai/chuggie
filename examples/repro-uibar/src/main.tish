@@ -1,0 +1,55 @@
+// repro-uibar — the SECOND uiRender in a ROM's life laid every node out with the PREVIOUS render's
+// box. packages/ui.tish imported `lay_reset` but never called it, so the native node pool
+// (crates/tish-agb/src/ui_layout.rs) only ever grew: render 2 pushed its nodes after render 1's,
+// while the geometry write-back read slots 0..count-1. Boxes came back offset by the first tree's
+// node count — a makeBar fill's 70x4 landing on a full-width container painted a screen-sized
+// block of `good` green over warsong's match.
+//
+// Both shapes below must print 72x6 / 70x4. Before the fix the second render printed
+// `_w=0 _h=0` and `_w=236 _h=0`, and it is NOT a makeBar bug — the inline copy breaks identically.
+
+import { frame, log, backdrop, bg_clear, ui_clear } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { uiInit, uiRender, uiResetPool, makeBar, makePanel } from '../../../packages/ui'
+
+backdrop(0x101018)
+bg_clear()
+ui_clear()
+frame()
+
+uiInit({ font: body, tinyFont: body, lineH: 9, tileReserve: 128 })
+
+// FIRST render: a panel like warsong's class-select screen, then tear it down the way warsong
+// does before opening the match HUD (uiResetPool + ui_clear, one frame, then render again).
+uiRender({ dir: "col", pad: 2, children: [{ text: "first", color: "text" }] })
+frame()
+ui_clear()
+frame()
+
+let bar = makeBar({ value: 40, max: 40, w: 72, h: 6, fill: "good" })
+let barView = bar.view()
+
+// The SAME shape, written inline instead of coming out of makeBar.
+let inlineFill = { w: 70, h: 4, fill: "good", children: [] }
+let inlineTrack = {
+  dir: "row", w: 72, h: 6, pad: 1, fill: "scrollTrack", border: "border",
+  children: [inlineFill]
+}
+
+uiRender({
+  dir: "col", pad: 2, gap: 2,
+  children: [
+    { text: "BAR", color: "title" },
+    barView,
+    { text: "INLINE", color: "title" },
+    inlineTrack
+  ]
+})
+
+log("bar    track w=" + barView.w + " h=" + barView.h + " -> _w=" + barView._w + " _h=" + barView._h)
+let bf = barView.children[0]
+log("bar    fill  w=" + bf.w + " h=" + bf.h + " -> _w=" + bf._w + " _h=" + bf._h)
+log("inline track w=" + inlineTrack.w + " h=" + inlineTrack.h + " -> _w=" + inlineTrack._w + " _h=" + inlineTrack._h)
+log("inline fill  w=" + inlineFill.w + " h=" + inlineFill.h + " -> _w=" + inlineFill._w + " _h=" + inlineFill._h)
+
+while (true) { frame() }

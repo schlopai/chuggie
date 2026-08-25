@@ -1,0 +1,86 @@
+// fx.tish — names for the engine's particle layer.
+//
+// CONSTANTS ONLY. There is not one function in this file, and that is deliberate: a Tish function
+// costs ~151 bytes of heap whether it is ever called or not, so a package of thin wrappers over
+// `fx_spawn` / `fx_set` would cost a ROM more than the natives it wraps. Everything here lowers to
+// an integer literal at the call site.
+//
+// You do not need this file. `fx_spawn(2, spark, 0, 120, 0, 256)` is a legal call and does the same
+// thing as `fx_spawn(FXP_RAIN, spark, 0, 120, 0, 256)`. It exists because the second one can be read
+// six months later, and because a mis-typed preset index is otherwise a silent wrong effect.
+//
+// ── What the engine does for you ───────────────────────────────────────────
+//
+// The GBA has 128 OAM entries for the WHOLE machine: the player, every NPC, the HUD, every
+// `text_draw` slot, and every particle. Nothing in the hardware arbitrates them, so a 48-particle
+// burst is 37.5% of the budget and firing one in a busy town makes NPCs disappear.
+//
+// So the engine measures what the game is holding and hands effects only what is spare, every
+// frame. An emitter that would exceed its share emits fewer particles; it never takes a slot the
+// game needs. You do not have to count sprites, and there is no failure for you to handle.
+//
+// Two knobs, both optional:
+//   fx_budget(max, reserve)  max -1 sizes automatically (the default). `reserve` is entries kept
+//                            free for sprites that do not exist YET — the NPC who walks on screen
+//                            during your victory burst. Default 16.
+//   fx_set(id, FXE_MAX, n)   one emitter's own ceiling, so a heavy effect cannot spend the whole
+//                            layer and leave the next one absent. Defaults to half.
+//
+// ── The one thing the hardware will not do ─────────────────────────────────
+//
+// There is no per-particle alpha and there cannot be. BLDCNT holds ONE blend mode for the whole
+// screen and the engine spends it on the scene fade, so a particle cannot fade out by going
+// transparent. It fades by walking its own sheet frames instead:
+//
+//   let id = fx_spawn(FXP_SMOKE, puff, 0, x, y, 256)
+//   fx_set(id, FXE_FRAMEN, 3)     // frames 0,1,2,3 across the particle's life
+//
+// Author the sheet so the last frame is the faintest and you have a fade. This is how it was done
+// on the hardware originally, and it costs nothing per frame — the engine only rebuilds a sprite's
+// tiles on the frames where the index actually changes.
+
+// ── Presets, for fx_spawn's first argument ─────────────────────────────────
+// BURST and CONFETTI are ONE-SHOTS: they emit immediately and retire themselves, so their handle is
+// stale almost at once and there is nothing to stop. The rest run until `fx_stop` or `fx_kill`.
+export let FXP_BURST: i32 = 0      // radial bang, gravity, short life
+export let FXP_CONFETTI: i32 = 1   // radial, NO gravity — expands and thins, never falls
+export let FXP_RAIN: i32 = 2       // full-width line at the top, fast, leaning on the wind
+export let FXP_SNOW: i32 = 3       // full-width line, slow, drifting
+export let FXP_FIRE: i32 = 4       // narrow cone up, short life, negative gravity
+export let FXP_SMOKE: i32 = 5      // slow cone up, drag, long life
+export let FXP_SPARKLE: i32 = 6    // scattered through a box, barely moving
+export let FXP_FOUNTAIN: i32 = 7   // cone up with gravity — arcs over and falls
+
+// ── Fields, for fx_set(id, field, value) ───────────────────────────────────
+export let FXE_X: i32 = 0
+export let FXE_Y: i32 = 1
+export let FXE_W: i32 = 2          // box width / line length / ring radius
+export let FXE_H: i32 = 3          // box height
+export let FXE_SHAPE: i32 = 4      // FXS_*
+export let FXE_DIR: i32 = 5        // 0..255 around the circle, or -1 for omnidirectional
+export let FXE_SPREAD: i32 = 6     // 0..128 either side of DIR. 128 with any DIR is a full circle
+export let FXE_SPEED: i32 = 7      // 8.8 pixels per frame
+export let FXE_SPEEDVAR: i32 = 8   // how much SPEED varies per particle; 0 reads as a ring
+export let FXE_GRAVITY: i32 = 9    // 8.8 downward acceleration. Negative rises, which is fire
+export let FXE_DRAG: i32 = 10      // velocity kept per frame out of 256. 256 frictionless, 250 smoke
+export let FXE_WIND: i32 = 11      // 8.8 sideways acceleration
+export let FXE_LIFE: i32 = 12      // frames a particle lives
+export let FXE_RATE: i32 = 13      // particles per frame, 8.8. 256 is one a frame, 26 about one in ten
+export let FXE_MAX: i32 = 14       // this emitter's own particle ceiling
+export let FXE_FRAME0: i32 = 15    // first sheet frame
+export let FXE_FRAMEN: i32 = 16    // last sheet frame; > FRAME0 animates across the particle's life
+export let FXE_DURATION: i32 = 17  // frames left to emit for; -1 forever, 0 stops (same as fx_stop)
+
+// ── Shapes, for FXE_SHAPE ──────────────────────────────────────────────────
+export let FXS_POINT: i32 = 0      // all from one spot
+export let FXS_BOX: i32 = 1        // anywhere in W x H, centred on X,Y
+export let FXS_RING: i32 = 2       // on a circle of radius W
+export let FXS_LINE: i32 = 3       // along a horizontal span of W
+
+// Direction, in the engine's 0..255 circle. Handy names, because `fx_set(id, FXE_DIR, 192)` is not
+// obviously "upwards" to anybody who has not read sin_cos_256.
+export let FXD_RIGHT: i32 = 0
+export let FXD_DOWN: i32 = 64
+export let FXD_LEFT: i32 = 128
+export let FXD_UP: i32 = 192
+export let FXD_ANY: i32 = 0 - 1

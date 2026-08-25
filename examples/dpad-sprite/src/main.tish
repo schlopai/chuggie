@@ -1,0 +1,12 @@
+// Move a sprite around with the d-pad — the classic first agb demo, in tish.
+import { sprite_create, sprite_set_pos, input_x, input_y, frame } from 'cargo:tish_agb'
+
+let s = sprite_create()
+let x: i32 = 104
+let y: i32 = 72
+while (true) {
+  x = x + input_x() * 2
+  y = y + input_y() * 2
+  sprite_set_pos(s, x, y)
+  frame()
+}

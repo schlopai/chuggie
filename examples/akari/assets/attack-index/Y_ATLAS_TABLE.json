@@ -1,0 +1,178 @@
+{
+  "DN": [
+    {
+      "blade": {
+        "atlas": [
+          0,
+          0
+        ]
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "atlas": [
+          3,
+          0
+        ]
+      },
+      "slash": {
+        "piece": "SLASH",
+        "offset": [
+          -8,
+          -16
+        ]
+      }
+    },
+    {
+      "blade": {
+        "atlas": [
+          3,
+          0
+        ]
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "atlas": [
+          3,
+          0
+        ]
+      },
+      "slash": null
+    }
+  ],
+  "UP": [
+    {
+      "blade": {
+        "atlas": [
+          0,
+          0
+        ]
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "atlas": [
+          3,
+          0
+        ]
+      },
+      "slash": {
+        "piece": "SLASH",
+        "offset": [
+          -8,
+          -16
+        ]
+      }
+    },
+    {
+      "blade": {
+        "atlas": [
+          3,
+          0
+        ]
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "atlas": [
+          3,
+          0
+        ]
+      },
+      "slash": null
+    }
+  ],
+  "LF": [
+    {
+      "blade": {
+        "atlas": [
+          0,
+          0
+        ]
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "atlas": [
+          3,
+          0
+        ]
+      },
+      "slash": {
+        "piece": "SLASH",
+        "offset": [
+          -8,
+          -12
+        ]
+      }
+    },
+    {
+      "blade": {
+        "atlas": [
+          3,
+          0
+        ]
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "atlas": [
+          3,
+          0
+        ]
+      },
+      "slash": null
+    }
+  ],
+  "RT": [
+    {
+      "blade": {
+        "atlas": [
+          0,
+          0
+        ]
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "atlas": [
+          7,
+          5
+        ]
+      },
+      "slash": {
+        "piece": "SLASH",
+        "offset": [
+          0,
+          -16
+        ]
+      }
+    },
+    {
+      "blade": {
+        "atlas": [
+          7,
+          5
+        ]
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "atlas": [
+          7,
+          5
+        ]
+      },
+      "slash": null
+    }
+  ]
+}

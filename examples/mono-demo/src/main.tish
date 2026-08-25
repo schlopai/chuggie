@@ -1,0 +1,31 @@
+// The game: gather the component exports and mount them, then spawn entities.
+// The component NAMES come from the export names (Player, Coin) — no registration call.
+import { player } from 'asset:../assets/player.png'
+import { sprite_new } from 'cargo:tish_agb'
+import { mount, create, step } from '../../../packages/engine'
+import * as components from './components'
+import { Player, Coin } from './components'
+
+mount(components)   // registers Player + Coin by their export names
+
+let hero = create()
+hero.setPos(104, 72)
+hero.setCollider(16, 16)
+hero.setSprite(sprite_new(player))
+hero.behave(Player, {})
+
+let cx: i32 = 30
+let cy: i32 = 24
+let k: i32 = 0
+while (k < 5) {
+  let coin = create()
+  coin.setPos(cx, cy)
+  coin.setCollider(16, 16)
+  coin.setSprite(sprite_new(player))
+  coin.behave(Coin, {})
+  cx = cx + 44
+  cy = cy + 26
+  k = k + 1
+}
+
+while (true) { step() }

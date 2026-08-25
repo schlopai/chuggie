@@ -1,0 +1,121 @@
+// rng.tish — seeded deterministic integer RNG, for games that must replay.
+//
+// `Math.random()` on GBA is unseeded, identical on every boot, and returns a soft-float f64
+// (`tish_runtime_gba` -> `tishlang_core::random_f64`, whose xorshift is seeded with a constant and
+// whose `seed_rng` hook nothing ever calls). A game that wants a replayable run — a puzzle whose
+// solution is derived once and asserted forever, a link match where both cartridges must deal the
+// same field — needs a stream it can seed, and needs it integer-cheap.
+//
+// ── THE ONE RULE, and a live bug it would have caught ───────────────────────────────────────────
+//
+// tish numbers are f64. An LCG is exact ONLY while every intermediate stays inside f64's
+// exact-integer range, 2^53 = 9,007,199,254,740,992. Past that the low bits are rounding noise
+// rather than generator output, and the sequence silently stops being the LCG it claims to be.
+//
+//   rngNext    x * 1664525 + 1013904223   peak 7,149,081,450,614,098   INSIDE, 20% headroom
+//   rngNext16  x * 75 + 74                peak 4,915,275               far inside
+//   feel.tish  x * 1103515245 + 12345     peak 2,368,177,116,079,275,000   263x OVER
+//
+// `packages/feel.tish:259` is that third row. It still produces a deterministic stream, so nothing
+// ever failed — it simply is not the generator written down. Ported onto `rngNext16` it would be.
+//
+// ── WHY THESE CONSTANTS ────────────────────────────────────────────────────────────────────────
+//
+// `rngNext` is bit-for-bit Numerical Recipes' LCG, the same stream the retired Magical Drop rules
+// core used (`archive/crates/tish-gba-drop/src/rng.rs:24` in schlop/drop-gba).
+//
+// ⚠️ THAT IS A CROSS-REPO CONTRACT, not an implementation note. drop-gba's conformance corpus —
+// sixteen scenarios at two board widths, plus 400 fuzz seeds per width — is checked against goldens
+// that Rust core authored, and a shared field generator is the only reason a 10,000-step trace can
+// be compared at all. Change these numbers and every one of those goldens is silently invalidated,
+// in a repo that does not build from this one.
+//
+// ── STATE IS UNTYPED, ON PURPOSE ───────────────────────────────────────────────────────────────
+//
+// `RS` is a plain array, not `i32[]`, and it is the one place in these packages where that is
+// correct: the state is a full uint32 and 2^32 does not fit in an i32. Everything a caller RECEIVES
+// is reduced to a small non-negative integer first, so callers can and should hold results in
+// `i32`. Never reassign `RS` — `packages/prefs.tish:49-53` records what that does (writers and
+// readers silently end up on different arrays, and the cartridge stays blank while the log says
+// the save worked).
+
+// Eight independent streams. Separate streams matter: a field generator and a cosmetic sparkle
+// drawing from one stream means the sparkle changes the field, and a replay stops replaying.
+let STREAMS: i32 = 8
+let RS = [1, 1, 1, 1, 1, 1, 1, 1]
+
+/// Seed a stream. Zero is remapped, because an LCG seeded at 0 is legal but starts with a long,
+/// visibly non-random climb — `schlop/drop-gba/archive/crates/tish-gba-drop/src/rng.rs:16-18` guards the same way.
+export function rngSeed(s: i32, seed: i32) {
+  if (s < 0 || s >= STREAMS) { return }
+  let v = seed
+  if (v < 0) { v = 0 - v }
+  if (v === 0) { v = 2463534242 }
+  RS[s] = v
+}
+
+/// The raw 32-bit step. Returns a uint32 as a `number`, not an i32 — the top bit is real.
+export function rngNext(s: i32) {
+  if (s < 0 || s >= STREAMS) { return 0 }
+  // `>>> 0`, NOT `% 4294967296`. They are exactly equivalent for a non-negative value — ToUint32 is
+  // reduction mod 2^32 — but `%` on an f64 is an `fmod` CALL on ARM7TDMI, and this runs up to
+  // fourteen times per fed row. Measured: the descent branch was the single most expensive frame in
+  // the game at 7,641 ticks, and the modulo was most of it.
+  //
+  // The earlier comment here argued for `%` on the grounds that the value "is not an int32", which
+  // is true and beside the point: the reduction is what makes it one, and `>>>` is the operator that
+  // performs it. The result is still a full uint32 held in a `number`, which is why RS stays
+  // untyped.
+  let v = (RS[s] * 1664525 + 1013904223) >>> 0
+  RS[s] = v
+  return v
+}
+
+/// A non-negative integer below `n`, taken from the HIGH bits.
+///
+/// `next % n` off the low bits is the classic way to get a badly non-uniform stream out of an LCG —
+/// the low bits of an LCG have short periods (bit 0 alternates). Same reasoning and the same shift
+/// as `schlop/drop-gba/archive/crates/tish-gba-drop/src/rng.rs:33-38`.
+export function rngBelow(s: i32, n: i32): i32 {
+  // `n == 0` returns without drawing, matching `rng.rs:30-33`. `n == 1` DOES draw — trivially
+  // returning 0 early would be correct arithmetically and wrong for the stream, and the whole point
+  // of this generator is that its stream matches the Rust core's step for step.
+  if (n <= 0) { return 0 }
+  // Sixteen bits, not fifteen. Rust takes `next_u32() >> 16`, which is 0..65535; the first version
+  // masked with 32767 and silently halved the range, which is invisible in isolation and diverges
+  // from the oracle on roughly half of all draws.
+  let hi: i32 = ((rngNext(s) / 65536) | 0) & 65535
+  return hi % n
+}
+
+/// True `pct` percent of the time.
+export function rngChance(s: i32, pct: i32): i32 {
+  // `pct <= 0` returns WITHOUT drawing — Rust's `pct > 0 && self.below(100) < pct` short-circuits,
+  // so no roll is consumed. There is deliberately NO `pct >= 100` shortcut: Rust still draws at
+  // 100, and skipping it would desynchronise the stream from that point on. An early return that
+  // is arithmetically right and stream-wrong is the subtlest way to break a replay.
+  if (pct <= 0) { return 0 }
+  // The `% 100` is written INLINE with a literal divisor rather than going through `rngBelow`,
+  // because tish's codegen lowers `x % <positive integer literal>` on a proven-integer dividend to
+  // an integer remainder, while a variable divisor stays an `fmod` call. Same arithmetic, same
+  // stream — `rngBelow(s, 100)` would compute exactly this.
+  let hi: i32 = ((rngNext(s) / 65536) | 0) & 65535
+  if ((hi % 100) < pct) { return 1 }
+  return 0
+}
+
+/// A cheap 16-bit stream, for anything drawn per frame where a full 32-bit step is not worth a
+/// soft-float multiply. Lifted from the SRPG rules module (now in the chuggie-tactics repo), which chose it for exactly this
+/// reason. Period 65536, so do not deal a field from it.
+export function rngNext16(s: i32): i32 {
+  if (s < 0 || s >= STREAMS) { return 0 }
+  let v: i32 = ((RS[s] * 75 + 74) % 65537) | 0
+  RS[s] = v
+  return v & 65535
+}
+
+/// Read a stream's state, to checkpoint a replay.
+export function rngState(s: i32) {
+  if (s < 0 || s >= STREAMS) { return 0 }
+  return RS[s]
+}

@@ -1,0 +1,95 @@
+{
+ "columns": 12,
+ "image": "../Backgrounds/Tilesets/TilesetDungeon.png",
+ "imagewidth": 192,
+ "imageheight": 64,
+ "margin": 0,
+ "spacing": 0,
+ "name": "TilesetDungeon",
+ "tilecount": 48,
+ "tiledversion": "1.11.0",
+ "tilewidth": 16,
+ "tileheight": 16,
+ "type": "tileset",
+ "version": "1.10",
+ "tiles": [
+  {
+   "id": 25,
+   "objectgroup": {
+    "draworder": "index",
+    "id": 1,
+    "name": "",
+    "objects": [
+     {
+      "height": 16,
+      "width": 16,
+      "x": 0,
+      "y": 0,
+      "id": 1,
+      "name": "",
+      "rotation": 0,
+      "type": "",
+      "visible": true
+     }
+    ],
+    "opacity": 1,
+    "type": "objectgroup",
+    "visible": true,
+    "x": 0,
+    "y": 0
+   }
+  },
+  {
+   "id": 26,
+   "objectgroup": {
+    "draworder": "index",
+    "id": 2,
+    "name": "",
+    "objects": [
+     {
+      "height": 16,
+      "width": 16,
+      "x": 0,
+      "y": 0,
+      "id": 1,
+      "name": "",
+      "rotation": 0,
+      "type": "",
+      "visible": true
+     }
+    ],
+    "opacity": 1,
+    "type": "objectgroup",
+    "visible": true,
+    "x": 0,
+    "y": 0
+   }
+  },
+  {
+   "id": 28,
+   "objectgroup": {
+    "draworder": "index",
+    "id": 3,
+    "name": "",
+    "objects": [
+     {
+      "height": 16,
+      "width": 16,
+      "x": 0,
+      "y": 0,
+      "id": 1,
+      "name": "",
+      "rotation": 0,
+      "type": "",
+      "visible": true
+     }
+    ],
+    "opacity": 1,
+    "type": "objectgroup",
+    "visible": true,
+    "x": 0,
+    "y": 0
+   }
+  }
+ ]
+}

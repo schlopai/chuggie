@@ -1,0 +1,305 @@
+// Typed-extern declarations for `cargo:tish_gba_game_engine`. The tish compiler auto-loads this file
+// when a game imports the crate: a call whose args match one of these signatures lowers to a DIRECT
+// `tish_gba_game_engine::<name>_typed(..)` Rust call (no `Value` boxing, no `value_call` dispatch),
+// with the boxed namespace path as the fallback. The crate provides each `<name>_typed`. Games get the
+// speedup for free — no `declare fn` in game code.
+declare fn spawn(): i32
+declare fn despawn(e: i32): void
+declare fn reset_entity(e: i32): void
+// ── Entity pools ─────────────────────────────────────────────────────────────────────────────────
+// A fixed set of entities created ONCE and re-armed forever after (docs/perf-rules.md §6: a spawn
+// costs ~1,400 ticks on the frame it happens and reallocates sprite VRAM; a re-arm is a few dozen
+// stores). Retirement runs through `life_system`, so a pooled slot gets the ttl, off-screen,
+// solid-tile and room-cutoff rules a `set_lifetime` bullet already gets — and there is exactly one
+// ttl countdown in the engine rather than one per game. Field/sentinel names: packages/pool.tish.
+declare fn pool_new(count: i32, sheet: i32, ox: i32, oy: i32): i32
+declare fn pool_arm(p: i32, slot: i32, kind: i32, ttl: i32): i32
+declare fn pool_retire(p: i32, slot: i32): void
+declare fn pool_clear(p: i32): void
+declare fn pool_get(p: i32, slot: i32, field: i32): i32
+declare fn pool_stat(p: i32, field: i32): i32
+// ── Rigid discs: golf, soccer, pinball, pool ─────────────────────────────────────────────────────
+// `dynamic_system` (world_step phase 2, between topdown_system and wrap_system) owns integration,
+// tile bounce, disc-vs-disc contact and sleep. Contact uses a RANK, not a mass: equal ranks split
+// the correction with a shift and a lower rank takes all of it, which is zero divisions on a chip
+// with no divide instruction. `turn` is 1/256ths, NOT degrees — agb's sin/cos table is 256 entries
+// over one turn, so a 1/256th angle reaches it with no arithmetic at all.
+declare fn set_dynamic(e: i32, diameter: fixed, restitution: i32, friction: i32, restSpeed: fixed, rank: i32): void
+declare fn body_impulse(e: i32, turn: i32, speed: fixed): void
+declare fn body_kick(e: i32, fromX: fixed, fromY: fixed, speed: fixed): void
+declare fn body_asleep(e: i32): i32
+declare fn body_speed2(e: i32): i32
+declare fn body_last_hit(e: i32): i32
+declare fn grid_set_surface(col: i32, row: i32, id: i32): void
+declare fn surface_def(id: i32, ax: fixed, ay: fixed, friction: i32): void
+declare fn set_stun(e: i32, frames: i32): void
+declare fn is_stunned(e: i32): i32
+declare fn set_transform(e: i32, x: fixed, y: fixed): void
+declare fn set_body(e: i32, vx: fixed, vy: fixed): void
+declare fn set_collider(e: i32, cw: fixed, ch: fixed): void
+declare fn set_sprite_offset(e: i32, ox: i32, oy: i32): void
+declare fn attach_sprite(e: i32, sp: i32): void
+declare fn set_tag(e: i32, t: i32): void
+declare fn set_hurt(e: i32, damage: i32, targetTag: i32, despawnOnHit: i32, stun: i32): void
+// damage_typed shipped in the crate for months with no declaration — dead code while every
+// caller boxed. Declaring it is the whole fix.
+declare fn damage(e: i32, amount: i32): void
+// Fire every `interval` frames at `speed` px/frame with the CURRENT bullet style.
+// `aimed` 0 = along the entity's facing, 1 = at the player.
+declare fn set_shooter(e: i32, interval: i32, speed: fixed, aimed: i32): void
+// Bolt along an axis at `speed` while lined up with the player within `band` px on the other.
+declare fn set_charger(e: i32, speed: i32, band: i32): void
+// A decoy the native AI prefers over the player: enemies within `radius` px walk to it instead.
+declare fn set_lure(e: i32, radius: i32, frames: i32): void
+// 1 while the entity still exists — ask this rather than tracking a bool that a lifetime, a room
+// cutoff or a scene load can silently invalidate.
+declare fn entity_alive(e: i32): i32
+declare fn entity_hp(e: i32): i32
+declare fn topdown_interact(e: i32, reach: i32): i32
+declare fn entity_hp_max(e: i32): i32
+declare fn set_lifetime(e: i32, ttl: i32): void
+declare fn set_despawn_offscreen(e: i32, on: i32): void
+// Toroidal arena (Asteroids): everything that leaves an edge re-enters the opposite one. A world
+// switch — while it is on nothing is ever off-screen, so bullets retire on their `ttl`, not on exit.
+declare fn set_arena_wrap(on: i32): void
+declare fn set_mover(e: i32, pattern: i32, vy: fixed, amp: fixed, period: i32): void
+declare fn bullet_style(sheet: i32, frame: i32, size: i32, damage: i32, target: i32, tag: i32, ttl: i32): void
+declare fn bullet_damage_type(dt: i32): void
+declare fn set_damage_type(e: i32, dt: i32): void
+declare fn fire_bullet(cx: fixed, cy: fixed, vx: fixed, vy: fixed): i32
+declare fn fire_angle(cx: fixed, cy: fixed, deg: fixed, speed: fixed): i32
+declare fn fire_ring(cx: fixed, cy: fixed, count: i32, speed: fixed): void
+declare fn fire_spread(cx: fixed, cy: fixed, centerDeg: fixed, count: i32, spreadDeg: fixed, speed: fixed): void
+declare fn fire_aimed(cx: fixed, cy: fixed, tox: fixed, toy: fixed, speed: fixed): i32
+declare fn cvar(e: i32, k: i32): i32
+declare fn set_cvar(e: i32, k: i32, v: i32): void
+declare fn set_health(e: i32, max: i32, invuln: i32): void
+declare fn entity_x(e: i32): fixed
+declare fn entity_y(e: i32): fixed
+declare fn entity_sprite(e: i32): i32
+declare fn health_hp(e: i32): i32
+declare fn health_max(e: i32): i32
+declare fn topdown_move(e: i32, dx: i32, dy: i32): void
+declare fn topdown_speed(e: i32, px: i32): void
+// ⚠️ topdown_speed takes WHOLE PIXELS — its slowest non-zero speed is 1 px/frame. Anything slower
+// (a classic NES-era standard walker is 0.5 px/frame) needs the raw 8.8 setter: 256 = 1 px/frame.
+declare fn topdown_speed_raw(e: i32, raw: i32): void
+// Continuous tile-aligned walker: never stops, turns only on a 16 px boundary, and always turns
+// onto the perpendicular axis toward the camera target. `turnRate` is 0..255 and HIGHER is more
+// aggressive (the roll is rand(256) > turnRate -> drift).
+declare fn set_wanderer(e: i32, turnRate: i32): void
+// 1 while a wanderer is freshly lined up on the target — the cue for a shot windup.
+declare fn wanderer_wants_shot(e: i32): i32
+declare fn topdown_facing(e: i32): i32
+declare fn anim_play(e: i32, from: i32, len: i32, speed: i32, looping: bool): void
+declare fn stun_all(tag: i32, frames: i32): i32
+
+// The iso board + units + turn order — the whole isob_* surface, typed. Every
+// export is (i32...) scalars; bools cross as 0/1 (tish has no loose eq).
+declare fn isob_stack_count(board: i32, col: i32, row: i32): i32
+declare fn isob_stack_elev(board: i32, col: i32, row: i32, i: i32): i32
+declare fn isob_stack_tile(board: i32, col: i32, row: i32, i: i32): i32
+declare fn isob_load(board: i32): void
+declare fn isob_board_bg(board: i32): i32
+declare fn isob_board_ox(board: i32): i32
+declare fn isob_board_oy(board: i32): i32
+declare fn isob_board_lift(board: i32): i32
+declare fn isob_w(): i32
+declare fn isob_h(): i32
+declare fn isob_spawn_count(board: i32): i32
+declare fn isob_spawn_col(board: i32, i: i32): i32
+declare fn isob_spawn_row(board: i32, i: i32): i32
+declare fn isob_spawn_cls(board: i32, i: i32): i32
+declare fn isob_spawn_team(board: i32, i: i32): i32
+declare fn isob_init(w: i32, h: i32): void
+declare fn isob_set_cell(col: i32, row: i32, elev: i32, tile: i32, walk: i32): void
+declare fn isob_height(col: i32, row: i32): i32
+declare fn isob_tile(col: i32, row: i32): i32
+declare fn isob_walkable(col: i32, row: i32): i32
+declare fn isob_set_occupant(col: i32, row: i32, id: i32): void
+declare fn isob_occupant(col: i32, row: i32): i32
+declare fn isob_move_range(col: i32, row: i32, movePts: i32, jump: i32, team: i32, flying: i32): i32
+declare fn isob_move_cost(col: i32, row: i32): i32
+declare fn isob_in_range(col: i32, row: i32): i32
+declare fn isob_range_count(): i32
+declare fn isob_range_col(i: i32): i32
+declare fn isob_range_row(i: i32): i32
+declare fn isob_path(col: i32, row: i32): i32
+declare fn isob_path_len(): i32
+declare fn isob_path_col(i: i32): i32
+declare fn isob_path_row(i: i32): i32
+declare fn isob_add_unit(col: i32, row: i32, team: i32, hp: i32, movePts: i32, jump: i32, speed: i32): i32
+declare fn isob_clear_units(): void
+declare fn isob_unit_count(): i32
+declare fn isob_unit_col(id: i32): i32
+declare fn isob_unit_row(id: i32): i32
+declare fn isob_unit_team(id: i32): i32
+declare fn isob_unit_hp(id: i32): i32
+declare fn isob_unit_maxhp(id: i32): i32
+declare fn isob_unit_move(id: i32): i32
+declare fn isob_unit_jump(id: i32): i32
+declare fn isob_unit_speed(id: i32): i32
+declare fn isob_unit_alive(id: i32): i32
+declare fn isob_unit_move_range(id: i32): i32
+declare fn isob_set_terrain_cost(tile: i32, cost: i32): void
+declare fn isob_knockback(id: i32, dcol: i32, drow: i32): i32
+declare fn isob_knock_drop(id: i32, dcol: i32, drow: i32): i32
+declare fn isob_set_zoc(on: i32): void
+declare fn isob_revive(id: i32, hp: i32): i32
+declare fn isob_turn_end(id: i32, moved: i32, acted: i32): void
+declare fn isob_unit_ct(id: i32): i32
+declare fn isob_unit_set_speed_scale(id: i32, pct: i32): void
+declare fn isob_unit_set_flying(id: i32, on: i32): void
+declare fn isob_unit_set_pos(id: i32, col: i32, row: i32): void
+declare fn isob_damage(id: i32, amount: i32): i32
+declare fn isob_heal(id: i32, amount: i32): i32
+declare fn isob_unit_set_maxhp(id: i32, maxhp: i32): i32
+declare fn isob_turn_next(): i32
+declare fn isob_adjacent_enemy(id: i32): i32
+
+// Grid + platformer genre families and the hot entity surface. grid_from_gids
+// stays boxed (array arg) until borrowed-slice extern params exist upstream.
+declare fn entity_count(): i32
+declare fn entity_count_tag(a0: i32): i32
+declare fn entity_tag(a0: i32): i32
+declare fn frame_period(a0: i32): i32
+declare fn grid_col(a0: i32): i32
+declare fn grid_facing(a0: i32): i32
+// grid_from_gids: not declarable — non-scalar args (stays boxed)
+declare fn grid_from_map(): void
+declare fn grid_interact(a0: i32): i32
+declare fn grid_moving(a0: i32): i32
+declare fn grid_row(a0: i32): i32
+declare fn grid_set_ladder(a0: i32, a1: i32, a2: i32): void
+declare fn grid_set_oneway(a0: i32, a1: i32, a2: i32): void
+declare fn grid_set_solid(a0: i32, a1: i32, a2: i32): void
+declare fn grid_setup(a0: i32, a1: i32): void
+declare fn grid_step(a0: i32, a1: i32, a2: i32): void
+declare fn heal(a0: i32, a1: i32): void
+declare fn overlaps(a0: i32, a1: i32): i32
+declare fn platformer_blocked(a0: i32): i32
+declare fn platformer_bounce(a0: i32, a1: i32): void
+declare fn platformer_can_interact(a0: i32, a1: i32): i32
+declare fn platformer_drop(a0: i32): void
+declare fn platformer_face(a0: i32): i32
+declare fn platformer_grounded(a0: i32): i32
+declare fn platformer_hold(a0: i32, a1: i32): void
+declare fn platformer_interact(a0: i32, a1: i32): i32
+declare fn platformer_jump(a0: i32): void
+declare fn platformer_jump_release(a0: i32): void
+declare fn platformer_run(a0: i32): void
+// ⚠️ walk/run are FIXED, not i32. The native multiplies by 256 for fixed-point, so declaring these
+// as i32 truncates every fractional speed on the way in: `walkSpeed: 1.9` arrived as 1, and the
+// engine's own documented defaults (1.25 walk / 2.25 run) became 1 and 2. The symptom is a player
+// who "barely moves" and a game that feels wrong in a way no amount of tuning the number fixes,
+// because every value between 1 and 2 is the same value.
+declare fn platformer_set_speed(a0: i32, a1: fixed, a2: fixed): void
+// Per-entity jump impulse / gravity, px/frame, 0 = engine default (held-weight physics: heavy
+// cargo lowers jumpVel, buoyant cargo lowers gravity). FIXED for the same truncation reason as
+// the speeds above — a jump of 3.4 must not arrive as 3.
+declare fn platformer_set_physics(e: i32, jumpVel: fixed, gravity: fixed): void
+// Throw arc: persistent horizontal velocity (clears on landing / wall hit) + immediate vertical
+// velocity (negative = up). How a thrown body flies — a platformer body has no persistent vx.
+declare fn platformer_launch(e: i32, vx: fixed, vy: fixed): void
+// Rideable: this entity's top edge becomes one-way MOVING ground for platformer bodies (stand on
+// a walking beast / drifting raft; riders inherit its motion; Down+jump drops through).
+declare fn set_carrier(e: i32): void
+// Nearest OTHER entity with `tag` within `radius` px (manhattan, box centers), or -1. O(entities)
+// and not gated on the off-screen cull — stagger calls (every 8-16 frames), don't ask every frame.
+declare fn nearest_tag(e: i32, tag: i32, radius: i32): i32
+// Manhattan distance between two entities' box centers in whole px, or -1 if either is gone.
+declare fn entity_dist(a: i32, b: i32): i32
+// ⚠️ BOTH ARE `fixed`, NOT `i32` (the platformer_set_speed trap): the native scales by 256, so an
+// i32 declaration truncates a 0.75 wall-slide scrape to 0 going in, and reports a -0.5 px/frame
+// rise as 0 coming out.
+declare fn platformer_set_vy(a0: i32, a1: fixed): void
+declare fn platformer_vy(a0: i32): fixed
+declare fn platformer_walk(a0: i32, a1: i32): void
+declare fn set_chase(a0: i32, a1: i32, a2: i32, a3: i32, a4: i32): void
+// ── RTS: shared flow fields, seek, attack-move, fog of war ───────────────────────────────────────
+// `flow_dist`, `seek_arrived`, `soldier_target` and `fog_state` are the per-frame READS a game does
+// per unit, so they are the ones that must not be boxed (docs/perf-rules.md §2).
+declare fn flow_goal(field: i32, col: i32, row: i32): void
+declare fn flow_dist(field: i32, col: i32, row: i32): i32
+declare fn set_seek(e: i32, field: i32, arrivePx: i32, stride: i32, animSpeed: i32): void
+declare fn clear_seek(e: i32): void
+declare fn seek_arrived(e: i32): i32
+declare fn set_soldier(e: i32, team: i32, rangePx: i32, damage: i32, cooldown: i32): void
+declare fn soldier_target(e: i32): i32
+declare fn soldier_team(e: i32): i32
+declare fn terrain_set(col: i32, row: i32, gid: i32, solid: i32): void
+declare fn terrain_blit(bg: i32, tileset: i32, tsCols: i32, camX: i32, camY: i32, gidUnseen: i32): i32
+declare fn set_sleeping(e: i32, on: i32): void
+declare fn fog_init(cols: i32, rows: i32): void
+declare fn set_vision(e: i32, radiusCells: i32): void
+declare fn fog_reveal(col: i32, row: i32, radiusCells: i32): void
+declare fn fog_state(col: i32, row: i32): i32
+declare fn fog_blit(bg: i32, tileset: i32, tsCols: i32, camX: i32, camY: i32, gidUnseen: i32, gidExplored: i32): i32
+declare fn set_guard(a0: i32, a1: i32): void
+declare fn set_hopper(a0: i32, a1: i32): void
+declare fn set_dir_anim(e: i32, base: i32, stride: i32, frames: i32, speed: i32): void
+declare fn set_immunity(e: i32, mask: i32): void
+// Vulnerability mask: 0 = hurt by everything; non-zero ALLOWS only matching DMG_* bits.
+declare fn set_weakness(e: i32, mask: i32): void
+// Stun-on-overlap grabber (the classic grab-on-contact enemy, lite).
+declare fn set_grabber(e: i32, targetTag: i32): void
+// Blade trap: inert until player shares row/col, then dash.
+declare fn set_trap(e: i32): void
+// Parent-linked follow stubs (offset glue / orbit).
+declare fn set_part(e: i32, parentId: i32): void
+declare fn set_train(e: i32, headId: i32): void
+declare fn set_orbiter(e: i32, centerId: i32, radius: i32): void
+// Boomerang return-mover: reverse Body toward owner after returnFrames.
+declare fn set_boomerang(e: i32, returnFrames: i32): void
+// Boomerang catches since last call (clears on read). A returning boomerang within reach of its
+// owner is caught: despawned + counted here — the "report catch" half of the return contract.
+declare fn boomerang_caught(): i32
+// ── NES-era enemy AI ─────────────────────────────────────────────────────────────────────────────
+// speedQ8 params are 1/256 px per frame (320 = 1.25 px) — integer on purpose, no float trap.
+// Ambusher (burrower): hidden (intangible+invisible, drifts toward the player) ⇄ surfaced
+// (vulnerable, stationary). Needs set_topdown. Compose with set_shooter for a surfacing shooter.
+declare fn set_ambusher(e: i32, hideFrames: i32, surfaceFrames: i32, speedQ8: i32): void
+// Drifter (hoverer): rest (vulnerable, still) ⇄ fly (INVULNERABLE, spin-up/spin-down ramp, random
+// 8-dir wander). Needs set_topdown. The damage path enforces the flight invulnerability natively.
+declare fn set_drifter(e: i32, restFrames: i32, flyFrames: i32, speedQ8: i32): void
+// Flicker-caster: vanish ⇄ teleport near the player onto a walkable tile, flicker in (unhittable),
+// then ONE aimed cast per appearance with the bullet style in force at THIS call.
+// ⚠️ shotSpeed is fixed px/frame — never declare it i32 (the platformer_set_speed trap).
+declare fn set_flicker_caster(e: i32, hideFrames: i32, visFrames: i32, shotSpeed: fixed): void
+// Bouncer: grounded pause ⇄ parabolic hop at speedQ8 (heading 50% at the player, 50% random).
+// Needs set_topdown. The hop arc writes the sprite oy offset (the entity owns it while a bouncer).
+declare fn set_bouncer(e: i32, restFrames: i32, hopFrames: i32, speedQ8: i32): void
+// A diagonal that reflects off whatever stops it (tiles, blockers, room edges) and never rests.
+// Needs set_topdown. The shmup set_mover is NOT this: Body integration ignores tiles, and a
+// "ricochet" built on it sails through its room's walls off the map.
+declare fn set_ricochet(e: i32, speedQ8: i32): void
+// 1 while the entity is invulnerable/intangible (drifter in flight, submerged ambusher, vanished
+// flicker-caster, or set_phased). For game-side damage logic; the native path already honours it.
+declare fn entity_phased(e: i32): i32
+declare fn set_phased(e: i32, on: i32): void
+// ── Multi-part boss glue ─────────────────────────────────────────────────────────────────────────
+// Damage dealt to e lands on targetId instead (boss neck→head; re-point per hit for the
+// shrinking-tail rule). targetId < 0 clears. ≤4 hops.
+declare fn set_hit_proxy(e: i32, targetId: i32): void
+// While open == 0 no damage lands on e (a gated weak-point eye, a boss's last-hit window). Combine with
+// set_weakness for "arrow only AND eye open".
+declare fn set_vuln_gate(e: i32, open: i32): void
+// Part-death notification: when e dies, code (non-zero) is queued; the parent drains the queue
+// with death_note() (0 = empty).
+declare fn set_death_note(e: i32, code: i32): void
+declare fn death_note(): i32
+// Promotion: sever set_part/set_train/set_orbiter glue; the same entity moves on its own again
+// (flying-head promotion: detach_part, then set_drifter + set_shooter).
+declare fn detach_part(e: i32): void
+declare fn set_jumper(a0: i32): void
+declare fn step_ticks(a0: i32): i32
+declare fn swing(a0: i32, a1: i32, a2: i32, a3: i32, a4: i32, a5: i32): i32
+declare fn world_step(): i32
+
+// ── S4: per-system tick attribution ─────────────────────────────────────────
+// Which SYSTEM ate the frame. `sys_prof(1)` turns profiling on (two timer reads per system per
+// frame — a profiling run, not a shipping default); `sys_ticks(i)` is that system's ticks LAST
+// frame, indexed by call order in `world_step`; `sys_name(i)` (boxed) names an index for logs.
+declare fn sys_prof(on: i32): void
+declare fn sys_ticks(i: i32): i32
+declare fn sys_count(): i32

@@ -1,0 +1,10 @@
+m3x6 — pixel font by Daniel Linssen
+
+  https://managore.itch.io/m3x6
+
+Free to use with attribution.
+Author asks: use font size 16, 32, 48, etc. (native bake size is 16).
+The “3×6” is the glyph grid (avg width 3, ascender 6), not the point size.
+
+Vendored as m3x6.ttf from the upstream TTF release.
+Bake at **16px** (`font:…/m3x6.ttf@16`).

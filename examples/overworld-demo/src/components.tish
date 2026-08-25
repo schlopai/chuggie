@@ -1,0 +1,65 @@
+// A grid-RPG-style overworld, in tish. Components use the natural `this`.
+import { input_x, input_y, key_pressed } from 'cargo:tish_agb'
+import { dialogueActive, updateDialogue, loadScene } from '../../../packages/engine'
+
+// Animation controller: map the hero's state (facing + moving) to a clip on its sheet.
+// Sheet rows are 3 frames each — row 0 down (0-2), row 1 up (3-5), row 2 side (6-8);
+// right reuses the side row, flipped. Column 1 of a row is the standing frame.
+function animateHero(e) {
+  let dir = e.facing()                     // 0 down, 1 up, 2 left, 3 right
+  let base = dir === 1 ? 3 : (dir >= 2 ? 6 : 0)
+  e.setFlip(dir === 3)                      // right = side row, mirrored
+  if (e.gridMoving()) {
+    e.play(base, 3, 6, true)               // walk cycle for this direction
+  } else {
+    e.play(base + 1, 1, 1, false)          // stand on the row's neutral frame
+  }
+}
+
+// The player: while a dialogue box is up, hand input to the dialogue system (page /
+// choose / advance); otherwise grid-walk, press A to talk to whatever it faces, and
+// drive the walk animation from facing + movement.
+export const Player = {
+  update: ({ this }) => {
+    if (dialogueActive()) {
+      updateDialogue()
+    } else {
+      if (!this.gridMoving()) {
+        this.gridStep(input_x(), input_y())
+        if (key_pressed(0) > 0) { this.interact() }
+      }
+      animateHero(this)
+    }
+  }
+}
+
+// An NPC: a multi-page conversation. Pass an array of pages — the player advances
+// through them with A (first A finishes the typewriter, next A turns the page).
+export const Npc = {
+  onInteract: ({ this, other }) => {
+    this.say([
+      "Hello, traveler! The grass sure is green today.",
+      "Careful past the rocks -- wild creatures roam the tall grass.",
+      "...Not that I have ever seen one. But that is what they say!"
+    ], "Villager")
+  }
+}
+
+// A second NPC that asks a question and branches on the answer. The player moves the
+// cursor with the d-pad and confirms with A; `onChoose` gets the picked `{ choice, label }`.
+export const Elder = {
+  onInteract: ({ this, other }) => {
+    this.ask("Do you like our town?", "Elder", ["Yes", "No"], ({ choice }) => {
+      if (choice === 0) {
+        this.say("Wonderful! Stay as long as you like.", "Elder")
+      } else {
+        this.say("Oh... give it time. It grows on you.", "Elder")
+      }
+    })
+  }
+}
+
+// A door: face it and press A to warp to the scene stored in its data (`{ to: sceneFn }`).
+export const Door = {
+  onInteract: ({ this, other }) => { loadScene(this.data.to) }
+}

@@ -1,0 +1,287 @@
+{
+  "_comment": "Import schemes contributed by tish-agb. A tish game that depends on tish-agb (via package.json tish.rustDependencies) picks these up automatically — no per-game config, and no edits to the tish compiler. `asset:` bakes a sprite image (PNG/aseprite) into the ROM and binds each imported name to an i32 sprite-sheet handle for sprite_new(). `background:` bakes a full-screen (>=240x160) tile image and binds an i32 handle for bg_new().",
+  "schemes": {
+    "asset": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [
+            "#[allow(unused_imports)] use agb::display::object::{Size, Sprite, Tag};",
+            "use agb::display::{Palette16, Rgb15};",
+            "use agb::align_bytes;"
+          ],
+          "module": "agb::include_aseprite_inner!({path});",
+          "accessor": "pub fn sheet() -> &'static [Sprite] { SPRITES }",
+          "register": "tishlang_runtime::gba::__asset_register_sheet({mod}::sheet())",
+          "bind": "handle"
+        }
+      }
+    },
+    "background": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [],
+          "module": "agb::include_background_gfx!(mod inner, bg => deduplicate {path});",
+          "accessor": "pub fn bg() -> (&'static [agb::display::Palette16], &'static agb::display::tile_data::TileData) { (inner::PALETTES, &inner::bg) }",
+          "register": "tishlang_runtime::gba::__asset_register_bg({mod}::bg())",
+          "bind": "handle"
+        }
+      }
+    },
+    "_bgtiles_comment": "A background tileset WITHOUT agb's `deduplicate`. Use this, not `background:`, when the game addresses tiles by INDEX through `tilemap_set` / `tilemap_new`: deduplicate collapses identical 8x8 tiles and shortens `tile_settings`, while the index math assumes the full grid, so every tile past the shortened length silently fails to draw. It costs ROM (no dedup) and buys correct indexing.",
+    "bgtiles": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [],
+          "module": "agb::include_background_gfx!(mod inner, bg => {path});",
+          "accessor": "pub fn bg() -> (&'static [agb::display::Palette16], &'static agb::display::tile_data::TileData) { (inner::PALETTES, &inner::bg) }",
+          "register": "tishlang_runtime::gba::__asset_register_bg({mod}::bg())",
+          "bind": "handle"
+        }
+      }
+    },
+    "sheet": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [
+            "#[allow(unused_imports)] use agb::display::object::{Size, Sprite, Tag};",
+            "use agb::display::{Palette16, Rgb15};",
+            "use agb::align_bytes;"
+          ],
+          "module": "agb::include_aseprite_inner!(16x16 {path});",
+          "accessor": "pub fn sheet() -> &'static [Sprite] { SPRITES }",
+          "register": "tishlang_runtime::gba::__asset_register_sheet({mod}::sheet())",
+          "bind": "handle"
+        }
+      }
+    },
+    "_sheet8_comment": "`sheet8:` is `sheet:` at 8x8. It exists for the falling-block genre, where a cell IS a hardware tile: the moving piece has to be sprites rather than tilemap writes (a tilemap write measured ~310 ticks, and a piece plus its ghost is 16 of them per horizontal move, which is over a whole frame), and a 16x16 sprite carrying an 8x8 block wastes four times the sprite VRAM per frame.",
+    "sheet8": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [
+            "#[allow(unused_imports)] use agb::display::object::{Size, Sprite, Tag};",
+            "use agb::display::{Palette16, Rgb15};",
+            "use agb::align_bytes;"
+          ],
+          "module": "agb::include_aseprite_inner!(8x8 {path});",
+          "accessor": "pub fn sheet() -> &'static [Sprite] { SPRITES }",
+          "register": "tishlang_runtime::gba::__asset_register_sheet({mod}::sheet())",
+          "bind": "handle"
+        }
+      }
+    },
+    "wav": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [],
+          "module": "pub static DATA: agb::sound::mixer::SoundData = agb::include_wav!({path});",
+          "accessor": "pub fn data() -> agb::sound::mixer::SoundData { DATA }",
+          "register": "tishlang_runtime::gba::__asset_register_wav({mod}::data())",
+          "bind": "handle"
+        }
+      }
+    },
+    "_map_comment": "map: is the LOW-LEVEL path and a game should not use it — author levels in Tiled and import them with `scene:`, which bakes the tileset and the map together from one .tmj and is what every example does. This scheme takes an ALREADY-BAKED blob (include_bytes!) and leaves you to pair it with a `background:` atlas by hand, which means nothing checks that the two agree, and a second `background:` on screen will fight it for the 16 shared background palettes. It exists for blobs produced outside Tiled — a converter, a test fixture, a generator — and for the tools that write them. Blob layout: `do_map_stream_resolved` in crates/tish-agb/src/lib.rs.",
+    "map": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [],
+          "module": "pub static DATA: &[u8] = include_bytes!({path});",
+          "accessor": "pub fn data() -> &'static [u8] { DATA }",
+          "register": "tishlang_runtime::gba::__asset_register_map({mod}::data())",
+          "bind": "handle"
+        }
+      }
+    },
+    "_chip_comment": "chip: compiles a readable chiptune tracker text (tempo/wave/inst/chN rows) into static note data and binds an i32 handle for chip_play(). The song plays on the GBA's four PSG hardware channels, so it costs the ROM its notes (kilobytes) instead of a recording (megabytes) and costs no per-frame mixing at all. See crates/tish-gba-scenepack/src/chippack.rs for the format.",
+    "chip": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [],
+          "module": "tish_gba_scenepack::include_chip!({path});",
+          "accessor": "",
+          "register": "{mod}::__chip_register()",
+          "bind": "handle"
+        }
+      }
+    },
+    "_deck_comment": "deck: compiles a deck song (gameBoyDmg + gbaDirectSound only) into a DeckSong for deck_play(). Tracks may set layer/intensity 0..3 for crossfading intensity stems (deck_set_intensity). Soft ADSR/vib/arp/pitch-drop run per frame on PSG and DirectSound wavetable voices. See docs/deck.md.",
+    "deck": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [],
+          "module": "tish_gba_scenepack::include_deck!({path});",
+          "accessor": "",
+          "register": "{mod}::__deck_register()",
+          "bind": "handle"
+        }
+      }
+    },
+    "scene": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [],
+          "module": "tish_gba_scenepack::include_scene!({path});",
+          "accessor": "",
+          "register": "{mod}::__scene_register()",
+          "bind": "handle"
+        }
+      }
+    },
+    "affine": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [],
+          "module": "agb::include_background_gfx!(mod inner, bg => 256 deduplicate {path});",
+          "accessor": "pub fn bg() -> (&'static [agb::display::Palette16], &'static agb::display::tile_data::TileData) { (inner::PALETTES, &inner::bg) }",
+          "register": "tishlang_runtime::gba::__asset_register_bg({mod}::bg())",
+          "bind": "handle"
+        }
+      }
+    },
+    "sheet32": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [
+            "#[allow(unused_imports)] use agb::display::object::{Size, Sprite, Tag};",
+            "use agb::display::{Palette16, Rgb15};",
+            "use agb::align_bytes;"
+          ],
+          "module": "agb::include_aseprite_inner!(32x32 {path});",
+          "accessor": "pub fn sheet() -> &'static [Sprite] { SPRITES }",
+          "register": "tishlang_runtime::gba::__asset_register_sheet({mod}::sheet())",
+          "bind": "handle"
+        }
+      }
+    },
+    "_sheet3264_comment": "32x64 cells. A 16x40 SRPG unit frame — ten tiles as 8/16/16px rows — which matches no GBA sprite size, so it is padded into the smallest cell that holds it.",
+    "sheet3264": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [
+            "#[allow(unused_imports)] use agb::display::object::{Size, Sprite, Tag};",
+            "use agb::display::{Palette16, Rgb15};",
+            "use agb::align_bytes;"
+          ],
+          "module": "agb::include_aseprite_inner!(32x64 {path});",
+          "accessor": "pub fn sheet() -> &'static [Sprite] { SPRITES }",
+          "register": "tishlang_runtime::gba::__asset_register_sheet({mod}::sheet())",
+          "bind": "handle"
+        }
+      }
+    },
+    "sheet6432": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [
+            "#[allow(unused_imports)] use agb::display::object::{Size, Sprite, Tag};",
+            "use agb::display::{Palette16, Rgb15};",
+            "use agb::align_bytes;"
+          ],
+          "module": "agb::include_aseprite_inner!(64x32 {path});",
+          "accessor": "pub fn sheet() -> &'static [Sprite] { SPRITES }",
+          "register": "tishlang_runtime::gba::__asset_register_sheet({mod}::sheet())",
+          "bind": "handle"
+        }
+      }
+    },
+    "sheet64": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [
+            "#[allow(unused_imports)] use agb::display::object::{Size, Sprite, Tag};",
+            "use agb::display::{Palette16, Rgb15};",
+            "use agb::align_bytes;"
+          ],
+          "module": "agb::include_aseprite_inner!(64x64 {path});",
+          "accessor": "pub fn sheet() -> &'static [Sprite] { SPRITES }",
+          "register": "tishlang_runtime::gba::__asset_register_sheet({mod}::sheet())",
+          "bind": "handle"
+        }
+      }
+    },
+    "_font_comment": "font:path@N bakes a TTF at N pixels (selective glyph set) plus FontMetrics for text_width/wrap. Binds an i32 handle for text_draw()/ui_text(). Example: font:../../../assets/fonts/tinypixel.ttf@7. Bare font:path (no @N) defaults to 16. Pick N matching the face's native pixel size (3x3-mono=4, tinypixel=7, ark-pixel=10, pixelify=11, undead-11=11, peaberry/monogram/m3x6/pixelify-bold=16, …).",
+    "font": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [],
+          "module": "tish_gba_scenepack::include_font_pack!({path}, {size}, {charset});",
+          "accessor": "",
+          "register": "tish_agb::register_font(tishlang_runtime::gba::__asset_register_font({mod}::font()), {mod}::metrics())",
+          "bind": "handle"
+        }
+      }
+    },
+    "_emoji_comment": "emoji: points at a DIRECTORY of per-codepoint PNGs (the vendored SerenityOS set at assets/emoji/serenity). It bakes ONLY the emoji this program's strings use into one colour sprite strip and registers it as the GLOBAL emoji fallback — every text_draw/hud_text call then renders those emoji inline wherever the font has no glyph. One import turns emoji on for the whole game; no per-font setup.",
+    "emoji": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [
+            "#[allow(unused_imports)] use agb::display::object::{Size, Sprite, Tag};",
+            "use agb::display::{Palette16, Rgb15};",
+            "use agb::align_bytes;"
+          ],
+          "module": "tish_gba_scenepack::include_emoji_used!({path}, {charset});",
+          "accessor": "",
+          "register": "{mod}::__emoji_register()",
+          "bind": "handle"
+        }
+      }
+    },
+    "strings": {
+      "file": true,
+      "_comment": "strings: bakes a multi-language string table into ROM from a .strings file ([lang] sections whose LINE POSITION is the id). The macro refuses to compile a file whose translations disagree on how many strings exist, so an id is valid in every language or in none. Read with str_get(handle, lang, id).",
+      "targets": {
+        "gba": {
+          "uses": [],
+          "module": "tish_gba_scenepack::include_strings!({path});",
+          "accessor": "",
+          "register": "{mod}::__strings_register()",
+          "bind": "handle"
+        }
+      }
+    },
+    "isoboard": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [],
+          "module": "tish_gba_scenepack::include_isoboard!({path});",
+          "accessor": "",
+          "register": "{mod}::__isoboard_register()",
+          "bind": "handle"
+        }
+      }
+    },
+    "_isobattle_comment": "isobattle: bakes a whole SRPG-style battlefield from a Tiled .tmj — the isometric floor background PLUS the per-cell terrain/elevation/walkability and unit spawns the grid-battle engine needs. The imported handle is loaded with isob_load(handle); the floor is bg_new(isob_board_bg(handle)); spawns are read with isob_spawn_count/col/row/cls/team. Walkability is a `walkable=false` tile property on the terrain tileset. No import script, no generated .tish data module — the Tiled files are the source.",
+    "isobattle": {
+      "file": true,
+      "targets": {
+        "gba": {
+          "uses": [],
+          "module": "tish_gba_scenepack::include_isobattle!({path});",
+          "accessor": "",
+          "register": "{mod}::__isobattle_register()",
+          "bind": "handle"
+        }
+      }
+    }
+  }
+}

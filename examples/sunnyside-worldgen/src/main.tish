@@ -1,0 +1,107 @@
+// Sunnyside de-risk 3 (examples/sunnyside/SPEC.md §ladder): the whole island
+// — farm, town, river, paths, forest — generated from a seed and verified
+// against scripts/procgen/sunnyside.py.  The generator itself lives in
+// examples/sunnyside/src/worldgen.tish (shared with the main game); this ROM
+// drives it, reports the oracle summaries, and runs a seed sweep one
+// generation per frame burst (the roguelike lesson: never a boot-time loop).
+//
+// D-pad walks, A regenerates with the next seed.
+import { world } from 'bgtiles:../../../assets/sunnyside/baked/world_tiles.png'
+import { player } from 'sheet6432:../../../assets/sunnyside/baked/char_player.png'
+import {
+  frame, log, backdrop, hud_text, heap_free, key_pressed, bg_clear, input_x, input_y,
+  sprite_new, sprite_set_frame, sprite_set_flip,
+} from 'cargo:tish_agb'
+import {
+  spawn, set_transform, set_collider, set_topdown, topdown_speed, topdown_moving, topdown_move,
+  topdown_facing, attach_sprite, set_sprite_offset, set_camera_target, world_step,
+} from 'cargo:tish_gba_game_engine'
+import {
+  ssgenGenerate, ssgenUpload, ssgenLand, ssgenHash, ssgenTrees,
+  ssgenBldX, ssgenBldY, ssgenDoorX, ssgenDoorY, ssgenFarmX, ssgenFarmY,
+} from '../../sunnyside/src/worldgen.tish'
+import { ANIM_PLAYER_START, ANIM_PLAYER_LEN } from '../../sunnyside/src/data_anim.tish'
+
+let TILE: i32 = 16
+let BTN_A: i32 = 0
+let SWEEP_N: i32 = 12
+
+backdrop(0x2090e8)
+hud_text(0, 4, 4, "SUNNYSIDE WORLDGEN")
+
+let hero: i32 = spawn()
+set_collider(hero, 8, 8)
+set_topdown(hero)
+topdown_speed(hero, 2)
+let heroSpr: i32 = sprite_new(player, 0)
+attach_sprite(hero, heroSpr)
+// the 64px frame is asymmetric (tool swings reach right), so the body is
+// NOT at the frame centre: flipping the frame moves it 18px. The offset
+// compensates per facing — see the flip block in the loop.
+set_sprite_offset(hero, 0 - 19, 0 - 21)
+set_camera_target(hero)
+
+let seed: i32 = 1
+
+function report(s: i32) {
+  log("SS GEN seed=" + s + " land=" + ssgenLand() + " trees=" + ssgenTrees()
+    + " hash=" + ssgenHash())
+  log("SS BLD shop=" + ssgenBldX(0) + "," + ssgenBldY(0)
+    + " house=" + ssgenBldX(1) + "," + ssgenBldY(1)
+    + " house2=" + ssgenBldX(2) + "," + ssgenBldY(2)
+    + " farm=" + ssgenFarmX() + "," + ssgenFarmY())
+}
+
+function rebuild(s: i32) {
+  bg_clear()
+  frame()
+  ssgenGenerate(s)
+  report(s)
+  ssgenUpload(world, 3)
+  // spawn on the path below the barn door
+  set_transform(hero, ssgenDoorX(3) * TILE + 4, (ssgenDoorY(3) + 1) * TILE + 4)
+  log("HEAP " + heap_free())
+}
+rebuild(seed)
+
+// The oracle sweep: generate SWEEP_N worlds one per played frame, reporting
+// each, then rebuild the seed we started on.  Generation touches no VRAM, so
+// the sweep costs only the frames it needed.
+let sweepLeft: i32 = SWEEP_N
+let sweepSeed: i32 = 100
+
+let tick: i32 = 0
+let cell: i32 = 0
+while (true) {
+  if (sweepLeft > 0) {
+    ssgenGenerate(sweepSeed)
+    report(sweepSeed)
+    sweepSeed = sweepSeed + 1
+    sweepLeft = sweepLeft - 1
+    if (sweepLeft === 0) {
+      log("SS SWEEP DONE")
+      rebuild(seed)
+    }
+  }
+  if (key_pressed(BTN_A) > 0) {
+    seed = seed + 1
+    rebuild(seed)
+  }
+  tick = tick + 1
+  if (tick >= 3) { tick = 0; cell = cell + 1 }
+  // set_topdown gives the body; topdown_move each frame is what walks it
+  topdown_move(hero, input_x(), input_y())
+  let act: i32 = 0
+  if (topdown_moving(hero) > 0) { act = 1 }
+  let len: i32 = ANIM_PLAYER_LEN[act]
+  sprite_set_frame(heroSpr, ANIM_PLAYER_START[act] + (cell % len))
+  if (topdown_facing(hero) === 2) {
+    sprite_set_flip(heroSpr, 1)
+    set_sprite_offset(hero, 0 - 37, 0 - 21)
+  }
+  if (topdown_facing(hero) === 3) {
+    sprite_set_flip(heroSpr, 0)
+    set_sprite_offset(hero, 0 - 19, 0 - 21)
+  }
+  world_step()
+}

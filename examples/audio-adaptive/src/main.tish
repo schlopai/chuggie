@@ -1,0 +1,121 @@
+// audio-adaptive — the two things a game kept getting wrong about music, made testable.
+//
+// ── What it is the acceptance test for ────────────────────────────────────────────────────────
+//
+// **1. `deck_pause` keeps the playhead. Stop-then-play does not.**
+//
+// The discipline this replaces is real and was written for a real crash: bracket anything that
+// rebuilds the UI canvas with `deck_stop()` / `deck_play()`, because a wavetable write landing at an
+// arbitrary point inside a frame froze a game on a cave entrance and cost eleven wrong theories to
+// diagnose. Two different games wrote that hush by hand and disagreed about it.
+//
+// But the pair throws away two things nobody meant to throw away: the PLAYHEAD, so the music
+// restarts at the top of the song, and the INTENSITY, which `play()` resets to 0 — so a game that
+// hushed for a menu during a boss fight came back playing the calm arrangement.
+//
+// This ROM does both, back to back, and logs the playhead and intensity either side of each. The
+// verifier asserts the pair loses them and the pause does not; asserting only the pause would pass
+// against an engine where neither worked.
+//
+// **2. Ducking is a MASTER attenuation, not per-voice scaling.**
+//
+// `audio_duck` moves the PSG master volume, so every voice comes down together. Scaled per voice, a
+// note that started before the duck stays loud until it ends, and the music "ducks" a beat late and
+// unevenly. The envelope's attack/release step sizes are divided ONCE at call time, never per frame.
+//
+// The music is `kart-circuit`'s `race.deck`, imported rather than regenerated: it already carries
+// all four intensity stems (bass 0, lead 1, kick+hats 2, stabs 3), which is exactly what is needed
+// and what a second copy would only let drift.
+
+import { race } from 'deck:../../kart-circuit/assets/race.deck'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  frame, log, backdrop, hud_text, heap_free,
+  deck_pause, deck_paused, audio_duck, audio_duck_level, deck_frame
+} from 'cargo:tish_agb'
+import { deckPlay, deckStop, deckPlaying, deckSetIntensity, deckIntensity } from '../../../packages/deck'
+import {
+  DUCK_DIALOG, DUCK_STINGER, DUCK_FAST, DUCK_SLOW, DUCK_HOLD_OPEN,
+  MI_CALM, MI_ALERT, MI_FIGHT, MI_PEAK
+} from '../../../packages/music'
+
+backdrop(0)
+hud_text(0, 4, 4, "ADAPTIVE AUDIO")
+
+deckPlay(race)
+log("AA START playing=" + deckPlaying() + " frame=" + deck_frame())
+
+let t: i32 = 0
+let phase: i32 = 0
+let lastDuck: i32 = 0 - 1
+
+// Marks for the verifier. Each is logged with the playhead and the intensity so the assertions can
+// be about what SURVIVED a thing, not merely that the thing happened.
+let pauseAt: i32 = 240
+let resumeAt: i32 = 360
+let stopAt: i32 = 600
+let duckAt: i32 = 780
+let stingAt: i32 = 960
+let doneAt: i32 = 1200
+
+while (true) {
+  t = t + 1
+
+  // Climb the intensity so the pause and the stop are both taken at a NON-ZERO level. At 0 the
+  // claim "stop-then-play resets the intensity" is untestable, because 0 is where it lands.
+  if (t === 60) { deckSetIntensity(MI_ALERT); log("AA INT " + deckIntensity()) }
+  if (t === 120) { deckSetIntensity(MI_FIGHT); log("AA INT " + deckIntensity()) }
+  if (t === 180) { deckSetIntensity(MI_PEAK); log("AA INT " + deckIntensity()) }
+
+  // ── 1a. pause / resume: everything must survive ──────────────────────────
+  if (t === pauseAt) {
+    log("AA PREPAUSE frame=" + deck_frame() + " int=" + deckIntensity())
+    deck_pause(1)
+    log("AA PAUSED paused=" + deck_paused() + " frame=" + deck_frame() + " int=" + deckIntensity())
+  }
+  if (t === resumeAt) {
+    // The playhead must be where it was at PREPAUSE, not further on: a paused deck does not advance.
+    log("AA RESUME frame=" + deck_frame() + " int=" + deckIntensity())
+    deck_pause(0)
+  }
+
+  // ── 1b. the old hush, for contrast ───────────────────────────────────────
+  if (t === stopAt) {
+    log("AA PRESTOP frame=" + deck_frame() + " int=" + deckIntensity())
+    deckStop()
+    deckPlay(race)
+    log("AA POSTPLAY frame=" + deck_frame() + " int=" + deckIntensity())
+  }
+
+  // ── 2. ducking ───────────────────────────────────────────────────────────
+  if (t === duckAt) {
+    // hold 0 = stay down until told otherwise, which is what a dialogue box wants: it does not know
+    // how long the player will take to read.
+    audio_duck(DUCK_DIALOG, DUCK_FAST, DUCK_HOLD_OPEN, DUCK_SLOW)
+    log("AA DUCK depth=" + DUCK_DIALOG)
+  }
+  if (t === duckAt + 120) {
+    audio_duck(0, DUCK_FAST, 0, DUCK_SLOW)
+    log("AA UNDUCK")
+  }
+  if (t === stingAt) {
+    // A held duck with a timer: down hard, hold 40 frames, and let itself back up.
+    audio_duck(DUCK_STINGER, DUCK_FAST, 40, DUCK_SLOW)
+    log("AA STING depth=" + DUCK_STINGER)
+  }
+
+  // Sample the duck as it moves, so the verifier can see a RAMP rather than a step. A duck that
+  // jumped straight to depth would satisfy "it ducked" and still sound wrong.
+  let d: i32 = audio_duck_level()
+  if (d !== lastDuck) {
+    log("AA LEVEL t=" + t + " gain=" + d)
+    lastDuck = d
+  }
+
+  if (t === doneAt) {
+    log("AA DONE frame=" + deck_frame() + " int=" + deckIntensity() + " playing=" + deckPlaying())
+    log("HEAP " + heap_free())
+  }
+
+  frame()
+}

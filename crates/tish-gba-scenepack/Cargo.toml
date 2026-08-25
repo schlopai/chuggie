@@ -1,0 +1,23 @@
+[package]
+name = "tish_gba_scenepack"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Proc-macro: pack a declarative scene recipe (tile slices + autotiled ground) into a GBA background at compile time. Runs on the host (proc-macros always do), so no no_std constraint."
+repository = "https://github.com/schlopai/chuggie-engine"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+# The `.deck` parser, generated from the same @spacedevin/deck source the Deckard host uses — so the
+# GBA bake and the host cannot disagree about what a file says. This crate keeps only the LOWERING
+# (channel allocation, wavetables, beats→frames); the grammar lives upstream.
+deckfile = "1.3.0"
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+image = { version = "0.24", default-features = false, features = ["png"] }
+freetype-rs = "0.38"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

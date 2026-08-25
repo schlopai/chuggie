@@ -1,0 +1,64 @@
+# chuggie-engine
+
+Game engine packages for writing Game Boy Advance games in [tish][tish], on [agb][agb].
+
+```bash
+npm install chuggie-engine
+```
+
+```tish
+import { mount, spawn, set_transform } from 'chuggie-engine'
+import { sceneGoto, sceneRegister } from 'chuggie-engine/scene'
+import { menuOpen } from 'chuggie-engine/menu'
+```
+
+Every module is tish source, compiled into your ROM by `tish build --target gba`. Nothing here is
+pre-compiled — a GBA build has no dynamic linking, so the authoring layer ships as source and the
+compiler inlines what you actually import.
+
+## What's here
+
+| Area | Modules |
+|------|---------|
+| Core | `engine` (entities, components, world step) · `scene` · `scene_hooks` · `game` · `prefs` · `save` |
+| Genres | `platformer` · `topdown` · `shmup` · `beatemup` · `iso` · `iso_actors` · `rhythm` (call-and-response, judged against the deck playhead) · `battle` (turn-based resolution) |
+| Presentation | `ui` · `menu` · `dialog` · `cutscene` · `title` · `parallax` · `shop` · `feel` (game feel: hit-stop, call-outs, presets; the screen-shake spring itself now lives in the engine as `fx_bump`) · `fx` (names for the engine's particle presets and emitter fields — **constants only, no functions**) |
+| Audio | `chipsfx` · `deck` (`.deck` soundtracks — see [@spacedevin/deck][deck]) |
+| Multiplayer | `link` |
+| Game data | `clan/*` · `clansave` · `isodemo` |
+| Debug | `memdebug` |
+
+`import { … } from 'chuggie-engine'` is the engine entry (`engine.tish`); everything else is a subpath.
+
+## The Rust half
+
+These modules call into native crates over tish's `cargo:` import form — `tish_agb` (agb bindings),
+`tish_gba_game_engine` (the SoA entity store and frame pipeline),
+`tish_gba_scenepack` (the compile-time scene/`.deck` baker), and `tish_agb_sio` (link cable). Declare
+them in your game's `package.json`:
+
+```json
+{
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": { "version": "0.1" },
+      "tish_gba_game_engine": { "version": "0.1" }
+    }
+  }
+}
+```
+
+## Requirements
+
+`@tishlang/tish` >= 3.2.2, a nightly Rust toolchain with `rust-src` (the GBA target is built with
+`build-std`), and `agb-gbafix` to turn the ELF into a `.gba`. `scripts/dev-setup.sh` in the repo
+installs all three.
+
+## License
+
+See the repository. Don't send patches here — the source of truth is
+[schlopai/chuggie-engine](https://github.com/schlopai/chuggie-engine).
+
+[tish]: https://github.com/tishlang/tish
+[agb]: https://github.com/agbrs/agb
+[deck]: https://www.npmjs.com/package/@spacedevin/deck

@@ -1,0 +1,351 @@
+// oakhollow — a side-scrolling town on three tiers.
+//
+// Run, jump, crouch, slide, climb ladders, grab ledges and scrape down walls through a town built
+// downwards: cellars and a forge under the street, the street itself, and a plank walk over the
+// roofs. Talk to the eight people who live here, buy from the store on the square and the forge
+// below it, and step inside the inn.
+//
+// Almost none of that is in this file. The character controller is `packages/platformer`, the
+// conversations and the shop counters are `packages/dialog`, the layout engine under them is
+// `packages/ui`, the parallax sky is a layer of the Tiled map, and the physics and entity system
+// are the engine crates. What is HERE is the wiring: which art, which scenes, and what the A button
+// means when you are facing a person. Where everybody stands is in the .tmj, not in this file.
+// The levels are Tiled maps, like every other game here. `scene:` bakes each one into ROM at build
+// time — the tileset it packs and the map blob it writes are build artifacts — and the streaming
+// layer reads tiles straight out of flash, so the town costs nothing on the 140 KB heap. Everything
+// about a level is in the .tmj: the three layers and their parallax, the collision (from `oneway` /
+// `ladder` / `walkable` tile properties in tiles.tsj), and where everybody stands.
+import { townScene } from 'scene:../assets/town.tmj'
+import { innScene } from 'scene:../assets/inn.tmj'
+import { storeScene } from 'scene:../assets/store.tmj'
+import { forgeScene } from 'scene:../assets/forge.tmj'
+import { heroSheet } from 'sheet64:../assets/hero.png'
+import { npcSheet } from 'sheet64:../assets/npcs.png'
+import { ui32 } from 'sheet32:../assets/ui32.png'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { arrowFont } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { sprite_new, frame } from 'cargo:tish_agb'
+import {
+  mount, create, loadScene, loadSceneRom, step, entityApi, entityRefs, hudText,
+  mapSpawnCount, mapSpawnKind, mapSpawnCol, mapSpawnRow, mapSpawnA
+} from '../../../packages/engine'
+import { uiInit } from '../../../packages/ui'
+import { dialogInit, dialogSay, dialogActive, dialogUpdate } from '../../../packages/dialog'
+import { shopInit, shopOpen, shopUpdate, shopActive } from '../../../packages/shop'
+import * as platformer from '../../../packages/platformer'
+import { PfNpc, PfSign, PfDoor } from '../../../packages/platformer'
+import * as components from './components'
+import { Player, CLIPS, BOX_W, BOX_H, SPRITE_OX, SPRITE_OY } from './components'
+import {
+  KIND_MERCHANT, KIND_SMITH, KIND_INNKEEP, KIND_KID, KIND_SIGN, KIND_DOOR, KIND_PLAYER,
+  NPC_IDLE_FRAMES, KID_WALK, KID_WALK_FRAMES, CURSOR_FRAME,
+  LINES, SIGN_LINES, STORE_STOCK, FORGE_STOCK,
+  npcFrame, npcPortrait, gold, bag, onBuy, onSell
+} from './town'
+
+let TILE: i32 = 16
+
+// Canvas tiles paid for AT BOOT. Every cell a glyph lands in copies-on-write into its own
+// `DynamicTile16`; the shared solid fill covers only the cells nothing was written over. This
+// game's peak is 289 live tiles — the shop's quantity picker over a full buy tab, measured with
+// `ui_mem_report()`, which is the number to size this by.
+//
+// 320 rather than 289 because agb grows its live-tile map in doubling steps and NEVER shrinks it,
+// so the only question is when the step gets paid for. 289 sits 18 tiles under the 512→1024
+// boundary (it trips at 307) — close enough that a longer item name would cross it mid-game, and
+// mid-game is exactly where that 20 KB request meets a heap a streamed town has already carved up
+// and fails. Reserving past the boundary takes the step here, at boot, on an empty heap.
+let UI_TILES: i32 = 320
+
+// Which room a door leads to. The town's doors carry one of these in their spawn's `a` field, set
+// on the object in Tiled (see the door entries in `build_town`).
+let ROOM_INN: i32 = 0
+let ROOM_STORE: i32 = 1
+let ROOM_FORGE: i32 = 2
+let ROOM_TOWN: i32 = 3
+
+// Speaker names, indexed by kind. They live here rather than in town.tish because they are what the
+// dialog box prints above the portrait, which is a presentation decision.
+const NAMES = ["Elder Mabon", "Wick", "Gerrun", "Sella", "Watch Captain", "Pell", "Old Rask", "Nan Orry"]
+
+// Entity method groups this game never touches. No tile-locked grid movement, no top-down movement,
+// and none of the engine's own low-level dialogue box — conversations here come from packages/dialog,
+// which draws on the UI canvas instead. Must run before the first spawn: a wrapper slot is built
+// once and keeps whatever API it was born with.
+entityApi({ grid: 0, topdown: 0, dialogue: 0, health: 0, extra: 0 })
+// One rotating wrapper slot instead of two. Each is ~5 KB of heap once built, and two are only
+// needed to hold two `create()`/`entity()` wrappers live in the SAME expression — which nothing here
+// does; every spawn helper takes its wrapper, configures it and drops it. Behaviour hooks get their
+// own slots regardless, so `this` and `other` are unaffected.
+entityRefs(1)
+
+// Boot order: the UI layout engine owns the icon sheet and the text canvas, and the dialog box is
+// built on it, so `uiInit` comes first.
+//
+// `tileReserve` is sized to this game's MEASURED peak, past the next doubling boundary — see the
+// UI_TILES note above for the numbers and why that direction.
+//
+// `cacheShapes: 0` because a solved dialog shape is 15-20 KB held indefinitely, and this game opens
+// a lot of boxes. They open a little slower; they open.
+uiInit({ font: body, sheet: ui32, icons: 24, iconSize: 32, tileReserve: UI_TILES })
+dialogInit({
+  font: body, arrowFont: arrowFont,
+  cursorSheet: ui32, cursorFrame: CURSOR_FRAME,
+  cacheShapes: 0
+})
+shopInit({ font: body, cursorSheet: ui32, cursorFrame: CURSOR_FRAME,
+  // The keeper's box. Passed in rather than imported by the shop: linking `./dialog`
+  // from the shop pulls dialog AND chipsfx into every ROM that has a shop, which cost
+  // a large SRPG example 38 KB at boot and killed it. A game that wants a greeting links it.
+  dialog: { say: dialogSay, update: dialogUpdate, active: dialogActive, free: dialogFree },
+})
+
+mount(components)
+mount(platformer)     // registers PfNpc / PfSign / PfDoor under their export names
+
+// Where the player stands when the town is next built: whichever door they came back out of, or
+// -1 for "wherever the map says", which is the case on the very first build. It cannot be seeded
+// from the map here — nothing is loaded yet at module init.
+let backCol = -1
+let backRow = -1
+// A warp requested by a door this frame: 0 none, 1 the inn, 2 back to the town. Doors do NOT call
+// `loadScene` themselves. A door's hook runs from inside the player's own `update`, and loading a
+// scene there tears down the world — including the player whose update is still running. Setting a
+// flag and letting the main loop do it keeps the teardown outside everybody's hooks.
+let warp: i32 = 0
+// Whether the game's own HUD is currently painted (see `hideHud`).
+let hudOn: i32 = 1
+
+// ── conversations ────────────────────────────────────────────────────────────────────────────────
+// Every handler below is a TOP-LEVEL function passed into an entity's data. Building them as inline
+// closures in the spawn loop would rebuild one per entity per scene load, and a closure that
+// captures a value from a boxed extern call and then escapes reads that value back wrong
+// (tishlang/tish#561) — top-level functions taking their state as a parameter dodge both problems.
+
+// ── the shops ────────────────────────────────────────────────────────────────────────────────────
+// `packages/shop` — the same buy/sell/quantity UI `examples/shop-demo` uses, over the economy in
+// src/town.tish. The keepers are INDOORS, which keeps the streamed town unloaded while a full-screen
+// menu is up; see the tileReserve note above for why that matters.
+function openStore() {
+  shopOpen({
+    title: NAMES[KIND_MERCHANT] + "'s Store", cur: "G", mode: "buy",
+    stock: STORE_STOCK, bag: bag, gold: gold, onBuy: onBuy, onSell: onSell
+  })
+}
+
+function openForge() {
+  shopOpen({
+    title: NAMES[KIND_SMITH] + "'s Forge", cur: "G", mode: "buy",
+    stock: FORGE_STOCK, bag: bag, gold: gold, onBuy: onBuy, onSell: onSell
+  })
+}
+
+function innChoice(pick) {
+  if (pick === 0) {
+    dialogSay(["You sit by the fire until the noise upstairs stops.",
+               "It does not, but you feel better anyway."], { speaker: NAMES[KIND_INNKEEP] })
+  } else if (pick === 1) {
+    dialogSay(["The Captain says the roof planks are watch business.",
+               "The Captain says a lot of things."], { speaker: NAMES[KIND_INNKEEP] })
+  }
+}
+
+function talkInnkeep(d) {
+  dialogSay(["Room's upstairs, ale's downstairs.", "What'll it be?"], {
+    speaker: d.name, portrait: d.portrait,
+    choices: ["Rest a while", "Any news?", "Nothing"],
+    onChoose: innChoice
+  })
+}
+
+// One handler for every townsperson: the two shopkeepers open their shop, the innkeeper offers a
+// choice, everybody else says their piece. The entity's own `data` decides which.
+function talkTo(d) {
+  if (d.kind === KIND_MERCHANT) { openStore(); return }
+  if (d.kind === KIND_SMITH) { openForge(); return }
+  if (d.kind === KIND_INNKEEP) { talkInnkeep(d); return }
+  dialogSay(d.lines, { speaker: d.name, portrait: d.portrait })
+}
+
+function readSign(d) { dialogSay(d.lines, { }) }
+
+// The HUD's two lines, blanked. Their slot numbers and positions have to match the ones
+// components.tish writes, which is the price of sprite-text slots being global.
+function hideHud() {
+  hudText(0, 8, 8, "")
+  hudText(1, 8, 22, "")
+  hudOn = 0
+}
+
+// A door does not travel; it asks. The main loop does the travelling, because a door's hook runs
+// from inside the player's own `update`, and loading a scene there tears down the world including
+// the player whose update is still running.
+function askRoom(d) {
+  backCol = d.col
+  backRow = d.row
+  warp = d.room + 1        // +1 so 0 can mean "nothing requested"
+}
+
+function askTown(d) { warp = ROOM_TOWN + 1 }
+
+// ── building a scene ─────────────────────────────────────────────────────────────────────────────
+function spawnHero(col, row) {
+  let hero = create()
+  hero.setPos(col * TILE, row * TILE)
+  hero.setSprite(sprite_new(heroSheet))
+  // The sprite offset is NOT set here: `platformerInit` owns it (`spriteOX`/`spriteOY` in
+  // components.tish), because the ledge-grab clips shift it and two owners would fight.
+  hero.platformer(BOX_W, BOX_H)
+  hero.behave(Player, { })
+  hero.play(CLIPS.idle[0], CLIPS.idle[1], CLIPS.idle[2], true)
+  hero.follow()
+}
+
+function spawnNpc(kind, col, row) {
+  let e = create()
+  e.setPos(col * TILE, row * TILE)
+  e.setSprite(sprite_new(npcSheet))
+  e.spriteOffset(SPRITE_OX, SPRITE_OY)
+  e.behave(PfNpc, {
+    w: BOX_W, h: BOX_H, kind: kind,
+    name: NAMES[kind], portrait: npcPortrait(kind), lines: LINES[kind],
+    onTalk: talkTo
+  })
+  if (kind === KIND_KID) {
+    // The one townsperson who moves. `patrol` is the engine's native walk-and-turn AI — it runs in
+    // Rust off the platformer body, so a wandering NPC costs no per-frame tish callback at all.
+    e.platformer(BOX_W, BOX_H)
+    e.patrol()
+    e.play(KID_WALK, KID_WALK_FRAMES, 6, true)
+  } else {
+    // Animation is set here at spawn rather than in a `start` hook: a hook that exists only to
+    // configure an entity forces the wrapper to be rebuilt for no other reason.
+    e.play(npcFrame(kind), NPC_IDLE_FRAMES, 14, true)
+  }
+}
+
+function spawnSign(idx, col, row) {
+  let e = create()
+  e.setPos(col * TILE, row * TILE)
+  e.behave(PfSign, { w: TILE, h: TILE, lines: SIGN_LINES[idx], onRead: readSign })
+}
+
+function spawnTownDoor(col, row, room) {
+  let e = create()
+  e.setPos(col * TILE, row * TILE)
+  e.behave(PfDoor, { w: TILE, h: TILE, col: col, row: row, room: room, onEnter: askRoom })
+}
+
+function spawnRoomDoor(col, row) {
+  let e = create()
+  e.setPos(col * TILE, row * TILE)
+  e.behave(PfDoor, { w: TILE, h: TILE, onEnter: askTown })
+}
+
+// Walk the spawn list the map carries in ROM. Reading it out of the blob rather than out of a tish
+// array is the same trade the tiles make: the list costs nothing in RAM until each entry is used.
+function populate(inTown) {
+  let signIdx = 0
+  let si = 0
+  while (si < mapSpawnCount()) {
+    let kind = mapSpawnKind(si)
+    let col = mapSpawnCol(si)
+    let row = mapSpawnRow(si)
+    if (kind === KIND_SIGN) {
+      spawnSign(signIdx, col, row)
+      signIdx = signIdx + 1
+    } else if (kind === KIND_DOOR) {
+      // A town door carries its destination in the spawn's spare `a` field; a room's single door
+      // always leads back out.
+      if (inTown === 1) { spawnTownDoor(col, row, mapSpawnA(si)) } else { spawnRoomDoor(col, row) }
+    } else if (kind !== KIND_PLAYER) {
+      // KIND_PLAYER is the hero's arrival cell, placed by the caller before this runs — a scene
+      // needs the player up before its NPCs. Everything else here is a townsperson.
+      spawnNpc(kind, col, row)
+    }
+    si = si + 1
+  }
+}
+
+// The cell the loaded map wants the hero in. One pass over the spawn list per scene load, which is
+// where every other per-scene decision is already being made.
+function spawnCol() {
+  let si = 0
+  while (si < mapSpawnCount()) {
+    if (mapSpawnKind(si) === KIND_PLAYER) { return mapSpawnCol(si) }
+    si = si + 1
+  }
+  return 0
+}
+function spawnRow() {
+  let si = 0
+  while (si < mapSpawnCount()) {
+    if (mapSpawnKind(si) === KIND_PLAYER) { return mapSpawnRow(si) }
+    si = si + 1
+  }
+  return 0
+}
+
+// The whole layer stack is in town.tmj, and every part of it is forced. World sprites draw at
+// priority 2 and an object beats a background of equal priority, so the World layer is at 2 (behind
+// the characters) and both backdrops behind it are at 3, where the tie is broken by Tiled's own
+// stacking order — Hills sits above Sky in the editor, so the treeline draws in front. Priority 0
+// belongs to the UI canvas. Four layers, four slots, no room for a fifth: add a layer in Tiled and
+// the sky silently stops being drawn.
+function buildTown() {
+  loadSceneRom(townScene)
+  // First arrival takes the map's own spawn; afterwards, whichever door was just stepped out of.
+  if (backCol < 0) { spawnHero(spawnCol(), spawnRow()) } else { spawnHero(backCol, backRow) }
+  populate(1)
+}
+
+// One builder per interior, and they build as LITTLE as possible: one layer, no sky, no treeline.
+// That is the whole reason the shops are indoors — a shop tab wants every byte of the heap the town
+// was holding, and it fails on a 192-byte allocation if it doesn't get it. The decor that would have
+// needed a layer behind it is pre-composited onto the cellar wall in the tileset (see `indoor` in
+// the generator).
+function buildRoom(scene) {
+  loadSceneRom(scene)
+  spawnHero(spawnCol(), spawnRow())
+  populate(0)
+}
+
+function buildInn() { buildRoom(innScene) }
+function buildStore() { buildRoom(storeScene) }
+function buildForge() { buildRoom(forgeScene) }
+
+// ── go ───────────────────────────────────────────────────────────────────────────────────────────
+// Straight into the town, with no title card and no opening speech. The controls are on the
+// signpost you spawn next to, which is where a town would put them anyway — and it means the world
+// is live from the first frame instead of waiting behind a box nobody can dismiss yet.
+loadScene(buildTown)
+
+// The main loop is a priority ladder of whoever currently owns the screen. A shop or a dialog box
+// takes `frame()` — draw, wait for vblank, refresh input — WITHOUT `step()`, so the world stops dead
+// while you are talking: nobody wanders off mid-sentence, and the d-pad belongs to the menu rather
+// than to the player. A door's warp is serviced here, between steps, for the same reason.
+while (true) {
+  if (warp > 0) {
+    let go = warp - 1
+    warp = 0
+    if (go === ROOM_INN) { loadScene(buildInn) }
+    else if (go === ROOM_STORE) { loadScene(buildStore) }
+    else if (go === ROOM_FORGE) { loadScene(buildForge) }
+    else { loadScene(buildTown) }
+  }
+  if (shopActive() > 0) {
+    // The gold counter and the prompt are sprite-text slots, so they survive the world not being
+    // stepped and would sit on top of the shop's own title bar. Clear them ONCE on the way in; the
+    // player's update paints them again the moment it resumes.
+    if (hudOn === 1) { hideHud() }
+    shopUpdate()
+    frame()
+  } else if (dialogActive() > 0) {
+    if (hudOn === 1) { hideHud() }
+    dialogUpdate()
+    frame()
+  } else {
+    hudOn = 1
+    step()
+  }
+}

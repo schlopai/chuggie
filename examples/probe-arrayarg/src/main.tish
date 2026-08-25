@@ -1,0 +1,54 @@
+// probe-arrayarg — does passing a module array to a NATIVE de-optimise every other read of it?
+//
+// `packages/dungeon.tish` measured ~13.8 ticks per cell for a plain count loop over a push-built
+// typed module array, against the ~1.35 `examples/bench-access` measures for the same shape. Four
+// explanations were tested and each disproven against the generated Rust: `export`, filling inside
+// a function, a module-scalar loop bound, and "it is universal to packages".
+//
+// The one structural difference left between that file and `examples/bench-tables` — whose
+// push-built module array reads at 1.54 ticks — is that dungeon.tish PASSES its array to
+// `tilemap_stream` and `grid_from_gids`, and bench-tables imports no natives at all.
+//
+// So: two arrays, identical in every respect, one of which is handed to a native exactly once.
+
+import { frame, log, backdrop, timer_read } from 'cargo:tish_agb'
+import { sumA, sumAMasked, sumB, A, handOverB } from './arrays'
+
+/// The SAME loop as `sumA`, over the SAME array — but written HERE, in the entry module, instead of
+/// inside the module that declares `A`. This is the last structural difference between
+/// `packages/dungeon.tish` (whose readers live beside its array, and are boxed) and
+/// `examples/bench-tables` (whose readers live in main.tish, and are typed).
+function sumAHere(): i32 {
+  let n: i32 = 256
+  let acc: i32 = 0
+  let i: i32 = 0
+  while (i < n) { acc = acc + A[i]; i = i + 1 }
+  return acc
+}
+
+backdrop(0)
+
+let SINK: i32[] = [0]
+
+frame()
+let a0: i32 = timer_read()
+SINK[0] = SINK[0] + sumA()
+let a1: i32 = timer_read()
+frame()
+let b0: i32 = timer_read()
+SINK[0] = SINK[0] + sumB()
+let b1: i32 = timer_read()
+frame()
+let m0: i32 = timer_read()
+SINK[0] = SINK[0] + sumAMasked()
+let m1: i32 = timer_read()
+frame()
+let h0: i32 = timer_read()
+SINK[0] = SINK[0] + sumAHere()
+let h1: i32 = timer_read()
+frame()
+
+handOverB()
+log("ARRAYARG bare=" + (a1 - a0) + " nativeArg=" + (b1 - b0) + " masked=" + (m1 - m0) + " here=" + (h1 - h0) + " sink=" + SINK[0])
+log("ARRAYARG DONE")
+while (true) { frame() }

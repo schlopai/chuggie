@@ -1,0 +1,72 @@
+# Holo Lounge - dialog bed
+# Near-silent pad lounge under dialogue.
+deck 1
+bpm 72
+
+track Pad id pad gen gameBoyDmg * 16
+  gen type pulse duty 12_5 env_mode constant vol 3
+  gen vib_rate 1 vib_amt 12
+  note 61 0 3.95 v 60
+  note 52 4 3.95 v 65
+  note 59 8 3.95 v 70
+  note 56 12 3.95 v 75
+  note 61 16 3.95 v 80
+  note 52 20 3.95 v 60
+  note 54 24 3.95 v 65
+  note 61 28 3.95 v 70
+  note 57 32 3.95 v 75
+  note 59 36 3.95 v 80
+  note 61 40 3.95 v 60
+  note 56 44 3.95 v 65
+  note 61 48 3.95 v 70
+  note 52 52 3.95 v 75
+  note 59 56 3.95 v 80
+  note 61 60 3.95 v 60
+
+track Lead id lead gen gameBoyDmg * 16
+  gen type pulse duty 25 env_mode constant vol 6
+  gen vib_rate 2 vib_amt 14
+  note 69 0.5 3 v 60
+  note 72 4.5 2.5 v 55
+  note 69 8.5 3 v 60
+  note 72 12.5 2.5 v 55
+  note 69 16.5 3 v 60
+  note 72 20.5 2.5 v 55
+  note 69 24.5 3 v 60
+  note 72 28.5 2.5 v 55
+  note 69 32.5 3 v 60
+  note 72 36.5 2.5 v 55
+  note 69 40.5 3 v 60
+  note 72 44.5 2.5 v 55
+  note 69 48.5 3 v 60
+  note 72 52.5 2.5 v 55
+  note 69 56.5 3 v 60
+  note 72 60.5 2.5 v 55
+
+track Bass id bass gen gameBoyDmg * 16
+  gen type wave wave_shape sine vol 14
+  note 45 0 4 v 110
+  note 48 4 4 v 110
+  note 43 8 4 v 110
+  note 40 12 4 v 110
+  note 45 16 4 v 110
+  note 48 20 4 v 110
+  note 38 24 4 v 110
+  note 45 28 4 v 110
+  note 41 32 4 v 110
+  note 43 36 4 v 110
+  note 45 40 4 v 110
+  note 40 44 4 v 110
+  note 45 48 4 v 110
+  note 48 52 4 v 110
+  note 43 56 4 v 110
+  note 45 60 4 v 110
+
+track Kick id kick gen gbaDirectSound * 16
+  gen waveform pulse duty 50 vol 14 bitcrush true pitch_drop -6 pitch_dec 0.06
+  adsr a 0 d 0.1 s 0 r 0.03
+
+track Hats id hats gen gbaDirectSound * 16
+  gen waveform sine vol 3 bitcrush true
+  adsr a 0 d 0.04 s 0 r 0.02
+

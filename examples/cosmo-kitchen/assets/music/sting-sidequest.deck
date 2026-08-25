@@ -1,0 +1,18 @@
+# Side Order - side quest
+# Curious sixth leap.
+deck 1
+bpm 120
+
+track Lead id lead gen gameBoyDmg
+  gen type pulse duty 50 env_mode constant vol 12
+  note 69 0 0.2 v 110
+  note 71 0.25 0.2 v 105
+  note 74 0.5 0.3 v 120
+  note 78 0.95 0.35 v 125
+  note 74 1.45 0.25 v 110
+  note 71 1.85 0.5 v 105
+
+track Bell id bell gen gbaDirectSound
+  gen waveform triangle vol 9 bitcrush true
+  adsr a 0 d 0.15 s 0 r 0.1
+  note 90 0.6 0.3 v 100

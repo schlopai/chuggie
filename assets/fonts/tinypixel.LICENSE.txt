@@ -1,0 +1,11 @@
+tinypixel — tiny pixel font by videodante (OFL)
+
+  https://videodante.itch.io/tinypixel
+  http://dante.cool
+
+Licensed under the SIL Open Font License, Version 1.1.
+See peaberry.OFL.txt in this directory for the full OFL text, or
+http://scripts.sil.org/OFL
+
+Vendored as tinypixel.ttf from the upstream TTF release.
+Designed ~5×5 with 2px descenders — bake at **7px** (`font:…/tinypixel.ttf@7`). @8/@12 scale and blur it.

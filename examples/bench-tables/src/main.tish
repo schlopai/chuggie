@@ -1,0 +1,224 @@
+// bench-tables — what a GENERATED TABLE costs to read, and whether caching one is worth anything.
+//
+// WHY THIS EXISTS. `examples/bench-access` measured a 64-entry module array literal at ~63.2 ticks
+// per element against ~1.68 for the same data built with `push()` — a 37x gap that came entirely
+// from how the array was WRITTEN. A literal is promoted to a Rust `static` (right: it lives in ROM,
+// not RAM) whose index path was BOXED: build a `Value::Number(i as f64)`, match it back to a usize,
+// read as f64, convert to i32, per element. That finding is the whole reason
+// `drop-gba/packages/drop_tables.tish` carries a warmed two-slot cache, and it lands on this repo
+// hard, because the topdown RPG port's generated dungeon-room table is 76 KB of exactly that shape.
+//
+// But bench-access measured the MICRO case: 64 entries, a masked index, inside a function that
+// touches nothing else. A real table read is 2,304 entries reached through an accessor that consults
+// module state. Those two costs were never separated, and the second one turns out to be the one
+// that survives — so a plan that reaches for the cache first fixes the half that is already gone.
+//
+// WHAT IT MEASURES:
+//
+//   P1   PUSH[k & 2047]        a push-built array, plain local index      — the baseline
+//   L1   LIT[k & 2047]         a promoted literal, plain local index      — THE tishlang/tish#645 CASE
+//   L2   litAt(k)              the literal through an accessor that reads a module scalar, i.e.
+//                              `uwDoor` — cannot typed-lower, so the call is boxed
+//   P2   pushAt(k)             the same accessor over the pushed arm, so the accessor's cost can be
+//                              told apart from the array's
+//   W    WARM[k & 127]         a 128-entry pushed slice copied out of LIT — drop_tables' cache read
+//   F32  warmFill(base, 32)    what filling that slice costs, which is what the cache has to earn
+//   F64  warmFill(base, 64)    the same fill at twice the width, so the per-element SLOPE and the
+//                              one-off call INTERCEPT come apart. A single fill span is one call
+//                              plus n iterations and cannot tell you which one you are looking at —
+//                              the first draft of this bench reported ~28 ticks an element for a
+//                              copy whose two halves measure ~0.5 and ~1.6, and the difference was
+//                              entirely the boxed call it was quietly including.
+//
+// Every span has a loop-only control at the SAME N, so the per-op numbers are net of loop overhead
+// and of the one boxed call into the bench function itself. Every bench function touches `SINK`, so
+// none of them is eligible for typed lowering and all of them pay that call identically — an arm
+// that inlined while its partner did not would measure the lowering, not the array.
+//
+// ⚠️ `timer_read()` is 16 bit and wraps every ~15 frames. Each arm gets its own N, sized so the span
+// stays inside one frame EVEN IF #645 is unfixed and a literal read still costs 63 ticks. This is
+// why L1 runs at 40 and P1 at 1000, and why the fill is measured at 32 elements and scaled: a full
+// 128-element fill out of a boxed literal is ~8,000 ticks, which wraps the timer and reports
+// fiction. bench-access learned that the expensive way — a call measured at 0.026 ticks and an array
+// parameter came out NEGATIVE, and the plausible half of that run was believed for weeks.
+
+import { timer_read, frame, log, backdrop } from 'cargo:tish_agb'
+import { PUSH, LIT, WARM, litAt, pushAt, warmFill, warmFillConst, warmFillPush, warmFillMask,
+         tablesChecksum, setLevel } from './tables'
+
+// A sink every bench writes to. Two jobs: nothing measured can be discarded as dead, and every
+// bench function touches a module array, so all of them are boxed `value_call`s and the loop-only
+// control at the same N subtracts that call rather than leaving it in one arm only.
+let SINK: i32[] = [0]
+
+function benchLoop(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + (k & 2047); k = k + 1 }
+  SINK[0] = SINK[0] + acc
+  return acc
+}
+
+function benchPush(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + PUSH[k & 2047]; k = k + 1 }
+  SINK[0] = SINK[0] + acc
+  return acc
+}
+
+function benchLit(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + LIT[k & 2047]; k = k + 1 }
+  SINK[0] = SINK[0] + acc
+  return acc
+}
+
+function benchWarm(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + WARM[k & 127]; k = k + 1 }
+  SINK[0] = SINK[0] + acc
+  return acc
+}
+
+function benchLitAt(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + litAt(k); k = k + 1 }
+  SINK[0] = SINK[0] + acc
+  return acc
+}
+
+function benchPushAt(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + pushAt(k); k = k + 1 }
+  SINK[0] = SINK[0] + acc
+  return acc
+}
+
+backdrop(0)
+
+// ⚠️ ONE MEASUREMENT PER FRAME. See the header.
+//
+// PN is large because a pushed read is ~1.35 ticks and needs the iterations to clear the timer's
+// resolution. LN is 40 because a literal read might still be ~63, and 40 x 63 = 2,520 ticks fits a
+// frame while 1,000 x 63 = 63,000 does not. CN is 20 because a boxed accessor call is ~117 ticks.
+let PN: i32 = 1000
+let LN: i32 = 40
+let CN: i32 = 20
+// The fill is measured at two widths, never at 128: if a literal read still cost 63 ticks a full
+// 128-element fill would be ~8,000 ticks, which wraps the timer and reports fiction. Two widths also
+// separate the per-element slope from the one-off boxed call, which one width cannot.
+let FN: i32 = 32
+let FN2: i32 = 64
+
+// The arms must hold the same data or none of the numbers below compare anything. Checked before
+// the first measurement, and reported, so a regenerated table that drifted cannot pass quietly.
+let ck0: i32 = tablesChecksum(0)
+let ck1: i32 = tablesChecksum(1)
+
+setLevel(3)
+// Warm the cache arm once, off every measured span — which is itself the rule the bench exists to
+// put a number on. `drop_tables.tish:150` records what happens when a cache fills lazily instead:
+// the fill lands on the frame that needed the data and the peak went from 6,614 to 12,877, worse
+// than having no cache at all.
+warmFill((3 - 1) * 128, 128)
+
+frame()
+let lp0: i32 = timer_read()
+benchLoop(PN)
+let lp1: i32 = timer_read()
+frame()
+let p10: i32 = timer_read()
+benchPush(PN)
+let p11: i32 = timer_read()
+frame()
+let w0: i32 = timer_read()
+benchWarm(PN)
+let w1: i32 = timer_read()
+frame()
+let ll0: i32 = timer_read()
+benchLoop(LN)
+let ll1: i32 = timer_read()
+frame()
+let l10: i32 = timer_read()
+benchLit(LN)
+let l11: i32 = timer_read()
+frame()
+let lc0: i32 = timer_read()
+benchLoop(CN)
+let lc1: i32 = timer_read()
+frame()
+let l20: i32 = timer_read()
+benchLitAt(CN)
+let l21: i32 = timer_read()
+frame()
+let p20: i32 = timer_read()
+benchPushAt(CN)
+let p21: i32 = timer_read()
+frame()
+let f0: i32 = timer_read()
+warmFill((3 - 1) * 128, FN)
+let f1: i32 = timer_read()
+frame()
+let g0: i32 = timer_read()
+warmFill((3 - 1) * 128, FN2)
+let g1: i32 = timer_read()
+frame()
+// The decomposition. Same width, same write, same call — only the SOURCE of each element differs.
+let fc0: i32 = timer_read()
+warmFillConst((3 - 1) * 128, FN2)
+let fc1: i32 = timer_read()
+frame()
+let fp0: i32 = timer_read()
+warmFillPush((3 - 1) * 128, FN2)
+let fp1: i32 = timer_read()
+frame()
+let fm0: i32 = timer_read()
+warmFillMask((3 - 1) * 128, FN2)
+let fm1: i32 = timer_read()
+frame()
+
+log("BENCH-TABLES RAW loopP=" + (lp1 - lp0) + " p1=" + (p11 - p10) + " w=" + (w1 - w0)
+  + " loopL=" + (ll1 - ll0) + " l1=" + (l11 - l10)
+  + " loopC=" + (lc1 - lc0) + " l2=" + (l21 - l20) + " p2=" + (p21 - p20)
+  + " fill32=" + (f1 - f0) + " fill64=" + (g1 - g0)
+  + " fillConst=" + (fc1 - fc0) + " fillPush=" + (fp1 - fp0) + " fillMask=" + (fm1 - fm0)
+  + " PN=" + PN + " LN=" + LN + " CN=" + CN + " FN=" + FN + " FN2=" + FN2
+  + " ck0=" + ck0 + " ck1=" + ck1 + " sink=" + SINK[0])
+
+// Every span must be positive, inside a frame, and larger than its own loop-only control; and the
+// two arms must hold the same data. Any one of those failing means the numbers above are fiction,
+// and the ROM says so rather than leaving it to be noticed.
+let worst: i32 = 0
+if ((lp1 - lp0) > worst) { worst = lp1 - lp0 }
+if ((p11 - p10) > worst) { worst = p11 - p10 }
+if ((w1 - w0) > worst) { worst = w1 - w0 }
+if ((l11 - l10) > worst) { worst = l11 - l10 }
+if ((l21 - l20) > worst) { worst = l21 - l20 }
+if ((p21 - p20) > worst) { worst = p21 - p20 }
+if ((f1 - f0) > worst) { worst = f1 - f0 }
+if ((g1 - g0) > worst) { worst = g1 - g0 }
+
+let ok: i32 = 1
+if ((lp1 - lp0) <= 0 || (p11 - p10) <= 0 || (w1 - w0) <= 0 || (ll1 - ll0) <= 0) { ok = 0 }
+if ((l11 - l10) <= 0 || (lc1 - lc0) <= 0 || (l21 - l20) <= 0 || (p21 - p20) <= 0) { ok = 0 }
+if ((f1 - f0) <= 0 || (g1 - g0) <= 0) { ok = 0 }
+if ((fc1 - fc0) <= 0 || (fp1 - fp0) <= 0 || (fm1 - fm0) <= 0) { ok = 0 }
+if ((fc1 - fc0) > worst) { worst = fc1 - fc0 }
+if ((fp1 - fp0) > worst) { worst = fp1 - fp0 }
+if ((fm1 - fm0) > worst) { worst = fm1 - fm0 }
+// Twice the elements must cost more than half of them, or the two-width slope is meaningless.
+if ((g1 - g0) <= (f1 - f0)) { ok = 0 }
+// A bench arm that measured BELOW its own empty loop did not measure the thing it names.
+if ((p11 - p10) <= (lp1 - lp0) || (l11 - l10) <= (ll1 - ll0)) { ok = 0 }
+if ((l21 - l20) <= (lc1 - lc0) || (p21 - p20) <= (lc1 - lc0)) { ok = 0 }
+if (ck0 !== ck1 || ck0 === 0) { ok = 0 }
+if (worst >= 4389) { ok = 0 }
+log("BENCH-TABLES SANE " + ok + " worstSpan=" + worst + " (must be 1, and worstSpan < 4389)")
+log("BENCH-TABLES DONE")
+
+while (true) { frame() }

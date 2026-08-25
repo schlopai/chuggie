@@ -1,0 +1,116 @@
+// sfx.tish — positional sound: where a thing is, not just that it happened.
+//
+// ── WHY THIS EXISTS ───────────────────────────────────────────────────────────────────────────
+//
+// The engine review's third gap was that audio is disproportionately thin: 220 lines of tish against
+// 22,000, "no mixer, no ducking, no positional/panned SFX, no music state machine". Ducking landed;
+// this is the positional half. Until now `sound_play` was the whole vocabulary and every effect in
+// every game played dead centre at full volume — an explosion off the left edge of the screen
+// sounded exactly like one under your feet, which is why "the audio does not react to the game" was
+// the most audible thing missing.
+//
+// `sound_play_ex` (new, in tish-agb) exposes the volume/panning/pitch that agb's `SoundChannel`
+// always had. This turns a WORLD position plus the camera into those three numbers.
+//
+// ── THE MODEL IS DELIBERATELY 1-D ─────────────────────────────────────────────────────────────
+//
+// Panning follows the horizontal offset from the listener; distance follows the true 2-D distance.
+// That is not a simplification of a "correct" model, it is what a stereo pair can actually express:
+// the GBA has two speakers side by side and no way to say "behind you". Spending cycles on a
+// vertical term would buy nothing audible.
+//
+// ⚠️ DISTANCE USES THE OCTAGONAL APPROXIMATION, NOT A SQUARE ROOT. `max + min/2` is within ~6% of
+// the true hypotenuse, and it costs a compare and a shift where `sqrt` costs a call. Six percent of
+// a falloff curve is inaudible; a software `sqrt` per sound effect is not free
+// (`docs/MEMORY.md`, "no divide instruction").
+//
+//     sfxInit({ near: 40, far: 200, minVol: 24 })
+//     sfxListener(cameraX + 120, cameraY + 80)   // once a frame, wherever the ears are
+//     sfxAt(boom, x, y)                          // and every effect from then on is placed
+
+import { sound_play_ex, sound_play } from 'cargo:tish_agb'
+
+//   0 listenerX  1 listenerY  2 near  3 far  4 minVol  5 maxPan  6 ready
+let L: i32[] = [0, 0, 40, 200, 24, 256, 0]
+let L_X: i32 = 0
+let L_Y: i32 = 1
+let L_NEAR: i32 = 2
+let L_FAR: i32 = 3
+let L_MINVOL: i32 = 4
+let L_MAXPAN: i32 = 5
+let L_READY: i32 = 6
+
+/// `near` — closer than this is full volume and no attenuation. `far` — beyond this is `minVol`.
+/// `minVol` is deliberately not 0: a sound that fades to nothing is indistinguishable from a sound
+/// that failed to play, and one of those is a bug you want to hear.
+export function sfxInit(cfg) {
+  if (cfg !== null) {
+    if (cfg.near !== null) { L[L_NEAR] = cfg.near }
+    if (cfg.far !== null) { L[L_FAR] = cfg.far }
+    if (cfg.minVol !== null) { L[L_MINVOL] = cfg.minVol }
+    if (cfg.maxPan !== null) { L[L_MAXPAN] = cfg.maxPan }
+  }
+  if (L[L_FAR] <= L[L_NEAR]) { L[L_FAR] = L[L_NEAR] + 1 }
+  L[L_READY] = 1
+}
+
+/// Where the ears are, in world pixels. Call it once a frame — usually the centre of the screen.
+export function sfxListener(x: i32, y: i32) {
+  L[L_X] = x
+  L[L_Y] = y
+}
+
+export function sfxListenerX(): i32 { return L[L_X] }
+export function sfxListenerY(): i32 { return L[L_Y] }
+
+/// The octagonal distance approximation — see the header.
+function dist(dx: i32, dy: i32): i32 {
+  let ax: i32 = dx
+  if (ax < 0) { ax = 0 - ax }
+  let ay: i32 = dy
+  if (ay < 0) { ay = 0 - ay }
+  if (ax > ay) { return ax + (ay >> 1) }
+  return ay + (ax >> 1)
+}
+
+/// Volume for a source `d` pixels away, Q8. Linear between `near` and `far`, which is the curve a
+/// player reads as "getting closer" — an inverse-square law on a 240px screen is almost all silence.
+export function sfxVolumeAt(d: i32): i32 {
+  if (d <= L[L_NEAR]) { return 256 }
+  if (d >= L[L_FAR]) { return L[L_MINVOL] }
+  let span: i32 = L[L_FAR] - L[L_NEAR]
+  let t: i32 = d - L[L_NEAR]
+  return 256 - (Math.imul(256 - L[L_MINVOL], t) / span)
+}
+
+/// Panning for a source `dx` pixels to the right of the listener, Q8, -256..+256. Saturates at
+/// `far`, so anything off the side of the screen is hard-panned rather than creeping.
+export function sfxPanAt(dx: i32): i32 {
+  let span: i32 = L[L_FAR]
+  let p: i32 = (Math.imul(L[L_MAXPAN], dx)) / span
+  if (p > L[L_MAXPAN]) { return L[L_MAXPAN] }
+  if (p < 0 - L[L_MAXPAN]) { return 0 - L[L_MAXPAN] }
+  return p
+}
+
+/// Play `wav` as coming from world position (x, y).
+export function sfxAt(wav: i32, x: i32, y: i32) {
+  if (L[L_READY] === 0) { sound_play(wav)  return }
+  let dx: i32 = x - L[L_X]
+  let dy: i32 = y - L[L_Y]
+  sound_play_ex(wav, sfxVolumeAt(dist(dx, dy)), sfxPanAt(dx), 256)
+}
+
+/// Play `wav` at the listener — full volume, centred. For UI clicks and anything the player IS.
+export function sfxHere(wav: i32) {
+  sound_play_ex(wav, 256, 0, 256)
+}
+
+/// Positional, with a pitch shift. `pitch` is Q8: 256 normal, 512 an octave up. Handy for making a
+/// repeated effect stop sounding like a loop — vary it a few percent per hit.
+export function sfxAtPitched(wav: i32, x: i32, y: i32, pitch: i32) {
+  if (L[L_READY] === 0) { sound_play(wav)  return }
+  let dx: i32 = x - L[L_X]
+  let dy: i32 = y - L[L_Y]
+  sound_play_ex(wav, sfxVolumeAt(dist(dx, dy)), sfxPanAt(dx), pitch)
+}

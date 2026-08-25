@@ -1,0 +1,875 @@
+// boxing.tish — the over-the-shoulder boxing bout, as a simulation.
+//
+// ── WHY THIS IS NOT `fighter.tish` ────────────────────────────────────────────────────────────
+//
+// `packages/fighter.tish` is a versus fighter: two actors on a LINE. Its 24-field state row is
+// mostly position — `S_X`, `S_Y`, `S_VY`, `S_FACE`, walk speeds in 8.8, gravity, stage bounds,
+// push-apart — and its tick is integrate, clamp, AABB, push.
+//
+// A boxing game is two actors on a TIMELINE. There is no X axis: neither fighter ever translates.
+// There is no facing, so nothing mirrors. There is no hitbox — a punch lands or does not land by
+// comparing ONE TABLE COLUMN (`A_AVOID`) against the defender's current stance. Sixteen of
+// fighter.tish's twenty-four state fields and five of its twenty-one move fields would be dead, and
+// what remained would still be paying integrate-and-clamp for two actors that never move.
+//
+// `motion.tish` is skipped for the same reason: it exists to recognise quarter-circles and dashes
+// mirrored by facing, and this game has no motions, no dashes and no facing. The one thing it would
+// have supplied — "was a punch pressed within N frames" — is two integers here.
+//
+// ── THIS MODULE OWNS NO SPRITES ───────────────────────────────────────────────────────────────
+//
+// It returns semantic state (which state, which attack, how many frames left) and the game maps
+// that to cells. Otherwise the pose indices would have to be duplicated between here and the
+// generator's `frames.tish`, and a duplicated contract drifts silently — the failure would be a
+// wrong pose on one attack, which looks like an art bug and is not.
+//
+// ── THE THREE RULES THIS FILE IS SHAPED BY ────────────────────────────────────────────────────
+//
+//   1. NO `%` AND NO `/`. The ARM7TDMI has no divide instruction; every one is a software call, and
+//      `motion.tish` once spent 1,400 of a 4,389-tick frame on a single `%`. Every duration here is
+//      a countdown, every stride is a power of two, every scale is a `>>`.
+//   2. EVERY MODULE SCALAR IS `let X: i32`. `const X = 5` AND bare `let X = 5` compile to a
+//      thread-local `Cell<f64>` on a chip with no FPU (docs/perf-rules.md §1). `verify.sh` gates it.
+//   3. READERS ARE PACKED WORDS. A one-argument call touching module state is ~117 ticks. A HUD
+//      reading eleven fields separately would spend 1,300 ticks of the frame on numbers it mostly
+//      repaints only when they change. Three calls, three words — the `fighterHudView` idiom.
+
+import { key_held, key_pressed } from 'cargo:tish_agb'
+
+// ── player states ─────────────────────────────────────────────────────────────────────────────
+export let PS_IDLE: i32 = 0
+export let PS_JAB: i32 = 1
+export let PS_BODY: i32 = 2
+export let PS_UPPER: i32 = 3
+export let PS_DODGE_L: i32 = 4
+export let PS_DODGE_R: i32 = 5
+export let PS_DUCK: i32 = 6
+export let PS_BLOCK: i32 = 7
+export let PS_HURT: i32 = 8
+export let PS_DOWN: i32 = 9
+export let PS_GETUP: i32 = 10
+export let PS_GASSED: i32 = 11
+
+// ── opponent states ───────────────────────────────────────────────────────────────────────────
+export let OS_BOB: i32 = 0
+export let OS_TELL: i32 = 1
+export let OS_WIND: i32 = 2
+export let OS_STRIKE: i32 = 3
+export let OS_RECOVER: i32 = 4
+export let OS_VULN: i32 = 5
+export let OS_GUARD: i32 = 6
+export let OS_HURT: i32 = 7
+export let OS_STUN: i32 = 8
+export let OS_DOWN: i32 = 9
+export let OS_TAUNT: i32 = 10
+
+// ── what avoids an attack. ONE table column, and it is the entire guessing game. ───────────────
+export let AV_NONE: i32 = 0
+export let AV_DODGE_L: i32 = 1
+export let AV_DODGE_R: i32 = 2
+export let AV_DUCK: i32 = 4
+export let AV_BLOCK: i32 = 8
+
+// ── punch targets ─────────────────────────────────────────────────────────────────────────────
+export let TG_BODY: i32 = 0
+export let TG_HEAD: i32 = 1
+
+// ── events returned by boxTick(), as a bitmask ────────────────────────────────────────────────
+export let EV_P_LAND: i32 = 1          // the player landed a punch
+export let EV_P_BLOCKED: i32 = 2       // ... into a guard
+export let EV_P_WHIFF: i32 = 4
+export let EV_P_COUNTER: i32 = 8       // landed inside the opponent's own windup
+export let EV_STAR: i32 = 16
+export let EV_O_LAND: i32 = 32         // the opponent landed one
+export let EV_O_GUARDED: i32 = 64      // ... into the player's block
+export let EV_P_DODGE: i32 = 128       // a clean dodge; this is what recovers stamina
+export let EV_O_STUN: i32 = 256
+export let EV_O_DOWN: i32 = 512
+export let EV_P_DOWN: i32 = 1024
+export let EV_O_OUT: i32 = 2048        // counted out, or the third knockdown
+export let EV_P_OUT: i32 = 4096
+export let EV_TELL: i32 = 8192         // a tell STARTED this frame — the crowd cue
+export let EV_HEART: i32 = 16384       // stamina was spent
+export let EV_COUNT: i32 = 32768       // the ten-count ticked over
+
+// ── the attack table ──────────────────────────────────────────────────────────────────────────
+// Stride 16, not 14: a power of two means `atk << 4` instead of a multiply, and `a * b` on i32
+// locals is STILL soft-float in this compiler even when both sides are typed (docs/perf-rules.md).
+// Two words are spare and that is a cheaper trade than a Math.imul on every table read.
+let AW: i32 = 16
+export let A_TELL_F: i32 = 0       // how long the readable wind-up is held. The whole game.
+export let A_WIND_F: i32 = 1       // committed; too late to read, still time to react
+export let A_HIT_F: i32 = 2        // frames the fist is out; contact resolves on entry
+export let A_REC_F: i32 = 3        // recovery after a landed or blocked punch
+export let A_DMG: i32 = 4
+export let A_AVOID: i32 = 5        // AV_* bitmask
+export let A_TARGET: i32 = 6       // TG_HEAD / TG_BODY
+export let A_COUNTER_F: i32 = 7    // window before contact in which a player punch STUNS
+export let A_VULN_F: i32 = 8       // the whiff-punish window — the reward for reading it
+export let A_KIND: i32 = 9         // free for the game: which pose family to draw
+
+let ATK: i32[] = []
+let NATK: i32 = 0
+
+// ── the pattern script ────────────────────────────────────────────────────────────────────────
+// (atkId, gapFrames) pairs. A run of zero-gap steps IS a flurry, so a flurry needs no special case.
+let SCRIPT: i32[] = []
+let PH_AT: i32[] = [0, 0, 0]
+let PH_LEN: i32[] = [0, 0, 0]
+let PH_GAP: i32[] = [256, 208, 160]     // Q8 multiplier on every gap, by phase
+
+// Difficulty shaves frames off every tell, and nothing else. Same table, same script, same art.
+let DIFF_CUT: i32[] = [0, 4, 8]
+let RAGE_CUT: i32[] = [0, 3, 6]
+// ⚠️ FLOORED, NOT CLAMPED TO ZERO. An unreadable tell is not difficulty, it is a broken game, and
+// this is the one number in the file that a later balance tweak could quietly destroy the game
+// with. `verify.sh` asserts it independently.
+export let TELL_FLOOR: i32 = 9
+
+let diff: i32 = 0
+
+// ── player state ──────────────────────────────────────────────────────────────────────────────
+let P_HP: i32 = 0
+let P_MAXHP: i32 = 1
+let P_HEARTS: i32 = 2
+let P_MAXHEART: i32 = 3
+let P_STARS: i32 = 4
+let P_STATE: i32 = 5
+let P_T: i32 = 6            // frames left in the current state
+let P_DOWNS: i32 = 7
+let P_METER: i32 = 8        // get-up mash meter
+let P_BUF: i32 = 9          // buffered button (1 = left, 2 = right, 3 = star)
+let P_BUFT: i32 = 10
+let P_REGEN: i32 = 11       // countdown to the next free heart
+let P_MERCY: i32 = 12       // invulnerable frames after being hit
+let P_TARGET: i32 = 13      // the target of the punch in flight
+let P_DODGES: i32 = 14      // clean dodges since gassing out
+let P_LASTMASH: i32 = 15
+let PL: i32[] = []
+
+// ── opponent state ────────────────────────────────────────────────────────────────────────────
+let O_HP: i32 = 0
+let O_MAXHP: i32 = 1
+let O_STATE: i32 = 2
+let O_T: i32 = 3
+let O_ATK: i32 = 4
+let O_PHASE: i32 = 5
+let O_DOWNS: i32 = 6
+let O_CURSOR: i32 = 7
+let O_HITDONE: i32 = 8
+let O_GUARDCH: i32 = 9      // percent chance of guarding when pressured
+let O_PRESSURE: i32 = 10    // player punches landed recently
+let O_PHASE2: i32 = 11      // hp at which phase 1 begins
+let OP: i32[] = []
+
+// ── bout state ────────────────────────────────────────────────────────────────────────────────
+let frozen: i32 = 0
+let countN: i32 = 0         // the ten-count, 1..10
+let countT: i32 = 0
+let whoDown: i32 = 0        // 1 player, 2 opponent
+let lastHitY: i32 = 0
+let lastHitMag: i32 = 0
+let seed: i32 = 22222
+
+// player punch tuning
+let jabDmg: i32 = 4
+let bodyDmg: i32 = 5
+let upperDmg: i32 = 22
+let jabF: i32 = 6
+let recF: i32 = 10
+
+let DODGE_F: i32 = 16       // total dodge frames; the first DODGE_IF are invulnerable
+let DODGE_IF: i32 = 10
+let DUCK_MIN: i32 = 6
+let MERCY_F: i32 = 24
+let REGEN_F: i32 = 90
+let COUNT_F: i32 = 48       // frames per number of the ten-count
+let GETUP_NEED: i32 = 96
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Authoring
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+// ⚠️ Split across two calls on purpose. tish does NOT check call arity — a dropped comma in a
+// fourteen-argument authoring call is a zero-damage haymaker, not an error. Six and five arguments
+// are short enough to read, and `scripts/arity_check.py` covers the rest.
+export function boxDefAttack(id: i32, tellF: i32, windF: i32, hitF: i32, recFr: i32, kind: i32) {
+  while (NATK <= id) {
+    let k: i32 = 0
+    while (k < AW) {
+      ATK.push(0)
+      k = k + 1
+    }
+    NATK = NATK + 1
+  }
+  let b: i32 = id << 4
+  ATK[b + A_TELL_F] = tellF
+  ATK[b + A_WIND_F] = windF
+  ATK[b + A_HIT_F] = hitF
+  ATK[b + A_REC_F] = recFr
+  ATK[b + A_KIND] = kind
+}
+
+export function boxDefAttackHit(id: i32, dmg: i32, avoid: i32, target: i32, counterF: i32, vulnF: i32) {
+  let b: i32 = id << 4
+  ATK[b + A_DMG] = dmg
+  ATK[b + A_AVOID] = avoid
+  ATK[b + A_TARGET] = target
+  ATK[b + A_COUNTER_F] = counterF
+  ATK[b + A_VULN_F] = vulnF
+}
+
+export function boxDefScript(phase: i32, atkId: i32, gapF: i32) {
+  if (PH_LEN[phase] === 0) {
+    PH_AT[phase] = SCRIPT.length >> 1
+  }
+  SCRIPT.push(atkId)
+  SCRIPT.push(gapF)
+  PH_LEN[phase] = PH_LEN[phase] + 1
+}
+
+export function boxDefOpponent(hp: i32, guardChance: i32, phase2Hp: i32) {
+  OP[O_MAXHP] = hp
+  OP[O_GUARDCH] = guardChance
+  OP[O_PHASE2] = phase2Hp
+}
+
+export function boxDefPlayer(hp: i32, hearts: i32, jd: i32, bd: i32, ud: i32) {
+  PL[P_MAXHP] = hp
+  PL[P_MAXHEART] = hearts
+  jabDmg = jd
+  bodyDmg = bd
+  upperDmg = ud
+}
+
+export function boxSetDifficulty(d: i32) {
+  diff = d
+}
+
+export function boxSeed(s: i32) {
+  seed = s
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Lifecycle
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+export function boxInit() {
+  let i: i32 = 0
+  while (i < 16) {
+    PL.push(0)
+    i = i + 1
+  }
+  i = 0
+  while (i < 12) {
+    OP.push(0)
+    i = i + 1
+  }
+}
+
+export function boxRoundReset(roundNo: i32) {
+  PL[P_HP] = PL[P_MAXHP]
+  PL[P_HEARTS] = PL[P_MAXHEART]
+  PL[P_STATE] = PS_IDLE
+  PL[P_T] = 0
+  PL[P_DOWNS] = 0
+  PL[P_METER] = 0
+  PL[P_BUF] = 0
+  PL[P_BUFT] = 0
+  PL[P_REGEN] = REGEN_F
+  PL[P_MERCY] = 0
+  PL[P_DODGES] = 0
+  if (roundNo === 1) {
+    PL[P_STARS] = 0
+    OP[O_HP] = OP[O_MAXHP]
+    OP[O_PHASE] = 0
+    OP[O_DOWNS] = 0
+  }
+  OP[O_STATE] = OS_BOB
+  OP[O_T] = 70
+  OP[O_ATK] = 0
+  OP[O_HITDONE] = 0
+  OP[O_PRESSURE] = 0
+  OP[O_CURSOR] = PH_AT[OP[O_PHASE]]
+  countN = 0
+  countT = 0
+  whoDown = 0
+  frozen = 0
+}
+
+export function boxSetFrozen(on: i32) {
+  if (on === 1) {
+    frozen = 0 - 1
+  } else {
+    frozen = 0
+  }
+}
+
+// Hit-stop. The single cheapest piece of impact there is: everything stops for a few frames and the
+// punch reads as having weight.
+export function boxFreeze(frames: i32) {
+  if (frozen >= 0) {
+    frozen = frames
+  }
+}
+
+export function boxFrozen(): i32 {
+  return frozen
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Readers — three packed words, not twenty accessors
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+export function boxPlayerView(): i32 {
+  return PL[P_HP] + (PL[P_HEARTS] << 9) + (PL[P_STARS] << 14)
+       + (PL[P_STATE] << 17) + (PL[P_DOWNS] << 21) + (PL[P_METER] << 23)
+}
+
+export function boxOppView(): i32 {
+  let t: i32 = OP[O_T]
+  if (t > 127) {
+    t = 127
+  }
+  return OP[O_HP] + (OP[O_STATE] << 9) + (OP[O_ATK] << 13)
+       + (t << 18) + (OP[O_DOWNS] << 25) + (OP[O_PHASE] << 27)
+}
+
+export function boxCountView(): i32 {
+  return countN + (whoDown << 5) + (lastHitY << 7) + (lastHitMag << 15)
+}
+
+// The attack table is the game's documentation, and the HUD wants to draw a tell cue from it.
+export function boxAtkField(id: i32, field: i32): i32 {
+  return ATK[(id << 4) + field]
+}
+
+export function boxTellFrames(id: i32): i32 {
+  let t: i32 = ATK[(id << 4) + A_TELL_F] - DIFF_CUT[diff] - RAGE_CUT[OP[O_PHASE]]
+  if (t < TELL_FLOOR) {
+    t = TELL_FLOOR
+  }
+  return t
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// The tick
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+export function boxTick(): i32 {
+  if (frozen !== 0) {
+    if (frozen > 0) {
+      frozen = frozen - 1
+    }
+    return 0
+  }
+
+  let ev: i32 = 0
+
+  // ── input, read ONCE. This is the whole pad in one place.
+  //
+  // ⚠️ THESE ARE INDICES, NOT A BITMASK. `key_pressed` takes 0=A 1=B 2=Select 3=Start 4=L 5=R
+  // 6=Up 7=Down 8=Left 9=Right — an ordinal, not a hardware bit. Passing the GBA's actual KEYINPUT
+  // bits (1, 2, 4, 8, …) compiles, runs, and silently reads the WRONG BUTTON or none at all,
+  // because `button_of` returns None for anything past 9 and None reads as "not pressed". Nothing
+  // warns. The symptom is a pad that does nothing, which looks like a broken state machine.
+  let hUp: i32 = key_held(6)
+  let hDown: i32 = key_held(7)
+  let eL: i32 = key_pressed(4)
+  let eR: i32 = key_pressed(5)
+  let eA: i32 = key_pressed(0)
+  let eB: i32 = key_pressed(1)
+  let eStart: i32 = key_pressed(3)
+
+  let st: i32 = PL[P_STATE]
+
+  // ── the ten-count runs instead of the fight, not alongside it
+  if (countN > 0) {
+    countT = countT - 1
+    if (st === PS_DOWN) {
+      if (eA === 1 || eB === 1) {
+        let which: i32 = 1
+        if (eB === 1) {
+          which = 2
+        }
+        // alternating pays nearly triple. Mashing one button works and is slow, which is the
+        // difference between a get-up that is a skill and one that is a formality.
+        if (which !== PL[P_LASTMASH]) {
+          PL[P_METER] = PL[P_METER] + 9
+        } else {
+          PL[P_METER] = PL[P_METER] + 3
+        }
+        PL[P_LASTMASH] = which
+      }
+      if (PL[P_METER] > 0) {
+        PL[P_METER] = PL[P_METER] - 1
+      }
+      let need: i32 = GETUP_NEED + (PL[P_DOWNS] << 3) + (PL[P_DOWNS] << 2)
+      if (PL[P_METER] >= need) {
+        return ev + riseUp()
+      }
+    } else {
+      // the opponent's get-up is scripted: count 4, then 6, then never — the third is the TKO
+      let at: i32 = 12
+      if (OP[O_DOWNS] === 1) {
+        at = 4
+      }
+      if (OP[O_DOWNS] === 2) {
+        at = 6
+      }
+      if (countN >= at) {
+        return ev + riseUp()
+      }
+    }
+    if (countT <= 0) {
+      countN = countN + 1
+      countT = COUNT_F
+      ev = ev + EV_COUNT
+      if (countN > 10) {
+        countN = 0
+        if (whoDown === 1) {
+          return ev + EV_P_OUT
+        }
+        return ev + EV_O_OUT
+      }
+    }
+    return ev
+  }
+
+  // ── player timers
+  if (PL[P_MERCY] > 0) {
+    PL[P_MERCY] = PL[P_MERCY] - 1
+  }
+  if (PL[P_BUFT] > 0) {
+    PL[P_BUFT] = PL[P_BUFT] - 1
+    if (PL[P_BUFT] === 0) {
+      PL[P_BUF] = 0
+    }
+  }
+  if (PL[P_T] > 0) {
+    PL[P_T] = PL[P_T] - 1
+  }
+
+  // stamina regen: a countdown, never `frame % 90`
+  if (st === PS_IDLE && PL[P_HEARTS] < PL[P_MAXHEART]) {
+    PL[P_REGEN] = PL[P_REGEN] - 1
+    if (PL[P_REGEN] <= 0) {
+      PL[P_REGEN] = REGEN_F
+      PL[P_HEARTS] = PL[P_HEARTS] + 1
+    }
+  }
+
+  // ── buffer a punch pressed during recovery, so an early press is not simply eaten
+  if (eB === 1) {
+    PL[P_BUF] = 1
+    PL[P_BUFT] = 4
+  }
+  if (eA === 1) {
+    PL[P_BUF] = 2
+    PL[P_BUFT] = 4
+  }
+  if (eStart === 1 && PL[P_STARS] > 0) {
+    PL[P_BUF] = 3
+    PL[P_BUFT] = 4
+  }
+
+  // ── player state machine
+  if (st === PS_GASSED) {
+    if (PL[P_T] <= 0) {
+      PL[P_STATE] = PS_IDLE
+      PL[P_HEARTS] = 4
+      PL[P_DODGES] = 0
+    }
+  } else if (st === PS_DUCK) {
+    // held, with a floor, so a tap still counts as a duck
+    if (hDown === 0 && PL[P_T] <= 0) {
+      PL[P_STATE] = PS_IDLE
+    }
+  } else if (st === PS_BLOCK) {
+    if (hUp === 0) {
+      PL[P_STATE] = PS_IDLE
+    }
+  } else if (PL[P_T] <= 0 && st !== PS_IDLE && st !== PS_DOWN) {
+    PL[P_STATE] = PS_IDLE
+  }
+
+  st = PL[P_STATE]
+
+  // ── actionable? then take an action, in priority order
+  if (st === PS_IDLE || st === PS_DUCK || st === PS_BLOCK) {
+    if (eL === 1) {
+      PL[P_STATE] = PS_DODGE_L
+      PL[P_T] = DODGE_F
+    } else if (eR === 1) {
+      PL[P_STATE] = PS_DODGE_R
+      PL[P_T] = DODGE_F
+    } else if (hDown === 1 && st !== PS_DUCK) {
+      PL[P_STATE] = PS_DUCK
+      PL[P_T] = DUCK_MIN
+    } else if (hUp === 1 && st !== PS_BLOCK && PL[P_BUF] === 0) {
+      PL[P_STATE] = PS_BLOCK
+      PL[P_T] = 0
+    } else if (PL[P_BUF] !== 0) {
+      ev = ev + throwPunch(hUp)
+    }
+  }
+
+  // ── opponent
+  ev = ev + oppStep()
+
+  // ── resolve the player's punch on the frame it becomes active
+  if (PL[P_STATE] === PS_JAB || PL[P_STATE] === PS_BODY || PL[P_STATE] === PS_UPPER) {
+    if (PL[P_T] === recF) {
+      ev = ev + resolvePlayerHit()
+    }
+  }
+
+  return ev
+}
+
+// ── a punch leaves the glove ───────────────────────────────────────────────────────────────────
+function throwPunch(hUp: i32): i32 {
+  let which: i32 = PL[P_BUF]
+  PL[P_BUF] = 0
+  PL[P_BUFT] = 0
+
+  if (which === 3) {
+    PL[P_STATE] = PS_UPPER
+    PL[P_T] = recF + jabF + 6
+    PL[P_TARGET] = TG_HEAD
+    PL[P_STARS] = PL[P_STARS] - 1
+    return 0
+  }
+
+  // gassed: the animation plays and the punch does nothing. The player must SEE the swing miss,
+  // or an exhausted round reads as the controller having stopped working.
+  if (PL[P_STATE] === PS_GASSED || PL[P_HEARTS] <= 0) {
+    PL[P_STATE] = PS_GASSED
+    PL[P_T] = 30
+    return 0
+  }
+
+  if (hUp === 1) {
+    PL[P_STATE] = PS_JAB
+    PL[P_TARGET] = TG_HEAD
+  } else {
+    PL[P_STATE] = PS_BODY
+    PL[P_TARGET] = TG_BODY
+  }
+  PL[P_T] = recF + jabF
+  return 0
+}
+
+// ── did it land, and was it a counter? ────────────────────────────────────────────────────────
+function resolvePlayerHit(): i32 {
+  let ev: i32 = 0
+  let ost: i32 = OP[O_STATE]
+  let dmg: i32 = jabDmg
+  if (PL[P_STATE] === PS_BODY) {
+    dmg = bodyDmg
+  }
+  if (PL[P_STATE] === PS_UPPER) {
+    dmg = upperDmg
+  }
+
+  // A punch into a raised guard costs three hearts and does almost nothing. This is what stops the
+  // fight being a mash: pressure has a price, and the price is the resource you dodge with.
+  if (ost === OS_GUARD) {
+    spendHearts(3)
+    lastHitY = 40
+    lastHitMag = 1
+    return ev + EV_P_BLOCKED + EV_HEART
+  }
+  if (ost === OS_DOWN) {
+    return 0
+  }
+
+  // ⚠️ THE COUNTER WINDOW. Landing inside the opponent's own windup — after the tell has committed
+  // and before the fist arrives — triples the damage, stuns him, and pays a star. Every other
+  // mechanic in this file exists to make this moment worth reaching for.
+  let counter: i32 = 0
+  if (ost === OS_TELL || ost === OS_WIND) {
+    let b: i32 = OP[O_ATK] << 4
+    if (ost === OS_WIND || OP[O_T] <= ATK[b + A_COUNTER_F]) {
+      counter = 1
+    }
+  }
+
+  spendHearts(1)
+  ev = ev + EV_HEART
+
+  if (counter === 1) {
+    dmg = dmg + dmg + dmg
+    OP[O_STATE] = OS_STUN
+    OP[O_T] = ATK[(OP[O_ATK] << 4) + A_VULN_F]
+    ev = ev + EV_P_COUNTER + EV_O_STUN
+    if (PL[P_STARS] < 3) {
+      PL[P_STARS] = PL[P_STARS] + 1
+      ev = ev + EV_STAR
+    }
+  } else if (ost === OS_VULN || ost === OS_STUN) {
+    dmg = dmg + dmg          // a punish on a whiffed attack is worth double
+  } else if (ost === OS_STRIKE || ost === OS_RECOVER) {
+    dmg = dmg
+  } else {
+    // trading into a bobbing guard: it lands, but it is the worst punch in the game
+    dmg = dmg >> 1
+    if (dmg < 1) {
+      dmg = 1
+    }
+  }
+
+  OP[O_PRESSURE] = OP[O_PRESSURE] + 1
+  lastHitY = 34
+  lastHitMag = dmg
+  ev = ev + EV_P_LAND
+
+  OP[O_HP] = OP[O_HP] - dmg
+  if (OP[O_HP] <= OP[O_PHASE2] && OP[O_PHASE] === 0) {
+    OP[O_PHASE] = 1
+    OP[O_CURSOR] = PH_AT[1]
+  }
+  if (OP[O_HP] <= 0) {
+    return ev + knockDown(2)
+  }
+  if (OP[O_STATE] !== OS_STUN) {
+    OP[O_STATE] = OS_HURT
+    OP[O_T] = 14
+  }
+  return ev
+}
+
+function spendHearts(n: i32) {
+  PL[P_HEARTS] = PL[P_HEARTS] - n
+  if (PL[P_HEARTS] <= 0) {
+    PL[P_HEARTS] = 0
+    PL[P_STATE] = PS_GASSED
+    PL[P_T] = 240
+    PL[P_DODGES] = 0
+  }
+}
+
+// ── the opponent ──────────────────────────────────────────────────────────────────────────────
+function oppStep(): i32 {
+  let ev: i32 = 0
+  let ost: i32 = OP[O_STATE]
+  OP[O_T] = OP[O_T] - 1
+
+  if (OP[O_PRESSURE] > 0 && OP[O_T] > 0) {
+    OP[O_PRESSURE] = OP[O_PRESSURE]
+  }
+
+  if (OP[O_T] > 0) {
+    // the STRIKE state resolves on its FIRST frame, not its last
+    return ev
+  }
+
+  if (ost === OS_BOB) {
+    // pressured opponents put a guard up instead of taking the next step — the reason a good
+    // player cannot simply hold the punch button once they are ahead
+    if (OP[O_PRESSURE] >= 3 && rnd100() < OP[O_GUARDCH]) {
+      OP[O_PRESSURE] = 0
+      OP[O_STATE] = OS_GUARD
+      OP[O_T] = 26
+      return ev
+    }
+    let c: i32 = OP[O_CURSOR]
+    let a: i32 = SCRIPT[c << 1]
+    OP[O_ATK] = a
+    OP[O_STATE] = OS_TELL
+    OP[O_T] = boxTellFrames(a)
+    OP[O_HITDONE] = 0
+    advanceCursor()
+    return ev + EV_TELL
+  }
+
+  if (ost === OS_TELL) {
+    OP[O_STATE] = OS_WIND
+    OP[O_T] = ATK[(OP[O_ATK] << 4) + A_WIND_F]
+    return ev
+  }
+
+  if (ost === OS_WIND) {
+    OP[O_STATE] = OS_STRIKE
+    OP[O_T] = ATK[(OP[O_ATK] << 4) + A_HIT_F]
+    return ev + resolveOppHit()
+  }
+
+  if (ost === OS_STRIKE) {
+    // a whiff opens the punish window; a landed or blocked punch just recovers
+    if (OP[O_HITDONE] === 1) {
+      OP[O_STATE] = OS_RECOVER
+      OP[O_T] = ATK[(OP[O_ATK] << 4) + A_REC_F]
+    } else {
+      OP[O_STATE] = OS_VULN
+      OP[O_T] = ATK[(OP[O_ATK] << 4) + A_VULN_F]
+    }
+    return ev
+  }
+
+  if (ost === OS_TAUNT || ost === OS_GUARD || ost === OS_RECOVER
+      || ost === OS_VULN || ost === OS_HURT || ost === OS_STUN) {
+    OP[O_STATE] = OS_BOB
+    OP[O_T] = gapFrames()
+    return ev
+  }
+
+  return ev
+}
+
+function advanceCursor() {
+  let ph: i32 = OP[O_PHASE]
+  OP[O_CURSOR] = OP[O_CURSOR] + 1
+  if (OP[O_CURSOR] >= PH_AT[ph] + PH_LEN[ph]) {
+    OP[O_CURSOR] = PH_AT[ph]
+  }
+}
+
+function gapFrames(): i32 {
+  let ph: i32 = OP[O_PHASE]
+  let c: i32 = OP[O_CURSOR]
+  let g: i32 = SCRIPT[(c << 1) + 1]
+  // Q8 shift, never a divide
+  let out: i32 = (g * PH_GAP[ph]) >> 8
+  if (out < 2) {
+    out = 2
+  }
+  return out
+}
+
+// ── the opponent's punch arrives ──────────────────────────────────────────────────────────────
+function resolveOppHit(): i32 {
+  let ev: i32 = 0
+  let b: i32 = OP[O_ATK] << 4
+  let avoid: i32 = ATK[b + A_AVOID]
+  let st: i32 = PL[P_STATE]
+
+  // dodging is only invulnerable in its first frames, and only against attacks that side beats.
+  // Dodging INTO a punch is not neutral; it is a counter-hit, and that is what makes a guess cost.
+  let dodged: i32 = 0
+  if (st === PS_DODGE_L && PL[P_T] > DODGE_F - DODGE_IF) {
+    if ((avoid & AV_DODGE_L) !== 0) {
+      dodged = 1
+    }
+  }
+  if (st === PS_DODGE_R && PL[P_T] > DODGE_F - DODGE_IF) {
+    if ((avoid & AV_DODGE_R) !== 0) {
+      dodged = 1
+    }
+  }
+  if (st === PS_DUCK && (avoid & AV_DUCK) !== 0) {
+    dodged = 1
+  }
+
+  if (dodged === 1) {
+    OP[O_HITDONE] = 0
+    // A clean read is the ONLY thing that recovers stamina, which is what stops the game being a
+    // mash: the resource you need to punch is paid out for defending well.
+    PL[P_DODGES] = PL[P_DODGES] + 1
+    if (PL[P_HEARTS] < PL[P_MAXHEART]) {
+      PL[P_HEARTS] = PL[P_HEARTS] + 1
+    }
+    return ev + EV_P_DODGE
+  }
+
+  OP[O_HITDONE] = 1
+
+  if (PL[P_MERCY] > 0) {
+    return ev
+  }
+
+  let dmg: i32 = ATK[b + A_DMG]
+  let blocked: i32 = 0
+  if (st === PS_BLOCK && (avoid & AV_BLOCK) !== 0) {
+    blocked = 1
+    dmg = dmg >> 2
+    spendHearts(1)
+    ev = ev + EV_O_GUARDED + EV_HEART
+  } else {
+    spendHearts(2)
+    PL[P_STATE] = PS_HURT
+    PL[P_T] = 20
+    PL[P_STARS] = 0            // getting hit costs every star. Stars are for reading, not surviving.
+    ev = ev + EV_O_LAND + EV_HEART
+  }
+
+  PL[P_MERCY] = MERCY_F
+  OP[O_PRESSURE] = 0
+  lastHitY = 120
+  lastHitMag = dmg
+
+  PL[P_HP] = PL[P_HP] - dmg
+  if (PL[P_HP] <= 0) {
+    return ev + knockDown(1)
+  }
+
+  // in rage, a landed punch is followed by a taunt: stronger AND sloppier, which is the trade that
+  // keeps a phase-2 winnable
+  if (OP[O_PHASE] >= 2 && blocked === 0) {
+    OP[O_STATE] = OS_TAUNT
+    OP[O_T] = 40
+  }
+  return ev
+}
+
+// ── going down ────────────────────────────────────────────────────────────────────────────────
+function knockDown(who: i32): i32 {
+  whoDown = who
+  countN = 1
+  countT = COUNT_F
+  frozen = 0
+  if (who === 1) {
+    PL[P_STATE] = PS_DOWN
+    PL[P_DOWNS] = PL[P_DOWNS] + 1
+    PL[P_METER] = 0
+    PL[P_LASTMASH] = 0
+    PL[P_HP] = PL[P_MAXHP] >> 1
+    if (PL[P_DOWNS] >= 3) {
+      countN = 0
+      return EV_P_DOWN + EV_P_OUT
+    }
+    return EV_P_DOWN
+  }
+  OP[O_STATE] = OS_DOWN
+  OP[O_DOWNS] = OP[O_DOWNS] + 1
+  OP[O_HP] = OP[O_MAXHP] >> 1
+  if (OP[O_PHASE] < 2) {
+    OP[O_PHASE] = 2
+    OP[O_CURSOR] = PH_AT[2]
+  }
+  if (OP[O_DOWNS] >= 3) {
+    countN = 0
+    return EV_O_DOWN + EV_O_OUT
+  }
+  return EV_O_DOWN
+}
+
+function riseUp(): i32 {
+  countN = 0
+  countT = 0
+  if (whoDown === 1) {
+    PL[P_STATE] = PS_IDLE
+    PL[P_T] = 0
+    PL[P_MERCY] = 60
+    PL[P_HEARTS] = 6 - (PL[P_DOWNS] << 1)
+    if (PL[P_HEARTS] < 2) {
+      PL[P_HEARTS] = 2
+    }
+  } else {
+    OP[O_STATE] = OS_BOB
+    OP[O_T] = 60
+    OP[O_PRESSURE] = 0
+  }
+  whoDown = 0
+  return 0
+}
+
+// xorshift; `packages/rng.tish` would be three extra crossings a frame for one number
+function rnd100(): i32 {
+  seed = seed ^ (seed << 13)
+  seed = seed & 0x7FFFFFFF
+  seed = seed ^ (seed >> 17)
+  seed = seed ^ (seed << 5)
+  seed = seed & 0x7FFFFFFF
+  return seed & 127
+}

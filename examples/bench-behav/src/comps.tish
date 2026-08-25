@@ -1,0 +1,60 @@
+// Three components that do the SAME work, reached by three different calling conventions.
+//
+// The work is deliberately small and identical in all three: decrement two counters that live with
+// the entity, and set an animation frame. That is roughly the idle path of the topdown RPG port's `Player.update`
+// with the gameplay stripped out — no input, no combat, no dialogue — so whatever the three cost
+// differently is the CONVENTION and not the logic.
+import { cvar, set_cvar, anim_play, topdown_facing } from 'cargo:tish_gba_game_engine'
+
+let STRIDE: i32 = 9
+
+// 1. The boxed convention that game's Player uses. The engine builds an entity wrapper, packs it into a
+// `{ this, dt }` object literal and calls through a closure, all before this body starts. State
+// lives on the wrapper's `data` bag, so every read and write is a hashed property lookup on a
+// boxed object.
+export const Boxed = {
+  start: ({ this }) => {
+    this.data.a = 30
+    this.data.b = 30
+  },
+  update: ({ this }) => {
+    let d = this.data
+    if (d.a > 0) { d.a = d.a - 1 } else { d.a = 30 }
+    if (d.b > 0) { d.b = d.b - 1 } else { d.b = 30 }
+    this.play(this.facing4() * STRIDE, 1, 1, false)
+  }
+}
+
+// 2. The same body, still boxed, but with state in engine cvars instead of the `data` bag. Isolates
+// how much of the boxed cost is the wrapper/ctx construction versus the property lookups.
+export const BoxedCvar = {
+  start: ({ this }) => {
+    set_cvar(this.id, 0, 30)
+    set_cvar(this.id, 1, 30)
+  },
+  update: ({ this }) => {
+    let id = this.id
+    let a: i32 = cvar(id, 0)
+    if (a > 0) { set_cvar(id, 0, a - 1) } else { set_cvar(id, 0, 30) }
+    let b: i32 = cvar(id, 1)
+    if (b > 0) { set_cvar(id, 1, b - 1) } else { set_cvar(id, 1, 30) }
+    anim_play(id, topdown_facing(id) * STRIDE, 1, 1, false)
+  }
+}
+
+// 3. The lean convention. The engine passes the raw entity id straight through — no wrapper, no ctx
+// object, no closure hop — and every call out of the body is a typed native.
+export const Lean = {
+  lean: true,
+  start: ({ this }) => {
+    set_cvar(this.id, 0, 30)
+    set_cvar(this.id, 1, 30)
+  },
+  tick: (id: i32) => {
+    let a: i32 = cvar(id, 0)
+    if (a > 0) { set_cvar(id, 0, a - 1) } else { set_cvar(id, 0, 30) }
+    let b: i32 = cvar(id, 1)
+    if (b > 0) { set_cvar(id, 1, b - 1) } else { set_cvar(id, 1, 30) }
+    anim_play(id, topdown_facing(id) * STRIDE, 1, 1, false)
+  }
+}

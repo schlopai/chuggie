@@ -1,0 +1,372 @@
+// fx-particles — the hardware effects layer: particle bursts, screen flash, screen shake.
+//
+// All three are owned and stepped by the ENGINE. This file spawns an effect and never touches it
+// again: there is no per-frame particle loop here, and there is no spring to integrate. That is the
+// whole point of `fx_*` living in tish-agb rather than in a package.
+//
+//   fx_burst(sheet, frame, x, y, count, speed, gravity, life)
+//       A burst of `count` particles at a SCREEN point. They are HUD sprites — screen space, front
+//       priority, unaffected by the camera — so a burst sits correctly over a result screen or a
+//       scrolling map alike. speed/gravity are 1/256ths of a pixel per frame; gravity 0 drifts,
+//       ~26 falls like a firework.
+//   fx_flash(level)     brighten toward white, 0..16, decaying one level per frame on its own.
+//   fx_active()         particles still alive, so a scene can wait for a burst to finish.
+//   fx_clear()          kill everything now. Call on teardown: particles hold sprite slots.
+//
+// ── The shake is a spring, and there is exactly one of it ──────────────────
+//
+//   fx_bump(ax, ay)           an impulse, in 8.8 pixels per frame. Bumps ADD.
+//   fx_shake(power, frames)   the convenience form: peak about `power` pixels, still again in about
+//                             `frames` frames. Adds like a bump; `frames` sets the damping.
+//   fx_shake_stop()           settle now, every surface square. What a scene teardown wants.
+//
+// A spring rather than a countdown, and the BUMP demo below is the argument: press A with the count
+// at 1 and then at 6, and the same impulse fired six times in ONE frame is a visibly bigger, longer
+// shake. A countdown cannot do that — the second call overwrites the first and loses its decay,
+// which is exactly wrong for a card cascade that destroys three cards in one resolution. The maths
+// (and this reasoning) came from `packages/feel.tish`, which used to own the spring; it moved into
+// the engine so it can offset the camera and the HUD sprites and not just the UI canvas, which is
+// why a shake is now visible on a scrolling map and on a screen drawn entirely in sprites.
+//
+// Why the engine and not Tish: a thirty-particle burst driven from Tish is sixty boxed native calls
+// a frame (a position write per particle) on top of whatever the scene is already doing. Stepping
+// them in Rust costs the game three calls TOTAL for the whole effect.
+
+import { spark } from "sheet32:../assets/spark.png"
+import { body } from "font:../../../assets/fonts/tinypixel.ttf@7"
+import {
+  frame, key_pressed, ui_begin, ui_clear, ui_text, ui_rect, log,
+  sprite_new, sprite_set_pos, sprite_set_hud, sprite_destroy,
+  fx_burst, fx_flash, fx_shake, fx_bump, fx_shake_stop, fx_active, fx_clear,
+  fx_spawn, fx_set, fx_stop, fx_kill, fx_budget, fx_headroom, fx_emitters
+} from "cargo:tish_agb"
+import {
+  FXP_RAIN, FXP_SNOW, FXP_FIRE, FXP_FOUNTAIN, FXE_RATE, FXE_MAX
+} from "../../../packages/fx"
+
+// `button_of` in tish-agb, and the order is NOT the GBA's register bit order — 4 and 5 are the
+// SHOULDER buttons, and the d-pad's horizontal axis is 8 and 9, after the vertical.
+//
+// This file shipped with KEY_RIGHT = 4 and KEY_LEFT = 5, i.e. bound to L and R, so its "LEFT/RIGHT:
+// launch speed" control had never once worked. Nothing caught it because the hint text said what it
+// was supposed to do and every screenshot was taken with UP/DOWN.
+let KEY_A: i32 = 0
+let KEY_B: i32 = 1
+let KEY_SELECT: i32 = 2
+let KEY_START: i32 = 3
+let KEY_UP: i32 = 6
+let KEY_DOWN: i32 = 7
+let KEY_LEFT: i32 = 8
+let KEY_RIGHT: i32 = 9
+
+let D_FIREWORKS: i32 = 0
+let D_FLASH: i32 = 1
+let D_SHAKE: i32 = 2
+let D_BUMP: i32 = 3
+let D_CONFETTI: i32 = 4
+let D_WEATHER: i32 = 5
+let D_BUDGET: i32 = 6
+let DEMO_N: i32 = 7
+
+// [demo, tick, count, speed, gravity, bumps, power, frames, emitter, weather, rate, hogs, reserve]
+let S: i32[] = [0, 0, 16, 640, 26, 3, 6, 24, 0, 0, 0, 0, 16]
+
+// Stand-in "gameplay" sprites for the BUDGET demo. They are not part of the effects layer, which is
+// the entire point: the engine has to see them and hold particles back for them.
+let HOG_MAX: i32 = 40
+let HOGS: i32[] = [
+  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+]
+
+function demoName(d: i32) {
+  if (d === D_FLASH) { return "FLASH" }
+  if (d === D_SHAKE) { return "SHAKE" }
+  if (d === D_BUMP) { return "BUMP" }
+  if (d === D_CONFETTI) { return "CONFETTI" }
+  if (d === D_WEATHER) { return "WEATHER " + weatherName(S[9]) }
+  if (d === D_BUDGET) { return "BUDGET" }
+  return "FIREWORKS"
+}
+
+function weatherName(w: i32) {
+  if (w === 1) { return "SNOW" }
+  if (w === 2) { return "FIRE" }
+  if (w === 3) { return "FOUNTAIN" }
+  return "RAIN"
+}
+
+function weatherPreset(w: i32) {
+  if (w === 1) { return FXP_SNOW }
+  if (w === 2) { return FXP_FIRE }
+  if (w === 3) { return FXP_FOUNTAIN }
+  return FXP_RAIN
+}
+
+function demoHint(d: i32) {
+  if (d === D_FLASH) { return "A: white flash - decays by itself" }
+  if (d === D_SHAKE) { return "A: shake   UP/DOWN power   L/R settle" }
+  if (d === D_BUMP) { return "A: N bumps in ONE frame - they SUM" }
+  if (d === D_CONFETTI) { return "A: zero gravity - drifts, never falls" }
+  if (d === D_WEATHER) { return "A: cycle   UP/DN rate   SELECT: stop" }
+  if (d === D_BUDGET) { return "UP/DN game sprites   L/R reserve" }
+  return "A: burst   UP/DOWN count   L/R speed"
+}
+
+// The read-out is per mode because the D-pad is per mode: showing "n16 v640" while UP/DOWN is
+// changing the shake power is a demo that teaches the wrong thing.
+function demoRead(d: i32) {
+  if (d === D_SHAKE) { return "p" + numStr(S[6]) + " f" + numStr(S[7]) }
+  if (d === D_BUMP) { return "x" + numStr(S[5]) }
+  if (d === D_FLASH) { return "" }
+  if (d === D_WEATHER) {
+    if (S[10] === 0) { return "auto p" + numStr(fx_active()) }
+    return "r" + numStr(S[10]) + " p" + numStr(fx_active())
+  }
+  // THE NUMBER THIS WHOLE DEMO IS FOR. `game` is sprites the effects layer must not touch, `hr` is
+  // what it has left, `p` is what it is actually holding. Add game sprites and watch hr fall.
+  if (d === D_BUDGET) {
+    return "g" + numStr(S[11]) + " r" + numStr(S[12])
+      + " hr" + numStr(fx_headroom()) + " p" + numStr(fx_active())
+  }
+  return "n" + numStr(S[2]) + " v" + numStr(S[3])
+}
+
+function paint() {
+  ui_rect(0, 0, 240, 160, 0x101018, 1)
+  ui_rect(0, 0, 240, 12, 0x202840, 1)
+  ui_text(body, 6, 2, "fx-particles  " + demoName(S[0]), 0xF0E8D8)
+  ui_text(body, 6, 137, demoHint(S[0]), 0x90A0B8)
+  ui_text(body, 6, 148, "B: next effect    START: clear", 0x60708A)
+  ui_text(body, 150, 2, demoRead(S[0]), 0xC0A060)
+}
+
+function numStr(n: i32) {
+  if (n < 0) { return "-" + numStr(0 - n) }
+  if (n < 10) { return digit(n) }
+  return numStr((n / 10) | 0) + digit(n % 10)
+}
+
+function digit(n: i32) {
+  if (n === 0) { return "0" }
+  if (n === 1) { return "1" }
+  if (n === 2) { return "2" }
+  if (n === 3) { return "3" }
+  if (n === 4) { return "4" }
+  if (n === 5) { return "5" }
+  if (n === 6) { return "6" }
+  if (n === 7) { return "7" }
+  if (n === 8) { return "8" }
+  return "9"
+}
+
+// ── Emitters ─────────────────────────────────────────────────────────────────
+// The demo's whole per-frame involvement with an emitter is NOTHING. It is spawned once; the engine
+// steps the rate accumulator, picks each particle's birthplace and aim, applies drag and wind, walks
+// the sheet frames, retires the dead and — the part a game should never have to write — holds the
+// effect inside whatever OAM the game is not using.
+function startWeather(preset: i32) {
+  // Fire and the fountain come off the ground; rain and snow come from above the top edge.
+  let y: i32 = 0
+  if (preset === FXP_FIRE || preset === FXP_FOUNTAIN) { y = 128 }
+  S[8] = fx_spawn(preset, spark, 0, 120, y, 256)
+  // Rate is left AS AUTHORED until the D-pad touches it (S[10] === 0). Each preset carries its own
+  // — fire is a denser source than snow — and a demo that overrode all of them with one number
+  // would be showing you its own taste rather than the library's presets.
+  if (S[10] > 0) { fx_set(S[8], FXE_RATE, S[10]) }
+}
+
+function stopWeather() {
+  if (S[8] !== 0) {
+    fx_kill(S[8])
+    S[8] = 0
+  }
+}
+
+// ── The budget, made visible ─────────────────────────────────────────────────
+// `sprite_new` here stands in for a game's own sprites — a player, NPCs, a HUD. They are NOT part of
+// the effects layer, and that is the point: the engine counts what is resident, subtracts its own
+// particles, and gives effects only what is genuinely spare.
+//
+// Hold UP and watch `hr` fall to zero and the rain thin out. Nothing in this file notices, and there
+// is no error to handle. The alternative — which is what every GBA game does by hand — is that the
+// rain wins the race for OAM and the player sprite silently fails to appear.
+function hogSet(n: i32) {
+  let want: i32 = n
+  if (want > HOG_MAX) { want = HOG_MAX }
+  if (want < 0) { want = 0 }
+  while (S[11] < want) {
+    let h: i32 = sprite_new(spark)
+    // HUD, i.e. screen space at priority P0. `sprite_new` makes a WORLD sprite (P2), and this
+    // screen is an opaque full-width UI canvas at P0 — so a world sprite here is allocated, counted
+    // against the budget, and completely invisible behind the backdrop. That is correct engine
+    // behaviour and a very confusing five minutes: the sprites were always there, under the canvas.
+    sprite_set_hud(h, 1)
+    sprite_set_pos(h, 6 + (S[11] % 20) * 11, 22 + ((S[11] / 20) | 0) * 13)
+    HOGS[S[11]] = h
+    S[11] = S[11] + 1
+  }
+  while (S[11] > want) {
+    S[11] = S[11] - 1
+    sprite_destroy(HOGS[S[11]])
+    HOGS[S[11]] = -1
+  }
+}
+
+// A deliberately greedy emitter for the budget demo: four particles a frame and its own ceiling
+// lifted to the whole layer, so the ONLY thing holding it back is the budget.
+function startBudget() {
+  S[8] = fx_spawn(FXP_RAIN, spark, 0, 120, 0, 256)
+  fx_set(S[8], FXE_RATE, 1024)
+  fx_set(S[8], FXE_MAX, 128)
+}
+
+// One press, one effect. Nothing below runs per frame — that is the demonstration.
+function fire() {
+  let d: i32 = S[0]
+  if (d === D_FLASH) {
+    fx_flash(14)
+    return
+  }
+  if (d === D_SHAKE) {
+    fx_shake(S[6], S[7])
+    return
+  }
+  if (d === D_BUMP) {
+    // N impulses inside ONE frame — a cascade, not a sequence. The engine has not stepped the
+    // spring between them, so they land on the same velocity and add. Alternating the sign of X
+    // would CANCEL, which is the interesting failure and the reason they all push the same way
+    // here: summing is a property of the spring, not of the caller getting lucky.
+    let i: i32 = 0
+    while (i < S[5]) {
+      fx_bump(700, 350)
+      i = i + 1
+    }
+    return
+  }
+  if (d === D_CONFETTI) {
+    // Zero gravity: the particles keep whatever velocity they launched with, so the burst expands
+    // and thins instead of arcing. Long life, slow speed — confetti rather than an explosion.
+    fx_burst(spark, 0, 120, 80, S[2], 240, 0, 90)
+    fx_burst(spark, 3, 120, 80, S[2], 300, 0, 90)
+    return
+  }
+  if (d === D_WEATHER) {
+    // A CONTINUOUS emitter, which is the thing `fx_burst` cannot be. One call and the engine keeps
+    // it running: fractional rate, per-particle spread, drag and wind, all stepped in Rust. Cycling
+    // kills the old one first — an emitter is a live object, not a fire-and-forget.
+    stopWeather()
+    S[9] = (S[9] + 1) % 4
+    startWeather(weatherPreset(S[9]))
+    paint()
+    return
+  }
+  if (d === D_BUDGET) {
+    // A burst ON TOP of a saturated emitter. It still shows: a one-shot may take slots from
+    // particles already dying (see fx_recycle_oldest), because a bang the player asked for is worth
+    // more than the tail of the rain. What it may NOT take is a slot the game is holding.
+    fx_burst(spark, 1, 120, 80, 16, 700, 20, 40)
+    return
+  }
+  // Fireworks: three staggered bursts across the top, each a different colour, on a gravity that
+  // makes them arc over and fall.
+  fx_flash(10)
+  fx_burst(spark, 0, 60, 44, S[2], S[3], S[4], 46)
+  fx_burst(spark, 1, 120, 32, S[2], S[3] + 60, S[4], 52)
+  fx_burst(spark, 2, 180, 48, S[2], S[3] - 20, S[4], 44)
+}
+
+// The D-pad tunes whatever the current mode's interesting parameter is. `dir` is +1 / -1 on the
+// vertical, the horizontal arms are separate because only some modes use both axes.
+function tuneV(dir: i32) {
+  let d: i32 = S[0]
+  if (d === D_SHAKE) {
+    S[6] = S[6] + dir * 2
+    if (S[6] < 2) { S[6] = 2 }
+    if (S[6] > 16) { S[6] = 16 }
+  } else if (d === D_BUMP) {
+    S[5] = S[5] + dir
+    if (S[5] < 1) { S[5] = 1 }
+    if (S[5] > 6) { S[5] = 6 }
+  } else if (d === D_WEATHER) {
+    // First touch adopts a concrete rate to nudge from; before that the preset's own is in force.
+    if (S[10] === 0) { S[10] = 256 }
+    S[10] = S[10] + dir * 64
+    if (S[10] < 64) { S[10] = 64 }
+    if (S[10] > 1024) { S[10] = 1024 }
+    if (S[8] !== 0) { fx_set(S[8], FXE_RATE, S[10]) }
+  } else if (d === D_BUDGET) {
+    hogSet(S[11] + dir * 4)
+  } else {
+    S[2] = S[2] + dir * 4
+    if (S[2] < 4) { S[2] = 4 }
+    if (S[2] > 40) { S[2] = 40 }
+  }
+  paint()
+}
+
+function tuneH(dir: i32) {
+  let d: i32 = S[0]
+  if (d === D_SHAKE) {
+    S[7] = S[7] + dir * 8
+    if (S[7] < 8) { S[7] = 8 }
+    if (S[7] > 88) { S[7] = 88 }
+  } else if (d === D_BUDGET) {
+    // The RESERVE: entries kept free for sprites that do not exist yet. Raise it and the rain
+    // thins immediately, without a single game sprite being added — which is the whole idea. The
+    // slots are being held for the NPC who has not walked on screen yet, and the alternative is
+    // discovering the ceiling as that NPC failing to appear.
+    S[12] = S[12] + dir * 8
+    if (S[12] < 0) { S[12] = 0 }
+    if (S[12] > 64) { S[12] = 64 }
+    fx_budget(-1, S[12])
+  } else if (d === D_BUMP || d === D_WEATHER) {
+    return
+  } else {
+    S[3] = S[3] + dir * 80
+    if (S[3] < 160) { S[3] = 160 }
+    if (S[3] > 1200) { S[3] = 1200 }
+  }
+  paint()
+}
+
+ui_begin()
+paint()
+
+while (true) {
+  if (key_pressed(KEY_A) > 0) { fire() }
+  if (key_pressed(KEY_B) > 0) {
+    S[0] = (S[0] + 1) % DEMO_N
+    // A FULL TEARDOWN between modes. fx_clear now takes the emitters with it, which is what a scene
+    // change has to mean — otherwise the rain follows you into the next room and the handle the old
+    // scene was holding steers whatever landed in that slot next. The hogs are the demo's own
+    // sprites, so the demo frees those itself.
+    fx_clear()
+    fx_shake_stop()
+    S[8] = 0
+    hogSet(0)
+    if (S[0] === D_WEATHER) { startWeather(weatherPreset(S[9])) }
+    if (S[0] === D_BUDGET) { startBudget() }
+    paint()
+  }
+  if (key_pressed(KEY_START) > 0) { fx_clear(); S[8] = 0 }
+  // Stop, not kill: the emitter stops producing and the drops already falling finish their lives.
+  // A torch leaving a room should thin out, not blink off, and that distinction is the reason both
+  // calls exist.
+  if (key_pressed(KEY_SELECT) > 0 && S[8] !== 0) { fx_stop(S[8]); S[8] = 0 }
+  if (key_pressed(KEY_UP) > 0) { tuneV(1) }
+  if (key_pressed(KEY_DOWN) > 0) { tuneV(-1) }
+  if (key_pressed(KEY_RIGHT) > 0) { tuneH(1) }
+  if (key_pressed(KEY_LEFT) > 0) { tuneH(-1) }
+
+  // The only per-frame lines in the whole demo, and they are READS. Every particle on screen is
+  // being spawned, moved, aged, re-framed and retired by the engine without this loop knowing about
+  // it — and so is the shake spring, which this file no longer integrates at all.
+  S[1] = S[1] + 1
+  if (S[1] % 30 === 0 && (S[0] === D_WEATHER || S[0] === D_BUDGET)) { paint() }
+  if (S[1] % 60 === 0) {
+    log("FX alive " + numStr(fx_active()) + " head " + numStr(fx_headroom())
+        + " emit " + numStr(fx_emitters()) + " game " + numStr(S[11]))
+  }
+  frame()
+}

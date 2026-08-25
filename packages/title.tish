@@ -1,0 +1,167 @@
+// title.tish — a reusable RPG TITLE SCREEN for the chuggie-engine engine.
+//
+// The classic layout every RPG opens with: a full-screen BACKGROUND, a big TITLE in a fancy font, a
+// MENU in the middle (New Game / Continue / …) with a moving cursor, and a COPYRIGHT line at the
+// bottom. The component OWNS input + selection — each menu item carries its own `onSelect` handler:
+//
+//     import { titleScreen } from '../../../packages/title'
+//     import { sky }        from 'background:assets/title-bg.png'
+//
+//     titleScreen({
+//       background: sky,
+//       title: "Aetheria",
+//       menu: [
+//         { label: "New Game", onSelect: () => { newGame() } },
+//         { label: "Continue", onSelect: () => { loadSave() } },
+//         { label: "Options",  onSelect: () => { options() } },
+//       ],
+//       copyright: "(c) 2026 tish games",
+//     }).run()          // owns its own vsync loop until a choice; fires that item's onSelect
+//
+// `run()` is the usual way — a title screen is a self-contained mode, so it drives `frame()` itself
+// until the player confirms. If you instead run ONE state-machine loop, call `.update()` each frame
+// (it fires `onSelect` and returns the picked index, else -1) and own `frame()` yourself. Menu items
+// may also be plain strings when you don't need a handler.
+//
+// The title uses the bundled **Alagard** font by default (a medieval pixel face); the menu/copyright
+// use the built-in font. Override any font (pass a `font:…@N` handle), colour, or position via config.
+import { titleAlagard } from 'font:../assets/fonts/alagard.ttf@32'
+import { bg_new, text_draw, key_pressed, frame } from 'cargo:tish_agb'
+
+// Button codes (tish-agb): 0=A, 3=Start, 6=Up, 7=Down.
+let BTN_A: i32 = 0
+let BTN_START: i32 = 3
+let BTN_UP: i32 = 6
+let BTN_DOWN: i32 = 7
+
+// A config value, or a default when the field is absent (null/undefined). NOT `||` — a font handle
+// or colour can legitimately be 0.
+function pick(v, dflt) {
+  if (v === null) { return dflt }
+  if (typeof v === 'undefined') { return dflt }
+  return v
+}
+
+// Rough horizontal centring in the 240px screen (text_draw reports no width) from an estimated glyph
+// width for the font size — good enough for a title/one-liner.
+function centreX(text, glyphW) { return 120 - (text.length * glyphW) / 2 }
+
+export function titleScreen(cfg) {
+  let menu = cfg.menu
+  let count = menu.length
+  let st = { sel: 0 }   // selection lives in an object so the returned closures share + mutate it
+
+  // Fonts: -1 = the built-in pixel font; the title defaults to bundled Alagard (32px).
+  let titleFont = pick(cfg.titleFont, titleAlagard)
+  let menuFont = pick(cfg.menuFont, -1)
+  let copyFont = pick(cfg.copyrightFont, -1)
+
+  // Colours (0xRRGGBB).
+  let titleColor = pick(cfg.titleColor, 0xF4E4C1)
+  let titleShadow = pick(cfg.titleShadow, 0x2A1830)
+  let menuColor = pick(cfg.menuColor, 0x9DA6C0)
+  let menuSelColor = pick(cfg.menuSelColor, 0xFFE06A)
+  let copyColor = pick(cfg.copyrightColor, 0x8A93AD)
+
+  // Layout (all overridable).
+  let titleX = pick(cfg.titleX, centreX(cfg.title, 15))
+  let titleY = pick(cfg.titleY, 22)
+  let menuX = pick(cfg.menuX, 100)
+  let menuY = pick(cfg.menuY, 92)
+  let menuGap = pick(cfg.menuGap, 16)
+  let copyText = pick(cfg.copyright, null)
+  let copyY = pick(cfg.copyrightY, 148)
+
+  // hud_text slots — reserve a contiguous block from `slot` so they don't collide with a game HUD.
+  let slot = pick(cfg.slot, 0)
+  let sTitle = slot
+  let sCursor = slot + 1
+  let sCopy = slot + 2
+  let sMenu0 = slot + 3   // menu items occupy sMenu0 .. sMenu0 + count - 1
+
+  // Background + static text drawn once (text_draw is slot-cached, so re-issuing is free).
+  let bg = pick(cfg.background, null)
+  if (bg !== null) { bg_new(bg) }
+  text_draw(titleFont, sTitle, titleX, titleY, cfg.title, titleColor, titleShadow)
+  if (copyText !== null) {
+    text_draw(copyFont, sCopy, centreX(copyText, 6), copyY, copyText, copyColor)
+  }
+
+  // A menu item is either a plain string (label only) or an object `{ label, onSelect }`.
+  let labelOf = (item) => {
+    if (typeof item === 'string') { return item }
+    return item.label
+  }
+  // Fire an item's `onSelect` handler, if it has one.
+  let fireSelect = (idx) => {
+    let item = menu[idx]
+    if (typeof item !== 'string') {
+      let cb = item.onSelect
+      if (cb !== null && typeof cb !== 'undefined') { cb() }
+    }
+  }
+
+  // Re-draw the menu: each item in its slot (selected one highlighted) + the cursor beside it. Only
+  // called on change, so the layout re-runs rarely.
+  let drawMenu = () => {
+    let i = 0
+    while (i < count) {
+      let col = menuColor
+      if (i === st.sel) { col = menuSelColor }
+      text_draw(menuFont, sMenu0 + i, menuX, menuY + i * menuGap, labelOf(menu[i]), col)
+      i = i + 1
+    }
+    text_draw(menuFont, sCursor, menuX - 14, menuY + st.sel * menuGap, ">", menuSelColor)
+  }
+  drawMenu()
+
+  // Blank every text slot the title used (for the hand-off into the game).
+  let clearText = () => {
+    text_draw(titleFont, sTitle, 0, 0, "")
+    text_draw(menuFont, sCursor, 0, 0, "")
+    text_draw(copyFont, sCopy, 0, 0, "")
+    let i = 0
+    while (i < count) { text_draw(menuFont, sMenu0 + i, 0, 0, ""); i = i + 1 }
+  }
+
+  // Read the d-pad once: move the cursor (redraw on change), and return the picked index when A/Start
+  // is pressed, else -1. Used by both `update()` and `run()`.
+  let poll = () => {
+    let moved = 0
+    if (key_pressed(BTN_UP) > 0) { st.sel = (st.sel + count - 1) % count; moved = 1 }
+    if (key_pressed(BTN_DOWN) > 0) { st.sel = (st.sel + 1) % count; moved = 1 }
+    if (moved > 0) { drawMenu() }
+    if (key_pressed(BTN_A) > 0) { return st.sel }
+    if (key_pressed(BTN_START) > 0) { return st.sel }
+    return -1
+  }
+
+  return {
+    // OWN LOOP (the usual way): show the screen and drive vsync internally until the player confirms,
+    // then blank the title, fire the chosen item's `onSelect`, and return its index. The game just
+    // does `titleScreen({...}).run()` and picks up in the handler.
+    run: () => {
+      while (true) {
+        let picked = poll()
+        if (picked >= 0) {
+          clearText()
+          fireSelect(picked)
+          return picked
+        }
+        frame()
+      }
+    },
+    // MAIN LOOP (for a game that owns one state-machine loop): call every frame; it moves the cursor,
+    // and on confirm fires the item's `onSelect` and returns its index (else -1). The caller owns
+    // `frame()` and decides when to stop showing the title (e.g. `title.clear()`).
+    update: () => {
+      let picked = poll()
+      if (picked >= 0) { fireSelect(picked) }
+      return picked
+    },
+    // The currently-highlighted index (preview without confirming).
+    selected: () => st.sel,
+    // Manually blank the title's text (pair with `bg_clear()` / `sprite_clear()` if reusing the screen).
+    clear: () => clearText()
+  }
+}

@@ -1,0 +1,143 @@
+// Sunnyside de-risk 5 (examples/sunnyside/SPEC.md §ladder): the day cycle.
+//
+// Time-of-day tint is the GBA's hardware brightness blend — `fade(level)`
+// drives BLDY, dims backgrounds AND sprites uniformly, and costs nothing by
+// day.  That beats rewriting BG palette banks (the first plan): agb's
+// palette entry order is nondeterministic between builds, so naming entries
+// is forbidden, and a whole-bank rewrite would leave sprites glowing at
+// midnight.  One register, no new natives.
+//
+// The clock runs a quarter-minute per frame (~96s per day).  17:00-20:00
+// ramps to dusk, 20:00 on is night, and at 02:00 the farmer passes out and
+// wakes at 06:00.  Standing by the barn door, A sleeps voluntarily: fade to
+// black, next day, fade back in.
+import { world } from 'bgtiles:../../../assets/sunnyside/baked/world_tiles.png'
+import { player } from 'sheet6432:../../../assets/sunnyside/baked/char_player.png'
+import {
+  frame, log, backdrop, hud_text, key_pressed, fade,
+  sprite_new, sprite_set_frame, sprite_set_flip,
+} from 'cargo:tish_agb'
+import {
+  spawn, set_transform, set_collider, set_topdown, topdown_speed, topdown_moving,
+  topdown_facing, attach_sprite, set_sprite_offset, set_camera_target, world_step,
+  entity_x, entity_y,
+} from 'cargo:tish_gba_game_engine'
+import {
+  ssgenGenerate, ssgenUpload, ssgenDoorX, ssgenDoorY,
+} from '../../sunnyside/src/worldgen.tish'
+import { ANIM_PLAYER_START, ANIM_PLAYER_LEN } from '../../sunnyside/src/data_anim.tish'
+
+let TILE: i32 = 16
+let BTN_A: i32 = 0
+
+let day: i32 = 1
+// quarter-minutes since midnight; wake at 06:00
+let qclock: i32 = 1440
+let sleeping: i32 = 0   // >0: frames left of the sleep transition
+
+function hourOf(): i32 { return qclock / 240 }
+function minOf(): i32 { return (qclock / 4) % 60 }
+
+/// BLDY level for the current time — the tint table the main game reuses.
+function fadeLevel(): i32 {
+  let h: i32 = hourOf()
+  if (h >= 6 && h < 17) { return 0 }
+  if (h === 17) { return 2 }
+  if (h === 18) { return 4 }
+  if (h === 19) { return 5 }
+  // 20:00 .. 05:59 — deep night, shading to the darkest hour before dawn
+  if (h >= 20 || h < 3) { return 7 }
+  return 8
+}
+
+function clockLabel() {
+  let mm: i32 = minOf()
+  if (mm < 10) {
+    hud_text(2, 170, 4, "D" + day + " " + hourOf() + ":0" + mm)
+  } else {
+    hud_text(2, 170, 4, "D" + day + " " + hourOf() + ":" + mm)
+  }
+}
+
+backdrop(0x2090e8)
+hud_text(0, 4, 4, "SUNNYSIDE DAY")
+
+let hero: i32 = spawn()
+set_collider(hero, 8, 8)
+set_topdown(hero)
+topdown_speed(hero, 2)
+let heroSpr: i32 = sprite_new(player, 0)
+attach_sprite(hero, heroSpr)
+// asymmetric 64px frame: body at x23, flipped x41 — offset per facing below
+set_sprite_offset(hero, 0 - 19, 0 - 21)
+set_camera_target(hero)
+
+ssgenGenerate(7)
+ssgenUpload(world, 3)
+let doorX: i32 = ssgenDoorX(3)
+let doorY: i32 = ssgenDoorY(3)
+set_transform(hero, doorX * TILE + 4, (doorY + 1) * TILE + 4)
+clockLabel()
+log("DAY READY day=" + day)
+
+function startSleep(reason: i32) {
+  sleeping = 64
+  if (reason > 0) { log("PASSOUT day=" + day) } else { log("SLEEP day=" + day) }
+}
+
+let tick: i32 = 0
+let cell: i32 = 0
+let lastHour: i32 = 0 - 1
+while (true) {
+  if (sleeping > 0) {
+    sleeping = sleeping - 1
+    // 64..32 fade out, 32: reset clock, 32..0 fade back in
+    if (sleeping >= 32) { fade((64 - sleeping) / 2) }
+    if (sleeping === 32) {
+      day = day + 1
+      qclock = 1440
+      log("WAKE day=" + day)
+      clockLabel()
+    }
+    if (sleeping < 32) { fade(sleeping / 2) }
+  } else {
+    qclock = qclock + 1
+    if (qclock >= 5760) { qclock = 0 }
+    let h: i32 = hourOf()
+    if (h !== lastHour) {
+      lastHour = h
+      clockLabel()
+      log("CLOCK day=" + day + " h=" + h + " fade=" + fadeLevel())
+      fade(fadeLevel())
+    }
+    if (minOf() === 0 || minOf() === 30) { clockLabel() }
+    // 02:00 — face down in the dirt
+    if (h === 2) { startSleep(1) }
+    // by the barn door, A sleeps
+    if (key_pressed(BTN_A) > 0) {
+      let px: i32 = (entity_x(hero) + 4) / TILE
+      let py: i32 = (entity_y(hero) + 4) / TILE
+      let dx: i32 = px - doorX
+      let dy: i32 = py - doorY
+      if (dx < 0) { dx = 0 - dx }
+      if (dy < 0) { dy = 0 - dy }
+      if (dx <= 1 && dy <= 1) { startSleep(0) }
+    }
+  }
+
+  tick = tick + 1
+  if (tick >= 3) { tick = 0; cell = cell + 1 }
+  let act: i32 = 0
+  if (topdown_moving(hero) > 0) { act = 1 }
+  let len: i32 = ANIM_PLAYER_LEN[act]
+  sprite_set_frame(heroSpr, ANIM_PLAYER_START[act] + (cell % len))
+  if (topdown_facing(hero) === 2) {
+    sprite_set_flip(heroSpr, 1)
+    set_sprite_offset(hero, 0 - 37, 0 - 21)
+  }
+  if (topdown_facing(hero) === 3) {
+    sprite_set_flip(heroSpr, 0)
+    set_sprite_offset(hero, 0 - 19, 0 - 21)
+  }
+  world_step()
+}

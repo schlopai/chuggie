@@ -1,0 +1,2283 @@
+// grid.tish — a packed cell grid for match/puzzle games, in tish.
+//
+// The backlog item from `INVENTORY.md:254-257`, finally built. It is the generic half of Magical
+// Drop, Puyo, Columns, Bejeweled and anything else whose board is columns of packed cells: the
+// board, the runs, the flood fill, the gravity collapse, the causality plane and the tile painter.
+// It knows nothing about balloons, pierrots or attacks.
+//
+// ── ONE i32 PER CELL ────────────────────────────────────────────────────────────────────────────
+//
+// The Rust it replaces keeps four parallel planes — cells plus `mark`, `seed` and `pass` as
+// separate `[[bool; 32]; COLS]` (`schlop/drop-gba/archive/crates/tish-gba-drop/src/board.rs:57-77`). Four array accesses
+// per cell per pass is the whole frame budget at tish prices. Everything is packed into one word:
+//
+//   bits  0..7   the CELL BYTE — the game's own encoding, opaque here
+//   bits  8..15  the engine planes  (MARK / SEED / PASS / JOIN)
+//   bits 16..23  the MATCH MASK, cached at write time so a pass never reads a table
+//   bit  24      WILD — matches every class but forms no run of its own
+//   bits 25..31  kept clear, so a word is never negative and `>>` never needs `>>>`
+//
+// ── THE CRUX: A TABLE, NOT A PREDICATE ─────────────────────────────────────────────────────────
+//
+// A boxed callback costs several hundred ticks against a ~6-per-frame budget
+// (`examples/shmup/README.md:53-56`), and even a plain user-function call is ~3-10 ticks on GBA
+// because there is no native call ABI for user tish functions
+// (`docs/memory-perf-review-2026-07.md:314-321`). A flood fill touches hundreds of cells. So the
+// rule is stronger than "no callbacks": NO FUNCTION CALLS OF ANY KIND INSIDE A PER-CELL LOOP.
+//
+// A game therefore registers its cell vocabulary ONCE with `gridDefineCell`, and `gridSet` folds
+// the match mask into the word. From then on "does this cell match class k" is `(w >> 16) & k` —
+// no call, no second array read.
+//
+// ── MEASURED, NOT ASSUMED ──────────────────────────────────────────────────────────────────────
+//
+// `examples/bench-grid` measured all of this on device. The two numbers that shaped the code:
+//
+//   * a module `i32[]` element read is 0.46 ticks and a write 1.0 — but an UNANNOTATED array reads
+//     at 8.1. Hence `i32[]` everywhere, and never a whole-array bind (`let a = PLANE` deep-copies;
+//     `PLANE[i]` does not).
+//   * `arr[(col << 5) + row]` cost 20,318 ticks/1000 and `arr[(col << 5) | row]` cost 1,494.
+//     `+` is not a ToInt32 context in JS so the chain leaves the integer domain; the shift has
+//     already cleared the low bits, so `|` is exactly equivalent. **INDEX WITH `|`, NEVER `+`.**
+//     Every index in this file obeys that, and it is worth 13x.
+//
+// A 63-cell flood fill measured 1,468 ticks — 33% of a frame — after the compiler fix in
+// tish b2c9f9ac2. Restrict a pass to dirty columns (a throw dirties one of seven) and it is a
+// fraction of that.
+
+import { tilemap_set } from 'cargo:tish_agb'
+
+// ── geometry ────────────────────────────────────────────────────────────────────────────────────
+// Ceiling 16 columns x 32 rows x 4 slots. Covers MD3 (7), Pocket (6), Puyo (6), Columns (6),
+// Bejeweled (8). Slots let a game hold a player board, an opponent board and a search scratch.
+export let GRID_COLS_MAX: i32 = 16
+export let GRID_ROWS_MAX: i32 = 32
+export let GRID_SLOTS: i32 = 4
+
+let COLSHIFT: i32 = 5
+let SLOTSHIFT: i32 = 9
+
+// ── the cell word ───────────────────────────────────────────────────────────────────────────────
+export let W_CELL: i32 = 255
+export let P_MARK: i32 = 256
+export let P_SEED: i32 = 512
+export let P_PASS: i32 = 1024
+export let P_JOIN: i32 = 2048
+/// POPPING: cleared, still on the board. Magical Drop's clear is not instantaneous — a matched
+/// balloon bursts IN PLACE for the whole clear window (~0.667s) and only then disappears, at which
+/// point the cells beyond it slide in. The sandwich chain is built on exactly this: the popping
+/// cell keeps the two halves apart until it vanishes. So a popping cell OCCUPIES (throws land past
+/// it, it still separates runs) but is INERT (no run may contain it, no flood may enter it, no grab
+/// may take it, no mark may re-clear it). `gridSweepToPop` sets it; `gridPopRemove` sweeps it out
+/// and collapses.
+export let P_POP: i32 = 4096
+export let P_WILD: i32 = 16777216
+// What travels with a cell when a row is fed in and the column shifts: everything about the cell
+// itself, and NOT the seed. The seed plane is indexed by POSITION, not by cell — see `gridFeed`.
+let KEEP_ON_FEED: i32 = 255 | 256 | 1024 | 2048 | 4096 | 16777216 | (255 << 16)
+let MATCHSHIFT: i32 = 16
+let MATCHMAX: i32 = 255
+let MATCHBITS: i32 = 16711680
+
+// KEEP masks, as ORs OF THE NAMED BITS — never as literals.
+//
+// They were literals, hand-computed, and two of the three were wrong. `KEEP_ON_UNSEED` was typed
+// 33493479 for 33492479: a single transposed digit whose low byte is 231, which CLEARS BIT 4 OF THE
+// CELL BYTE. Every cell whose kind is 1 (`0x1n` — the normal balloons, the commonest cell in the
+// game) was silently erased by `gridClearSeeds`. `KEEP_ON_SIM` was wrong too, and cleared bit 16,
+// so a cell copied into a search scratch board lost its match class.
+//
+// Neither was caught by examples/grid-demo, and could not have been: it uses cell bytes 1..5, whose
+// bits all survive a mask of 231. The bug needed a game whose cells set bit 4, which is the entire
+// Magical Drop vocabulary. A constant that is correct for one caller's data and destroys another's
+// is exactly what a hand-computed bitmask buys you.
+//
+//   KEEP_ON_UNMARK  drop MARK / PASS / JOIN; keep the cell, its class, its wild bit AND its seed
+//   KEEP_ON_UNSEED  drop SEED only
+//   KEEP_ON_SIM     what crosses into a search scratch board: cell, class, wild — no planes
+let KEEP_ON_UNMARK: i32 = W_CELL | P_SEED | P_POP | MATCHBITS | P_WILD
+let KEEP_ON_UNSEED: i32 = W_CELL | P_MARK | P_PASS | P_JOIN | P_POP | MATCHBITS | P_WILD
+// P_POP is deliberately NOT in KEEP_ON_SIM: `gridCopyState` drops popping cells entirely (and
+// compacts around them), because the board a search should plan against is the one that exists
+// after the burst lands.
+let KEEP_ON_SIM: i32 = W_CELL | MATCHBITS | P_WILD
+
+// Cell properties a game can ask about outside a hot loop.
+export let CP_MOVABLE: i32 = 1
+export let CP_OBSTACLE: i32 = 2
+export let CP_INDESTRUCTIBLE: i32 = 4
+// CAN BE PICKED UP, BUT NOT PUT DOWN — it pops out of the hands instead of landing on the board.
+//
+// Magical Drop's Bubble Balloon is the case: `cell.rs:is_throwable` is `kind != BUBBLE`, and the
+// only way one ever leaves the field is being pulled into the pierrot's hands to burst. Without this
+// the kit has no way to say it, and `packages/drop_game.tish` was pushing a bubble onto the board
+// like any other cell — a cell that matches nothing, cannot be cleared, and would sit there forever.
+export let CP_NOTHROW: i32 = 8
+// WHEN THIS CELL CLEARS, THE WHOLE CLASS GOES WITH IT.
+//
+// Magical Drop's Special Balloon: three in a row containing one does not clear three, it clears
+// every balloon of that colour on the board (`board.rs:446-460`). A wildcard in the set escalates
+// the same way, which is why `gridEscalate` treats `P_WILD` as escalating too.
+export let CP_ESCALATE: i32 = 16
+// TRANSMUTES WHEN A CLEAR HAPPENS BESIDE IT — Magical Drop's Ice Balloon.
+//
+// Ice matches nothing and no run can contain it, so on its own it is a permanent obstacle. Touching
+// a clear THAWS IT, and the rule is asymmetric in a way that is easy to get backwards: the thaw is
+// board-wide, the clearing is not. Every ice on the field turns into the hit colour; only the ice
+// actually adjacent to the cleared set goes with it (`board.rs:474-509`).
+export let CP_THAW: i32 = 32
+
+/// This cell counts down: `gridTickCounters` replaces it with the cell byte BELOW it each time.
+export let CP_COUNTER: i32 = 64
+/// This cell is a spent counter: it detonates itself and its four neighbours on the next tick.
+export let CP_FUSE: i32 = 256
+
+// ── state ───────────────────────────────────────────────────────────────────────────────────────
+// One strided `i32[]` per concern, declared once, never reassigned. Built at module init rather
+// than as literals: 2048 zeros in source would tell nobody anything.
+let PLANE: i32[] = []
+let DEPTH: i32[] = []
+let SHADOW: i32[] = []
+let STACK: i32[] = []
+let POPPED: i32[] = []
+
+// Per-cell-byte vocabulary, registered by the game. 256 entries each.
+// OPTIONAL per-cell vocabulary, all defaulting to 0 = "no special behaviour". Registered by the
+// game after `gridDefineCell`, so a kit that wants none of it writes nothing and pays nothing.
+//   THAWTO  what a thawable cell becomes, overriding the caller's default — ice with its OWN colour
+//   ESCMASK which classes a cell detonates when cleared, if not the class it matched into
+//   LINEDIR which way a cell fires when cleared: 0 none, else 1|up 2|down 4|left 8|right
+let THAWTO: i32[] = []
+let ESCMASK: i32[] = []
+let LINEDIR: i32[] = []
+let MATCHMASK: i32[] = []
+let GRABMASK: i32[] = []
+let PROP: i32[] = []
+let GID: i32[] = []
+
+// Per-slot scalars, stride 16.
+let GS: i32[] = []
+let G_COLS: i32 = 0
+let G_ROWS: i32 = 1
+let G_DIRTY: i32 = 2
+let G_TOUCH: i32 = 3
+let G_POPN: i32 = 4
+/// The `G_VERSION` the painter last drew. Equal means nothing that CHANGES A CELL BYTE has happened
+/// since, so the whole diff walk can be skipped.
+///
+/// THE INVARIANT THIS RESTS ON: every function that writes a cell BYTE bumps `G_VERSION`. The plane
+/// bits — mark, seed, pass, join — do not count, because `GID` is indexed by the byte alone and the
+/// painter cannot see them. `examples/grid-demo/verify.sh` greps this file for writers that fail to
+/// bump, because the failure mode is a stale board that no rules test can see.
+let G_PAINTVER: i32 = 8
+let G_VERSION: i32 = 5
+let G_ANCHOR: i32 = 6
+// THE RENDER TARGET, bound once by `gridPaintTarget` instead of passed every frame. `gridPaint`
+// took six arguments and five of them never changed for the life of a board — and on GBA an
+// argument is not free: every one is an i32 boxed into a `Value::Number`'s f64 at the call site and
+// ToInt32'd back in the callee, two soft-float conversions on a chip with no FPU. Measured at ~28
+// ticks per argument against ~42 fixed for the call itself, so the six-argument painter spent 210
+// ticks a frame being called and the one-argument one spends 70.
+let G_BG: i32 = 9
+let G_TILES: i32 = 10
+let G_TCOLS: i32 = 11
+let G_OX: i32 = 12
+let G_OY: i32 = 13
+// STRIDE 16, ADDRESSED AS A SHIFT — and the shift is the point, not the 16.
+//
+// `PLANE` has always been indexed `(slot << SLOTSHIFT) | (col << COLSHIFT) | row` for the reason
+// this file states at the top: shifts and ORs stay in the integer domain, while `*` and `+` go out
+// to f64 and back. `GS` was the one table that did not follow its own rule — it was addressed
+// `slot * GSTRIDE`, and because `GSTRIDE` is a module binding rather than a literal the compiler
+// cannot fold it, so every one of the 32 sites emitted `to_int32((slot as f64) * (GSTRIDE as f64))`:
+// two soft-float calls to compute a base offset of 16 times a small integer.
+//
+// `GSTRIDE` is kept because `gridInit` sizes the table from it and a bare 4 there would be a puzzle.
+let GSHIFT: i32 = 4
+let GSTRIDE: i32 = 16
+
+let gi: i32 = 0
+while (gi < 2048) {
+  PLANE.push(0)
+  SHADOW.push(-1)
+  gi = gi + 1
+}
+let gj: i32 = 0
+while (gj < 1024) {
+  STACK.push(0)
+  gj = gj + 1
+}
+let gk: i32 = 0
+while (gk < 256) {
+  MATCHMASK.push(0)
+  GRABMASK.push(0)
+  PROP.push(0)
+  THAWTO.push(0)
+  ESCMASK.push(0)
+  LINEDIR.push(0)
+  GID.push(0)
+  gk = gk + 1
+}
+let gm: i32 = 0
+while (gm < 64) {
+  DEPTH.push(0)
+  gm = gm + 1
+}
+let gn: i32 = 0
+while (gn < 128) {
+  POPPED.push(0)
+  gn = gn + 1
+}
+let gp: i32 = 0
+while (gp < 64) {
+  GS.push(0)
+  gp = gp + 1
+}
+
+// ── vocabulary ──────────────────────────────────────────────────────────────────────────────────
+
+/// Register one cell byte. Call once per kind at boot, before any board exists.
+///
+/// `matchMask` is a bitmask over match CLASSES — a colour, a shape, whatever the game groups by. A
+/// wildcard sets every class it can join AND passes `wild = 1`, which is what stops a run of pure
+/// wildcards counting as a run (the distinction `board.rs:377-385` tracks with a separate `real`
+/// counter; here it is one bit).
+///
+/// `grabMask` is a separate vocabulary for pickup compatibility, so "these two can be carried
+/// together" need not equal "these two match".
+export function gridDefineCell(cell: i32, matchMask: i32, grabMask: i32, props: i32, wild: i32, gid: i32) {
+  if (cell < 0 || cell > 255) { return }
+  MATCHMASK[cell] = matchMask & MATCHMAX
+  GRABMASK[cell] = grabMask
+  PROP[cell] = props
+  GID[cell] = gid
+  if (wild === 1) { PROP[cell] = props | 128 }
+}
+
+/// What a thawable cell becomes, overriding the `become` its thaw was called with.
+///
+/// Magical Drop has two ices: clear ice takes the colour that popped it, and COLOUR ice — new in
+/// MD3 — has its colour predetermined and keeps it. The caller of `gridThaw` knows the first; only
+/// the cell knows the second.
+export function gridDefineThaw(cell: i32, becomes: i32) {
+  if (cell < 0 || cell > 255) { return }
+  THAWTO[cell] = becomes
+}
+
+/// Which classes this cell detonates when it is cleared, if NOT the class it matched into.
+///
+/// A Special and a Rainbow both sweep the colour of the run they were part of, which is the
+/// default (0) and needs no registration. A BURST is the interesting one: it joins a run of any
+/// colour and detonates the colour it CARRIES, so the class it explodes is a property of the cell
+/// rather than of the run — the wild card you aim.
+export function gridDefineEscalate(cell: i32, escMask: i32) {
+  if (cell < 0 || cell > 255) { return }
+  ESCMASK[cell] = escMask & MATCHMAX
+}
+
+/// Which way a cell fires when it is cleared: `1` up, `2` down, `4` left, `8` right, OR-able.
+///
+/// An Arrow destroys everything in the direction it points, and what it points at is the cell, not
+/// the move. Cells carrying `CP_INDESTRUCTIBLE` survive being fired over.
+export function gridDefineLine(cell: i32, dirs: i32) {
+  if (cell < 0 || cell > 255) { return }
+  LINEDIR[cell] = dirs
+}
+
+// ── boards ──────────────────────────────────────────────────────────────────────────────────────
+
+/// Create a board. `anchor` 0 packs cells toward row 0 (a ceiling-fed board like Magical Drop);
+/// `anchor` 1 packs toward the last row (a floor-stacked board like Puyo). Everything below reads
+/// the anchor, so the same collapse serves both.
+export function gridInit(slot: i32, cols: i32, rows: i32, anchor: i32) {
+  if (slot < 0 || slot >= GRID_SLOTS) { return }
+  let b: i32 = slot << GSHIFT
+  GS[b | G_COLS] = cols
+  GS[b | G_ROWS] = rows
+  GS[b | G_ANCHOR] = anchor
+  GS[b | G_DIRTY] = 0
+  GS[b | G_TOUCH] = 0
+  GS[b | G_POPN] = 0
+  GS[b | G_VERSION] = 0
+  gridClear(slot)
+}
+
+export function gridCols(slot: i32): i32 { return GS[(slot << GSHIFT) | G_COLS] }
+export function gridRows(slot: i32): i32 { return GS[(slot << GSHIFT) | G_ROWS] }
+export function gridVersion(slot: i32): i32 { return GS[(slot << GSHIFT) | G_VERSION] }
+export function gridDirty(slot: i32): i32 { return GS[(slot << GSHIFT) | G_DIRTY] }
+
+export function gridClear(slot: i32) {
+  let base: i32 = slot << SLOTSHIFT
+  let c: i32 = 0
+  let cols: i32 = GS[(slot << GSHIFT) | G_COLS]
+  while (c < cols) {
+    let r: i32 = 0
+    while (r < GRID_ROWS_MAX) {
+      PLANE[base | (c << COLSHIFT) | r] = 0
+      r = r + 1
+    }
+    DEPTH[(slot << 4) | c] = 0
+    c = c + 1
+  }
+  GS[(slot << GSHIFT) | G_VERSION] = GS[(slot << GSHIFT) | G_VERSION] + 1
+}
+
+/// Read a cell byte. 0 is empty.
+export function gridGet(slot: i32, col: i32, row: i32): i32 {
+  return PLANE[(slot << SLOTSHIFT) | (col << COLSHIFT) | row] & W_CELL
+}
+
+/// Write a cell, folding its cached match mask and wild bit into the word. INERT — it seeds
+/// nothing, so a board authored this way cannot hand the player a free clear. That distinction is
+/// the whole of the causality rule: only `gridPush` and `gridInsertRow` seed.
+export function gridSet(slot: i32, col: i32, row: i32, cell: i32) {
+  GS[(slot << GSHIFT) | G_VERSION] = GS[(slot << GSHIFT) | G_VERSION] + 1
+  let idx: i32 = (slot << SLOTSHIFT) | (col << COLSHIFT) | row
+  let w: i32 = (cell & W_CELL) | ((MATCHMASK[cell & W_CELL] & MATCHMAX) << MATCHSHIFT)
+  if ((PROP[cell & W_CELL] & 128) !== 0) { w = w | P_WILD }
+  PLANE[idx] = w
+  GS[(slot << GSHIFT) | G_DIRTY] = GS[(slot << GSHIFT) | G_DIRTY] | (1 << col)
+}
+
+export function gridDepth(slot: i32, col: i32): i32 { return DEPTH[(slot << 4) | col] }
+
+/// Total cells on the board, and whether any column is full — ONE call each, not one per column.
+///
+/// MEASURED, and it is the single biggest lever in this kit. A user tish function call on GBA costs
+/// about 150 ticks of a 4,389-tick frame: there is no native call ABI for user functions, so every
+/// one goes through `value_call` with per-argument boxing. A caller looping `gridDepth` over seven
+/// columns therefore spends ~1,000 ticks to read seven array elements that cost half a tick each.
+///
+/// Two callers doing exactly that (a refill check and a top-out check, every frame) were 2,400 of
+/// the 7,565-tick worst frame in examples/drop-tish. The rule this teaches is the same one the repo
+/// already applies to the tish/Rust boundary — batch the crossing, do not repeat it per cell — and
+/// it turns out to apply just as hard to tish-to-tish calls.
+export function gridCount(slot: i32): i32 {
+  let n: i32 = 0
+  let cols: i32 = GS[(slot << GSHIFT) | G_COLS]
+  let c: i32 = 0
+  while (c < cols) {
+    n = n + DEPTH[(slot << 4) | c]
+    c = c + 1
+  }
+  return n
+}
+
+export function gridAnyFull(slot: i32): i32 {
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  let c: i32 = 0
+  while (c < cols) {
+    if (DEPTH[(slot << 4) | c] >= rows) { return 1 }
+    c = c + 1
+  }
+  return 0
+}
+
+/// Has any column been pushed PAST the floor? Distinct from `gridAnyFull`, and the distinction is a
+/// whole row of play: a board filled exactly to its last row is full but still playable, and a game
+/// that ends there ends one row early. A ruleset whose loss condition is "something fell out of the
+/// field" wants this one; a ruleset that cannot accept another cell wants `gridAnyFull`.
+export function gridAnyOver(slot: i32): i32 {
+  let sb: i32 = slot << GSHIFT
+  let base: i32 = slot << SLOTSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  let c: i32 = 0
+  while (c < cols) {
+    let d: i32 = DEPTH[(slot << 4) | c]
+    if (d > rows) {
+      // Only LIVE cells can lose the game. A tall throw that clears keeps its column standing
+      // over the line for the whole burst window — those balloons are already gone, merely still
+      // animating out, and once `gridPopRemove` runs the column fits again. Counting them read a
+      // successful ceiling-high clear as a top-out. The compare stays `d > rows` first so the
+      // per-cell walk is paid only by a column actually over the line.
+      let live: i32 = 0
+      let r: i32 = 0
+      while (r < d) {
+        let w: i32 = PLANE[base | (c << COLSHIFT) | r]
+        if ((w & W_CELL) !== 0 && (w & P_POP) === 0) { live = live + 1 }
+        r = r + 1
+      }
+      if (live > rows) { return 1 }
+    }
+    c = c + 1
+  }
+  return 0
+}
+
+/// Recompute a column's depth from its cells. Cheap; call after authoring a board by hand.
+export function gridRecount(slot: i32) {
+  GS[(slot << GSHIFT) | G_VERSION] = GS[(slot << GSHIFT) | G_VERSION] + 1
+  let base: i32 = slot << SLOTSHIFT
+  let cols: i32 = GS[(slot << GSHIFT) | G_COLS]
+  let rows: i32 = GS[(slot << GSHIFT) | G_ROWS]
+  let c: i32 = 0
+  while (c < cols) {
+    let n: i32 = 0
+    let r: i32 = 0
+    // THE STORAGE BOUND, so a column standing over the field is recovered at its true
+    // height rather than clipped back to the field and silently made legal again.
+    while (r < GRID_ROWS_MAX) {
+      if ((PLANE[base | (c << COLSHIFT) | r] & W_CELL) !== 0) { n = n + 1 }
+      r = r + 1
+    }
+    DEPTH[(slot << 4) | c] = n
+    c = c + 1
+  }
+}
+
+/// Push `n` copies of `cell` onto a column, from the anchor end. Returns 1 if the column overflowed
+/// — the caller decides whether that is a top-out or an illegal move.
+///
+/// SEEDS every cell it writes. A clear may only fire in a run containing a seed, which is what makes
+/// a clear something the player CAUSED rather than something the board happened to contain.
+/// Insert one cell at row 0, shifting the column away from it. Returns 1 if it landed.
+///
+/// THE OTHER END FROM `gridPush`, and the difference is the whole descent. A THROW adds at the
+/// player's end — `gridPush`, appending at `d`, matching `board.rs:throw`. A FED ROW arrives at the
+/// far end and pushes the stack TOWARD the player — `board.rs:feed_row` shifts the column down and
+/// writes index 0.
+///
+/// `packages/drop_feed.tish` used `gridPush` for both, so fed rows landed next to the pierrot
+/// instead of at the ceiling. The board grew the wrong way and the player always grabbed the NEWEST
+/// balloons rather than the oldest — the descent inverted. It plays, which is why nothing caught it
+/// until a conformance trace put the two boards side by side and every prefilled column read
+/// exactly backwards: `nG nY nR` against `nR nY nG`.
+///
+/// SEEDS, like `gridPush`: an arriving row can legitimately complete a run, which is what makes an
+/// incoming attack dangerous rather than merely inconvenient.
+export function gridFeed(slot: i32, col: i32, cell: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let d: i32 = DEPTH[(slot << 4) | col]
+  // BOUNDED BY THE STORAGE, NOT THE BOARD. `board.rs:feed_row` stops at MAX_ROWS, not at the visible
+  // height, so a column overflows past the floor and `topped_out` is `depth > rows` — the overflow
+  // IS the loss condition. Capping at `rows` here meant a column simply stopped growing, the board
+  // never registered the overflow, and a run that should have ended kept playing: the conformance
+  // trace showed the Rust board at count=224 where this one had levelled off.
+  if (d >= GRID_ROWS_MAX) { return 0 }
+  let cb: i32 = base | (col << COLSHIFT)
+  // THE SEED PLANE DOES NOT MOVE WITH THE CELLS, and the fed cell arrives UNSEEDED. Both come
+  // straight from `board.rs:feed_row`, which shifts `cells` and never touches `seed` — and both
+  // matter for the same reason the seed plane exists at all: a run only fires if the PLAYER caused
+  // it. Seeding the arriving cell makes a fed row clear itself the instant it lands, and carrying
+  // seeds along with the shift hands causality to whatever happens to be sitting there next. The
+  // port did both, and the result was the CPU's board clearing runs nobody had played into: three
+  // reds the reference left standing went up on arrival. It only showed once the descent was
+  // spawning enough variety to complete a run by itself, which is why nine scenarios missed it.
+  let r: i32 = d
+  while (r > 0) {
+    let rp: i32 = r - 1
+    PLANE[cb | r] = (PLANE[cb | rp] & KEEP_ON_FEED) | (PLANE[cb | r] & P_SEED)
+    r = r - 1
+  }
+  let w: i32 = (cell & W_CELL) | ((MATCHMASK[cell & W_CELL] & MATCHMAX) << MATCHSHIFT)
+  if ((PROP[cell & W_CELL] & 128) !== 0) { w = w | P_WILD }
+  PLANE[cb] = w | (PLANE[cb] & P_SEED)
+  DEPTH[(slot << 4) | col] = d + 1
+  GS[sb | G_DIRTY] = GS[sb | G_DIRTY] | (1 << col)
+  GS[sb | G_VERSION] = GS[sb | G_VERSION] + 1
+  return 1
+}
+
+export function gridPush(slot: i32, col: i32, cell: i32, n: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let rows: i32 = GS[sb | G_ROWS]
+  let d: i32 = DEPTH[(slot << 4) | col]
+  let i: i32 = 0
+  let over: i32 = 0
+  // BOUNDED BY THE STORAGE, NOT THE FIELD — `board.rs:290` takes `count.min(MAX_ROWS - start)`.
+  // Throwing past the top of the field is not an error to be clipped, it is HOW A PLAYER LOSES:
+  // the cells land, the column stands over the line, and `gridAnyOver` reads it. Clipping at the
+  // visible height silently discarded them, so a six-balloon throw into a column at depth 6 landed
+  // three, and a run of six cleared as a run of three. `over` still reports it for a caller that
+  // wants to refuse the move instead.
+  while (i < n) {
+    let r: i32 = d + i
+    if (r >= rows) { over = 1 }
+    if (r < GRID_ROWS_MAX) {
+      let idx: i32 = base | (col << COLSHIFT) | r
+      let w: i32 = (cell & W_CELL) | ((MATCHMASK[cell & W_CELL] & MATCHMAX) << MATCHSHIFT) | P_SEED
+      if ((PROP[cell & W_CELL] & 128) !== 0) { w = w | P_WILD }
+      PLANE[idx] = w
+    }
+    i = i + 1
+  }
+  let nd: i32 = d + n
+  if (nd > GRID_ROWS_MAX) { nd = GRID_ROWS_MAX }
+  DEPTH[(slot << 4) | col] = nd
+  GS[sb | G_DIRTY] = GS[sb | G_DIRTY] | (1 << col)
+  GS[sb | G_VERSION] = GS[sb | G_VERSION] + 1
+  return over
+}
+
+/// Remove `n` cells from a column's anchor end and return the cell byte that was there.
+export function gridTake(slot: i32, col: i32, n: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let d: i32 = DEPTH[(slot << 4) | col]
+  if (d < n || n <= 0) { return 0 }
+  let top: i32 = PLANE[base | (col << COLSHIFT) | (d - 1)] & W_CELL
+  let i: i32 = 0
+  while (i < n) {
+    PLANE[base | (col << COLSHIFT) | (d - 1 - i)] = 0
+    i = i + 1
+  }
+  DEPTH[(slot << 4) | col] = d - n
+  GS[(slot << GSHIFT) | G_DIRTY] = GS[(slot << GSHIFT) | G_DIRTY] | (1 << col)
+  GS[(slot << GSHIFT) | G_VERSION] = GS[(slot << GSHIFT) | G_VERSION] + 1
+  return top
+}
+
+/// The contiguous run of grab-compatible cells at a column's anchor end. Returns
+/// `(cell << 8) | count`, or 0.
+///
+/// The hand carries a running intersection of grab masks, which is why the Rust's special case for
+/// "a concrete colour beats a wildcard picked up first" (`board.rs:238-243`) is not needed: the
+/// intersection narrows on its own.
+/// The `props` bitmask this cell byte was registered with — `CP_*`.
+///
+/// For asking outside a hot loop. Inside one, read the cached bits in the packed word instead: this
+/// is a function call plus an array read, and `grid.tish`'s rule is that a per-cell loop makes no
+/// calls at all.
+export function gridCellProps(cell: i32): i32 {
+  if (cell < 0 || cell > 255) { return 0 }
+  return PROP[cell & W_CELL]
+}
+
+/// Vertical same-class pairs on the board, as `(bottomPairs << 16) | pairs`.
+///
+/// A search's board heuristic wants "how close is this to a clear", and a vertical pair is one throw
+/// away. A pair at the BOTTOM of a column is reachable right now, so it is counted separately and
+/// the caller can weight it higher.
+///
+/// THE LOOP LIVES HERE, and that is the whole point of the function. `packages/drop_cpu.tish` first
+/// wrote this heuristic in its own file, reading cells with `gridGet` — 126 cross-module calls per
+/// evaluation at ~93 ticks each, so one `cpuStep` measured 45,051 ticks: TEN FRAMES, for four
+/// candidate pairs. It is exactly the rule at the top of this file — no function calls of any kind
+/// inside a per-cell loop — and the fix is to move the loop to the data, not the data to the loop.
+///
+/// A pair is two cells whose cached MATCH MASKS intersect and neither of which is wild. That is the
+/// analogue of `cell::clear_colour(a).is_some() && a == b`: a wildcard has no colour of its own to
+/// pair off, and counting it as pairing with everything would make every board look one throw from
+/// a cascade.
+export function gridPairs(slot: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let pairs: i32 = 0
+  let bottom: i32 = 0
+  let c: i32 = 0
+  while (c < cols) {
+    let d: i32 = DEPTH[(slot << 4) | c]
+    let cb: i32 = base | (c << COLSHIFT)
+    let r: i32 = 1
+    while (r < d) {
+      let ra: i32 = r - 1
+      let wa: i32 = PLANE[cb | ra]
+      let wb: i32 = PLANE[cb | r]
+      if ((wa & P_WILD) === 0 && (wb & P_WILD) === 0
+          && (((wa >> MATCHSHIFT) & MATCHMAX) & ((wb >> MATCHSHIFT) & MATCHMAX)) !== 0) {
+        let rn: i32 = r + 1
+        if (rn === d) { bottom = bottom + 1 } else { pairs = pairs + 1 }
+      }
+      r = r + 1
+    }
+    c = c + 1
+  }
+  return (bottom << 16) | pairs
+}
+
+/// Apply a whole candidate move to a scratch board, in ONE call: copy `src`, take the bottom run of
+/// each column in `order`, then throw the accumulated hand at `to`.
+///
+/// Returns `(cell << 16) | (count << 8) | reach`, or 0 if the move is illegal — a column whose
+/// bottom will not join the hand, or an empty hand. `reach` is the run the throw would land in,
+/// which is what lets a caller skip a resolve that provably cannot clear.
+///
+/// `order` packs up to seven column indices, four bits each, lowest first.
+///
+/// WHY IT IS ONE CALL, and why the bodies below are inlined rather than delegated. A tish function
+/// call was costed here at a flat ~150 ticks, boxed closure, whether or not it crosses a module.
+///
+/// ⚠️ MEASURED SINCE (`examples/bench-access`), AND THE FLAT NUMBER IS WRONG — the cost depends
+/// entirely on the callee's SHAPE. A trivial typed call with scalar arguments is FREE: it lowers to
+/// a direct native fn and inlines, and 1, 4 and 8 arguments all measure at the empty loop. A
+/// realistic accessor — a branch on a module flag plus a computed index into a large module array,
+/// which is what every function named below is — is ~193 ticks and does not inline. A zero-argument
+/// call is ~55 even when trivial, because no-params breaks typed lowering.
+///
+/// So the batching here is still right, and for a sharper reason than the one originally given: it
+/// is not that calls cost 150, it is that THESE calls do. Do not generalise it to a helper that
+/// only moves scalars around — that one is free, and inlining it by hand buys nothing.
+///
+/// A CPU search runs this per candidate pair and was making
+/// five of them (`gridCopyState`, `gridRun` and `gridTake` per pickup column, `gridReach`,
+/// `gridPush`), so most of what a candidate cost was the calling, not the work: 2,308 ticks of
+/// which ~900 was overhead. Merging the CALLS is the whole point, so calling `gridRun` and
+/// `gridTake` from in here would have moved the cost rather than removed it. The duplication is
+/// deliberate and is why those two keep their own tests.
+/// `spec` packs the four small operands: `slot | (src << 4) | (n << 8) | (to << 12)` — the
+/// destination scratch slot, the source slot, how many nibbles of `order` are live, and the target
+/// column. `order` stays its own argument because eight pickups fill all 32 bits of it.
+///
+/// FOUR OPERANDS IN ONE ARGUMENT, because an argument is not free on GBA: it is boxed into a
+/// `Value::Number`'s f64 at the call site and ToInt32'd back in the callee, two soft-float
+/// conversions apiece on a chip with no FPU. Measured at ~28 ticks per argument against ~42 fixed
+/// for the call itself, so this signature costs 98 ticks a call where the five-argument one cost
+/// 182 — and the CPU search makes three of these a frame.
+export function gridSimMove(order: i32, spec: i32): i32 {
+  let slot: i32 = spec & 15
+  let src: i32 = (spec >> 4) & 15
+  let n: i32 = (spec >> 8) & 15
+  let to: i32 = (spec >> 12) & 15
+  // THE COPY, INLINED TOO. It was `gridCopyState`, which is another boxed closure at ~150 ticks for
+  // ~60 cells of work — the call cost as much as the copying. Same contract: take the source
+  // column, erase up to the destination's old depth so nothing of the last candidate survives above
+  // the new one, and drop the planes on the way across.
+  let base: i32 = slot << SLOTSHIFT
+  let sbase: i32 = src << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let sg: i32 = src << GSHIFT
+  let cols0: i32 = GS[sg | G_COLS]
+  GS[sb | G_COLS] = cols0
+  GS[sb | G_ROWS] = GS[sg | G_ROWS]
+  GS[sb | G_ANCHOR] = GS[sg | G_ANCHOR]
+  GS[sb | G_DIRTY] = 0
+  GS[sb | G_TOUCH] = 0
+  GS[sb | G_POPN] = 0
+  let keep: i32 = KEEP_ON_SIM
+  let cc: i32 = 0
+  while (cc < cols0) {
+    let dc: i32 = base | (cc << COLSHIFT)
+    let sc: i32 = sbase | (cc << COLSHIFT)
+    let sd: i32 = DEPTH[(src << 4) | cc]
+    let od: i32 = DEPTH[(slot << 4) | cc]
+    let rr0: i32 = 0
+    while (rr0 < sd) {
+      PLANE[dc | rr0] = PLANE[sc | rr0] & keep
+      rr0 = rr0 + 1
+    }
+    while (rr0 < od) {
+      PLANE[dc | rr0] = 0
+      rr0 = rr0 + 1
+    }
+    DEPTH[(slot << 4) | cc] = sd
+    cc = cc + 1
+  }
+
+  let held: i32 = 0
+  let heldN: i32 = 0
+  let dirty: i32 = GS[sb | G_DIRTY]
+  let i: i32 = 0
+  while (i < n) {
+    let col: i32 = (order >> (i << 2)) & 15
+    let cb: i32 = base | (col << COLSHIFT)
+    let d: i32 = DEPTH[(slot << 4) | col]
+    if (d <= 0) { return 0 }
+    let top: i32 = PLANE[cb | (d - 1)] & W_CELL
+    if (top === 0) { return 0 }
+    let acc: i32 = GRABMASK[top]
+    if (held !== 0) {
+      acc = acc & GRABMASK[held & W_CELL]
+      if (acc === 0) { return 0 }
+    }
+    let cnt: i32 = 1
+    let r: i32 = d - 2
+    while (r >= 0) {
+      let c: i32 = PLANE[cb | r] & W_CELL
+      if (c === 0) { r = 0 - 1 } else {
+        let nx: i32 = acc & GRABMASK[c]
+        if (nx === 0) { r = 0 - 1 } else {
+          acc = nx
+          cnt = cnt + 1
+          r = r - 1
+        }
+      }
+    }
+    // Take it. The run is `cnt` cells at the anchor end, which the scan above just proved present.
+    let k: i32 = 0
+    while (k < cnt) {
+      PLANE[cb | (d - 1 - k)] = 0
+      k = k + 1
+    }
+    DEPTH[(slot << 4) | col] = d - cnt
+    dirty = dirty | (1 << col)
+    // A CONCRETE COLOUR BEATS A WILDCARD, so a rainbow picked up first does not leave the hand
+    // permanently wild — `board.rs:238`, and the same rule `gridRun`'s mask intersection encodes.
+    if (heldN === 0) {
+      held = top
+    } else {
+      if ((PROP[held & W_CELL] & 128) !== 0 && (PROP[top] & 128) === 0) { held = top }
+    }
+    heldN = heldN + cnt
+    i = i + 1
+  }
+  if (heldN === 0) { return 0 }
+
+  // Reach: the run at the target's anchor end that this hand would join.
+  let reach: i32 = heldN
+  let hc: i32 = held & W_CELL
+  if ((PROP[hc] & 128) === 0) {
+    let want: i32 = MATCHMASK[hc] & MATCHMAX
+    if (want !== 0) {
+      let tb: i32 = base | (to << COLSHIFT)
+      let tr: i32 = DEPTH[(slot << 4) | to] - 1
+      let scanning: i32 = 1
+      while (scanning === 1 && tr >= 0) {
+        let w: i32 = PLANE[tb | tr]
+        if ((w & W_CELL) !== 0 && (((w >> MATCHSHIFT) & MATCHMAX) & want) !== 0) {
+          reach = reach + 1
+          tr = tr - 1
+        } else {
+          scanning = 0
+        }
+      }
+    }
+  }
+
+  // Throw. Bounded by the STORAGE, not the field — landing over the line is how a move loses, and
+  // the caller reads the depth back to reject it.
+  let tb2: i32 = base | (to << COLSHIFT)
+  let td: i32 = DEPTH[(slot << 4) | to]
+  let w2: i32 = hc | ((MATCHMASK[hc] & MATCHMAX) << MATCHSHIFT) | P_SEED
+  if ((PROP[hc] & 128) !== 0) { w2 = w2 | P_WILD }
+  let j: i32 = 0
+  while (j < heldN) {
+    let rr: i32 = td + j
+    if (rr < GRID_ROWS_MAX) { PLANE[tb2 | rr] = w2 }
+    j = j + 1
+  }
+  let nd: i32 = td + heldN
+  if (nd > GRID_ROWS_MAX) { nd = GRID_ROWS_MAX }
+  DEPTH[(slot << 4) | to] = nd
+  GS[sb | G_DIRTY] = dirty | (1 << to)
+  GS[sb | G_VERSION] = GS[sb | G_VERSION] + 1
+
+  // WHEN THE MOVE PROVABLY CANNOT CLEAR — which is most candidates, and the reach test is exact
+  // rather than a heuristic — the caller wants nothing from this call but a board to score. So the
+  // scan happens here, inline, and comes back NEGATIVE to say so: one boxed call saved on the ~78%
+  // path, and the ~60-cell walk it would have made anyway.
+  if (reach < 3) {
+    let bottom: i32 = 0
+    let pairs: i32 = 0
+    let deepest: i32 = 0
+    let total: i32 = 0
+    let sc2: i32 = 0
+    while (sc2 < cols0) {
+      let d2: i32 = DEPTH[(slot << 4) | sc2]
+      total = total + d2
+      if (d2 > deepest) { deepest = d2 }
+      let cb2: i32 = base | (sc2 << COLSHIFT)
+      let r2: i32 = 1
+      while (r2 < d2) {
+        let wa: i32 = PLANE[cb2 | (r2 - 1)]
+        let wb: i32 = PLANE[cb2 | r2]
+        if ((wa & P_WILD) === 0 && (wb & P_WILD) === 0
+            && (((wa >> MATCHSHIFT) & MATCHMAX) & ((wb >> MATCHSHIFT) & MATCHMAX)) !== 0) {
+          if ((r2 + 1) === d2) { bottom = bottom + 1 } else { pairs = pairs + 1 }
+        }
+        r2 = r2 + 1
+      }
+      sc2 = sc2 + 1
+    }
+    return 0 - (((bottom << 22) | (pairs << 14) | (deepest << 8) | total) + 1)
+  }
+  if (reach > 255) { reach = 255 }
+  return (hc << 16) | (heldN << 8) | reach
+}
+
+/// How many cells at the anchor end of `col` share a class with `cell` — the run a throw of `cell`
+/// would join. 0 when `cell` has no colour of its own (a wildcard, or an obstacle).
+///
+/// ONE CALL for a loop that was four to nine. A CPU search runs this per candidate pair, and it was
+/// `gridDepth` plus a `gridGet` and a `gridCellMatch` per cell — measured at 475 ticks of a 2,846
+/// tick candidate, almost all of it call overhead rather than work. The cells are adjacent words in
+/// one column and the match mask is already cached in each of them, so done here it is a handful of
+/// array reads.
+export function gridReach(slot: i32, col: i32, cell: i32): i32 {
+  let c: i32 = cell & W_CELL
+  if ((PROP[c] & 128) !== 0) { return 0 }
+  let want: i32 = MATCHMASK[c] & MATCHMAX
+  if (want === 0) { return 0 }
+  let cb: i32 = (slot << SLOTSHIFT) | (col << COLSHIFT)
+  let r: i32 = DEPTH[(slot << 4) | col] - 1
+  let k: i32 = 0
+  let scanning: i32 = 1
+  while (scanning === 1 && r >= 0) {
+    let w: i32 = PLANE[cb | r]
+    if ((w & W_CELL) !== 0 && (((w >> MATCHSHIFT) & MATCHMAX) & want) !== 0) {
+      k = k + 1
+      r = r - 1
+    } else {
+      scanning = 0
+    }
+  }
+  return k
+}
+
+/// Everything a static board evaluation needs, in ONE pass and ONE call:
+///
+///     bottomPairs << 22 | midPairs << 14 | deepest << 8 | total
+///
+/// `gridPairs` and `gridExtent` already existed and each walks the board; a scorer wants both and
+/// the depth bound is the same walk. Ranges are safe by construction: at most one BOTTOM pair per
+/// column (7), at most 31 mid pairs per column, depth at most 32, total at most 224 — 30 bits used,
+/// so the word is never negative.
+export function gridEvalStats(slot: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let pairs: i32 = 0
+  let bottom: i32 = 0
+  let deepest: i32 = 0
+  let total: i32 = 0
+  let c: i32 = 0
+  while (c < cols) {
+    let d: i32 = DEPTH[(slot << 4) | c]
+    total = total + d
+    if (d > deepest) { deepest = d }
+    let cb: i32 = base | (c << COLSHIFT)
+    let r: i32 = 1
+    while (r < d) {
+      let wa: i32 = PLANE[cb | (r - 1)]
+      let wb: i32 = PLANE[cb | r]
+      if ((wa & P_WILD) === 0 && (wb & P_WILD) === 0
+          && (((wa >> MATCHSHIFT) & MATCHMAX) & ((wb >> MATCHSHIFT) & MATCHMAX)) !== 0) {
+        if ((r + 1) === d) { bottom = bottom + 1 } else { pairs = pairs + 1 }
+      }
+      r = r + 1
+    }
+    c = c + 1
+  }
+  return (bottom << 22) | (pairs << 14) | (deepest << 8) | total
+}
+
+/// The board's extent, as `(deepest << 16) | total`. One call instead of a `gridDepth` per column.
+export function gridExtent(slot: i32): i32 {
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let deepest: i32 = 0
+  let total: i32 = 0
+  let c: i32 = 0
+  while (c < cols) {
+    let d: i32 = DEPTH[(slot << 4) | c]
+    if (d > deepest) { deepest = d }
+    total = total + d
+    c = c + 1
+  }
+  return (deepest << 16) | total
+}
+
+/// Can these two cell bytes be held together?
+///
+/// The masks intersect exactly when `cell.rs:grab_compatible` is true — `a == b || a wild || b wild`
+/// — because a concrete kind registers a single class bit and a wildcard registers all of them. A
+/// game's SEARCH needs this to enumerate multi-column pickup orders before simulating any of them;
+/// `gridRun`'s `holding` argument answers the same question but only while actually taking a run.
+export function gridGrabCompatible(a: i32, b: i32): i32 {
+  if ((GRABMASK[a & W_CELL] & GRABMASK[b & W_CELL]) !== 0) { return 1 }
+  return 0
+}
+
+/// The bottom cell byte of a column, or 0 for an empty one. What a pickup order is enumerated from.
+export function gridBottom(slot: i32, col: i32): i32 {
+  let d: i32 = DEPTH[(slot << 4) | col]
+  if (d <= 0) { return 0 }
+  return PLANE[(slot << SLOTSHIFT) | (col << COLSHIFT) | (d - 1)] & W_CELL
+}
+
+/// Is this cell byte a WILDCARD — one that joins any run but forms none of its own?
+///
+/// Registered by `gridDefineCell`'s `wild` argument. A game needs this to reproduce the rule that a
+/// concrete colour REPLACES a wildcard in hand: pick up a rainbow and then a red, and the hand is
+/// red, not "any". Without it a wild pickup leaves the hand permanently wild and every later grab
+/// matches everything.
+/// A cell's MATCH MASK — which classes it can be part of a run of. A wildcard's is every class; a
+/// pure obstacle's is none, which makes "does this have a colour of its own" fall out as `mask
+/// non-zero AND not wild` with no special case.
+export function gridCellMatch(cell: i32): i32 { return MATCHMASK[cell & W_CELL] & MATCHMAX }
+
+export function gridCellWild(cell: i32): i32 {
+  if (cell < 0 || cell > 255) { return 0 }
+  if ((PROP[cell & W_CELL] & 128) !== 0) { return 1 }
+  return 0
+}
+
+export function gridRun(slot: i32, col: i32, holding: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let d: i32 = DEPTH[(slot << 4) | col]
+  if (d <= 0) { return 0 }
+  let topw: i32 = PLANE[base | (col << COLSHIFT) | (d - 1)]
+  // A popping cell cannot be grabbed — it is already cleared, merely still bursting on screen.
+  if ((topw & P_POP) !== 0) { return 0 }
+  let top: i32 = topw & W_CELL
+  if (top === 0) { return 0 }
+  let acc: i32 = GRABMASK[top]
+  // HOLDING: the cell already in hand, or 0 for empty-handed.
+  //
+  // Without this the kit could only express "take the run at this column", and a game built on it
+  // could never accumulate one colour across SEVERAL columns before throwing — which in Magical
+  // Drop is not a flourish but the core technique, and the whole reason its CPU plans multi-column
+  // pickup orders at all. `packages/drop_game.tish` was refusing any grab while holding, so the
+  // port had silently lost the mechanic.
+  //
+  // Intersecting the masks reproduces `board.rs:bottom_run`'s two rules at once. Empty intersection
+  // is an illegal grab, exactly like `!grab_compatible(held_key, key)`. And when the bottom cell is
+  // a WILDCARD, the intersection narrows the run to the held colour rather than staying wild —
+  // which is that function's "a concrete colour wins over the wildcard, so a rainbow picked up
+  // first does not leave the hand permanently wild", falling out of the arithmetic instead of
+  // needing its own branch.
+  if (holding !== 0) {
+    acc = acc & GRABMASK[holding & W_CELL]
+    if (acc === 0) { return 0 }
+  }
+  let n: i32 = 1
+  let r: i32 = d - 2
+  while (r >= 0) {
+    let cw: i32 = PLANE[base | (col << COLSHIFT) | r]
+    let c: i32 = cw & W_CELL
+    if (c === 0 || (cw & P_POP) !== 0) { r = -1 } else {
+      let nx: i32 = acc & GRABMASK[c]
+      if (nx === 0) { r = -1 } else {
+        acc = nx
+        n = n + 1
+        r = r - 1
+      }
+    }
+  }
+  return (top << 8) | n
+}
+
+/// Copy a board into another slot: cells and depths only.
+///
+/// NOT the planes, and not the shadow. A search evaluates hundreds of hypothetical moves and each
+/// one starts from the live board — copying the marks and the fill worklist too would triple the
+/// cost for state the very next `gridClearMarks` discards. The Rust equivalent copies 232 bytes
+/// against the ~780 a whole-board clone would (`schlop/drop-gba/archive/crates/tish-gba-drop/src/game.rs:534-537`), and the
+/// reason is identical.
+export function gridCopyState(slot: i32, src: i32) {
+  let db: i32 = slot << SLOTSHIFT
+  let sb2: i32 = src << SLOTSHIFT
+  let sg: i32 = src << GSHIFT
+  let dg: i32 = slot << GSHIFT
+  let cols: i32 = GS[sg | G_COLS]
+  GS[dg | G_COLS] = cols
+  GS[dg | G_ROWS] = GS[sg | G_ROWS]
+  GS[dg | G_ANCHOR] = GS[sg | G_ANCHOR]
+  GS[dg | G_DIRTY] = 0
+  GS[dg | G_TOUCH] = 0
+  GS[dg | G_POPN] = 0
+  // Bounded by the board's OWN height, not the 32-row storage. A search copies the board once per
+  // candidate, so looping to GRID_ROWS_MAX on a 9-row board was 3.5x the work on the hottest path
+  // in the kit — it cost grid-demo half its frame rate before it was noticed.
+  let rows: i32 = GS[sg | G_ROWS]
+  // COLUMN BASES HOISTED, and the keep-mask with them. This loop is the single hottest thing in the
+  // kit — a search copies the board once per candidate — and it was costing 2,103 ticks for 63
+  // cells, 33 per cell, against the ~1.6 a module `i32[]` read plus write measures in
+  // `examples/bench-grid`. The arithmetic was the whole difference: `(c << COLSHIFT)` is invariant
+  // across the row loop and was being recomputed TWICE per cell, and `KEEP_ON_SIM` is a module
+  // scalar read through a capture cell on every iteration. Neither shows up when reading the code;
+  // both showed up the moment the phase was timed separately.
+  let keep: i32 = KEEP_ON_SIM
+  let c: i32 = 0
+  while (c < cols) {
+    let dc: i32 = db | (c << COLSHIFT)
+    let sc: i32 = sb2 | (c << COLSHIFT)
+    // THE WHOLE COLUMN, THEN ERASE WHAT THE LAST ONE LEFT. Two bounds, and both are load-bearing.
+    //
+    // Copying only `rows` was wrong once columns could overflow: the depth is copied verbatim, so
+    // the scratch board claimed twelve cells and held nine, three of them the previous candidate's.
+    // Copying only `sd` is wrong the other way — it leaves the previous candidate's cells standing
+    // ABOVE the new depth, which is invisible until something legitimately grows back into them.
+    // The reference has neither problem because it clones the whole array; this does the same job
+    // proportionally, touching `max(new, old)` rows instead of all 32.
+    let sd: i32 = DEPTH[(src << 4) | c]
+    let od: i32 = DEPTH[(slot << 4) | c]
+    let r: i32 = 0
+    let write: i32 = 0
+    while (r < sd) {
+      let w: i32 = PLANE[sc | r]
+      // POPPING cells do not cross: the board a search plans against is the one after the burst
+      // lands, so a mid-burst copy drops them and compacts — the same collapse `gridPopRemove`
+      // will perform on the live board when the window closes.
+      if ((w & P_POP) === 0) {
+        // The planes are dropped on the way across; only the cell, its class and its wild bit
+        // travel.
+        PLANE[dc | write] = w & keep
+        write = write + 1
+      }
+      r = r + 1
+    }
+    let e: i32 = write
+    let hi: i32 = sd
+    if (od > hi) { hi = od }
+    while (e < hi) {
+      PLANE[dc | e] = 0
+      e = e + 1
+    }
+    DEPTH[(slot << 4) | c] = write
+    c = c + 1
+  }
+}
+
+// ── matching ────────────────────────────────────────────────────────────────────────────────────
+
+/// Mark every cell in a vertical run of `minLen` or more of match-class `cls`, and everything
+/// 4-connected to it — then, if `needSeed` is 1, discard any run that no seed touched.
+///
+/// Returns the number of cells marked.
+///
+/// One pass, not two: detecting runs and flooding from them in separate passes would need a
+/// function call per run, and a call is 3-10 ticks against 0.46 for a read.
+/// Clear the mark plane and seed every qualifying class, in ONE call.
+///
+/// The exact composition a match-and-clear pass opens with: `gridClearMarks`, then `gridSeedRuns`
+/// once per class bit set in `classes`. Returns `(hitClass << 16) | found`, where `hitClass` is the
+/// single class bit of the LAST class that found anything — the value a sweep-and-thaw phase needs
+/// next, so the caller does not have to track it.
+///
+/// THE BODIES ARE COPIED IN, DELIBERATELY, and that is the whole point of this function. Calling
+/// the five originals from here would MOVE the cost, not remove it: every tish call on GBA is a
+/// boxed closure at ~150 ticks, and five of them is 750 of a 4,389-tick frame before any cell is
+/// read. Measured on the CPU's scratch board, a resolve link cost 2,750 ticks of which the calls
+/// were most; the originals stay exported because a game that wants one class or one phase should
+/// still be able to ask for exactly that.
+///
+/// Any edit here has to be made in `gridClearMarks`/`gridSeedRuns` too. `drop-gba's scripts/drop_conformance_tish.sh`
+/// is what catches a divergence — it runs both cores over the same 16 scenarios at both widths.
+/// `spec` packs the three small operands: `classes | (minLen << 8) | (needSeed << 16)`. An argument
+/// costs ~28 ticks on GBA — boxed into a `Value::Number`'s f64 at the call site, ToInt32'd back in
+/// the callee — against ~42 fixed for the call, so four arguments cost 154 ticks and two cost 98.
+export function gridSeedRunsAll(slot: i32, spec: i32): i32 {
+  let classes: i32 = spec & 255
+  let minLen: i32 = (spec >> 8) & 255
+  let needSeed: i32 = (spec >> 16) & 1
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+
+  // — gridClearMarks —
+  let cc: i32 = 0
+  while (cc < cols) {
+    let rr0: i32 = 0
+    let d0: i32 = DEPTH[(slot << 4) | cc]
+    while (rr0 < d0) {
+      let idx0: i32 = base | (cc << COLSHIFT) | rr0
+      PLANE[idx0] = PLANE[idx0] & KEEP_ON_UNMARK
+      rr0 = rr0 + 1
+    }
+    cc = cc + 1
+  }
+  GS[sb | G_TOUCH] = 0
+
+  // — gridSeedRuns, once per class —
+  let total: i32 = 0
+  let hitCls: i32 = 0
+  let k: i32 = 0
+  while (k < 4) {
+    let cls: i32 = 1 << k
+    if ((classes & cls) === 0) {
+      k = k + 1
+    } else {
+    // RE-READ PER CLASS, because `gridSpread` sets dirty bits and the four separate calls this
+    // replaces each read the mask fresh. Hoisting it above the loop is in fact equivalent — a
+    // column a spread newly dirties gains no SEED, and a run without one does not qualify — but
+    // that is a two-step argument resting on an invariant stated in a comment, and the read is one
+    // array access against a scan of the whole column.
+    let dirty: i32 = GS[sb | G_DIRTY]
+    let found: i32 = 0
+    let c: i32 = 0
+    while (c < cols) {
+      if (needSeed === 1 && (dirty & (1 << c)) === 0) {
+        c = c + 1
+      } else {
+      let d: i32 = DEPTH[(slot << 4) | c]
+      let r: i32 = 0
+      while (r < d) {
+        let w: i32 = PLANE[base | (c << COLSHIFT) | r]
+        // A POPPING cell is a blocker, not a member: it keeps its byte and class for the painter,
+        // but no run may start on it or extend through it — that separation is the sandwich.
+        if ((w & W_CELL) !== 0 && (w & P_POP) === 0 && ((w >> MATCHSHIFT) & cls) !== 0) {
+          let n: i32 = 0
+          let real: i32 = 0
+          let seeded: i32 = 0
+          let rr: i32 = r
+          while (rr < d) {
+            let ww: i32 = PLANE[base | (c << COLSHIFT) | rr]
+            if ((ww & W_CELL) === 0 || (ww & P_POP) !== 0 || ((ww >> MATCHSHIFT) & cls) === 0) { rr = d } else {
+              n = n + 1
+              if ((ww & P_WILD) === 0) { real = real + 1 }
+              if ((ww & P_SEED) !== 0) { seeded = 1 }
+              rr = rr + 1
+            }
+          }
+          let ok: i32 = 0
+          if (n >= minLen && real > 0) {
+            ok = 1
+            if (needSeed === 1 && seeded === 0) { ok = 0 }
+          }
+          if (ok === 1) { found = found + gridSpread(slot, c, r, cls) }
+          r = r + n
+        } else {
+          r = r + 1
+        }
+      }
+      c = c + 1
+      }
+    }
+    if (found > 0) {
+      GS[sb | G_TOUCH] = 1
+      hitCls = cls
+      total = total + found
+    }
+    k = k + 1
+    }
+  }
+  return (hitCls << 16) | total
+}
+
+export function gridSeedRuns(slot: i32, cls: i32, minLen: i32, needSeed: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  let found: i32 = 0
+
+  // DIRTY-COLUMN RESTRICTION, and it is exact rather than an approximation. When `needSeed` is 1 a
+  // run only counts if a seed touches it, and a seed only ever exists in a column marked dirty —
+  // `gridPush` sets both, and `gridCollapse` sets both on anything that moved. So a clean column
+  // cannot contain a qualifying run and scanning it is provably wasted. A drop dirties one column
+  // of eight, and this pass costs 363 ticks per candidate rather than the ~2,900 all eight would.
+  //
+  // (An earlier version of this comment claimed the restriction took the demo's AI "from 4,167
+  // ticks a frame to well inside budget". It did not: the AI was still at 4,463 with it in place.
+  // The 4,000 ticks were in `gridCopyState`, four lines of index arithmetic away. A saving is only
+  // worth the number you measured for THAT change, not the total that happened to move.)
+  //
+  // With `needSeed` 0 the caller is asking about the whole board, so everything is scanned.
+  let dirty: i32 = GS[sb | G_DIRTY]
+  let c: i32 = 0
+  while (c < cols) {
+    if (needSeed === 1 && (dirty & (1 << c)) === 0) {
+      c = c + 1
+    } else {
+    // THE COLUMN'S DEPTH, hoisted, and it bounds the INNER scan too. A column may stand deeper than
+    // the visible field — that overflow is the loss condition — and when only the outer loop was
+    // widened, `r` walked past `rows`, the inner scan ran zero times, `n` came back 0, and `r = r +
+    // n` advanced by nothing: a silent hang inside the CPU's search, with no panic and nothing in
+    // the log but the frame it stopped on. A bound and its break sentinel are one decision; they
+    // cannot be edited apart.
+    let d: i32 = DEPTH[(slot << 4) | c]
+    let r: i32 = 0
+    while (r < d) {
+      let idx: i32 = base | (c << COLSHIFT) | r
+      let w: i32 = PLANE[idx]
+      // A run is cells whose match mask carries `cls`; a wildcard joins one but cannot start one.
+      // A POPPING cell is a blocker: cleared but still occupying, it separates runs — the sandwich.
+      if ((w & W_CELL) !== 0 && (w & P_POP) === 0 && ((w >> MATCHSHIFT) & cls) !== 0) {
+        let n: i32 = 0
+        let real: i32 = 0
+        let seeded: i32 = 0
+        let rr: i32 = r
+        while (rr < d) {
+          let ww: i32 = PLANE[base | (c << COLSHIFT) | rr]
+          if ((ww & W_CELL) === 0 || (ww & P_POP) !== 0 || ((ww >> MATCHSHIFT) & cls) === 0) { rr = d } else {
+            n = n + 1
+            if ((ww & P_WILD) === 0) { real = real + 1 }
+            if ((ww & P_SEED) !== 0) { seeded = 1 }
+            rr = rr + 1
+          }
+        }
+        let ok: i32 = 0
+        if (n >= minLen && real > 0) {
+          ok = 1
+          if (needSeed === 1 && seeded === 0) { ok = 0 }
+        }
+        if (ok === 1) {
+          // ONE spread per run, from its first cell — not one per cell of it. The flood fill is
+          // 4-connected, so the first call already marks the rest of the run and everything joined
+          // to it; the other n-1 calls each paid a function call and a worklist setup only to find
+          // P_MARK already set and return 0. On a three-run that is three times the spreads for the
+          // same marks.
+          found = found + gridSpread(slot, c, r, cls)
+        }
+        r = r + n
+      } else {
+        r = r + 1
+      }
+    }
+    c = c + 1
+    }
+  }
+  if (found > 0) { GS[sb | G_TOUCH] = 1 }
+  return found
+}
+
+/// Which match classes have at least `minLen` cells present in dirty columns, plus every class a
+/// wildcard can join. A class outside this mask CANNOT form a qualifying run, so the caller can skip
+/// its whole scan.
+///
+/// This is `clear_pass`'s first phase (`schlop/drop-gba/archive/crates/tish-gba-drop/src/board.rs:344-364`) and it earns its
+/// place the same way: one cheap pass replaces up to four expensive ones, and in play most classes
+/// do not qualify.
+export function gridHistogram(slot: i32, minLen: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  let dirty: i32 = GS[sb | G_DIRTY]
+  // Eight counters packed four bits each — a class with 15+ cells saturates, which is fine because
+  // the test is only "at least minLen".
+  let lo: i32 = 0
+  let wild: i32 = 0
+  let c: i32 = 0
+  while (c < cols) {
+    if ((dirty & (1 << c)) === 0) {
+      c = c + 1
+    } else {
+      let r: i32 = 0
+      while (r < DEPTH[(slot << 4) | c]) {
+        let w: i32 = PLANE[base | (c << COLSHIFT) | r]
+        if ((w & W_CELL) !== 0) {
+          let m: i32 = (w >> MATCHSHIFT) & MATCHMAX
+          if ((w & P_WILD) !== 0) {
+            wild = wild | m
+          } else {
+            let k: i32 = 0
+            while (k < 4) {
+              if ((m & (1 << k)) !== 0) {
+                let sh: i32 = k << 2
+                if (((lo >> sh) & 15) < 15) { lo = lo + (1 << sh) }
+              }
+              k = k + 1
+            }
+          }
+        }
+        r = r + 1
+      }
+      c = c + 1
+    }
+  }
+  let out: i32 = 0
+  let k2: i32 = 0
+  while (k2 < 4) {
+    if (((lo >> (k2 << 2)) & 15) >= minLen) { out = out | (1 << k2) }
+    k2 = k2 + 1
+  }
+  // A wildcard can complete a run it could not start, so any class a wild joins stays a candidate.
+  return out | wild
+}
+
+/// 4-connected flood fill of match-class `cls` from one cell, marking as it goes. Returns the count
+/// of newly marked cells.
+///
+/// The worklist is the module-level `STACK`, never a local. As a local in the Rust this was 1.8 KB
+/// of per-call zeroing and a nine-frame spike (`schlop/drop-gba/archive/crates/tish-gba-drop/src/board.rs:79-84`); in tish a
+/// local array would be rebuilt on every call, which is worse.
+export function gridSpread(slot: i32, col: i32, row: i32, cls: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  let sp: i32 = 0
+  STACK[0] = (col << COLSHIFT) | row
+  sp = 1
+  let n: i32 = 0
+  while (sp > 0) {
+    sp = sp - 1
+    let local: i32 = STACK[sp]
+    let cc: i32 = local >> COLSHIFT
+    let rr: i32 = local & 31
+    let idx: i32 = base | local
+    let w: i32 = PLANE[idx]
+    if ((w & P_MARK) === 0 && (w & P_POP) === 0 && (w & W_CELL) !== 0 && ((w >> MATCHSHIFT) & cls) !== 0) {
+      PLANE[idx] = w | P_MARK
+      n = n + 1
+      GS[sb | G_DIRTY] = GS[sb | G_DIRTY] | (1 << cc)
+      // BOUNDED BY THE COLUMN, NOT THE FIELD. A column may stand deeper than the visible height —
+      // that overflow IS the loss condition — and a flood fill that stops at the field height
+      // walks off the top of a run instead of through it. The cell test above rejects empties
+      // anyway, so DEPTH is the tighter and the correct bound.
+      if (rr + 1 < DEPTH[(slot << 4) | cc]) {
+        STACK[sp] = (cc << COLSHIFT) | (rr + 1)
+        sp = sp + 1
+      }
+      if (rr > 0) {
+        STACK[sp] = (cc << COLSHIFT) | (rr - 1)
+        sp = sp + 1
+      }
+      if (cc + 1 < cols) {
+        STACK[sp] = ((cc + 1) << COLSHIFT) | rr
+        sp = sp + 1
+      }
+      if (cc > 0) {
+        STACK[sp] = ((cc - 1) << COLSHIFT) | rr
+        sp = sp + 1
+      }
+    }
+  }
+  return n
+}
+
+/// Mark every cell on the board whose match mask intersects `classMask`. This is how a game
+/// implements a bomb, a boardwide colour sweep or a Magical Drop Special.
+/// Thaw every `CP_THAW` cell on the board, and clear the ones touching the cleared set.
+///
+/// `become` is what they turn into for the class being resolved; `becomeWild` is what they turn into
+/// instead when the marked set contains a wildcard — Magical Drop turns thawing ice into Rainbows in
+/// that case rather than into plain colours. Returns how many joined the cleared set.
+///
+/// THE ASYMMETRY IS THE RULE, and it is the part worth reading twice: the THAW is board-wide and the
+/// CLEARING is not. A clear in column 1 turns the ice in column 6 into a coloured balloon, but does
+/// not remove it. Implementing "thaw and clear the ones that thawed" would be a plausible reading
+/// and a different game.
+///
+/// Adjacency is 4-connected and bounded by each column's own depth, matching `adjacent_marked`: a
+/// neighbour column shorter than this row simply has nothing there.
+///
+/// `P_JOIN` is what the plane bit was reserved for — the set is recorded BEFORE any cell is
+/// rewritten, because the rewrite changes what counts as adjacent.
+export function gridThaw(slot: i32, cls: i32, become: i32, becomeWild: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let touched: i32 = 0
+  let wild: i32 = 0
+
+  // Pass 1: who is adjacent to a mark, and did the marked set contain a wildcard?
+  let c: i32 = 0
+  while (c < cols) {
+    let d: i32 = DEPTH[(slot << 4) | c]
+    let r: i32 = 0
+    while (r < d) {
+      let idx: i32 = base | (c << COLSHIFT) | r
+      let w: i32 = PLANE[idx]
+      if ((w & P_MARK) !== 0 && (w & P_WILD) !== 0) { wild = 1 }
+      if ((PROP[w & W_CELL] & CP_THAW) !== 0) {
+        // Neighbour offsets are hoisted OUT of the subscripts. `grid.tish`'s rule is that an index
+        // is shifts and ORs only, and grid-demo's verify enforces it with a regex over this file —
+        // which caught `PLANE[base | (c << COLSHIFT) | (r + 1)]` here. The pack was correct (`|`),
+        // the `+` was a genuine neighbour offset rather than a mis-spelled pack, and the check
+        // cannot tell those apart. Hoisting satisfies both readings and costs nothing.
+        let ru: i32 = r - 1
+        let rd: i32 = r + 1
+        let cl: i32 = c - 1
+        let cr: i32 = c + 1
+        let adj: i32 = 0
+        if (r > 0 && (PLANE[base | (c << COLSHIFT) | ru] & P_MARK) !== 0) { adj = 1 }
+        if (rd < d && (PLANE[base | (c << COLSHIFT) | rd] & P_MARK) !== 0) { adj = 1 }
+        if (c > 0 && r < DEPTH[(slot << 4) | cl]
+            && (PLANE[base | (cl << COLSHIFT) | r] & P_MARK) !== 0) { adj = 1 }
+        if (cr < cols && r < DEPTH[(slot << 4) | cr]
+            && (PLANE[base | (cr << COLSHIFT) | r] & P_MARK) !== 0) { adj = 1 }
+        if (adj === 1) {
+          PLANE[idx] = w | P_JOIN
+          touched = 1
+        }
+      }
+      r = r + 1
+    }
+    c = c + 1
+  }
+  if (touched === 0) { return 0 }
+
+  let to: i32 = become
+  if (wild === 1) { to = becomeWild }
+  let n: i32 = 0
+
+  // Pass 2: rewrite EVERY thawable cell, then mark the ones that were recorded as joining. The
+  // cached match mask and wild bit have to be rebuilt from the new byte, the same way gridSet does.
+  let c2: i32 = 0
+  while (c2 < cols) {
+    let d2: i32 = DEPTH[(slot << 4) | c2]
+    let r2: i32 = 0
+    while (r2 < d2) {
+      let idx2: i32 = base | (c2 << COLSHIFT) | r2
+      let w2: i32 = PLANE[idx2]
+      if ((PROP[w2 & W_CELL] & CP_THAW) !== 0) {
+        let join: i32 = w2 & P_JOIN
+        // WHAT THIS CELL BECOMES, which is not always what the caller asked for: a cell may carry
+        // its own thaw target. Clear ice takes the colour that popped it — the caller's `to` — and
+        // colour ice keeps the colour it was always going to be. The wildcard case still wins over
+        // both, because a wildcard in the set turns every thawing cell into a wildcard.
+        let own2: i32 = THAWTO[w2 & W_CELL]
+        let to2: i32 = to
+        if (own2 !== 0 && wild === 0) { to2 = own2 }
+        let nw: i32 = (w2 & (P_MARK | P_SEED | P_PASS)) | (to2 & W_CELL)
+        nw = nw | ((MATCHMASK[to2 & W_CELL] & MATCHMAX) << MATCHSHIFT)
+        if ((PROP[to2 & W_CELL] & 128) !== 0) { nw = nw | P_WILD }
+        if (join !== 0) {
+          nw = nw | P_MARK
+          n = n + 1
+        }
+        PLANE[idx2] = nw
+        GS[sb | G_DIRTY] = GS[sb | G_DIRTY] | (1 << c2)
+        GS[sb | G_VERSION] = GS[sb | G_VERSION] + 1
+      }
+      r2 = r2 + 1
+    }
+    c2 = c2 + 1
+  }
+  return n
+}
+
+/// If the marked set contains a cell that ESCALATES class `cls`, mark every cell of that class.
+///
+/// Returns how many extra cells were marked, or 0 if nothing escalated. Call it right after seeding
+/// the runs for `cls` and before collapsing — the sweep has to happen while the marks are still the
+/// set that is about to be removed.
+///
+/// A cell escalates when it carries `CP_ESCALATE` (a Special) or the wild bit (a Rainbow), AND its
+/// own match mask includes `cls`. That last condition is what keeps a red Special from sweeping
+/// green two iterations later: marks accumulate across a caller's per-class loop, so "is anything
+/// escalating marked" alone would fire for every class after the first.
+///
+/// WHERE THIS DIFFERS FROM THE REFERENCE, stated because it is a design difference and not an
+/// oversight. `board.rs:clear_pass` finds ONE run per pass, computes that run's hit colour, and
+/// loops to fixpoint; the sweep is unambiguously "the colour of the run the Special was in". This
+/// kit resolves class by class and collapses once, so the equivalent is "the class being resolved".
+/// The two agree whenever a Special sits in a run of its own colour, which is every Special. They
+/// can differ for a Rainbow, whose mask matches every class and which may legitimately be part of
+/// runs of two different colours in one resolve.
+/// Escalate, thaw, fire lines, read the props and CONVERT THE MARKED SET TO POPPING — the back
+/// half of a match-and-clear pass, in ONE call. Returns `(props << 16) | (anyThawed << 12) | popped`.
+///
+/// NOTHING FALLS HERE. Magical Drop does not collapse on the clear: the matched balloons burst in
+/// place for the whole clear window and only vanish when it closes — `gridPopRemove` is that
+/// close, and it is where the collapse (and the cascade seeding) lives. The sandwich chain is this
+/// gap: the popping cell keeps two separated groups apart until it disappears, and only THEN do
+/// they connect and fire the next link.
+///
+/// The props scan is folded INTO the collapse loop rather than run as its own pass: both walk the
+/// dirty columns and both are interested in exactly the marked cells, and collapse visits every one
+/// of them on its way to removing it.
+///
+/// THE BODIES ARE COPIED IN, for the same reason as `gridSeedRunsAll` and with the same obligation:
+/// an edit to `gridEscalate`, `gridThaw`, `gridFireLines`, `gridScanMarkedProps` or `gridCollapse`
+/// has to be made here too. Five boxed calls is ~750 ticks of a 4,389-tick frame spent on nothing
+/// but calling, and the CPU's search pays it once per link of every candidate that might clear.
+///
+/// The two calls that survive are the ones that do not run on an ordinary board: `gridMarkByMask`
+/// fires only when the marked set contains something that escalates, and `gridMarkOne` only along
+/// an arrow's line. Inlining those would duplicate a flood fill to save a call that usually is not
+/// made.
+/// `spec` packs the three small operands: `cls | (become << 8) | (becomeWild << 16)` — the class
+/// that fired, and the cell bytes a thawing cell becomes with and without a wildcard in the set.
+/// Two arguments rather than four; see `gridSeedRunsAll` for the arithmetic.
+export function gridSweepToPop(slot: i32, spec: i32): i32 {
+  let cls: i32 = spec & 255
+  let become: i32 = (spec >> 8) & 255
+  let becomeWild: i32 = (spec >> 16) & 255
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+
+  // — gridEscalate —
+  let fire: i32 = 0
+  let ce: i32 = 0
+  while (ce < cols) {
+    let de: i32 = DEPTH[(slot << 4) | ce]
+    let re: i32 = 0
+    while (re < de) {
+      let we: i32 = PLANE[base | (ce << COLSHIFT) | re]
+      if ((we & P_MARK) !== 0) {
+        let own: i32 = ESCMASK[we & W_CELL]
+        if ((we & P_WILD) !== 0) { fire = fire | cls }
+        if ((PROP[we & W_CELL] & CP_ESCALATE) !== 0) { fire = fire | cls }
+        if (own !== 0) { fire = fire | own }
+      }
+      re = re + 1
+    }
+    ce = ce + 1
+  }
+  if (fire !== 0) { gridMarkByMask(slot, fire) }
+
+  // — gridThaw pass 1: who is adjacent to a mark, and was there a wildcard in the set? —
+  let touched: i32 = 0
+  let wild: i32 = 0
+  let c: i32 = 0
+  while (c < cols) {
+    let d: i32 = DEPTH[(slot << 4) | c]
+    let r: i32 = 0
+    while (r < d) {
+      let idx: i32 = base | (c << COLSHIFT) | r
+      let w: i32 = PLANE[idx]
+      if ((w & P_MARK) !== 0 && (w & P_WILD) !== 0) { wild = 1 }
+      if ((PROP[w & W_CELL] & CP_THAW) !== 0) {
+        let ru: i32 = r - 1
+        let rd: i32 = r + 1
+        let cl: i32 = c - 1
+        let cr: i32 = c + 1
+        let adj: i32 = 0
+        if (r > 0 && (PLANE[base | (c << COLSHIFT) | ru] & P_MARK) !== 0) { adj = 1 }
+        if (rd < d && (PLANE[base | (c << COLSHIFT) | rd] & P_MARK) !== 0) { adj = 1 }
+        if (c > 0 && r < DEPTH[(slot << 4) | cl]
+            && (PLANE[base | (cl << COLSHIFT) | r] & P_MARK) !== 0) { adj = 1 }
+        if (cr < cols && r < DEPTH[(slot << 4) | cr]
+            && (PLANE[base | (cr << COLSHIFT) | r] & P_MARK) !== 0) { adj = 1 }
+        if (adj === 1) {
+          PLANE[idx] = w | P_JOIN
+          touched = 1
+        }
+      }
+      r = r + 1
+    }
+    c = c + 1
+  }
+
+  // — gridThaw pass 2 —
+  let thawed: i32 = 0
+  if (touched === 1) {
+    let to: i32 = become
+    if (wild === 1) { to = becomeWild }
+    let c2: i32 = 0
+    while (c2 < cols) {
+      let d2: i32 = DEPTH[(slot << 4) | c2]
+      let r2: i32 = 0
+      while (r2 < d2) {
+        let idx2: i32 = base | (c2 << COLSHIFT) | r2
+        let w2: i32 = PLANE[idx2]
+        if ((PROP[w2 & W_CELL] & CP_THAW) !== 0) {
+          let join: i32 = w2 & P_JOIN
+          let own2: i32 = THAWTO[w2 & W_CELL]
+          let to2: i32 = to
+          if (own2 !== 0 && wild === 0) { to2 = own2 }
+          let nw: i32 = (w2 & (P_MARK | P_SEED | P_PASS)) | (to2 & W_CELL)
+          nw = nw | ((MATCHMASK[to2 & W_CELL] & MATCHMAX) << MATCHSHIFT)
+          if ((PROP[to2 & W_CELL] & 128) !== 0) { nw = nw | P_WILD }
+          if (join !== 0) {
+            nw = nw | P_MARK
+            thawed = thawed + 1
+          }
+          PLANE[idx2] = nw
+          GS[sb | G_DIRTY] = GS[sb | G_DIRTY] | (1 << c2)
+          GS[sb | G_VERSION] = GS[sb | G_VERSION] + 1
+        }
+        r2 = r2 + 1
+      }
+      c2 = c2 + 1
+    }
+  }
+
+  // — gridFireLines —
+  let shots: i32 = 0
+  let cf: i32 = 0
+  while (cf < cols) {
+    let df: i32 = DEPTH[(slot << 4) | cf]
+    let rf: i32 = 0
+    while (rf < df) {
+      let wf: i32 = PLANE[base | (cf << COLSHIFT) | rf]
+      if ((wf & P_MARK) !== 0 && LINEDIR[wf & W_CELL] !== 0) {
+        if (shots < 32) {
+          STACK[shots] = (cf << COLSHIFT) | rf
+          shots = shots + 1
+        }
+      }
+      rf = rf + 1
+    }
+    cf = cf + 1
+  }
+  let i: i32 = 0
+  while (i < shots) {
+    let at: i32 = STACK[i]
+    let sc: i32 = at >> COLSHIFT
+    let sr: i32 = at & 31
+    let dirs: i32 = LINEDIR[PLANE[base | at] & W_CELL]
+    if ((dirs & 1) !== 0) {
+      let r1: i32 = 0
+      while (r1 < sr) { gridMarkOne(slot, sc, r1); r1 = r1 + 1 }
+    }
+    if ((dirs & 2) !== 0) {
+      let r2b: i32 = sr + 1
+      while (r2b < DEPTH[(slot << 4) | sc]) { gridMarkOne(slot, sc, r2b); r2b = r2b + 1 }
+    }
+    if ((dirs & 4) !== 0) {
+      let c1: i32 = 0
+      while (c1 < sc) { gridMarkOne(slot, c1, sr); c1 = c1 + 1 }
+    }
+    if ((dirs & 8) !== 0) {
+      let c2b: i32 = sc + 1
+      while (c2b < cols) { gridMarkOne(slot, c2b, sr); c2b = c2b + 1 }
+    }
+    i = i + 1
+  }
+
+  // — gridScanMarkedProps and mark→pop conversion, over the same dirty columns. The cell stays
+  // where it is with its byte intact (the painter keeps drawing the balloon under the burst
+  // overlay); P_POP is what makes it inert. `POPPED` records live coordinates — nothing moves
+  // until `gridPopRemove`, so they stay valid for the whole window.
+  let acc: i32 = 0
+  let removed: i32 = 0
+  let popn: i32 = GS[sb | G_POPN]
+  let dirty: i32 = GS[sb | G_DIRTY]
+  let cg: i32 = 0
+  while (cg < cols) {
+    if ((dirty & (1 << cg)) === 0) {
+      cg = cg + 1
+    } else {
+    let rg: i32 = 0
+    while (rg < DEPTH[(slot << 4) | cg]) {
+      let idx: i32 = base | (cg << COLSHIFT) | rg
+      let w: i32 = PLANE[idx]
+      if ((w & W_CELL) !== 0 && (w & P_MARK) !== 0) {
+        acc = acc | PROP[w & W_CELL]
+        removed = removed + 1
+        if (popn < 32) {
+          POPPED[(slot << 5) | popn] = (cg << 16) | (rg << 8) | (w & W_CELL)
+          popn = popn + 1
+        }
+        PLANE[idx] = (w & KEEP_ON_UNMARK) | P_POP
+      }
+      rg = rg + 1
+    }
+    cg = cg + 1
+    }
+  }
+  GS[sb | G_POPN] = popn
+  if (removed > 0) { GS[sb | G_VERSION] = GS[sb | G_VERSION] + 1 }
+  // A FLAG, not the count. `gridThaw`'s return can exceed the four bits there are room for here,
+  // and every caller only ever asked whether it was above zero.
+  let iced: i32 = 0
+  if (thawed > 0) { iced = 1 }
+  return (acc << 16) | (iced << 12) | (removed & 4095)
+}
+
+/// Convert the CURRENT marked set to popping, with no escalate/thaw/arrow pass — the tail of
+/// `gridSweepToPop` alone, for a caller that built its own marks (a Number Balloon detonation).
+/// The cells burst in place like any clear and leave with everything else at `gridPopRemove`.
+/// Walks every column: detonation marks are not confined to the dirty set. Returns cells popped.
+export function gridMarkedToPop(slot: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let popn: i32 = GS[sb | G_POPN]
+  let n: i32 = 0
+  let c: i32 = 0
+  while (c < cols) {
+    let cb: i32 = base | (c << COLSHIFT)
+    let d: i32 = DEPTH[(slot << 4) | c]
+    let r: i32 = 0
+    while (r < d) {
+      let w: i32 = PLANE[cb | r]
+      if ((w & W_CELL) !== 0 && (w & P_MARK) !== 0) {
+        n = n + 1
+        if (popn < 32) {
+          POPPED[(slot << 5) | popn] = (c << 16) | (r << 8) | (w & W_CELL)
+          popn = popn + 1
+        }
+        PLANE[cb | r] = (w & KEEP_ON_UNMARK) | P_POP
+      }
+      r = r + 1
+    }
+    c = c + 1
+  }
+  GS[sb | G_POPN] = popn
+  if (n > 0) { GS[sb | G_VERSION] = GS[sb | G_VERSION] + 1 }
+  return n
+}
+
+/// The clear window closed: every POPPING cell disappears and the gaps close toward the anchor.
+/// Returns the number removed.
+///
+/// This is the second half of what `gridSweepToPop` starts, and the collapse rules are
+/// `gridCollapse`'s exactly: a survivor that MOVES inherits a seed, and its column goes dirty —
+/// that pair is what lets the caller re-run the match pass right here and find the sandwich link
+/// the vanished cells just connected. Walks every column, not the dirty set: a window spans many
+/// ops and the dirty set has been cleared and rebuilt several times since the cells started
+/// popping. Also forgets `POPPED` — the burst those coordinates described is over.
+///
+/// BUMPS `G_VERSION` when anything was removed, as every cell-byte writer must.
+export function gridPopRemove(slot: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let removed: i32 = 0
+  let c: i32 = 0
+  while (c < cols) {
+    let cb: i32 = base | (c << COLSHIFT)
+    let d: i32 = DEPTH[(slot << 4) | c]
+    let write: i32 = 0
+    let r: i32 = 0
+    while (r < d) {
+      let w: i32 = PLANE[cb | r]
+      if ((w & W_CELL) === 0) {
+        r = r + 1
+      } else {
+        if ((w & P_POP) !== 0) {
+          removed = removed + 1
+          PLANE[cb | r] = 0
+        } else {
+          if (write !== r) {
+            PLANE[cb | write] = w | P_SEED
+            PLANE[cb | r] = 0
+            GS[sb | G_DIRTY] = GS[sb | G_DIRTY] | (1 << c)
+          }
+          write = write + 1
+        }
+        r = r + 1
+      }
+    }
+    DEPTH[(slot << 4) | c] = write
+    c = c + 1
+  }
+  GS[sb | G_POPN] = 0
+  if (removed > 0) { GS[sb | G_VERSION] = GS[sb | G_VERSION] + 1 }
+  return removed
+}
+
+export function gridEscalate(slot: i32, cls: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  // A MASK, not a flag. Most escalating cells sweep the class they matched into, so the mask is
+  // just `cls` — but a cell may register an ESCMASK of its own and sweep something else entirely.
+  // That is the whole difference between a Rainbow and a Burst: both join a run of any colour, and
+  // the Rainbow detonates the colour it joined while the Burst detonates the one it carries.
+  let fire: i32 = 0
+  let c: i32 = 0
+  while (c < cols) {
+    let r: i32 = 0
+    while (r < DEPTH[(slot << 4) | c]) {
+      let w: i32 = PLANE[base | (c << COLSHIFT) | r]
+      // ANY marked escalating cell, whatever class it belongs to. `board.rs:439-459` sets one
+      // `sweep` flag from the whole marked set and then sweeps the single hit colour — it never
+      // asks whether the Special that triggered it was that colour. Testing the class here instead
+      // was correct only while the caller escalated once per class, which it no longer does.
+      if ((w & P_MARK) !== 0) {
+        let own: i32 = ESCMASK[w & W_CELL]
+        if ((w & P_WILD) !== 0) { fire = fire | cls }
+        if ((PROP[w & W_CELL] & CP_ESCALATE) !== 0) { fire = fire | cls }
+        if (own !== 0) { fire = fire | own }
+      }
+      r = r + 1
+    }
+    c = c + 1
+  }
+  if (fire === 0) { return 0 }
+  return gridMarkByMask(slot, fire)
+}
+
+export function gridMarkByMask(slot: i32, classMask: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  let n: i32 = 0
+  let c: i32 = 0
+  while (c < cols) {
+    let r: i32 = 0
+    while (r < DEPTH[(slot << 4) | c]) {
+      let idx: i32 = base | (c << COLSHIFT) | r
+      let w: i32 = PLANE[idx]
+      if ((w & W_CELL) !== 0 && (w & P_MARK) === 0 && (w & P_POP) === 0
+          && ((w >> MATCHSHIFT) & classMask) !== 0) {
+        PLANE[idx] = w | P_MARK
+        n = n + 1
+        GS[sb | G_DIRTY] = GS[sb | G_DIRTY] | (1 << c)
+      }
+      r = r + 1
+    }
+    c = c + 1
+  }
+  return n
+}
+
+/// The union of the match masks of every marked cell — "what did this clear actually contain".
+/// One pass instead of the caller running one per question.
+export function gridScanMarked(slot: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  let acc: i32 = 0
+  // Same dirty argument as gridSeedRuns, and just as exact: a mark only exists where gridSpread put
+  // one, and gridSpread sets the column's dirty bit on every cell it marks.
+  let dirty: i32 = GS[sb | G_DIRTY]
+  let c: i32 = 0
+  while (c < cols) {
+    if ((dirty & (1 << c)) === 0) {
+      c = c + 1
+    } else {
+    let r: i32 = 0
+    while (r < DEPTH[(slot << 4) | c]) {
+      let w: i32 = PLANE[base | (c << COLSHIFT) | r]
+      if ((w & P_MARK) !== 0) { acc = acc | ((w >> MATCHSHIFT) & MATCHMAX) }
+      r = r + 1
+    }
+    c = c + 1
+    }
+  }
+  return acc
+}
+
+/// OR together the PROPS of every marked cell. The companion to `gridScanMarked`, which unions the
+/// match masks — that answers "which classes were in the set", this answers "which kinds of cell".
+///
+/// A ruleset that reports which of ITS RULES fired needs this one, and the distinction is not
+/// academic: the port reported the union of colour masks as its rule bitfield, so a clear of three
+/// green balloons announced itself as rule 4 rather than rule "a normal run cleared". The two
+/// fields are the same width and both plausible, which is exactly why the mix-up survived — the
+/// conformance trace caught it on a bubble pop.
+export function gridScanMarkedProps(slot: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  let acc: i32 = 0
+  let dirty: i32 = GS[sb | G_DIRTY]
+  let c: i32 = 0
+  while (c < cols) {
+    if ((dirty & (1 << c)) === 0) {
+      c = c + 1
+    } else {
+    let r: i32 = 0
+    while (r < DEPTH[(slot << 4) | c]) {
+      let w: i32 = PLANE[base | (c << COLSHIFT) | r]
+      if ((w & P_MARK) !== 0) { acc = acc | PROP[w & W_CELL] }
+      r = r + 1
+    }
+    c = c + 1
+    }
+  }
+  return acc
+}
+
+/// Every MARKED cell that fires a line takes everything along it. Returns how many extra it marked.
+///
+/// Call between marking and collapsing, so the line's victims go with the set that triggered it.
+/// A cell carrying `CP_INDESTRUCTIBLE` survives being fired over — the arrow passes it by, which is
+/// what makes an indestructible block an obstacle rather than a target.
+///
+/// The shots are collected BEFORE any of them fire. Firing as they are found would let one arrow's
+/// victims include another arrow that had not gone yet, and whether that chained would depend on
+/// scan order rather than on the rules.
+export function gridFireLines(slot: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let n: i32 = 0
+  let shots: i32 = 0
+  let c: i32 = 0
+  while (c < cols) {
+    let d: i32 = DEPTH[(slot << 4) | c]
+    let r: i32 = 0
+    while (r < d) {
+      let w: i32 = PLANE[base | (c << COLSHIFT) | r]
+      if ((w & P_MARK) !== 0 && LINEDIR[w & W_CELL] !== 0) {
+        if (shots < 32) {
+          STACK[shots] = (c << COLSHIFT) | r
+          shots = shots + 1
+        }
+      }
+      r = r + 1
+    }
+    c = c + 1
+  }
+  let i: i32 = 0
+  while (i < shots) {
+    let at: i32 = STACK[i]
+    let sc: i32 = at >> COLSHIFT
+    let sr: i32 = at & 31
+    let dirs: i32 = LINEDIR[PLANE[base | at] & W_CELL]
+    if ((dirs & 1) !== 0) {
+      let r1: i32 = 0
+      while (r1 < sr) {
+        n = n + gridMarkOne(slot, sc, r1)
+        r1 = r1 + 1
+      }
+    }
+    if ((dirs & 2) !== 0) {
+      let r2: i32 = sr + 1
+      while (r2 < DEPTH[(slot << 4) | sc]) {
+        n = n + gridMarkOne(slot, sc, r2)
+        r2 = r2 + 1
+      }
+    }
+    if ((dirs & 4) !== 0) {
+      let c1: i32 = 0
+      while (c1 < sc) {
+        n = n + gridMarkOne(slot, c1, sr)
+        c1 = c1 + 1
+      }
+    }
+    if ((dirs & 8) !== 0) {
+      let c2: i32 = sc + 1
+      while (c2 < cols) {
+        n = n + gridMarkOne(slot, c2, sr)
+        c2 = c2 + 1
+      }
+    }
+    i = i + 1
+  }
+  return n
+}
+
+/// Mark one cell if it exists and can be destroyed. Returns 1 if this call marked it.
+export function gridMarkOne(slot: i32, col: i32, row: i32): i32 {
+  let sb: i32 = slot << GSHIFT
+  if (col < 0 || col >= GS[sb | G_COLS]) { return 0 }
+  if (row < 0 || row >= DEPTH[(slot << 4) | col]) { return 0 }
+  let idx: i32 = (slot << SLOTSHIFT) | (col << COLSHIFT) | row
+  let w: i32 = PLANE[idx]
+  if ((w & W_CELL) === 0) { return 0 }
+  if ((w & P_MARK) !== 0) { return 0 }
+  // Already cleared, still bursting — a detonation or line cannot clear it twice.
+  if ((w & P_POP) !== 0) { return 0 }
+  if ((PROP[w & W_CELL] & CP_INDESTRUCTIBLE) !== 0) { return 0 }
+  PLANE[idx] = w | P_MARK
+  GS[sb | G_DIRTY] = GS[sb | G_DIRTY] | (1 << col)
+  return 1
+}
+
+/// Advance every counting cell by one, and detonate the ones that reach the end.
+///
+/// A counting cell is one carrying `CP_COUNTER`; ticking it means the cell BYTE below it, so a game
+/// registers its counter values as a descending run of bytes exactly as it would lay them out
+/// anyway. The end of the run carries `CP_FUSE` instead and stops counting.
+///
+/// Returns `(marked << 8) | ticked`. A fuse marks ITSELF and its four neighbours, skipping
+/// indestructible ones — so two counters side by side do not take each other out, they just keep
+/// counting, which is what makes them an obstacle rather than a chain reaction.
+///
+/// ONE TICK PER CLEAR EVENT, not per cascade link — that is the caller's job, and it is the
+/// difference between a block that rewards clearing and one a long chain runs down for free.
+export function gridTickCounters(slot: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let ticked: i32 = 0
+  let c: i32 = 0
+  while (c < cols) {
+    let d: i32 = DEPTH[(slot << 4) | c]
+    let r: i32 = 0
+    while (r < d) {
+      let idx: i32 = base | (c << COLSHIFT) | r
+      let w: i32 = PLANE[idx]
+      let cb: i32 = w & W_CELL
+      if ((PROP[cb] & CP_COUNTER) !== 0) {
+        let nb: i32 = cb - 1
+        let nw: i32 = (w & (P_MARK | P_SEED | P_PASS | P_JOIN)) | nb
+        nw = nw | ((MATCHMASK[nb] & MATCHMAX) << MATCHSHIFT)
+        if ((PROP[nb] & 128) !== 0) { nw = nw | P_WILD }
+        PLANE[idx] = nw
+        ticked = ticked + 1
+        GS[sb | G_VERSION] = GS[sb | G_VERSION] + 1
+        GS[sb | G_DIRTY] = GS[sb | G_DIRTY] | (1 << c)
+      }
+      r = r + 1
+    }
+    c = c + 1
+  }
+  if (ticked === 0) { return 0 }
+
+  let marked: i32 = 0
+  let c2: i32 = 0
+  while (c2 < cols) {
+    let d2: i32 = DEPTH[(slot << 4) | c2]
+    let r2: i32 = 0
+    while (r2 < d2) {
+      let w2: i32 = PLANE[base | (c2 << COLSHIFT) | r2]
+      if ((PROP[w2 & W_CELL] & CP_FUSE) !== 0) {
+        // The block itself goes — its counter is spent — and it is marked directly rather than
+        // through `gridMarkOne`, which would refuse it for being indestructible.
+        let idx2: i32 = base | (c2 << COLSHIFT) | r2
+        if ((PLANE[idx2] & P_MARK) === 0) {
+          PLANE[idx2] = PLANE[idx2] | P_MARK
+          GS[sb | G_DIRTY] = GS[sb | G_DIRTY] | (1 << c2)
+          marked = marked + 1
+        }
+        marked = marked + gridMarkOne(slot, c2, r2 - 1)
+        marked = marked + gridMarkOne(slot, c2, r2 + 1)
+        marked = marked + gridMarkOne(slot, c2 - 1, r2)
+        marked = marked + gridMarkOne(slot, c2 + 1, r2)
+      }
+      r2 = r2 + 1
+    }
+    c2 = c2 + 1
+  }
+  return (marked << 8) | ticked
+}
+
+/// BUMPS `G_VERSION` — as must every function that changes a cell BYTE, or `gridPaint` will skip
+/// the frame that should have drawn it. Plane bits (mark/seed/pass/join) do not count: `GID` is
+/// indexed by the byte alone, so the painter cannot see them.
+///
+/// Remove every marked cell and close the gaps toward the anchor. Returns the number removed.
+///
+/// A survivor that MOVES inherits a seed. That single line is what makes a cascade a cascade: the
+/// next pass sees the moved cell as player-caused, so the chain continues, while a board that
+/// merely contains a run does nothing.
+export function gridCollapse(slot: i32): i32 {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  let removed: i32 = 0
+  // CONTINUES the list rather than starting it — the reset belongs to `gridPopClear`, at the top of
+  // the caller's resolve loop. A cascade is ONE burst to the player, and resetting per pass reported
+  // only the final link: a four-link chain drew three pops instead of a screenful. Capped at 32
+  // either way, so a runaway loop cannot walk off POPPED.
+  let popn: i32 = GS[sb | G_POPN]
+
+  let dirty: i32 = GS[sb | G_DIRTY]
+  let c: i32 = 0
+  while (c < cols) {
+    if ((dirty & (1 << c)) === 0) {
+      c = c + 1
+    } else {
+    let write: i32 = 0
+    let r: i32 = 0
+    while (r < DEPTH[(slot << 4) | c]) {
+      let idx: i32 = base | (c << COLSHIFT) | r
+      let w: i32 = PLANE[idx]
+      if ((w & W_CELL) === 0) {
+        r = r + 1
+      } else {
+        if ((w & P_MARK) !== 0) {
+          removed = removed + 1
+          if (popn < 32) {
+            POPPED[(slot << 5) | popn] = (c << 16) | (r << 8) | (w & W_CELL)
+            popn = popn + 1
+          }
+          PLANE[idx] = 0
+        } else {
+          if (write !== r) {
+            PLANE[base | (c << COLSHIFT) | write] = w | P_SEED
+            PLANE[idx] = 0
+          }
+          write = write + 1
+        }
+        r = r + 1
+      }
+    }
+    DEPTH[(slot << 4) | c] = write
+    c = c + 1
+    }
+  }
+  GS[sb | G_POPN] = popn
+  if (removed > 0) { GS[sb | G_VERSION] = GS[sb | G_VERSION] + 1 }
+  return removed
+}
+
+/// Forget what the last collapse removed. A ruleset whose resolve is a LOOP calls this once before
+/// the loop, not per pass, so the renderer sees the whole cascade as one burst — and, less
+/// obviously, so a resolve that removes NOTHING reports an empty list rather than the previous
+/// one's. That second case is the one that bites: the stale list is correct-looking, correctly
+/// formatted, and a full pop burst late.
+export function gridPopClear(slot: i32) { GS[(slot << GSHIFT) | G_POPN] = 0 }
+
+export function gridPopCount(slot: i32): i32 { return GS[(slot << GSHIFT) | G_POPN] }
+export function gridPopped(slot: i32, i: i32): i32 { return POPPED[(slot << 5) | i] }
+
+/// End the causal round: clear every seed AND the dirty set.
+///
+/// A game calls this when a chain has fully resolved. It is not optional and it is not only an
+/// optimisation. Seeds are written by `gridPush` and by `gridCollapse` (on anything that moved) and
+/// NOTHING else removes them — so a game that never ends the round accumulates seeds until every
+/// cell carries one, at which point `needSeed` stops discriminating and the causality rule quietly
+/// degrades to "any run clears". The Rust does this at the end of every `resolve`
+/// (`schlop/drop-gba/archive/crates/tish-gba-drop/src/board.rs:761-784`); the first version of this port did not, and the
+/// dirty set went the same way, which is why the dirty-column restrictions below stopped paying.
+/// Declare every occupied cell player-caused. The inverse of `gridClearSeeds`, and the escape hatch
+/// for the two jobs that legitimately want "resolve whatever is matchable, whoever caused it":
+/// bringing a hand-authored board to rest, and testing the matching rule with no play in front of
+/// it. Real play must NOT call this — the seed plane is what stops one match detonating unrelated
+/// colours across the board, and what stops a fed row clearing itself on arrival.
+export function gridSeedAll(slot: i32) {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let c: i32 = 0
+  while (c < cols) {
+    let d: i32 = DEPTH[(slot << 4) | c]
+    let r: i32 = 0
+    while (r < d) {
+      let idx: i32 = base | (c << COLSHIFT) | r
+      PLANE[idx] = PLANE[idx] | P_SEED
+      r = r + 1
+    }
+    GS[sb | G_DIRTY] = GS[sb | G_DIRTY] | (1 << c)
+    c = c + 1
+  }
+}
+
+/// THE COLUMN'S DEPTH. An earlier version walked all 32 rows of storage, on a fear that turns out
+/// to be unfounded: a seed above the depth cannot be READ, because every scan in this file is
+/// bounded by the depth, so clearing it is work with no observable effect. That is 224 cells per
+/// call against ~40, on something a resolve runs once per link and a CPU search runs per candidate.
+///
+/// (`board.rs` sweeps MAX_ROWS and can afford to — that is a memset over a fixed-size array, not an
+/// interpreted loop.)
+export function gridClearSeeds(slot: i32) {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  let c: i32 = 0
+  while (c < cols) {
+    let r: i32 = 0
+    while (r < DEPTH[(slot << 4) | c]) {
+      let idx: i32 = base | (c << COLSHIFT) | r
+      PLANE[idx] = PLANE[idx] & KEEP_ON_UNSEED
+      r = r + 1
+    }
+    c = c + 1
+  }
+  GS[sb | G_DIRTY] = 0
+}
+
+/// Clear the mark and pass planes, leaving cells and seeds alone. Between passes of a chain.
+export function gridClearMarks(slot: i32) {
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  let c: i32 = 0
+  while (c < cols) {
+    let r: i32 = 0
+    while (r < DEPTH[(slot << 4) | c]) {
+      let idx: i32 = base | (c << COLSHIFT) | r
+      PLANE[idx] = PLANE[idx] & KEEP_ON_UNMARK
+      r = r + 1
+    }
+    c = c + 1
+  }
+  GS[(slot << GSHIFT) | G_TOUCH] = 0
+}
+
+// ── painting ────────────────────────────────────────────────────────────────────────────────────
+
+/// Paint the board as background tiles, writing only the cells whose gid changed.
+///
+/// A sprite per cell is not viable — `sprite_set_frame` rebuilds an agb `Object` at ~2,200 ticks and
+/// 63 of them cost 26,000 of a 4,389-tick frame (`packages/drop.tish:21-24`). That is a RENDERING
+/// cost, identical on either side of the language boundary, which is why the fix was tiles and not
+/// Rust. `tilemap_set` is ~7 ticks, and the shadow means a quiet frame writes nothing.
+///
+/// Returns the number of tiles written.
+/// Bind where `gridPaint` draws. Call once per board, after `gridInit` and before the first paint.
+export function gridPaintTarget(slot: i32, handle: i32, tileset: i32, tcols: i32, ox: i32, oy: i32) {
+  let sb: i32 = slot << GSHIFT
+  GS[sb | G_BG] = handle
+  GS[sb | G_TILES] = tileset
+  GS[sb | G_TCOLS] = tcols
+  GS[sb | G_OX] = ox
+  GS[sb | G_OY] = oy
+}
+
+export function gridPaint(slot: i32): i32 {
+  let sbt: i32 = slot << GSHIFT
+  let handle: i32 = GS[sbt | G_BG]
+  let tileset: i32 = GS[sbt | G_TILES]
+  let tcols: i32 = GS[sbt | G_TCOLS]
+  let ox: i32 = GS[sbt | G_OX]
+  let oy: i32 = GS[sbt | G_OY]
+  let base: i32 = slot << SLOTSHIFT
+  let sb: i32 = slot << GSHIFT
+  let cols: i32 = GS[sb | G_COLS]
+  let rows: i32 = GS[sb | G_ROWS]
+  let anchor: i32 = GS[sb | G_ANCHOR]
+  // NOTHING HAS CHANGED, so there is nothing to diff. The walk is `cols * rows` cells of tish loop
+  // — 72 on a pocket board, measured at ~1,000 ticks of a 4,389-tick frame — and it ran EVERY frame
+  // to discover that almost every frame the board is identical. The native painter can afford the
+  // unconditional walk (51 ticks); this cannot.
+  if (GS[sb | G_VERSION] === GS[sb | G_PAINTVER]) { return 0 }
+  GS[sb | G_PAINTVER] = GS[sb | G_VERSION]
+  let wrote: i32 = 0
+  let c: i32 = 0
+  while (c < cols) {
+    let r: i32 = 0
+    while (r < rows) {
+      let idx: i32 = base | (c << COLSHIFT) | r
+      let g: i32 = GID[PLANE[idx] & W_CELL]
+      if (SHADOW[idx] !== g) {
+        SHADOW[idx] = g
+        // Row 0 is the anchor end. A floor-stacked board draws it at the bottom of the screen.
+        let sr: i32 = r
+        if (anchor === 1) { sr = rows - 1 - r }
+        tilemap_set(handle, tileset, tcols, ox + c, oy + sr, g)
+        wrote = wrote + 1
+      }
+      r = r + 1
+    }
+    c = c + 1
+  }
+  return wrote
+}
+
+/// Paint the pop-ring overlay for the current `POPPED` list, one call per popping frame, AFTER
+/// `gridPaint`. Ordering is load-bearing: the rings go through `SHADOW` like every other tile, so a
+/// board pass in the same frame may repair a ring cell (its shadow holds the ring gid, not the cell
+/// gid) — running the ring pass last re-stamps it, exactly the native painter's shape
+/// (`abi.rs:968-981`). Because the writes diff against `SHADOW`, the thirty-six frames per window
+/// where the stage does not change cost the loop and nothing else — no `tilemap_set`, and no
+/// cross-module `gridPopped` call per cell per frame, which is the ~150-tick reason this loop
+/// lives here and not in the caller.
+///
+/// TWO SKIPS, one cosmetic and one a correctness rule:
+/// - `r >= rows`: the entry is above the visible field.
+/// - the cell no longer carries `P_POP`: `POPPED` coordinates are live for as long as the cells
+///   are popping (nothing collapses until `gridPopRemove`), but a mid-window detonation CAN still
+///   collapse a column, and after that a live survivor may be sitting at a recorded coordinate.
+///   Drawing the ring anyway paints over a live cell for the whole window, which reads as "my
+///   balls were removed and came back" — so a ring draws only over a cell that is actually
+///   popping.
+///
+/// `gPopBase` is the caller's first ring tile: the drawn gid is `gPopBase + stage*4 + colour`,
+/// colour 3 for anything that is not a plain or special ball. Returns tiles written.
+export function gridPaintPopped(slot: i32, stage: i32, gPopBase: i32): i32 {
+  let sb: i32 = slot << GSHIFT
+  let handle: i32 = GS[sb | G_BG]
+  let tileset: i32 = GS[sb | G_TILES]
+  let tcols: i32 = GS[sb | G_TCOLS]
+  let ox: i32 = GS[sb | G_OX]
+  let oy: i32 = GS[sb | G_OY]
+  let rows: i32 = GS[sb | G_ROWS]
+  let anchor: i32 = GS[sb | G_ANCHOR]
+  let base: i32 = slot << SLOTSHIFT
+  let n: i32 = GS[sb | G_POPN]
+  let wrote: i32 = 0
+  let i: i32 = 0
+  while (i < n) {
+    let packed: i32 = POPPED[(slot << 5) | i]
+    let c: i32 = (packed >> 16) & 255
+    let r: i32 = (packed >> 8) & 255
+    if (r < rows && (PLANE[base | (c << COLSHIFT) | r] & P_POP) !== 0) {
+      let cellv: i32 = packed & 255
+      let kind: i32 = (cellv >> 4) & 15
+      let colour: i32 = 3
+      if (kind === 1 || kind === 2) { colour = cellv & 15 }
+      let g: i32 = gPopBase + stage * 4 + colour
+      let idx: i32 = base | (c << COLSHIFT) | r
+      if (SHADOW[idx] !== g) {
+        SHADOW[idx] = g
+        let sr: i32 = r
+        if (anchor === 1) { sr = rows - 1 - r }
+        tilemap_set(handle, tileset, tcols, ox + c, oy + sr, g)
+        wrote = wrote + 1
+      }
+    }
+    i = i + 1
+  }
+  return wrote
+}
+
+/// Force the next `gridPaint` to write every cell — after a scene change or a palette swap.
+export function gridRepaint(slot: i32) {
+  GS[(slot << GSHIFT) | G_PAINTVER] = 0 - 1
+  let base: i32 = slot << SLOTSHIFT
+  let c: i32 = 0
+  while (c < GRID_COLS_MAX) {
+    let r: i32 = 0
+    while (r < GRID_ROWS_MAX) {
+      SHADOW[base | (c << COLSHIFT) | r] = -1
+      r = r + 1
+    }
+    c = c + 1
+  }
+}

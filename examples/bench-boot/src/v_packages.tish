@@ -1,0 +1,11 @@
+// Variant: FLOOR + the `packages/` tish stack (ui, dialog, engine) and NO assets. Isolates the cost
+// of those modules' own top-level initialization — their theme tables, defaults and behaviour
+// registries — from the asset registration the other variants carry.
+import { log, frame } from 'cargo:tish_agb'
+import { uiInit } from '../../../packages/ui'
+import { dialogInit } from '../../../packages/dialog'
+import { mount, create } from '../../../packages/engine'
+
+// Referenced so none of the three modules can be dropped as unused.
+log("BB packages fns=" + (typeof uiInit) + (typeof dialogInit) + (typeof mount) + (typeof create))
+while (true) { frame() }

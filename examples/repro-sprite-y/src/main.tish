@@ -1,0 +1,23 @@
+// Repro: hudText / dialogue after a scene_stream — catches "y too big for sprite size".
+import { cave } from 'scene:../assets/cave.tmj'
+import { heartsSheet } from 'sheet32:../../akari/assets/hearts.png'
+import { log, frame, dialogue_show } from 'cargo:tish_agb'
+import { loadScene, loadSceneRom, hudText, setupHearts, updateHearts } from '../../../packages/engine'
+
+loadScene(() => {
+  loadSceneRom(cave)
+  setupHearts(heartsSheet, 3, 72, 2, 10)
+  updateHearts(6, 2)
+  hudText(0, 176, 2, "99")
+  hudText(1, 176, 12, "0")
+  // Shop / greet strings that fire on the source game's cave type 6 after enter.
+  hudText(20, 40, 40, "MONEY MAKING GAME")
+  hudText(21, 40, 56, "Pick 1/2/3  A confirm")
+  hudText(22, 40, 68, "CHOICE 1")
+  hudText(8, 8, 148, "DEBUG HUB")
+  hudText(9, 80, 148, "WALK TO PAD  A")
+  dialogue_show(["LET'S PLAY MONEY", "MAKING GAME."], "OLD MAN")
+  log("SPRITE_Y_OK")
+})
+
+while (true) { frame() }

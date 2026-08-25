@@ -1,0 +1,18 @@
+import { sprite_new, sprite_set_pos, sprite_set_hud, frame } from 'cargo:tish_agb'
+import { marker } from 'sheet:../assets/marker.png'
+
+type P = { x: i32 }
+let arr: P[] = []
+arr.push({ x: 10 })
+arr[0].x = 200            // native store expected; instead compiles to a boxed throwaway
+
+let m = sprite_new(marker)
+sprite_set_hud(m, 1)
+// marker X = arr[0].x  →  200 if the write took effect, 10 if it was discarded
+let f: i32 = 0
+while (f < 12) {
+  sprite_set_pos(m, arr[0].x, 60)
+  frame()
+  f = f + 1
+}
+while (true) { frame() }

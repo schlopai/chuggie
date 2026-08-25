@@ -1,0 +1,29 @@
+{
+  "name": "soccer",
+  "private": true,
+  "scripts": {
+    "assets": "python3 ../../scripts/gen_soccer.py",
+    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
+    "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png 300",
+    "verify": "./verify.sh",
+    "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
+  },
+  "devDependencies": {
+    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_game_engine": {
+        "path": "../../crates/tish-gba-game-engine"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
+    }
+  },
+  "description": "Six players and a ball on the engine's rigid discs: the acceptance test for disc-vs-disc contact being STABLE rather than merely present, the rank-based mass model, and body_last_hit telling a goal from an own goal."
+}

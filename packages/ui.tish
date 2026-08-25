@@ -1,0 +1,3761 @@
+// ui.tish — a small RUNTIME UI LAYOUT ENGINE for chuggie-engine menus (flexbox-lite).
+//
+// The engine had drawing primitives (text, sprites, bars) but no LAYOUT: every menu hard-coded pixel
+// x/y for every element. This composes them into a declarative, CSS-flexbox-like tree so you describe
+// WHAT a menu contains and the engine computes WHERE. It runs at runtime (recompute only when content
+// changes — menus are cold), so it handles dynamic lists, runtime strings, and measured widths that a
+// pre-baked layout can't.
+//
+// It renders on the tish-agb UI TEXT CANVAS (`ui_begin`/`ui_text` — background tiles, no sprite-VRAM
+// ceiling) for text, and an engine-managed SPRITE POOL for icons. Call `uiInit(...)` once, build a
+// node tree, and `uiRender(root)` each time the content changes.
+//
+// SOLVE ONCE, DON'T RE-SOLVE: a re-layout costs ~2k ticks PER NODE, three quarters of it just reading and
+// writing boxed node fields, so a screen that re-lays-out per open cannot be fast. `uiBake(id, root)`
+// solves a screen one time and compiles it to a flat display list; `uiReplay(id)` repaints it with no
+// layout at all, and `uiBakeText` / `uiBakeIcon` swap the content that varies into fixed slots. Build the
+// tree once, keep the nodes you patch, give anything dynamic a fixed w/h. See ui-roadmap.md.
+//
+// Helpers: `makePrompt` / `makePromptBar`, `makeButton` / `makeButtonGroup` / `uiSetText`,
+// `makePanel` / `makeListRow` / `makeDetailPanel` / `makeStepper` / `makeToggle` / `makeTabs` /
+// `makeBar` / `makeGrid`, `uiPush` / `uiPop`, `uiKeys` / `uiKeyDown` / `uiAct`
+// (flex panel buttons + shop-grade chrome + options widgets; flash-free selection).
+//
+// ── Node shapes (plain object literals) ────────────────────────────────────
+//   Container: { dir:"row"|"col" (default "col"), gap, pad, justify, align, w?, h?, grow?, children:[…] }
+//     justify (main axis):  "start" | "center" | "end" | "between"
+//     align   (cross axis): "start" | "center" | "end" | "stretch"
+//     w/h: fixed size (px). Omit = size to content. grow: flex weight (share leftover main space).
+//     fill?: theme token | 0xRRGGBB — opaque panel fill (drawn under the border). Use over maps.
+//     border?: theme token | 0xRRGGBB — 1px outline.
+//   Text leaf: { text, color?, font?, w?/h?/grow?, ellip?:true, wrap?:true,
+//                align?: "left"|"center"|"right"|"justify" }  (also start/end)
+//     Text `align` is IN-BOX line alignment (agb Layout) — not flex cross-axis (containers use that).
+//     Centre/right need a real box width (`w` / stretch / grow); content-sized leaves are a no-op.
+//   Icon leaf: { icon:<frame>, size?, w?/h?/grow? }                drawn from the icon sheet via the pool
+import {
+  ui_begin, ui_text, ui_text_span, ui_text_box, ui_rect, ui_clear_rect, ui_reserve_tiles, text_draw,
+  text_width, text_height, text_wrap_height, key_pressed, keys_edge, audio_pump, audio_defer, ticks,
+  sprite_new, sprite_destroy, sprite_set_frame, sprite_set_pos, sprite_set_visible, sprite_set_hud,
+  lay_reset, lay_push, lay_set_measured, lay_solve, lay_x, lay_y, lay_w, lay_h, lay_hide,
+  lay_content, lay_view, lay_set_paint, lay_set_text, ui_paint_from
+} from 'cargo:tish_agb'
+import { POOL, PTRS, uiResetPool, uiResetPointers } from './scene_hooks'
+// Re-export so `import { uiResetPool } from './ui'` keeps working.
+export { uiResetPool, uiResetPointers } from './scene_hooks'
+
+// The default THEME — a map of colour tokens. `color`/`border` on any node may be a raw 0xRRGGBB
+// number OR one of these token strings; a game restyles everything by passing its own `theme` to
+// uiInit. Missing tokens fall back here, then to white.
+let DEFAULT_THEME = {
+  bg: 0x0E0C16, text: 0xB9C0D6, dim: 0x6E7690, title: 0xF4E4C1,
+  label: 0xE0925A, accent: 0xFFE06A, gold: 0xFFCE4A, border: 0x8A6A4A,
+  good: 0x8CE060, bad: 0xE07070, selected: 0xFFE06A,
+  scrollTrack: 0x3A3450, scrollThumb: 0xAAB0CC, panel: 0x1A1626,
+  // Compact menu-button chrome (wood-brown; selected = gold rim, not a full yellow fill).
+  button: 0x3A2A1E, buttonBorder: 0x8A6A4A, buttonText: 0xF4E4C1,
+  buttonSel: 0x4A3A28, buttonSelBorder: 0xFFE06A, buttonSelText: 0xFFE06A,
+  buttonDis: 0x2A2220, buttonDisBorder: 0x4A4038, buttonDisText: 0x6E7690,
+}
+
+let CFG = {
+  font: -1, titleFont: -1, tinyFont: -1,
+  sheet: -1, lineH: 12, iconSize: 16, theme: DEFAULT_THEME
+}
+// Per-phase timings of the LAST render, in Timer2 ticks (1 vblank ≈ 4389). `frame_stats()` gives whole-frame
+// maxima, which say a keypress blew the budget but not which pass did; this splits one uiRender into
+// flatten / measure / arrange / write-back / paint — the difference between "the layout is slow" and "we are
+// re-solving a layout we could have baked". OFF unless `uiInit({ stats: 1 })`; read with `uiLayoutStats()`.
+// (Declared up here with CFG/POOL: uiInit assigns it, and a module `let` has to precede its writer.)
+let PSTAT = { on: 0, n: 0, flat: 0, meas: 0, arr: 0, wb: 0, paint: 0, t: 0 }
+
+// ── DE-BOXED layout node (a NATIVE typed struct) ─────────────────────────────
+// The flex engine (measure/arrange/paint) runs over a Vec of THESE, not over the boxed object-literal
+// tree — so every field read/write is a native i32 op, not a `get_prop` hashmap lookup on a boxed
+// Value::Object. `uiRender` flattens the object tree into a LOCAL `Vec<LNode>` (kept local because
+// reading a MODULE typed array inside a fn clones it), then does the three passes ITERATIVELY over that
+// Vec (kept iterative because a recursive fn reading the module Vec would clone it per call). All i32:
+// links are indices (-1 = none); `fw/fh` = fixed w/h (-1 = size to content); am/jm = align/justify mode.
+
+// ── BAKED layout: one solved screen as a flat DISPLAY LIST ────────────────────
+// A screen's layout is not news at runtime. The row count, the label lengths, the box that holds them
+// — all of it is known the first time the screen exists, and it never changes again. Solving it per
+// open costs ~2000 ticks PER NODE (measured on a 9-node dialog: 7.5k ticks reading the boxed tree,
+// 6.2k writing geometry back, 4.9k of actual flex math), so a 60-node shop tab is ~27 frames of layout
+// before a single glyph is drawn.
+//
+// So solve it ONCE (`uiBake`) and compile the result to this: a native i32 op per draw, in paint order,
+// with strings in a side table. `uiReplay` then walks a typed array and calls ui_rect / ui_text — no
+// boxed field reads, no measure, no arrange, no geometry write-back. Text that varies (a count, an item
+// name) is swapped in its slot with `uiBakeText`; geometry stays put, which is the whole premise.
+//
+// op kinds: 0 = outline rect, 1 = filled rect, 2 = text, 3 = icon.
+//
+// The pool is ONE flat array of numbers, stride BSTRIDE, not an array of typed structs: a typed
+// typed-struct-array local is a COPY of the boxed array (the generated Rust collects it into a Vec), so
+// pushes/writes vanish at the end of the call. A plain array is reference-shared, so a display list
+// can be appended in one function and replayed in another. Hoist `let OPS = BAKE.ops` per function
+// and index it — that costs one property lookup per call instead of one per field.
+// Fields 3..7 are shared between op kinds (a rect has no font, a glyph run has no height) — the pool is
+// the largest thing a bake retains, so it is packed, not one column per attribute.
+//   rect: P1=w      P2=h      P3=color
+//   text: P1=font   P2=color  P3=wrap width   P4=align   P5=string slot
+//   icon: P1=frame
+let BSTRIDE: i32 = 8
+let B_KIND: i32 = 0
+let B_X: i32 = 1
+let B_Y: i32 = 2
+let B_P1: i32 = 3
+let B_P2: i32 = 4
+let B_P3: i32 = 5
+let B_P4: i32 = 6
+let B_P5: i32 = 7
+// Right-edge gutter for scrollbars (thumb is 3px; +2 leaves a gap before content). Must precede arrange.
+let SB_GUTTER: i32 = 5
+
+// tish-agb button codes.
+export let BTN_A: i32 = 0
+export let BTN_B: i32 = 1
+export let BTN_SELECT: i32 = 2
+export let BTN_START: i32 = 3
+export let BTN_L: i32 = 4
+export let BTN_R: i32 = 5
+export let BTN_UP: i32 = 6
+export let BTN_DOWN: i32 = 7
+export let BTN_LEFT: i32 = 8
+export let BTN_RIGHT: i32 = 9
+
+// uiKeys() — one keys_edge() for the frame. Bit N = button code N (A=0 … Right=9).
+// Prefer this over many key_pressed() calls during menu updates (one ctx crossing).
+export function uiKeys() { return keys_edge() }
+// ⚠️ NO `Math` IN HERE, and that is not a style preference.
+//
+// This function is scalar-in/scalar-out, which is exactly the shape tish lowers to a NATIVE Rust fn
+// (`uiKeyDown_native(mut bits: f64, mut code: f64) -> f64`). A native fn does not carry module
+// scope, so a module-level binding like `Math` is simply not in scope there and the generated Rust
+// fails with `cannot find value Math in this scope` — pointing at generated code, naming no tish
+// file. `bits` is a non-negative bitmask, so halving it by hand is exact in f64 and needs nothing
+// from the module.
+export function uiKeyDown(bits, code) {
+  let b = bits
+  let i = 0
+  while (i < code) {
+    if (b % 2 === 1) { b = (b - 1) / 2 } else { b = b / 2 }
+    i = i + 1
+  }
+  return b % 2
+}
+
+// uiAct(map, bits?) — first logical action whose button edge fired this frame.
+// Prefer ARRAY form (no heap): [["confirm", BTN_A], ["back", BTN_B], …]
+// Object form `{ confirm: BTN_A, … }` still works but allocates Object.keys every call — avoid on the
+// hot path (hoist the object AND only call when uiKeys() !== 0).
+// bits: optional pre-read `uiKeys()`; omitted → reads the pad once.
+// Returns the action name string, or "".
+export function uiAct(map, bits) {
+  let b = bits
+  if (b === null) { b = uiKeys() }
+  if (present(map) === 0) { return "" }
+  // Array of [name, code] pairs — no Object.keys allocation.
+  if (map.length !== null) {
+    let i = 0
+    while (i < map.length) {
+      let pair = map[i]
+      if (present(pair) === 1) {
+        if (uiKeyDown(b, pair[1]) > 0) { return pair[0] }
+      }
+      i = i + 1
+    }
+    return ""
+  }
+  let keys = Object.keys(map)
+  let i = 0
+  while (i < keys.length) {
+    let name = keys[i]
+    let code = map[name]
+    if (code !== null) {
+      if (uiKeyDown(b, code) > 0) { return name }
+    }
+    i = i + 1
+  }
+  return ""
+}
+
+// A config/prop value, or a default when absent (null/undefined). NOT `||` — 0 is a valid value.
+// HOT PATH: called thousands of times per render. tish has NO `undefined` (a missing prop reads as
+// `null`, and typeof never returns "undefined"), so a `typeof===undefined` guard is dead code that
+// still allocates a string every call — omit it. Just the null check.
+function pick(v, d) {
+  if (v === null) { return d }
+  return v
+}
+// Shared empty options object for `pick(opts, EMPTY)` — never mutate; avoids `{}` alloc per make*.
+let EMPTY = {}
+function optsOf(o) {
+  if (o === null) { return EMPTY }
+  return o
+}
+// Is a property present (a node is a leaf if it has `text` or `icon`)?
+function present(v) {
+  if (v === null) { return 0 }
+  return 1
+}
+function fontOf(n) { return pick(n.font, CFG.font) }
+// Recolour every text node in a subtree to `c` and report whether any text was found. Used for
+// selection: recolouring text is reliable (text owns its tiles) whereas a canvas outline fights the
+// text for the tile's single palette.
+function recolorText(n, c) {
+  let had = 0
+  if (present(n.text)) { n.color = c; had = 1 }
+  let kids = n.children
+  if (present(kids)) {
+    let cnt = kids.length
+    let i = 0
+    while (i < cnt) {
+      if (recolorText(kids[i], c) > 0) { had = 1 }
+      i = i + 1
+    }
+  }
+  return had
+}
+// Remember each text node's ORIGINAL colour (once) so a selection can be undone without rebuilding the
+// cell — `restoreColors` puts them back. Lets a cursor move recolour + repaint at the cached geometry
+// (no re-layout). Multi-colour cells (e.g. white name + gold price) survive, unlike a blanket recolour.
+function tagColors(n) {
+  if (present(n.text)) { if (present(n._c0) === 0) { n._c0 = pick(n.color, "text") } }
+  let kids = n.children
+  if (present(kids)) {
+    let cnt = kids.length
+    let i = 0
+    while (i < cnt) { tagColors(kids[i]); i = i + 1 }
+  }
+}
+function restoreColors(n) {
+  if (present(n._c0)) { n.color = n._c0 }
+  let kids = n.children
+  if (present(kids)) {
+    let cnt = kids.length
+    let i = 0
+    while (i < cnt) { restoreColors(kids[i]); i = i + 1 }
+  }
+}
+// A row's line height: explicit `lineH`, else the font's own height (so a bigger-font row is taller).
+// Resolve a colour: a theme TOKEN string → the theme's colour (falling back to DEFAULT_THEME, then
+// white); a number is used as a raw 0xRRGGBB.
+// Interned fixed theme colours — see uiInit. -1 until the theme is installed.
+let COL_SELECTED: i32 = 0 - 1
+let COL_SCROLL_TRACK: i32 = 0 - 1
+let COL_SCROLL_THUMB: i32 = 0 - 1
+
+export function col2(v) {
+  if (typeof v === 'string') {
+    let c = CFG.theme[v]
+    if (present(c)) { return c }
+    return pick(DEFAULT_THEME[v], 0xFFFFFF)
+  }
+  return v
+}
+
+// Truncate `s` with ".." so it fits `maxw` px in `font` (binary search — strings are short but
+// linear-from-end did O(n) text_width calls with a slice alloc each).
+export function fitText(font, s, maxw) {
+  if (text_width(font, s) <= maxw) { return s }
+  let lo = 1
+  let hi = s.length
+  let best = ".."
+  while (lo <= hi) {
+    let mid = Math.floor((lo + hi) / 2)
+    let t = s.slice(0, mid) + ".."
+    if (text_width(font, t) <= maxw) {
+      best = t
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
+  }
+  return best
+}
+
+// Text-leaf in-box alignment → arg for ui_text / ui_text_box. Flex containers also use `align`
+// (cross-axis); only call this on nodes that have `text` (paint already gates on that).
+function textAlignArg(n) {
+  let a = n.align
+  if (a === null) { return "left" }
+  if (a === "start") { return "left" }
+  if (a === "end") { return "right" }
+  return a
+}
+
+// Wrap / centre / right need the leaf's laid-out width as agb max-line length. Plain left
+// single-line keeps 512 (effectively unwrapped) so content-sized leaves don't clip.
+function textMaxW(n) {
+  if (n.wrap !== null) { return n._w }
+  let a = n.align
+  if (a === "center") { return n._w }
+  if (a === "centre") { return n._w }
+  if (a === "right") { return n._w }
+  if (a === "end") { return n._w }
+  if (a === "justify") { return n._w }
+  return 512
+}
+
+// ── Pass 1: measure natural (content) size bottom-up, into _mw/_mh ──────────
+// NOTE (perf): the mainNat/crossNat/pick helpers are INLINED in the child loops below. Each was a
+// `value_call` (heap-allocated arg slice + boxed dispatch) per child — thousands per render on a
+// 16MHz CPU. Inlining to a bare property read + null check removes that. Same for the string align/
+// justify/dir compares, computed ONCE per container as int modes instead of per-child (each string
+// `===` allocates the literal). This is why a big menu went from seconds to a fraction of a second.
+function measure(n) {
+  // present()/fontOf()/pick() are INLINED here (each was a value_call — heap arg slice + dispatch — per
+  // node per render). `x !== null` is the inline of present.
+  if (n.text !== null) {
+    let f = n.font
+    if (f === null) { f = CFG.font }
+    // A WRAPPING paragraph (`wrap:true`, needs a fixed `w`) flows to multiple lines; its height is the
+    // wrapped height. A plain text node is one line sized to its content.
+    if (n.wrap !== null) {
+      let mw = n.w
+      if (mw === null) { mw = 100 }
+      n._mw = mw
+      // A paragraph with a FIXED `h` (a dialog body / detail description that reserves its box) needs
+      // no wrap measurement — and `text_wrap_height` is a full agb shaping pass, the single most
+      // expensive call in a layout. Containers prefer `k.h` over `_mh` anyway, so this is only the
+      // fallback value.
+      if (n.h !== null) { n._mh = n.h }
+      else { n._mh = text_wrap_height(f, n.text, mw) }
+    } else {
+      n._mw = text_width(f, n.text)
+      let lh = n.lineH
+      if (lh === null) { lh = text_height(f) }
+      n._mh = lh
+    }
+    return
+  }
+  if (n.icon !== null) {
+    let s = n.size
+    if (s === null) { s = CFG.iconSize }
+    n._mw = s
+    n._mh = s
+    return
+  }
+  let isRow = 0
+  if (n.dir === "row") { isRow = 1 }
+  let gap = n.gap
+  if (gap === null) { gap = 0 }
+  let pad = n.pad
+  if (pad === null) { pad = 0 }
+  let kids = n.children
+  let cnt = kids.length
+  let sumMain = 0
+  let maxCross = 0
+  let i = 0
+  while (i < cnt) {
+    let k = kids[i]
+    measure(k)
+    // cm/cc init from a property read (dynamic Value), NOT `0` — a literal would type them f64 and then
+    // `cm = k.w` panics when w is null (missing). Null-coalesce to the measured _mw/_mh.
+    let cm = k._mw
+    let cc = k._mh
+    if (isRow > 0) {
+      cm = k.w
+      if (cm === null) { cm = k._mw }
+      cc = k.h
+      if (cc === null) { cc = k._mh }
+    } else {
+      cm = k.h
+      if (cm === null) { cm = k._mh }
+      cc = k.w
+      if (cc === null) { cc = k._mw }
+    }
+    sumMain = sumMain + cm
+    if (cc > maxCross) { maxCross = cc }
+    i = i + 1
+  }
+  if (cnt > 1) { sumMain = sumMain + gap * (cnt - 1) }
+  let mainT = sumMain + pad * 2
+  let crossT = maxCross + pad * 2
+  if (isRow > 0) { n._mw = mainT; n._mh = crossT } else { n._mw = crossT; n._mh = mainT }
+}
+
+// ── Pass 2: arrange — assign each node a box (_x,_y,_w,_h) honouring flex ────
+function arrange(n, x, y, w, h) {
+  n._x = x
+  n._y = y
+  n._w = w
+  n._h = h
+  if (n.text !== null) { return }
+  if (n.icon !== null) { return }
+  let isRow = 0
+  if (n.dir === "row") { isRow = 1 }
+  let pad = n.pad
+  if (pad === null) { pad = 0 }
+  let gap = n.gap
+  if (gap === null) { gap = 0 }
+  // Resolve the flex string modes to ints ONCE (a string `===` allocates the literal each time — do it
+  // per container, not per child). justify: 0 start, 1 center, 2 end, 3 between. align: 0 start,
+  // 1 center, 2 end, 3 stretch (default).
+  let jm = 0
+  if (n.justify === "center") { jm = 1 } else { if (n.justify === "end") { jm = 2 } else { if (n.justify === "between") { jm = 3 } } }
+  let am = 3
+  if (n.align === "start") { am = 0 } else { if (n.align === "center") { am = 1 } else { if (n.align === "end") { am = 2 } } }
+  let hasScroll = 0
+  if (n.scroll !== null) { hasScroll = 1 }
+  let ix = x + pad
+  let iy = y + pad
+  let iw = w - pad * 2
+  let ih = h - pad * 2
+  let mainLen = iw
+  let crossLen = ih
+  if (isRow === 0) { mainLen = ih; crossLen = iw }
+  let kids = n.children
+  let cnt = kids.length
+  let sumMain = 0
+  let totalGrow = 0
+  let i = 0
+  while (i < cnt) {
+    let k = kids[i]
+    let cm = k._mw
+    if (isRow > 0) { cm = k.w; if (cm === null) { cm = k._mw } } else { cm = k.h; if (cm === null) { cm = k._mh } }
+    sumMain = sumMain + cm
+    let g = k.grow
+    if (g === null) { g = 0 }
+    totalGrow = totalGrow + g
+    i = i + 1
+  }
+  let gapsum = 0
+  if (cnt > 1) { gapsum = gap * (cnt - 1) }
+  let leftover = mainLen - sumMain - gapsum
+  if (leftover < 0) { leftover = 0 }
+  // Remember content vs viewport size so paint() can draw a scrollbar.
+  if (hasScroll > 0) {
+    n._content = sumMain + gapsum
+    n._view = mainLen
+    // Column scroll: pull children left of the bar so tags/text aren't covered.
+    if (isRow === 0) {
+      if (sumMain + gapsum > mainLen) {
+        if (crossLen > SB_GUTTER) { crossLen = crossLen - SB_GUTTER }
+      }
+    }
+  }
+  let off = 0
+  let egap = gap
+  if (totalGrow <= 0) {
+    if (jm === 1) { off = leftover / 2 }
+    if (jm === 2) { off = leftover }
+    if (jm === 3) { if (cnt > 1) { egap = gap + leftover / (cnt - 1) } }
+  }
+  // Scroll: a fixed-size container whose children extend past it. Offset the run by scrollY and CULL
+  // children that fall fully outside the viewport (item-granular; keep scrollY a multiple of item
+  // height so nothing is half-clipped).
+  let sy = n.scrollY
+  if (sy === null) { sy = 0 }
+  let cur = off - sy
+  i = 0
+  while (i < cnt) {
+    let c = kids[i]
+    let cm = c._mw
+    let cc = c._mh
+    if (isRow > 0) {
+      cm = c.w
+      if (cm === null) { cm = c._mw }
+      cc = c.h
+      if (cc === null) { cc = c._mh }
+    } else {
+      cm = c.h
+      if (cm === null) { cm = c._mh }
+      cc = c.w
+      if (cc === null) { cc = c._mw }
+    }
+    if (totalGrow > 0) {
+      let g = c.grow
+      if (g === null) { g = 0 }
+      if (g > 0) { cm = cm + leftover * g / totalGrow }
+    }
+    if (am === 3) {
+      // Stretch only when the child has no fixed cross size.
+      if (isRow > 0) {
+        if (c.h === null) { cc = crossLen }
+      } else {
+        if (c.w === null) { cc = crossLen }
+      }
+    }
+    let cpos = 0
+    if (am === 1) { cpos = (crossLen - cc) / 2 }
+    if (am === 2) { cpos = crossLen - cc }
+    // Cull scroll children that aren't FULLY inside the viewport, so a partially-scrolled row never
+    // spills past the edge (there is no pixel clipping — keep scrollY row-aligned, see makeSelector).
+    let hide = 0
+    if (hasScroll > 0) {
+      if (cur < 0) { hide = 1 }
+      if (cur + cm > mainLen) { hide = 1 }
+    }
+    c._hide = hide
+    if (isRow > 0) {
+      arrange(c, ix + cur, iy + cpos, cm, cc)
+    } else {
+      arrange(c, ix + cpos, iy + cur, cc, cm)
+    }
+    cur = cur + cm + egap
+    i = i + 1
+  }
+}
+
+// Opaque panel/backdrop fill. Tall `ui_rect(...,1)` snaps IN to 8×8 (map rims). A full exact
+// fill of a large unaligned panel allocates too many unique tiles and OOMs — so: solid bulk fill
+// (shared tile), then seal only the thin inset rims with chunked ≤48 spans.
+function fillRectExact(x, y, w, h, color) {
+  if (w <= 0) { return }
+  if (h <= 0) { return }
+  ui_rect(x, y, w, h, color, 1)
+  if (h <= 48) { return }
+  let x0 = x + 7
+  x0 = x0 - (x0 % 8)
+  let y0 = y + 7
+  y0 = y0 - (y0 % 8)
+  let x1 = x + w
+  x1 = x1 - (x1 % 8)
+  let y1 = y + h
+  y1 = y1 - (y1 % 8)
+  if (x0 > x) { fillStripExact(x, y, x0 - x, h, color) }
+  if (x + w > x1) { fillStripExact(x1, y, x + w - x1, h, color) }
+  if (y0 > y) { ui_rect(x, y, w, y0 - y, color, 1) }
+  if (y + h > y1) { ui_rect(x, y1, w, y + h - y1, color, 1) }
+}
+
+function fillStripExact(x, y, w, h, color) {
+  let yy = y
+  let left = h
+  while (left > 0) {
+    let chunk = left
+    if (chunk > 48) { chunk = 48 }
+    ui_rect(x, yy, w, chunk, color, 1)
+    yy = yy + chunk
+    left = left - chunk
+  }
+}
+
+// ── Pass 3: paint — text to the canvas, icons to the sprite pool ────────────
+function paint(n) {
+  // present()/fontOf()/pick() are INLINED (`x !== null` = present). Each was a value_call per node.
+  // Scroll-culled nodes draw nothing (and neither do their subtrees).
+  if (n._hide !== null) { if (n._hide > 0) { return } }
+  // Selection highlight: an outline just outside the node's box, in the theme's `selected` colour.
+  if (n.sel !== null) { if (n.sel) { ui_rect(n._x - 1, n._y - 1, n._w + 2, n._h + 2, COL_SELECTED) } }
+  if (n.text !== null) {
+    let s = n.text
+    // Typewriter: draw only the first `reveal` characters (the box was sized on the full text, so it
+    // doesn't reflow as it types). Then optional single-line ellipsis, then wrap width.
+    if (n.reveal !== null) { s = s.slice(0, n.reveal) }
+    let f = n.font
+    if (f === null) { f = CFG.font }
+    if (n.ellip !== null) { s = fitText(f, s, n._w) }
+    let wrapW = textMaxW(n)
+    let col = n.color
+    if (col === null) { col = "text" }
+    // `shadow` (a theme token or 0xRRGGBB) draws the string again underneath, offset by `shadowOff` px
+    // (default 1) — what makes a label readable over map art or title art with no panel behind it. It is
+    // a second shaping + blit pass, so it suits text painted once per screen; `uiRowText`'s patch path
+    // does not carry it, so don't put it on a row whose label changes.
+    if (n.shadow !== null) {
+      let sd = 1
+      if (n.shadowOff !== null) { sd = n.shadowOff }
+      ui_text(f, n._x, n._y, s, col2(col), wrapW, textAlignArg(n), col2(n.shadow), sd, sd)
+      return
+    }
+    ui_text(f, n._x, n._y, s, col2(col), wrapW, textAlignArg(n))
+    return
+  }
+  if (n.icon !== null) {
+    if (POOL.used < POOL.n) {
+      let sp = ensureIconSprite(POOL.used)
+      if (sp >= 0) {
+        n._sp = POOL.used   // remember the pool sprite so uiReframeIcon can update it in place
+        POOL.used = POOL.used + 1
+        sprite_set_frame(sp, n.icon)
+        sprite_set_pos(sp, n._x, n._y)
+        sprite_set_visible(sp, 1)
+      }
+    }
+    return
+  }
+  // Container: optional opaque fill (for dialog/menus over a live map), then border outline.
+  if (n.fill !== null) { fillRectExact(n._x, n._y, n._w, n._h, col2(n.fill)) }
+  if (n.border !== null) { ui_rect(n._x, n._y, n._w, n._h, col2(n.border)) }
+  let kids = n.children
+  let cnt = kids.length
+  let i = 0
+  while (i < cnt) { paint(kids[i]); i = i + 1 }
+  paintScrollbar(n)
+}
+
+// Track + proportional thumb on a scroll container's right edge, when the content overflows the viewport.
+// Both painters call it (a scroll container is one node per screen, so the call costs nothing measurable),
+// and it needs `_content`/`_view`, which arrange records only for scroll containers.
+// Callers that show a bar must also reserve `SB_GUTTER` on the right (arrange does this for `scroll`;
+// makeSelector wraps a spacer for `win`).
+function paintScrollbar(n) {
+  // `scroll` culls against a live offset; `win` builds only the rows that fit (makeSelector). Both want
+  // the same bar, and both supply `_content`/`_view` — arrange records them for the first, the selector
+  // writes them for the second.
+  if (n.scroll === null && n.win === null) { return }
+  if (n._content === null) { return }
+  if (n._content <= n._view) { return }
+  let bx = n._x + n._w - 3
+  let by = n._y + pick(n.pad, 0)
+  let bh = n._view
+  let th = bh * n._view / n._content
+  if (th < 6) { th = 6 }
+  let maxS = n._content - n._view
+  let ty = by
+  if (maxS > 0) { ty = by + pick(n.scrollY, 0) * (bh - th) / maxS }
+  ui_rect(bx, by, 1, bh, COL_SCROLL_TRACK, 1)
+  ui_rect(bx - 1, ty, 3, th, COL_SCROLL_THUMB, 1)
+}
+
+function hideRest() {
+  let i = POOL.used
+  while (i < POOL.sprites.length) {
+    sprite_set_visible(POOL.sprites[i], 0)
+    i = i + 1
+  }
+}
+
+// Hide EVERY icon-pool sprite (resets the pool cursor to 0 first). Callers that tear a menu down, or
+// swap to a panel with no icons, use this so a previous panel's icon/portrait sprite doesn't linger.
+export function uiHideIcons() {
+  POOL.used = 0
+  hideRest()
+}
+
+// ── Public API ──────────────────────────────────────────────────────────────
+// uiInit({ font, titleFont?, tinyFont?, sheet, lineH?, iconSize?, icons?, theme? }) — set default
+// fonts + icon sheet. `titleFont` / `tinyFont` fall back to `font` when omitted (read via uiFont).
+// Icons are HUD (screen-space) and start HIDDEN — `sprite_new` defaults to visible at screen centre.
+export function uiInit(cfg) {
+  CFG.font = pick(cfg.font, -1)
+  CFG.titleFont = pick(cfg.titleFont, CFG.font)
+  CFG.tinyFont = pick(cfg.tinyFont, CFG.font)
+  CFG.sheet = pick(cfg.sheet, -1)
+  CFG.lineH = pick(cfg.lineH, 12)
+  CFG.iconSize = pick(cfg.iconSize, 16)
+  CFG.theme = pick(cfg.theme, DEFAULT_THEME)
+  // ⚠️ Resolve the FIXED theme keys once, here, instead of per paint. `COL_SELECTED` and the two
+  // scrollbar colours ran a typeof plus two boxed map lookups on every node of every frame, for
+  // three values that cannot change until the theme does. Re-resolve if the theme is ever swapped.
+  COL_SELECTED = COL_SELECTED
+  COL_SCROLL_TRACK = COL_SCROLL_TRACK
+  COL_SCROLL_THUMB = COL_SCROLL_THUMB
+  PSTAT.on = pick(cfg.stats, 0)   // `stats: 1` → time each render pass; read with uiLayoutStats()
+  let n = pick(cfg.icons, 24)
+  POOL.n = n
+  POOL.sprites = []
+  POOL.used = 0
+  // Lazy: sprites are created on first paint (see ensureIconSprite). Pre-allocating here used to
+  // tip shrine/cave loads over the GBA heap after sprite_clear + map stream + entities.
+  //
+  // ⚠️ agb's live-tile HashMap still starts empty and doubles. Past ~307 live DynamicTiles the
+  // 512→1024 step asks for one ~40 KB contiguous block. Mid-game that fails and takes the ROM down
+  // (`memory allocation of 40960 bytes failed`). Provoke it HERE via `tileReserve` while the heap
+  // is still clean. `tileReserve: 0` opts out — only safe if this ROM never lights that many
+  // canvas tiles. Large games that open a full dialogue box or menu over a board must warm ≥320.
+  ui_reserve_tiles(pick(cfg.tileReserve, 0))
+}
+
+// uiUseSheet(sheet, iconSize?) — switch the icon pool's sheet (e.g. shop32 ↔ clan16) and drop live
+// sprites so the next paint grows them from the new sheet. Call when entering/leaving a menu that
+// owns a different sheet than uiInit.
+export function uiUseSheet(sheet, iconSize) {
+  let same = 0
+  if (sheet === CFG.sheet) { same = 1 }
+  CFG.sheet = sheet
+  if (present(iconSize) === 1) { CFG.iconSize = iconSize }
+  // Nothing to rebuild if the sheet did not actually change — just park the icons.
+  if (same === 1) { uiHideIcons(); return }
+  // DESTROY the pool, don't forget it. `uiResetPool` drops the handle array without freeing
+  // anything, which is correct after `sprite_clear` (they are already dead) and a straight leak
+  // here (they are alive). A sprite is bound to the sheet it was made from, so a sheet swap does
+  // need new ones — but the old ones have to go with it. Forgetting them stranded the whole pool in
+  // the sprite arena, unreachable, on every swap; a menu that swaps on open AND on close leaked it
+  // twice a visit, and in a game with no scene loads to wipe the arena nothing ever gave it back.
+  // (The `uiHideIcons` that used to follow could not even hide them — it walks the array that was
+  // just emptied, so they stayed visible too.)
+  uiFreePool()
+  uiHideIcons()
+}
+
+// uiFreePool — destroy every pooled icon sprite and empty the pool. For when the sprites are still
+// LIVE (a sheet swap). Use `uiResetPool` when `sprite_clear` has already invalidated the handles.
+export function uiFreePool() {
+  let i = 0
+  while (i < POOL.sprites.length) {
+    sprite_set_visible(POOL.sprites[i], 0)
+    sprite_destroy(POOL.sprites[i])
+    i = i + 1
+  }
+  POOL.sprites = []
+  POOL.used = 0
+}
+
+// uiFont("body"|"title"|"tiny") — theme font token → handle from uiInit.
+export function uiFont(which) {
+  if (which === "title") { return CFG.titleFont }
+  if (which === "tiny") { return CFG.tinyFont }
+  return CFG.font
+}
+
+// Ensure pool slot `i` has a live sprite (after loadScene / sprite_clear handles are dead).
+function ensureIconSprite(i) {
+  while (POOL.sprites.length <= i) {
+    if (CFG.sheet < 0) { return -1 }
+    if (POOL.sprites.length >= POOL.n) { return -1 }
+    let sp = sprite_new(CFG.sheet)
+    sprite_set_hud(sp, 1)
+    sprite_set_visible(sp, 0)
+    POOL.sprites.push(sp)
+  }
+  return POOL.sprites[i]
+}
+
+// uiIconAt(slot, x, y, frame) — show pool sprite `slot` at (x, y) on `frame`. Returns the sprite
+// handle, or -1 if the pool is exhausted / no sheet is set.
+//
+// The positional twin of an `{icon}` leaf in a node tree: the same pooled, HUD-space sprites, but
+// addressed by INDEX instead of by node. This is what the node-free painters need —
+// `uiReframeIcon` can only touch an icon a `uiRender` already painted, because it reads the pool
+// index back off the node, so a painter that owns no nodes had no way to draw one at all.
+//
+// The caller owns its slot numbers; keep them disjoint from anything a `uiRender` on the same screen
+// will allocate (uiRender fills from 0 upward). `uiHideIcons()` still parks every sprite.
+//
+// ⚠️ A TOP-LEVEL FUNCTION ON PURPOSE. A tish-agb sprite extern called directly from inside a
+// `() => {}` closure silently no-ops on GBA — the same reason makePointer returns a plain state
+// object and its sprite ops live in the top-level `pointerAt`/`pointerHide`. A closure may CALL
+// this; it must not inline the extern itself.
+export function uiIconAt(slot, x, y, frame) {
+  if (slot < 0) { return 0 - 1 }
+  let sp = ensureIconSprite(slot)
+  if (sp < 0) { return 0 - 1 }
+  // Keep the pool cursor past this slot so a later uiRender does not hand it to a node as well.
+  if (POOL.used <= slot) { POOL.used = slot + 1 }
+  sprite_set_frame(sp, frame)
+  sprite_set_pos(sp, x, y)
+  sprite_set_visible(sp, 1)
+  return sp
+}
+
+// uiIconHide(slot) — park one positional icon (an empty inventory cell, a row scrolled away).
+export function uiIconHide(slot) {
+  if (slot < 0) { return }
+  if (slot >= POOL.sprites.length) { return }
+  sprite_set_visible(POOL.sprites[slot], 0)
+}
+
+// uiResetPool / uiResetPointers — defined in scene_hooks.tish (imported above).
+
+// uiRender(root) — lay out and draw the whole tree into the screen (240x160). Call when content
+// changes (not necessarily every frame); the canvas + icon sprites persist until the next render.
+// STREAM.lo (layout-only): when 1, uiRender lays out + writes geometry back to the RAW nodes but does NOT
+// paint or ui_begin — the streamed renderer (uiStreamBegin/Step) drives ui_begin + the paint itself, one
+// batch of nodes per frame. Kept as a STRUCT FIELD (not a bare module scalar — reassigning those from a
+// function is unreliable on GBA), so uiRender and uiStreamStep see the same value.
+let STREAM = { active: 0, laid: 0, lo: 0, raw: [], count: 0, i: 0, pending: null }
+// Reused across uiRender calls so flatten/RAW don't reallocate every paint.
+// LNode SLOTS are pooled too — `length = 0` + push({...}) used to allocate a fresh boxed LNode per
+// tree node on every paint, and denser trees (makeGrid) OOMed the GBA heap on the second render.
+// sub=1: lay out `root` into (subX,subY,subW,subH) without ui_begin (keeps the rest of the canvas).
+// Used by uiRelayoutAt / uiRelayoutInner so a panel swap rides the fast native LN path instead of the
+// boxed measure/arrange (which is ~5× slower — shop qty is small enough to hide it, bag/equip is not).
+let LAYOUT = { raw: [], n: 0, sub: 0, subX: 0, subY: 0, subW: 240, subH: 160 }
+// The layout node pool now lives in tish-agb (crates/tish-agb/src/ui_layout.rs): a flat i32 pool
+// behind `lay_push`/`lay_solve`. The old boxed `LN: LNode[]` pool and the copy-not-view trap it
+// documented are gone with it — a native pool cannot be aliased into a tish local by accident.
+
+
+// Ticks since the last lap. Timer2 wraps at 65536, so a phase straddling a wrap must not report negative
+// (a whole render is ~10 vblanks = ~44k ticks, so it wraps often).
+function tickLap() {
+  let now = ticks()
+  let d = now - PSTAT.t
+  if (d < 0) { d = d + 65536 }
+  PSTAT.t = now
+  return d
+}
+
+// uiLayoutStats() — the last render's phase breakdown, e.g.
+//   "ui: n=142 flat=3100 meas=9800 arr=6400 wb=3100 paint=21000 tot=43400t 165ms"
+// Needs `uiInit({ stats: 1 })`; without it every number reads 0. Paint ACCUMULATES across a streamed open
+// (uiStreamStep paints a budget of nodes per frame), so `tot` is the whole screen's cost, not one frame's.
+//
+// These are CPU ticks INCLUDING the `audio_pump()` each pass makes every 8 nodes — real work the pass has to
+// do, and the reason a pass can't just be timed end to end anyway. Compare passes against each other and
+// across changes; don't read a phase as pure layout cost.
+export function uiLayoutStats() {
+  let tot = PSTAT.flat + PSTAT.meas + PSTAT.arr + PSTAT.wb + PSTAT.paint
+  return "ui: n=" + PSTAT.n + " flat=" + PSTAT.flat + " meas=" + PSTAT.meas + " arr=" + PSTAT.arr +
+    " wb=" + PSTAT.wb + " paint=" + PSTAT.paint + " tot=" + tot + "t " + Math.floor(tot / 262) + "ms"
+}
+
+export function uiRender(root) {
+  if (PSTAT.on > 0) {
+    PSTAT.flat = 0; PSTAT.meas = 0; PSTAT.arr = 0; PSTAT.wb = 0; PSTAT.paint = 0
+    PSTAT.t = ticks()
+  }
+  // Subtree relayout: keep the existing canvas (no ui_begin). Full-screen render: clear + reset pool.
+  if (STREAM.lo === 0) {
+    if (LAYOUT.sub === 0) { ui_begin() }
+    POOL.used = 0
+  }
+  audio_pump()   // a full re-layout runs for tens of ms reading boxed node fields with no text/tile call
+  // `LN` is the module-level pool (see its declaration): entries survive between renders, so a
+  // screen after the first reuses slots instead of pushing new ones.
+  let RAW = LAYOUT.raw
+  let n = 0
+  RAW.length = 0
+  // Rewind the NATIVE node pool. Without this it only ever grows: the second uiRender pushed its
+  // nodes after the first screen's, while the geometry write-back below reads slots 0..count-1 —
+  // so every node got the PREVIOUS screen's box, offset by that screen's node count. A bar's 70x4
+  // fill landing on a full-width container is what painted a screen-sized block of `good` green.
+  lay_reset()
+  // ── Pass 0: FLATTEN the boxed object tree into the native typed Vec (iterative preorder DFS). This
+  // reads each object field ONCE (boxed), resolving strings→int modes + pre-measuring leaves. Every
+  // pass after this is native i32.
+  let sObj = [root]
+  let sPar = [-1]
+  while (sObj.length > 0) {
+    // Lap every 8 nodes rather than once per phase: Timer2 wraps every 65536 ticks (~250ms) and a phase on a
+    // dense screen runs longer than that, which would silently alias a whole wrap away.
+    if (PSTAT.on > 0) { if (n % 8 === 0) { PSTAT.flat = PSTAT.flat + tickLap() } }
+    let node = sObj.pop()
+    let par = sPar.pop()
+    let idx = n
+    // The node pool lives in tish-agb now (crates/tish-agb/src/ui_layout.rs) — `lay_push` grows and
+    // reuses it, and links the child into its parent. Nothing to grow here.
+    n = idx + 1
+    let kind = 0
+    let dir = 0
+    if (node.dir === "row") { dir = 1 }
+    let gap = node.gap
+    if (gap === null) { gap = 0 }
+    let pad = node.pad
+    if (pad === null) { pad = 0 }
+    let fw = node.w
+    if (fw === null) { fw = -1 }
+    let fh = node.h
+    if (fh === null) { fh = -1 }
+    let grow = node.grow
+    if (grow === null) { grow = 0 }
+    let jm = 0
+    if (node.justify === "center") { jm = 1 } else { if (node.justify === "end") { jm = 2 } else { if (node.justify === "between") { jm = 3 } } }
+    let am = 3
+    if (node.align === "start") { am = 0 } else { if (node.align === "center") { am = 1 } else { if (node.align === "end") { am = 2 } } }
+    let scroll = 0
+    if (node.scroll !== null) { scroll = 1 }
+    let sy = node.scrollY
+    if (sy === null) { sy = 0 }
+    let mw = 0
+    let mh = 0
+    if (node.text !== null) {
+      kind = 1
+      let f = node.font
+      if (f === null) { f = CFG.font }
+      if (node.wrap !== null) {
+        let w = fw
+        if (w < 0) { w = 100 }
+        mw = w
+        // A paragraph that reserves a fixed `h` (dialog body, detail description) needs no wrap
+        // measurement: `text_wrap_height` is a full agb shaping pass, and `fh` wins over `mh` anyway.
+        if (fh >= 0) { mh = fh }
+        else { mh = text_wrap_height(f, node.text, w) }
+      } else {
+        mw = text_width(f, node.text)
+        let lh = node.lineH
+        if (lh === null) { lh = text_height(f) }
+        mh = lh
+      }
+    } else {
+      if (node.icon !== null) {
+        kind = 2
+        let s = node.size
+        if (s === null) { s = CFG.iconSize }
+        mw = s
+        mh = s
+      } else {
+        // A CUSTOM-PAINT LEAF: `{ w, h, paint: (x,y,w,h) => ... }`. The engine lays out its box like
+        // any other leaf and then hands the box back, instead of the caller building nodes for
+        // content it is going to draw imperatively anyway.
+        //
+        // This is what lets a list of a hundred rows cost nothing structural: the library owns the
+        // layout and the sequencing (paint happens after arrange, inside the same pass), and the
+        // component owns the pixels. Without it every component that wanted to avoid per-row nodes
+        // had to hand-roll the "reserve a spacer, capture its box after layout, paint later" dance —
+        // which is exactly the optimization a UI library exists to do once.
+        if (node.paint !== null) {
+          kind = 3
+          mw = 0
+          mh = 0
+          if (fw >= 0) { mw = fw }
+          if (fh >= 0) { mh = fh }
+        }
+      }
+    }
+    // ⚠️ ONE native call replaces 22 boxed field writes. `lay_push` also links this node into its
+    // parent's child list, so the `fc`/`ns`/`last` fixup below is gone too.
+    lay_push(kind, dir, gap, pad, fw, fh, grow, am, jm, scroll, sy, par)
+    lay_set_measured(idx, mw, mh)
+    // paint reads `_kind`; it is known here, so set it at flatten instead of shipping another
+    // accessor across the boundary for a value that never changes after this point.
+    node._kind = kind
+    // ⚠️ COLOURS ARE INTERNED HERE, once, instead of being resolved from a theme-key STRING on every
+    // paint. `col2` is a typeof plus two boxed map lookups; paint runs per frame and again per
+    // streamed chunk, so this moved the whole cost onto the one pass that already has the node open.
+    // A node that sets no colour gets the theme's "text".
+    node._col = col2(pick(node.color, "text"))
+    // ⚠️ FONT, ALIGN and the WRAP DECISION are interned here too. Paint used to call
+    // `textAlignArg(raw)` and `textMaxW(raw)` per text node — two boxed CALLS plus a run of string
+    // compares, every node every frame — and re-derive the font with a null check. All three are
+    // decided by fields the node already has, so they are decided once.
+    // ⚠️ `_useW` rather than the width itself: the laid-out `_w` is not known until arrange runs,
+    // so what is interned is WHETHER the alignment wants it (wrap/centre/right/end/justify) — paint
+    // then picks `_w` or the 512 "no limit" sentinel without touching a string.
+    // ⚠️ PAINT CLASS, decided here because paint must not have to ask. 0 container, 1 plain text,
+    // 2 icon, 3 custom-paint leaf, 4 text the native pass cannot draw (reveal = a per-frame slice,
+    // ellip = a fitText measurement). 2/3/4 are painted by the tish loop below, in order.
+    node._font = pick(node.font, CFG.font)
+    node._align = textAlignArg(node)
+    node._useW = 0
+    if (node.wrap !== null) { node._useW = 1 }
+    let pk = kind
+    if (kind === 1) {
+      if (node.reveal !== null) { pk = 4 }
+      if (node.ellip !== null) { pk = 4 }
+    }
+    node._pk = pk
+    // Hand paint everything it needs, now, while the node is open. `sel` is a flag; -1 means "no
+    // colour" for shadow/fill/border. Align is an id: 0 left, 1 centre, 2 right.
+    let alignId = 0
+    if (node._align === "center") { alignId = 1 }
+    if (node._align === "right") { alignId = 2 }
+    let selFlag = 0
+    if (node.sel !== null) { if (node.sel) { selFlag = 1 } }
+    let shOff = 1
+    if (node.shadowOff !== null) { shOff = node.shadowOff }
+    else {
+      let al = node.align
+      if (al === "center") { node._useW = 1 }
+      if (al === "centre") { node._useW = 1 }
+      if (al === "right") { node._useW = 1 }
+      if (al === "end") { node._useW = 1 }
+      if (al === "justify") { node._useW = 1 }
+    }
+    if (node.shadow !== null) { node._shadowc = col2(node.shadow) }
+    if (node.fill !== null) { node._fillc = col2(node.fill) }
+    if (node.border !== null) { node._borderc = col2(node.border) }
+
+    lay_set_paint(idx, pk, node._col, pick(node._shadowc, 0 - 1), pick(node._fillc, 0 - 1),
+                  pick(node._borderc, 0 - 1), node._font, alignId, node._useW, shOff, selFlag)
+    if (pk === 1) { lay_set_text(idx, node.text) }
+    RAW.push(node)
+    // Keep the BGM fed through the (boxed, slow) flatten of container-heavy trees — text leaves pump via
+    // text_width, but a run of containers (root/panels) reads many boxed fields with no pump between.
+    if (idx % 8 === 0) { audio_pump() }
+    if (kind === 0) {
+      let kids = node.children
+      if (kids !== null) {
+        let j = kids.length - 1
+        while (j >= 0) {
+          sObj.push(kids[j])
+          sPar.push(idx)
+          j = j - 1
+        }
+      }
+    }
+  }
+  LAYOUT.n = n
+  let count: i32 = n
+  if (PSTAT.on > 0) { PSTAT.flat = PSTAT.flat + tickLap(); PSTAT.n = count }
+
+  // ── LAYOUT: one native call ────────────────────────────────────────────────────────────────────
+  // Measure (bottom-up) and arrange (top-down) both run in tish-agb now — see
+  // crates/tish-agb/src/ui_layout.rs. What used to be ~190 lines of boxed `LN[i].field` reads at
+  // ~2,000 ticks per node is a flat i32 pool and two passes of ordinary Rust arithmetic.
+  //
+  // ⚠️ The `audio_pump()` calls that used to be sprinkled through these loops are gone WITH them.
+  // They existed because the boxed passes ran long enough to starve the mixer; the native pass
+  // does not. Do not reintroduce them here — pump around the passes, not inside a native call.
+  // ⚠️ The solver's arithmetic is pinned to what this file used to do, integer truncation included.
+  // examples/repro-ui-layout is the parity check; run it after touching either side.
+  if (LAYOUT.sub === 1) {
+    lay_solve(LAYOUT.subX, LAYOUT.subY, LAYOUT.subW, LAYOUT.subH)
+  } else {
+    lay_solve(0, 0, 240, 160)
+  }
+  if (PSTAT.on > 0) { PSTAT.arr = PSTAT.arr + tickLap() }
+
+  // ⚠️ `i` used to be declared by the measure pass that lived above; that pass is native now, so the
+  // write-back owns the counter.
+  let i: i32 = 0
+  while (i < count) {
+    if (i % 8 === 0) { audio_pump() }   // boxed geometry write-back per node → feed the BGM
+    if (PSTAT.on > 0) { if (i % 8 === 0) { PSTAT.wb = PSTAT.wb + tickLap() } }
+    let raw = RAW[i]
+    // Geometry comes back out of the native pool. The boxed writes onto `raw` stay: paint reads
+    // them, and a component may too (`node._w` is public-ish).
+    raw._x = lay_x(i)
+    raw._y = lay_y(i)
+    raw._w = lay_w(i)
+    raw._h = lay_h(i)
+    raw._hide = lay_hide(i)
+    i = i + 1
+  }
+  if (PSTAT.on > 0) { PSTAT.wb = PSTAT.wb + tickLap() }
+  // Streamed render: stash a COPY of the flat list + bail. Must not alias LAYOUT.raw — the next
+  // uiRender clears that array's length and would wipe the in-flight stream.
+  if (STREAM.lo === 1) {
+    STREAM.raw = []
+    let si = 0
+    while (si < count) { STREAM.raw.push(RAW[si]); si = si + 1 }
+    STREAM.count = count
+    // Same release as the immediate path below, for the same reason: STREAM.raw now holds the
+    // references, so LAYOUT.raw must not keep a SECOND set alive until the next full uiRender.
+    // Every uiBake and every uiStreamBegin lands here, and a replay-driven game (akari, shop tabs)
+    // may never run a full uiRender again — so without this the last baked screen's node graph
+    // (~14-40K) stays resident for the rest of the session. Only the references go; capacity stays.
+    RAW.length = 0
+    return
+  }
+  // ── Pass 3: PAINT — a container draws its border before its children (forward order).
+  // ⚠️ ORDER IS PRESERVED BY CONSTRUCTION. `ui_paint_from` draws forward until it reaches a node it
+  // cannot (icon / custom / reveal-ellipsis text) and returns THAT index; this loop paints that one
+  // the boxed way and resumes after it. A screen of text and containers is ONE crossing; four icons
+  // cost five. Painting "everything native, exceptions after" would lift icons above borders drawn
+  // later, which is why it is not done that way.
+  i = 0
+  while (i < count) {
+    let stop = ui_paint_from(i)
+    if (stop >= count) { i = count }
+    else {
+      audio_pump()
+      paintNode(RAW[stop])
+      i = stop + 1
+    }
+  }
+  hideRest()
+  if (PSTAT.on > 0) { PSTAT.paint = PSTAT.paint + tickLap() }
+  // Let go of the tree. The pool exists to avoid re-allocating the ARRAY, not to hold a screen alive: a
+  // shop tab is ~40K of node objects, and keeping the flat list until the next render meant the outgoing
+  // screen was still resident while the incoming one allocated (the tab a player had just left made the
+  // keeper's dialog fail to allocate). Capacity stays; only the references go.
+  RAW.length = 0
+}
+
+// Paint ONE laid-out node from its RAW object (geometry/kind/hide written by uiRender's write-back pass).
+// Shared by the immediate paint (uiRender) and the streamed painter (uiStreamStep) so both stay identical.
+function paintNode(raw) {
+  if (raw._hide > 0) { return }
+  if (raw.sel !== null) { if (raw.sel) { ui_rect(raw._x - 1, raw._y - 1, raw._w + 2, raw._h + 2, COL_SELECTED) } }
+  let k = raw._kind
+  if (k === 1) {
+    let s = raw.text
+    if (raw.reveal !== null) { s = s.slice(0, raw.reveal) }
+    let f = raw._font
+    if (raw.ellip !== null) { s = fitText(f, s, raw._w) }
+    let wrapW = 512
+    if (raw._useW > 0) { wrapW = raw._w }
+    if (raw.shadow !== null) {   // see `paint` — inlined rather than shared to keep this loop value_call-free
+      let sd = 1
+      if (raw.shadowOff !== null) { sd = raw.shadowOff }
+      ui_text(f, raw._x, raw._y, s, raw._col, wrapW, raw._align, raw._shadowc, sd, sd)
+    } else {
+      ui_text(f, raw._x, raw._y, s, raw._col, wrapW, raw._align)
+    }
+  } else {
+    if (k === 3) {
+      // Custom-paint leaf: the engine has already given it its box; the component draws into it.
+      raw.paint(raw._x, raw._y, raw._w, raw._h)
+    } else {
+    if (k === 2) {
+      if (POOL.used < POOL.n) {
+        let sp = ensureIconSprite(POOL.used)
+        if (sp >= 0) {
+          raw._sp = POOL.used   // remember which pool sprite drew this icon, so it can be reframed in place
+          POOL.used = POOL.used + 1
+          sprite_set_frame(sp, raw.icon)
+          sprite_set_pos(sp, raw._x, raw._y)
+          sprite_set_visible(sp, 1)
+        }
+      }
+    } else {
+      if (raw.fill !== null) { fillRectExact(raw._x, raw._y, raw._w, raw._h, raw._fillc) }
+      if (raw.border !== null) { ui_rect(raw._x, raw._y, raw._w, raw._h, raw._borderc) }
+      paintScrollbar(raw)
+    }
+    }
+  }
+}
+
+// Change an already-painted icon node's frame IN PLACE (its pool sprite, recorded as `_sp` when painted).
+// A sprite reframe is instant (OAM, no bg touch), so a menu whose icon changes on selection can update it
+// without a re-layout/flash — the sprite-side companion to ui_text_box for text.
+export function uiReframeIcon(node, frame) {
+  if (present(node) === 0) { return }
+  if (present(node._sp) === 0) { return }
+  sprite_set_frame(POOL.sprites[node._sp], frame)
+}
+
+// uiRepaint(node) — clear + paint ONE already-laid-out subtree in place (no measure, no ui_begin).
+// The clear flashes black for a frame — prefer `buttonPaint` / `ui_text_box` for selection/text
+// updates (shop-style opaque overwrite, no intermediate). Use this when the subtree's shape or
+// glyph set actually changes.
+export function uiRepaint(node) {
+  if (present(node) === 0) { return }
+  if (present(node._x) === 0) { return }
+  ui_clear_rect(node._x, node._y, node._w, node._h)
+  paint(node)
+}
+
+// ── Baked layout: solve once, replay forever ─────────────────────────────────
+// ONE shared op pool for every bake; a bake records its slice of it as start (in numbers) + op count.
+// `epoch` rises every time the pool is released (uiBakeFreeAll). Nodes remember the epoch their `_op`
+// handle belongs to, so a node kept by a caller across a release can't write into a recycled slot.
+let BAKE = { ops: [], ids: [], starts: [], counts: [], strs: [], epoch: 0 }
+// In-flight replay, so a first open can spread the glyph paint across frames like uiStreamStep does.
+let RP = { active: 0, bi: -1, i: 0 }
+
+function bakeIndex(id) {
+  let i = 0
+  while (i < BAKE.ids.length) {
+    if (BAKE.ids[i] === id) { return i }
+    i = i + 1
+  }
+  return -1
+}
+
+// uiBaked(id) — 1 when this screen's layout is already solved and can be replayed.
+export function uiBaked(id) {
+  if (bakeIndex(id) >= 0) { return 1 }
+  return 0
+}
+
+// Append one op to the shared pool. Returns its BASE index (nodes remember this as `_op`, so a later
+// uiBakeText/uiBakeIcon can reach its own op without a search).
+function bakeOp(kind, x, y, p1, p2, p3, p4, p5) {
+  let OPS = BAKE.ops
+  let base = OPS.length
+  OPS.push(kind)
+  OPS.push(x)
+  OPS.push(y)
+  OPS.push(p1)
+  OPS.push(p2)
+  OPS.push(p3)
+  OPS.push(p4)
+  OPS.push(p5)
+  return base
+}
+
+// uiBake(id, root) — solve `root` ONCE and compile it to a display list under `id`. Returns 1 when the
+// screen is baked (already-baked ids are a no-op). The tree's nodes keep the geometry this pass writes,
+// so the in-place patch helpers (uiRowText / uiReveal / uiReframeIcon) keep working on them — KEEP the
+// node refs you want to patch; rebuilt object literals get no geometry.
+// Refuses a tree containing a `scroll` container: those cull their children per frame against a live
+// scroll offset, so their geometry genuinely is not predetermined (use uiRender / uiRelayoutAt there).
+export function uiBake(id, root) {
+  if (bakeIndex(id) >= 0) { return 1 }
+  if (STREAM.active === 1) { return 0 }
+  // Layout-only render: flatten + measure + arrange + geometry write-back, no paint, and it stashes
+  // the flat node list for us.
+  STREAM.lo = 1
+  uiRender(root)
+  STREAM.lo = 0
+  let RAWS = STREAM.raw
+  let count = STREAM.count
+  STREAM.raw = []
+  STREAM.count = 0
+  let i = 0
+  while (i < count) {
+    if (RAWS[i].scroll !== null) { return 0 }
+    // A custom-paint leaf draws through a closure, which a display list cannot hold — baking one
+    // would silently drop whatever it draws. Same refusal as a scroll container, same reason.
+    if (RAWS[i].paint !== null) { return 0 }
+    i = i + 1
+  }
+  let start = BAKE.ops.length
+  let ops = 0
+  // Replay hands out icon-pool slots in op order, so each icon's pool slot is known now — record it as
+  // `_sp` so uiReframeIcon can still change an icon in place without a repaint.
+  let icons = 0
+  i = 0
+  while (i < count) {
+    let raw = RAWS[i]
+    let k = raw._kind
+    if (raw._hide > 0) { k = -1 }
+    if (k === 1) {
+      let f = raw.font
+      if (f === null) { f = CFG.font }
+      let s = raw.text
+      // A typewriter node paints nothing at open (uiReveal types into it); an ellipsised label is
+      // fitted now, at the width it will always have.
+      if (raw.reveal !== null) { s = s.slice(0, raw.reveal) }
+      if (raw.ellip !== null) { s = fitText(f, s, raw._w) }
+      let col = raw.color
+      if (col === null) { col = "text" }
+      BAKE.strs.push(s)
+      let bw = 512
+      if (raw._useW > 0) { bw = raw._w }
+      raw._op = bakeOp(2, raw._x, raw._y, f, raw._col, bw, raw._align, BAKE.strs.length - 1)
+      raw._ope = BAKE.epoch
+      ops = ops + 1
+    }
+    if (k === 2) {
+      raw._op = bakeOp(3, raw._x, raw._y, raw.icon, 0, 0, 0, 0)
+      raw._ope = BAKE.epoch
+      ops = ops + 1
+      if (icons < POOL.n) { raw._sp = icons }
+      icons = icons + 1
+    }
+    if (k === 0) {
+      if (raw.fill !== null) { bakeOp(1, raw._x, raw._y, raw._w, raw._h, raw._fillc, 0, 0); ops = ops + 1 }
+      if (raw.border !== null) { bakeOp(0, raw._x, raw._y, raw._w, raw._h, raw._borderc, 0, 0); ops = ops + 1 }
+    }
+    if (i % 8 === 0) { audio_pump() }
+    i = i + 1
+  }
+  BAKE.ids.push(id)
+  BAKE.starts.push(start)
+  BAKE.counts.push(ops)
+  return 1
+}
+
+// uiBakeFreeAll() — hand every baked screen's memory back: the op pool, the string table and the ids.
+// A baked screen replays for almost nothing, but it is RESIDENT, and on a 256K heap the screen taking
+// over next often needs those kilobytes more than we need an instant re-open (one shop tab's node tree is
+// ~40K; a dialog that stayed baked through it made a quantity prompt fail to allocate). Callers own the
+// rebuild — `uiBaked(id)` reports 0 afterwards and the screen bakes again on its next open.
+export function uiBakeFreeAll() {
+  BAKE.ops = []
+  BAKE.ids = []
+  BAKE.starts = []
+  BAKE.counts = []
+  BAKE.strs = []
+  BAKE.epoch = BAKE.epoch + 1
+  RP.active = 0
+  RP.bi = -1
+  RP.i = 0
+}
+
+// Does this node's baked op handle still point into the CURRENT pool?
+function bakeLive(node) {
+  if (present(node) === 0) { return 0 }
+  if (present(node._op) === 0) { return 0 }
+  if (node._ope !== BAKE.epoch) { return 0 }
+  return 1
+}
+
+// uiBakeText(node, text) — swap the string a baked text op draws, at the same geometry. This is the
+// only thing a "dynamic" screen needs: gold totals, item names, a page of dialogue. Returns 0 if the
+// node was never baked (caller should fall back to uiRowText / a re-render).
+export function uiBakeText(node, text) {
+  if (bakeLive(node) === 0) { return 0 }
+  if (BAKE.ops[node._op + B_KIND] !== 2) { return 0 }
+  let si = BAKE.ops[node._op + B_P5]
+  if (si < 0) { return 0 }
+  BAKE.strs[si] = text
+  node.text = text
+  return 1
+}
+
+// uiBakeIcon(node, frame) — swap the frame a baked icon op draws (a dialog portrait changing speaker).
+// Also reframes the live sprite, so it works whether or not the screen is currently up.
+export function uiBakeIcon(node, frame) {
+  if (bakeLive(node) === 0) { return 0 }
+  if (BAKE.ops[node._op + B_KIND] !== 3) { return 0 }
+  BAKE.ops[node._op + B_P1] = frame
+  node.icon = frame
+  if (present(node._sp) === 1) {
+    if (node._sp < POOL.sprites.length) { sprite_set_frame(POOL.sprites[node._sp], frame) }
+  }
+  return 1
+}
+
+// Draw one baked op. `OPS` is hoisted by the caller so the whole replay costs ONE property lookup.
+function replayOp(OPS, o) {
+  let k = OPS[o + B_KIND]
+  if (k === 2) {
+    let si = OPS[o + B_P5]
+    if (si >= 0) {
+      ui_text(OPS[o + B_P1], OPS[o + B_X], OPS[o + B_Y], BAKE.strs[si], OPS[o + B_P2], OPS[o + B_P3], OPS[o + B_P4])
+    }
+    return
+  }
+  if (k === 3) {
+    if (POOL.used < POOL.n) {
+      let sp = ensureIconSprite(POOL.used)
+      if (sp >= 0) {
+        POOL.used = POOL.used + 1
+        sprite_set_frame(sp, OPS[o + B_P1])
+        sprite_set_pos(sp, OPS[o + B_X], OPS[o + B_Y])
+        sprite_set_visible(sp, 1)
+      }
+    }
+    return
+  }
+  if (k === 1) { ui_rect(OPS[o + B_X], OPS[o + B_Y], OPS[o + B_P1], OPS[o + B_P2], OPS[o + B_P3], 1); return }
+  ui_rect(OPS[o + B_X], OPS[o + B_Y], OPS[o + B_P1], OPS[o + B_P2], OPS[o + B_P3])
+}
+
+// uiReplay(id) — repaint a baked screen in ONE call: ui_begin + the op list. No layout of any kind.
+export function uiReplay(id) {
+  let bi = bakeIndex(id)
+  if (bi < 0) { return 0 }
+  ui_begin()
+  POOL.used = 0
+  let OPS = BAKE.ops
+  let o = BAKE.starts[bi]
+  let cnt = BAKE.counts[bi]
+  let i = 0
+  while (i < cnt) {
+    replayOp(OPS, o)
+    o = o + BSTRIDE
+    if (i % 4 === 0) { audio_pump() }
+    i = i + 1
+  }
+  hideRest()
+  return 1
+}
+
+// uiReplayBegin(id) / uiReplayStep(budget) — the same replay spread over frames, for the first open of
+// a dense screen where even the glyph blitting alone overruns a frame. Same contract as
+// uiStreamBegin/uiStreamStep: step until it returns 1.
+export function uiReplayBegin(id) {
+  let bi = bakeIndex(id)
+  if (bi < 0) { return 0 }
+  ui_begin()
+  POOL.used = 0
+  RP.active = 1
+  RP.bi = bi
+  RP.i = 0
+  return 1
+}
+
+export function uiReplayStep(budget) {
+  if (RP.active === 0) { return 1 }
+  let OPS = BAKE.ops
+  let start = BAKE.starts[RP.bi]
+  let cnt = BAKE.counts[RP.bi]
+  let painted = 0
+  let i = RP.i
+  while (i < cnt) {
+    if (painted >= budget) { RP.i = i; audio_pump(); return 0 }
+    replayOp(OPS, start + i * BSTRIDE)
+    painted = painted + 1
+    i = i + 1
+    if (painted % 2 === 0) { audio_pump() }
+  }
+  RP.i = i
+  hideRest()
+  RP.active = 0
+  audio_pump()
+  return 1
+}
+
+export function uiReplaying() { return RP.active }
+
+// ── Streamed render: paint a big tree over several frames so no single frame blocks ──────────────────
+// uiStreamBegin(root, bgColor) once — it ui_begin()s, INSTANTLY fills the canvas with `bgColor` (so a
+// menu opening over a game scene snaps to its own background colour immediately), and stashes the tree.
+// Then call uiStreamStep(budget) each frame until it returns 1: the first step lays the whole tree out
+// (the one unavoidable chunk — but it runs on the already-shown bg colour, and only writes geometry, no
+// glyphs), and each following step paints `budget` nodes. The heavy glyph rasterising is thus spread
+// across frames — the menu "loads in" instead of hanging the loop for ~a second.
+export function uiStreamBegin(root, bgColor) {
+  ui_begin()
+  POOL.used = 0
+  // Chunked fill — a single 240×160 ui_rect snaps inward and leaves map rims on over-map menus.
+  if (bgColor !== null) { fillRectExact(0, 0, 240, 160, col2(bgColor)) }
+  STREAM.active = 1
+  STREAM.laid = 0
+  STREAM.raw = []
+  STREAM.count = 0
+  STREAM.i = 0
+  STREAM.pending = root
+}
+export function uiStreamStep(budget) {
+  if (STREAM.active === 0) { return 1 }
+  if (STREAM.laid === 0) {
+    STREAM.lo = 1
+    uiRender(STREAM.pending)   // lays out + writes geometry to RAW, stashes STREAM.raw/count, no paint
+    STREAM.lo = 0
+    STREAM.laid = 1
+    STREAM.i = 0
+    audio_pump()
+    return 0
+  }
+  let painted = 0
+  // Paint accumulates across every step of the open, so uiLayoutStats reports the SCREEN's paint cost
+  // rather than one frame's slice of it.
+  if (PSTAT.on > 0) { PSTAT.t = ticks() }
+  while (STREAM.i < STREAM.count) {
+    if (painted >= budget) {
+      if (PSTAT.on > 0) { PSTAT.paint = PSTAT.paint + tickLap() }
+      audio_pump()
+      return 0
+    }
+    if (PSTAT.on > 0) { if (painted % 8 === 0) { PSTAT.paint = PSTAT.paint + tickLap() } }
+    paintNode(STREAM.raw[STREAM.i])
+    STREAM.i = STREAM.i + 1
+    painted = painted + 1
+    if (painted % 2 === 0) { audio_pump() }
+  }
+  hideRest()
+  if (PSTAT.on > 0) { PSTAT.paint = PSTAT.paint + tickLap() }
+  STREAM.active = 0
+  // The screen is fully painted, so the flat list and the root that produced it are just a copy of the
+  // whole tree held for no one (see the note in uiRender's paint pass). Callers keep the few nodes they
+  // patch; everything else should be free the moment it is on the canvas.
+  STREAM.raw = []
+  STREAM.count = 0
+  STREAM.i = 0
+  STREAM.pending = null
+  audio_pump()
+  return 1
+}
+export function uiStreaming() { return STREAM.active }
+
+// uiPaint(root, opts?) — one-shot `uiRender`, or start a streamed open when `opts.stream`.
+// opts: { stream?: 1, bg?: token|0xRRGGBB, budget?: 6 }. Returns 1 if paint finished this call,
+// 0 if a stream is in flight (call uiPaintStep() each frame until it returns 1).
+let PAINT = { budget: 6 }
+export function uiPaint(root, opts) {
+  let o = optsOf(opts)
+  if (pick(o.stream, 0)) {
+    PAINT.budget = pick(o.budget, 6)
+    let bg = null
+    if (present(o.bg) === 1) { bg = o.bg }
+    uiStreamBegin(root, bg)
+    return 0
+  }
+  uiRender(root)
+  return 1
+}
+export function uiPaintStep() {
+  if (STREAM.active === 0) { return 1 }
+  if (uiStreamStep(PAINT.budget) === 1) { return 1 }
+  return 0
+}
+export function uiPaintBusy() {
+  if (RP.active === 1) { return 1 }
+  return STREAM.active
+}
+
+// uiOverlay(node) — lay out `node` at its own (measured or fixed) size, CENTRED on screen, and paint
+// it ON TOP of the current canvas (no `ui_begin`, so it accumulates). For popups.
+export function uiOverlay(node) {
+  measure(node)
+  let w = pick(node.w, node._mw)
+  let h = pick(node.h, node._mh)
+  arrange(node, (240 - w) / 2, (160 - h) / 2, w, h)
+  paint(node)
+  hideRest()
+}
+
+// uiModal(node) — like uiOverlay, but first blanks the region behind the node so the base screen is
+// obscured. Prefer a `fill` on the node (e.g. fill:"panel") so the box is opaque; without it, later
+// ui_text_box patches on the base screen can show through the cleared tiles. Draw the base with
+// uiRender/uiPaint first, then this — and do not patch the base while the modal is up.
+export function uiModal(node) {
+  measure(node)
+  let w = pick(node.w, node._mw)
+  let h = pick(node.h, node._mh)
+  let x = (240 - w) / 2
+  let y = (160 - h) / 2
+  // Extra margin so tile-aligned clears don't leave a 1-tile ring of base text around the box.
+  ui_clear_rect(x - 8, y - 8, w + 16, h + 16)
+  arrange(node, x, y, w, h)
+  paint(node)
+  hideRest()
+}
+
+// uiPaintBox(node) — centred overlay for SMALL menus (pause). Uses the recursive measure/arrange/paint
+// path and skips `uiRender`'s LNode flatten/write-back (built for dense Status trees; one-shot hangs
+// ~a second on glyph work). Resets the icon pool. Call when the panel is a handful of rows, not a
+// full chrome tree.
+export function uiPaintBox(node) {
+  ui_begin()
+  POOL.used = 0
+  measure(node)
+  let w = pick(node.w, node._mw)
+  let h = pick(node.h, node._mh)
+  arrange(node, (240 - w) / 2, (160 - h) / 2, w, h)
+  paint(node)
+  hideRest()
+}
+
+// ── Screen focus stack (pause → options → confirm) ────────────────────────────
+// Tiny ordered stack — top screen owns input. Not a full router.
+// screen: { id?, view: () => node, update?: () => changed, enter?, exit?, paint?: (opts) }
+// Push FREEZES the previous top (no exit) — exit runs only when a screen is removed (pop/clear).
+let STACK = { screens: [] }
+
+export function uiPush(screen) {
+  if (present(screen) === 0) { return STACK.screens.length }
+  STACK.screens.push(screen)
+  if (present(screen.enter) === 1) { screen.enter() }
+  return STACK.screens.length
+}
+
+export function uiPop() {
+  if (STACK.screens.length === 0) { return 0 }
+  let top = STACK.screens.pop()
+  if (present(top.exit) === 1) { top.exit() }
+  if (STACK.screens.length > 0) {
+    let neu = STACK.screens[STACK.screens.length - 1]
+    // Optional re-enter so a covered screen can refresh chrome when revealed.
+    if (present(neu.enter) === 1) { neu.enter() }
+  }
+  return STACK.screens.length
+}
+
+export function uiTop() {
+  if (STACK.screens.length === 0) { return null }
+  return STACK.screens[STACK.screens.length - 1]
+}
+
+export function uiDepth() { return STACK.screens.length }
+
+export function uiStackClear() {
+  while (STACK.screens.length > 0) {
+    let top = STACK.screens.pop()
+    if (present(top.exit) === 1) { top.exit() }
+  }
+}
+
+// Paint the top screen (stream-friendly via uiPaint opts). Returns 0 if stack empty.
+export function uiStackPaint(opts) {
+  let top = uiTop()
+  if (present(top) === 0) { return 0 }
+  if (present(top.paint) === 1) {
+    top.paint(opts)
+    return 1
+  }
+  if (present(top.view) === 0) { return 0 }
+  uiPaint(top.view(), opts)
+  return 1
+}
+
+// Run top.update() if present. Returns its result (or 0).
+export function uiStackUpdate() {
+  let top = uiTop()
+  if (present(top) === 0) { return 0 }
+  if (present(top.update) === 0) { return 0 }
+  return top.update()
+}
+
+// uiRelayoutAt(node, x, y, w, h) — re-lay-out and repaint ONE self-contained SUBTREE (e.g. a menu's
+// detail panel) into a fixed box, clearing that region first — WITHOUT a full-tree uiRender. The huge
+// win for interactive menus: a cursor move re-does only the panel that changed, not the whole (boxed,
+// slow) layout of the entire screen. The box is normally the node's own `_x/_y/_w/_h` from the last
+// full uiRender. Resets the icon pool for this subtree, so use it for a panel that OWNS its icons (the
+// rest of the screen must not rely on the pool staying put across this call).
+// WARNING: `ui_clear_rect` blanks whole 8×8 tiles — do NOT use this for a body slot under a title/tab
+// row (shared tiles nick the chrome). Prefer a one-shot `uiPaint`/`uiRender` for tab swaps.
+// Uses the same native LN flatten path as uiRender (not boxed measure/arrange).
+export function uiRelayoutAt(node, x, y, w, h) {
+  ui_clear_rect(x - 1, y - 1, w + 2, h + 2)
+  LAYOUT.sub = 1
+  LAYOUT.subX = x
+  LAYOUT.subY = y
+  LAYOUT.subW = w
+  LAYOUT.subH = h
+  uiRender(node)
+  LAYOUT.sub = 0
+}
+
+// uiRelayoutInner(node, x, y, w, h) — like uiRelayoutAt but for an already-framed panel: opaque `fill`
+// covers old content (no tile-aligned clear — that punches map/footer holes), then native LN layout +
+// paint of the whole node (fill + children + border). Transparent panels still clear the padded
+// interior. Prefer pad ≥ 8 on bordered panels.
+export function uiRelayoutInner(node, x, y, w, h) {
+  let pad = pick(node.pad, 0)
+  // Inset the repaint by the border ring when there is one. The border does not change between
+  // repaints, and covering it — even for the part of a frame before the node paints it again — is
+  // visible as a flicker around the panel every time a cursor moves.
+  let bx = x
+  let by = y
+  let bw = w
+  let bh = h
+  if (node.border !== null) { bx = x + 1; by = y + 1; bw = w - 2; bh = h - 2 }
+  if (node.fill === null) {
+    ui_clear_rect(x + pad, y + pad, w - pad * 2, h - pad * 2)
+  } else {
+    fillRectExact(bx, by, bw, bh, col2(node.fill))
+  }
+  LAYOUT.sub = 1
+  LAYOUT.subX = x
+  LAYOUT.subY = y
+  LAYOUT.subW = w
+  LAYOUT.subH = h
+  uiRender(node)
+  LAYOUT.sub = 0
+}
+
+// uiReveal(node, n) — TYPEWRITER: draw the first `n` characters of an ALREADY-LAID-OUT text node
+// (its `_x`/`_y`/`_w` from the last uiRender) directly onto the canvas, WITHOUT re-laying-out the tree.
+// A full uiRender per character is far too slow for per-frame animation; this only draws the growing
+// substring (cheap) onto the persistent canvas. Give the node its FULL text + `reveal:0` in the tree
+// so its box height is reserved and it paints empty, then call `uiReveal(node, n)` with rising `n`.
+export function uiReveal(node, n) {
+  // Draw only the characters newly revealed since last call ([_rev, n)) — O(delta), so the typewriter
+  // stays a constant speed instead of slowing as the line grows. The node persists on the canvas, so
+  // earlier characters are already drawn. (`render()` rebuilds the node → `_rev` resets to 0.)
+  let from = pick(node._rev, 0)
+  if (n <= from) { return }
+  let wrapW = textMaxW(node)
+  ui_text_span(fontOf(node), node._x, node._y, node.text, col2(pick(node.color, "text")), wrapW, from, n, textAlignArg(node))
+  node._rev = n
+}
+
+// uiRowText(node, text, color, bg?) — redraw an already-laid-out text node's content at its cached
+// geometry, NO re-layout. For a cheap menu cursor move: relabel/recolour ONLY the two changed rows
+// instead of a full `uiRender` of the whole menu (which is ~65ms of boxed layout work per keypress — a
+// visible lag AND an audio-mixer starvation).
+// ⚠️ `bg` (the CONTAINER'S FILL colour) is REQUIRED when the row sits on a filled panel: blank
+// glyphs in `ui_text_box` are filled with `bg` in the same write (no wipe flash, no backdrop holes).
+// Omit `bg` only for a row on a transparent/backdrop background.
+export function uiRowText(node, text, color, bg) {
+  if (present(node._x) === 0) { return }
+  let bw = node._w
+  if (bw === null) { bw = 200 }
+  if (bw <= 0) { bw = 200 }
+  let f = fontOf(node)
+  let c = col2(color)
+  let ta = textAlignArg(node)
+  // Filled panel/button: one ui_text_box write with bg fill in blank glyphs (no ui_rect wipe flash).
+  if (present(bg) === 1) {
+    let h = node._h
+    if (h === null) { h = text_height(f) }
+    if (h <= 0) { h = text_height(f) }
+    let bgc = col2(bg)
+    if (present(node.wrap) === 1) {
+      let wrapW = textMaxW(node)
+      if (wrapW <= 0) { wrapW = bw }
+      ui_text_box(f, node._x, node._y, text, c, bw, wrapW, h, ta, bgc)
+    } else {
+      ui_text_box(f, node._x, node._y, text, c, bw, 0, 0, ta, bgc)
+    }
+    node.text = text
+    node.color = color
+    node._rev = 0
+    return
+  }
+  // No panel fill (transparent/backdrop) → opaque replace clears to transparent, which is correct here.
+  if (present(node.wrap) === 1) {
+    let bh = pick(node.h, pick(node._h, 0))
+    if (bh > 0) {
+      ui_text_box(f, node._x, node._y, text, c, bw, bw, bh, ta)
+      node.text = text
+      node.color = color
+      node._rev = 0
+      return
+    }
+  }
+  ui_text_box(f, node._x, node._y, text, c, bw, 0, 0, ta)
+  node.text = text
+  node.color = color
+  node._rev = 0
+}
+
+// uiBlankText(node) — clear an already-laid-out text node's footprint WITHOUT changing `node.text`.
+// Use before a typewriter (`uiReveal`) when the label string changed but geometry stayed put.
+export function uiBlankText(node) {
+  if (present(node._x) === 0) { return }
+  let bw = node._w
+  if (bw === null) { bw = 200 }
+  if (bw <= 0) { bw = 200 }
+  let f = fontOf(node)
+  let c = col2(pick(node.color, "text"))
+  if (present(node.wrap) === 1) {
+    let bh = pick(node.h, pick(node._h, 0))
+    if (bh > 0) {
+      ui_text_box(f, node._x, node._y, "", c, bw, bw, bh)
+      node._rev = 0
+      return
+    }
+  }
+  ui_text_box(f, node._x, node._y, "", c, bw)
+  node._rev = 0
+}
+
+// Alias — clearer name for detail-panel / general opaque text replace (same as uiRowText).
+export function uiReplaceText(node, text, color) { uiRowText(node, text, color) }
+
+// Paint every text leaf of an already-arranged subtree with an OPAQUE in-place write (blank pixels
+// filled with `bg`), recursing through containers without repainting their fill/border.
+function paintRowsOf(n, bg) {
+  if (n._hide !== null) { if (n._hide > 0) { return } }
+  if (n.text !== null) {
+    uiRowText(n, n.text, pick(n.color, "text"), bg)
+    return
+  }
+  if (n.icon !== null) { paint(n); return }
+  let kids = n.children
+  if (present(kids) === 0) { return }
+  let i = 0
+  while (i < kids.length) { paintRowsOf(kids[i], bg); i = i + 1 }
+}
+
+// Copy text/colours from a fresh cell template onto an already-laid-out tree and opaque-paint.
+// Returns 1 on success, 0 if the shapes differ (caller must fall back to measure/arrange).
+// Module-level (not a closure): tish cannot emit recursive locals inside makeSelector.
+function patchTextTree(dst, src, selected, bg) {
+  if (present(src.text) === 1) {
+    if (present(dst.text) === 0) { return 0 }
+    if (present(dst._x) === 0) { return 0 }
+    let base = pick(src.color, "text")
+    dst._c0 = base
+    let col = base
+    if (selected === 1) { col = "selected" }
+    // Skip shaping/blit when the leaf already shows this string+colour.
+    if (dst.text === src.text) {
+      if (dst.color === col) { return 1 }
+    }
+    uiRowText(dst, src.text, col, bg)
+    return 1
+  }
+  let sk = src.children
+  let dk = dst.children
+  if (present(sk) === 0) {
+    if (present(dk) === 0) { return 1 }
+    return 0
+  }
+  if (present(dk) === 0) { return 0 }
+  if (sk.length !== dk.length) { return 0 }
+  let i = 0
+  while (i < sk.length) {
+    if (patchTextTree(dk[i], sk[i], selected, bg) === 0) { return 0 }
+    i = i + 1
+  }
+  return 1
+}
+
+// uiRelayoutRows(node, x, y, w, h, bg) — like `uiRelayoutAt`, but with NO `ui_clear_rect`: each text
+// row is written opaquely over its own footprint with `bg` in the blank pixels. `ui_clear_rect` blanks
+// WHOLE 8×8 tiles, so filling a slot that sits directly under a paragraph (a dialog's choice menu under
+// its body) sheared the line above it. Use this when the slot's neighbours must survive.
+export function uiRelayoutRows(node, x, y, w, h, bg) {
+  measure(node)
+  arrange(node, x, y, w, h)
+  // This paints a slot INSIDE a screen that is already up, so it must NOT touch the icon pool: resetting
+  // the cursor and then hiding everything past this slot's own icons hid the dialog's portrait the moment
+  // its choice menu appeared. Any icon in the slot simply takes the next free pool sprite.
+  paintRowsOf(node, bg)
+}
+
+// uiRevealWarm(node) — SHAPE the node's full text into the reveal cache WITHOUT drawing (blits [0,0)).
+// This is the EXACT shaping the first `uiReveal` would do, just run once at layout time and its draw
+// discarded — so it adds no new code path, only moves WHERE the one-time O(n) agb-Layout cost lands.
+// Call it right after the node is laid out, before the per-character reveal: the shaping spike (~a frame
+// of CPU for a long line) then happens on the box-open frame instead of on the FIRST typing frame, where
+// it overran the vblank and stalled the audio mixer → the BGM audibly hitched as each line began typing.
+// Every subsequent uiReveal is a cheap cache-hit blit.
+export function uiRevealWarm(node) {
+  let wrapW = textMaxW(node)
+  ui_text_span(fontOf(node), node._x, node._y, node.text, col2(pick(node.color, "text")), wrapW, 0, 0, textAlignArg(node))
+}
+
+// ── Continue arrow / indicator ────────────────────────────────────────────────
+// makeArrow(cfg) — a reusable ANIMATED indicator glyph (the "▼ press A to continue" affordance, a
+// menu "more items ↓" hint, etc). It is a widget, not a static char: pick its glyph, colour, SIZE (any
+// font handle), and animation. cfg:
+//   { glyph?:"▼", color?:"dim", font?, anim?:"blink"|"bounce"|"none", period?:44, amp?:2, slot?:31 }
+// The arrow is drawn as a SPRITE (text_draw), NOT on the bg text canvas — so animating/blinking it
+// never disturbs borders or neighbouring text (the canvas is one-colour-per-tile and clears whole
+// tiles, which fought box borders). `slot` is a hud-text sprite slot it owns (give overlapping arrows
+// distinct slots). Usage: put `arrow.node()` in a tree (it reserves an empty box the size of the
+// glyph), uiRender, then `arrow.tick()` every frame to animate the sprite in place; `arrow.reset()`
+// restarts the animation; `arrow.hide()` clears the sprite (call when you stop showing it).
+export function makeArrow(cfg) {
+  let c = optsOf(cfg)
+  let A = {
+    glyph: pick(c.glyph, "▼"),
+    color: pick(c.color, "dim"),
+    font: pick(c.font, CFG.font),
+    anim: pick(c.anim, "blink"),
+    period: pick(c.period, 44),
+    amp: pick(c.amp, 2),
+    slot: pick(c.slot, 31),
+    _node: null, _t: 0
+  }
+  // The layout node is an EMPTY box the size of one glyph — it reserves space in the tree (so the
+  // arrow doesn't overlap text and the box doesn't jump), but paints nothing on the canvas. tick()
+  // draws the actual glyph as a sprite at the node's laid-out position.
+  A.node = () => {
+    let s = text_height(A.font)
+    A._node = { w: s, h: s, children: [] }
+    return A._node
+  }
+  A.reset = () => { A._t = 0 }
+  A.hide = () => { text_draw(A.font, A.slot, 0, 0, "", col2(A.color)) }
+  A.tick = () => {
+    let nd = A._node
+    if (present(nd) === 0) { return }
+    if (present(nd._x) === 0) { return }   // not laid out yet (no uiRender since node())
+    A._t = A._t + 1
+    let ph = A._t % A.period
+    let half = A.period / 2
+    if (A.anim === "blink") {
+      if (ph >= half) { A.hide(); return }
+    }
+    let oy = 0
+    if (A.anim === "bounce") {
+      // triangle wave 0→amp→0 across the period (integer-ish; no trig needed).
+      if (ph < half) { oy = ph * A.amp / half } else { oy = (A.period - ph) * A.amp / half }
+    }
+    text_draw(A.font, A.slot, nd._x, nd._y + oy, A.glyph, col2(A.color))
+  }
+  return A
+}
+
+// makeListPainter(cfg) — a scrolling text list painted DIRECTLY into a fixed box.
+//
+// THE RULE THIS EXISTS TO ENFORCE: cache the things that don't change — the panel, its border, its
+// title, the cursor sprite — and paint everything that does with opaque text writes, retaining
+// nothing per item. A `makeSelector` list does the opposite: it builds ~3 boxed nodes per row and
+// lays them out, then keeps them so a cursor move can look up a row's box. Measured on a seven-row
+// shop list that was 49.3 KB, ~13 KB of it resident for the whole screen. Painted this way: 0.4 KB.
+//
+// Rows are a fixed pitch in a fixed box, so a row's geometry is ARITHMETIC. Nothing here holds a
+// node — only integers and the caller's two closures.
+//
+// cfg: {
+//   count: () => n,                       how many rows
+//   row:   (i) => { left, right?, color? } one row's content, built on demand and thrown away
+//   font?, pad?, gap?, gutter?,            gutter = space reserved left of a row for the cursor
+//   bg?, colorSel?, colorRight?,           theme tokens
+//   cursor?: <makePointer>                 the shared ► (see makePointer / pointerAtRow)
+// }
+//
+// Usage: put `spacer(w, h)` in the tree where the list goes so the layout reserves its box, then
+// `setBoxOf(node)` once geometry exists, then `paintAll()`. A cursor move is `nav(d)` — which
+// repaints only the two rows whose highlight changed, and the panel border is never touched.
+// makeGridPainter(cfg) — the 2-D twin of makeListPainter: a node-free, geometry-only CELL GRID whose
+// cursor move repaints exactly the two cells that changed.
+//
+// Why this exists rather than makeGrid: `makeGrid` builds a node tree and is icon-first, so a cursor
+// move goes back through the layout. A lot of menus are a small fixed grid of TEXT cells (an item
+// pouch, a B-button grid, an equip rack) sitting inside a screen whose other half is chrome painted
+// once. For those, the node tree is pure overhead — the cell geometry is `i % cols` arithmetic, and
+// the caller usually already has a hand-painted background it does NOT want a `uiRender` to wipe.
+//
+// The failure this replaces is specific and keeps recurring: a menu repaints EVERYTHING on a cursor
+// move — `ui_begin` (a whole canvas rebuild) plus every glyph — because the cursor is drawn as part
+// of the one paint function. Glyph rasterisation is ~430 ticks each, so on hardware that is the
+// difference between an instant cursor and a visible stall. See makeListPainter for the 1-D case.
+//
+// cfg: {
+//   cols:  n,                              cells per row
+//   count: () => n,                        how many cells
+//   cell:  (i) => { text, color? },        one cell's content, built on demand and thrown away
+//   font?, cellW, cellH, gap?,             gap = space between cells (the pitch is cellW/cellH)
+//   bg?, color?, colorSel?,                theme tokens OR raw 0xRRGGBB (col2 takes both)
+//   frame?: 1                              draw a filled `colorSel` frame behind the selected cell
+// }
+//
+// Usage: `setBox(x, y)` once, then `paintAll()`. A cursor move is `nav(dx, dy)`.
+//
+// Cell text goes through `ui_text_box`, which REPLACES its box (bg + glyphs) in one masked write —
+// so a cell repaint leaves no ghost of the previous label and never flashes. That also means the
+// caller does not have to know where the font puts its ink: `ui_text` positions glyphs at the font's
+// ascent below `y`, not at `y`, so hand-rolled highlight bands routinely cover the wrong row.
+export function makeGridPainter(cfg) {
+  let c = optsOf(cfg)
+  let ST = {
+    x: 0, y: 0, ready: 0, idx: 0,
+    cols: pick(c.cols, 4),
+    cw: pick(c.cellW, 32), ch: pick(c.cellH, 24), gap: pick(c.gap, 0),
+    font: pick(c.font, CFG.font),
+    // Icon cells: `slot0` is the first icon-pool index this grid owns (cell i uses slot0 + i), and
+    // `isz` is the sprite's cell size, used only to centre it.
+    slot0: pick(c.iconSlot, 0), isz: pick(c.iconSize, CFG.iconSize),
+    bg: pick(c.bg, "bg"), colRow: pick(c.color, "text"), colSel: pick(c.colorSel, "selected"),
+    frame: pick(c.frame, 1)
+  }
+  if (ST.cols < 1) { ST.cols = 1 }
+
+  // A cell's box. `i % cols` across, integer-divide down — spelled out because `/` in tish is float
+  // division, so `i / cols` is not the row index.
+  let cellX = (i) => { return ST.x + (i % ST.cols) * ST.cw }
+  let cellY = (i) => { return ST.y + ((i - (i % ST.cols)) / ST.cols) * ST.ch }
+
+  let paintOne = (i) => {
+    if (ST.ready === 0) { return }
+    if (i < 0) { return }
+    if (i >= c.count()) { return }
+    let r = c.cell(i)
+    if (present(r) === 0) { return }
+    let cx = cellX(i)
+    let cy = cellY(i)
+    let w = ST.cw - ST.gap
+    let h = ST.ch - ST.gap
+    let bg = col2(ST.bg)
+    // Always clear the WHOLE cell first: a deselected cell has to lose the frame the selected one
+    // drew, and neither the icon sprite nor `ui_text_box` covers the frame's outer ring.
+    ui_rect(cx, cy, w, h, bg, 1)
+    let col = ST.colRow
+    if (present(r.color) === 1) { col = r.color }
+    if (i === ST.idx) {
+      if (ST.frame > 0) {
+        ui_rect(cx, cy, w, h, col2(ST.colSel), 1)
+        ui_rect(cx + 2, cy + 2, w - 4, h - 4, bg, 1)
+      }
+      if (present(r.colorSel) === 1) { col = r.colorSel }
+    }
+    // An ICON cell: a pooled sprite centred in the cell. `icon < 0` means the slot is empty, which
+    // is how an inventory shows a thing you have not found yet — the cell keeps its box and shows
+    // nothing, rather than collapsing.
+    if (present(r.icon) === 1) {
+      let isz = ST.isz
+      if (r.icon < 0) {
+        uiIconHide(ST.slot0 + i)
+      } else {
+        // Sprites are drawn from their top-left and the art is centred in its cell, so centre the
+        // WHOLE sprite on the cell centre. A sheet whose art is smaller than its cell (NES item
+        // sprites are 8x16 ink inside a 32x32 frame) just overlaps its neighbours transparently.
+        uiIconAt(ST.slot0 + i, cx + ((w - isz) - ((w - isz) % 2)) / 2,
+                 cy + ((h - isz) - ((h - isz) % 2)) / 2, r.icon)
+      }
+    }
+    if (present(r.text) === 0) { return }
+    // Centre the label in the cell's inner box rather than pinning it to the top, so cells of
+    // different heights still read as a grid.
+    //
+    // ⚠️ `bg` here must not be 0: `ui_text_box` treats a bg of 0 as "clear to TRANSPARENT" (it
+    // cannot tell an explicit black from an omitted argument), so a text cell on a black panel
+    // punches a hole through the fill above and shows whatever is behind the canvas.
+    let fh = text_height(ST.font)
+    let ty = cy + ((h - fh) - ((h - fh) % 2)) / 2
+    ui_text_box(ST.font, cx + 2, ty, r.text, col2(col), w - 4, 0, fh, "center", bg)
+  }
+
+  return {
+    setBox: (x, y) => { ST.x = x; ST.y = y; ST.ready = 1 },
+    ready: () => ST.ready,
+    index: () => ST.idx,
+    setIndex: (i) => {
+      let n = c.count()
+      let v = i
+      if (v < 0) { v = 0 }
+      if (v >= n) { v = n - 1 }
+      if (v < 0) { v = 0 }
+      ST.idx = v
+    },
+    paintCell: (i) => { paintOne(i) },
+    // Repaint every cell. The caller's chrome is never touched — this only ever writes cell boxes.
+    paintAll: () => {
+      if (ST.ready === 0) { return 0 }
+      let n = c.count()
+      let i = 0
+      while (i < n) { paintOne(i); i = i + 1 }
+      return 1
+    },
+    // Move the cursor and repaint the MINIMUM — the two cells whose highlight changed. Wraps within
+    // the row horizontally and within the column vertically, which is what a fixed pouch grid wants
+    // (there is no scrolling: every cell is on screen).
+    nav: (dx, dy) => {
+      let n = c.count()
+      if (n === 0) { return 0 }
+      let old = ST.idx
+      let i = old
+      if (dx !== 0) {
+        let col = i % ST.cols
+        let base = i - col
+        let nc = col + dx
+        if (nc < 0) { nc = ST.cols - 1 }
+        if (nc >= ST.cols) { nc = 0 }
+        i = base + nc
+      }
+      if (dy !== 0) {
+        let rows = (n + ST.cols - 1 - ((n + ST.cols - 1) % ST.cols)) / ST.cols
+        let col = i % ST.cols
+        let row = (i - col) / ST.cols + dy
+        if (row < 0) { row = rows - 1 }
+        if (row >= rows) { row = 0 }
+        i = row * ST.cols + col
+      }
+      if (i >= n) { i = n - 1 }
+      if (i < 0) { i = 0 }
+      if (i === old) { return 0 }
+      ST.idx = i
+      paintOne(old)
+      paintOne(i)
+      return 1
+    },
+    // Park every icon this grid owns as well as forgetting the box — a pooled sprite left visible
+    // keeps drawing over whatever loads next (sprites are always in front of the backgrounds).
+    clear: () => {
+      ST.ready = 0
+      let i = 0
+      let n = c.count()
+      while (i < n) { uiIconHide(ST.slot0 + i); i = i + 1 }
+    }
+  }
+}
+
+export function makeListPainter(cfg) {
+  let c = optsOf(cfg)
+  let ST = {
+    x: 0, y: 0, w: 0 - 1, h: 0,
+    top: 0, vis: 0, y0: 0, pitch: 0, idx: 0,
+    font: pick(c.font, CFG.font), pad: pick(c.pad, 4), gap: pick(c.gap, 3),
+    gutter: pick(c.gutter, 10), bg: pick(c.bg, "panel"),
+    colSel: pick(c.colorSel, "selected"), colRow: pick(c.color, "text"),
+    colRight: pick(c.colorRight, "gold"),
+    cursor: pick(c.cursor, null)
+  }
+
+  let rowsFor = () => {
+    let fh = text_height(ST.font)
+    ST.pitch = fh + ST.gap
+    ST.y0 = ST.y + ST.pad
+    let room = ST.h - ST.pad * 2
+    let v = Math.floor(room / ST.pitch)
+    if (v < 1) { v = 1 }
+    ST.vis = v
+  }
+
+  // Keep the selection inside the window; returns 1 if the window itself moved (every row's text
+  // changed, so the caller needs a full repaint rather than two rows).
+  let follow = () => {
+    let was = ST.top
+    if (ST.idx < ST.top) { ST.top = ST.idx }
+    if (ST.idx >= ST.top + ST.vis) { ST.top = ST.idx - ST.vis + 1 }
+    let n = c.count()
+    if (ST.top > n - ST.vis) { ST.top = n - ST.vis }
+    if (ST.top < 0) { ST.top = 0 }
+    if (ST.top !== was) { return 1 }
+    return 0
+  }
+
+  let paintOne = (i) => {
+    if (ST.w < 0) { return }
+    let k = i - ST.top
+    if (k < 0) { return }
+    if (k >= ST.vis) { return }
+    let n = c.count()
+    if (i < 0) { return }
+    if (i >= n) { return }
+    let r = c.row(i)
+    let fh = text_height(ST.font)
+    let bg = col2(ST.bg)
+    let rowY = ST.y0 + k * ST.pitch
+    let rowX = ST.x + ST.pad + ST.gutter
+    let rowW = ST.w - ST.pad * 2 - ST.gutter
+    let col = ST.colRow
+    if (present(r.color) === 1) { col = r.color }
+    if (i === ST.idx) { col = ST.colSel }
+    let right = ""
+    if (present(r.right) === 1) { right = r.right }
+    if (right === "") {
+      ui_text_box(ST.font, rowX, rowY, r.left, col2(col), rowW, 0, fh, 0, bg)
+      return
+    }
+    let rw = text_width(ST.font, right) + 2
+    ui_text_box(ST.font, rowX, rowY, r.left, col2(col), rowW - rw, 0, fh, 0, bg)
+    ui_text_box(ST.font, rowX + rowW - rw, rowY, right, col2(ST.colRight), rw, 0, fh, "right", bg)
+  }
+
+  return {
+    // A node that just reserves the list's box in a tree. No children, no content — the rows are
+    // painted afterwards and never become nodes.
+    spacer: (w, h) => { return { w: w, h: h } },
+    // Capture the box from that node once the layout has run, then forget the node.
+    setBoxOf: (n) => {
+      if (present(n) === 0) { return 0 }
+      if (present(n._x) === 0) { return 0 }
+      ST.x = n._x
+      ST.y = n._y
+      ST.w = n._w
+      ST.h = n._h
+      rowsFor()
+      return 1
+    },
+    setBox: (x, y, w, h) => { ST.x = x; ST.y = y; ST.w = w; ST.h = h; rowsFor() },
+    ready: () => { if (ST.w < 0) { return 0 } return 1 },
+    // Repaint every visible row. Does NOT touch the panel fill or its border — those are chrome and
+    // were painted once.
+    paintAll: () => {
+      if (ST.w < 0) { return 0 }
+      follow()
+      let k = 0
+      while (k < ST.vis) {
+        paintOne(ST.top + k)
+        k = k + 1
+      }
+      return 1
+    },
+    paintRow: (i) => { paintOne(i) },
+    // The ► on the selected row, from arithmetic — no cell node to read a box off.
+    paintCursor: () => {
+      if (ST.cursor === null) { return }
+      if (ST.w < 0) { return }
+      if (ST.pitch <= 0) { return }
+      let k = ST.idx - ST.top
+      if (k < 0) { return }
+      if (k >= ST.vis) { return }
+      pointerAtRow(ST.cursor, ST.x + ST.pad, ST.y0 + k * ST.pitch, text_height(ST.font))
+    },
+    hideCursor: () => { if (ST.cursor !== null) { pointerHide(ST.cursor) } },
+    index: () => ST.idx,
+    setIndex: (i) => {
+      let n = c.count()
+      let v = i
+      if (v < 0) { v = 0 }
+      if (v >= n) { v = n - 1 }
+      if (v < 0) { v = 0 }
+      ST.idx = v
+    },
+    // Move the selection by `d` and repaint the minimum: two rows normally, everything only when the
+    // window scrolled. Returns 1 if the selection actually moved.
+    nav: (d) => {
+      let n = c.count()
+      if (n === 0) { return 0 }
+      let old = ST.idx
+      let i = old + d
+      if (i < 0) { i = 0 }
+      if (i >= n) { i = n - 1 }
+      if (i === old) { return 0 }
+      ST.idx = i
+      if (follow() === 1) {
+        let k = 0
+        while (k < ST.vis) { paintOne(ST.top + k); k = k + 1 }
+      } else {
+        paintOne(old)
+        paintOne(i)
+      }
+      return 1
+    },
+    visible: () => ST.vis,
+    // Forget the box. The painter holds no nodes, so this is all there is to release.
+    clear: () => { ST.w = 0 - 1; ST.top = 0 }
+  }
+}
+
+// makePointer(cfg) — a reusable animated SELECTION CURSOR: a ► that points at the current item, the
+// sprite equivalent of a "> " text prefix. It draws a dedicated SPRITE (a ► cursor frame you provide),
+// NOT a font glyph — the pixel fonts have no right-pointing triangle, and an emoji arrow can't be
+// tinted. A menu calls `pointer.at(x, y)` each frame with the selected row's left edge; `hide()` clears
+// it. cfg: { sheet, frame?:0, anim?:"bob"|"none", period?:40, amp?:2 }  (sheet/frame = the arrow art —
+// pack a small ► into the menu's sprite sheet). Reusable by makeSelector, dialog choices, title menus.
+// makePointer returns a plain STATE object; drive it with the top-level pointerAt/pointerHide below —
+// NOT closure methods. A tish-agb sprite extern (sprite_set_pos/visible) called from a CLOSURE silently
+// no-ops on GBA (works from a top-level fn or the module body), so the sprite ops must live in a real
+// function, not a `() => {}` method on the object.
+// PTRS lives in scene_hooks.tish so loadScene can reset cursors without importing all of ui.
+
+export function makePointer(cfg) {
+  let c = optsOf(cfg)
+  // hotY: optical centre of the ► within the 32×32 cell. Default 6 matches the shop/dialog cursor
+  // art (triangle centred near y≈6 after its top-left padding). paintCursor / pointerAtRow centre
+  // that hot spot on the row — the art was originally authored for ~12px rows.
+  let P = {
+    sp: -1, sheet: pick(c.sheet, -1), frame: pick(c.frame, 0),
+    anim: pick(c.anim, "bob"), period: pick(c.period, 40), amp: pick(c.amp, 2),
+    hotY: pick(c.hotY, 6), t: 0
+  }
+  PTRS.list.push(P)
+  return P
+}
+
+// The cursor's sprite, created on first use and re-created after a scene load.
+//
+// It is LAZY because a menu is built once at boot (shopInit, partyInit) and outlives every scene
+// the game loads, while `loadScene`'s `sprite_clear` drops every sprite and restarts handle
+// numbering from zero. A handle taken at init time is therefore not merely dead afterwards — it is
+// REISSUED to whatever the next scene spawns first, so the cursor silently drives that entity's
+// sprite: the ► never appears, and the player character it aliased gets teleported and reframed
+// every time the menu paints. `uiResetPointers` (from `loadScene`) is what makes this re-take.
+function ptrSprite(P) {
+  if (P.sp >= 0) { return P.sp }
+  if (P.sheet < 0) { return 0 - 1 }
+  let sp = sprite_new(P.sheet)
+  sprite_set_frame(sp, P.frame)
+  sprite_set_hud(sp, 1)           // screen-space, not world-space (this does NOT survive sprite_clear)
+  sprite_set_visible(sp, 0)
+  P.sp = sp
+  return sp
+}
+
+// pointerAt(P, x, y) — position P's cursor sprite at (x,y), bobbing toward the item it points at.
+export function pointerAt(P, x, y) {
+  P.t = P.t + 1
+  let ox = 0
+  if (P.anim === "bob") {
+    let ph = P.t % P.period
+    let half = P.period / 2
+    if (ph < half) { ox = ph * P.amp / half } else { ox = (P.period - ph) * P.amp / half }
+  }
+  let sp = ptrSprite(P)
+  if (sp < 0) { return }
+  sprite_set_pos(sp, x + ox, y)
+  sprite_set_visible(sp, 1)
+}
+// pointerAtRow(P, x, rowTop, rowH) — place P so its hotY sits on the vertical centre of a text row.
+// Pixel fonts' ink sits high in the line box (empty descent below); nudge 1px up so the ► matches
+// the glyphs, not the empty band under them.
+export function pointerAtRow(P, x, rowTop, rowH) {
+  let h = rowH
+  if (h === null) { h = text_height(CFG.font) }
+  if (h <= 0) { h = text_height(CFG.font) }
+  let hot = P.hotY
+  if (hot === null) { hot = 6 }
+  pointerAt(P, x, rowTop + h / 2 - hot - 1)
+}
+// Hiding a cursor that has no sprite yet is a no-op — it must NOT take one just to hide it.
+export function pointerHide(P) { if (P.sp >= 0) { sprite_set_visible(P.sp, 0) } }
+export function pointerReset(P) { P.t = 0 }
+
+// ── Button prompts + flex menu buttons (dialog-box layout model) ──────────────
+// Frame indices are GAME-OWNED (pass your sheet's A/B/… frames).
+//
+// makePrompt(frame, label?, opts?) — icon + optional caption, e.g. makePrompt(PROMPT_A, "Talk").
+// opts: { size?, gap?, color?, font? }
+export function makePrompt(frame, label, opts) {
+  let o = optsOf(opts)
+  let kids = [{ icon: frame, size: pick(o.size, CFG.iconSize) }]
+  if (present(label) === 1) {
+    if (label !== "") {
+      kids.push({ text: label, color: pick(o.color, "dim"), font: pick(o.font, CFG.font) })
+    }
+  }
+  return { dir: "row", gap: pick(o.gap, 4), align: "center", children: kids }
+}
+
+// makeButton(label|opts, opts?) — a compact flex PANEL like the dialog box: fill + border +
+// children laid out by the UI engine (text, icons, nested rows). Sizes to its content by default
+// (sets an explicit `w` so a stretch-aligned parent can't blow it into a full-width bar).
+//
+//   makeButton("Continue")
+//   makeButton("Save", { selected: 1 })
+//   makeButton({ selected: 1, children: [
+//     { icon: PROMPT_A, size: 16 },
+//     { text: "Confirm", color: "buttonText" },
+//   ]})
+//
+// opts: selected?, disabled?, icon?, children?, pad?, gap?, dir?, w?, h?, font?,
+//       fill?, border?, color?  (override theme tokens)
+export function makeButton(label, opts) {
+  let o = opts
+  let lab = label
+  // makeButton({ children:…, selected:1 }) — opts-only form.
+  if (typeof label === 'object') {
+    if (label !== null) {
+      o = label
+      lab = null
+    }
+  }
+  o = optsOf(o)
+  let selected = 0
+  if (pick(o.selected, 0)) { selected = 1 }
+  let disabled = 0
+  if (pick(o.disabled, 0)) { disabled = 1 }
+
+  let fill = pick(o.fill, "button")
+  let border = pick(o.border, "buttonBorder")
+  let color = pick(o.color, "buttonText")
+  if (selected > 0) {
+    fill = pick(o.fill, "button")
+    border = pick(o.border, "buttonSelBorder")
+    color = pick(o.color, "buttonSelText")
+  }
+  if (disabled > 0) {
+    fill = pick(o.fill, "buttonDis")
+    border = pick(o.border, "buttonDisBorder")
+    color = pick(o.color, "buttonDisText")
+  }
+
+  let pad = pick(o.pad, 3)
+  let gap = pick(o.gap, 3)
+  let font = pick(o.font, CFG.font)
+
+  let kids = pick(o.children, null)
+  if (kids === null) {
+    kids = []
+    if (present(o.icon) === 1) {
+      kids.push({ icon: o.icon, size: pick(o.size, CFG.iconSize) })
+    }
+    if (typeof lab === 'string') {
+      kids.push({ text: lab, color: color, font: font })
+    }
+  } else {
+    let i = 0
+    while (i < kids.length) {
+      let k = kids[i]
+      if (present(k.text) === 1) {
+        if (k.color === null) { k.color = color }
+        if (k.font === null) { k.font = font }
+      }
+      i = i + 1
+    }
+  }
+
+  let node = {
+    dir: pick(o.dir, "row"),
+    pad: pad,
+    gap: gap,
+    align: pick(o.align, "center"),
+    justify: pick(o.justify, "center"),
+    fill: fill,
+    border: border,
+    children: kids,
+  }
+  // Hug content: measure label/icons and lock width so stretch parents can't widen the bar.
+  if (present(o.w) === 1) {
+    node.w = o.w
+  } else {
+    let inner = 0
+    let i = 0
+    while (i < kids.length) {
+      let k = kids[i]
+      if (present(k.text) === 1) {
+        let f = k.font
+        if (f === null) { f = font }
+        inner = inner + text_width(f, k.text)
+      } else {
+        if (present(k.icon) === 1) {
+          let s = k.size
+          if (s === null) { s = 16 }
+          inner = inner + s
+        }
+      }
+      i = i + 1
+    }
+    if (kids.length > 1) { inner = inner + gap * (kids.length - 1) }
+    let bw = inner + pad * 2
+    // Floor so short labels still read as a pill, not a tiny stub.
+    if (bw < 48) { bw = 48 }
+    node.w = bw
+  }
+  if (present(o.h) === 1) { node.h = o.h }
+  return node
+}
+
+// buttonStyle(node, opts) — mutate an existing makeButton node for selection/disabled.
+// Pair with buttonPaint(node) for a flash-free in-place update.
+// Selection only changes border + label colour (fill stays put) — redrawing a precise fill every
+// d-pad step is what made the highlight flicker.
+export function buttonStyle(node, opts) {
+  let o = optsOf(opts)
+  let selected = 0
+  if (pick(o.selected, 0)) { selected = 1 }
+  let disabled = 0
+  if (pick(o.disabled, 0)) { disabled = 1 }
+  let fill = "button"
+  let border = "buttonBorder"
+  let color = "buttonText"
+  if (selected > 0) {
+    // Keep the same fill as idle — only rim + text light up (dialog-style recolour).
+    fill = "button"
+    border = "buttonSelBorder"
+    color = "buttonSelText"
+  }
+  if (disabled > 0) {
+    fill = "buttonDis"
+    border = "buttonDisBorder"
+    color = "buttonDisText"
+  }
+  if (present(o.fill) === 1) { fill = o.fill }
+  if (present(o.border) === 1) { border = o.border }
+  if (present(o.color) === 1) { color = o.color }
+  node.fill = fill
+  node.border = border
+  recolorText(node, color)
+}
+
+// buttonPaint(node) — redraw selection chrome with NO clear and NO full fill (no flicker).
+// Overwrites the 1px border + label glyphs in place. Fill is left alone so we don't spend a frame
+// re-plotting every pixel of the plate (that was the select flicker). Call after buttonStyle.
+// For disabled↔enabled (fill actually changes), do a full uiRender instead.
+export function buttonPaint(node) {
+  if (present(node) === 0) { return }
+  if (present(node._x) === 0) { return }
+  if (present(node.border) === 1) {
+    ui_rect(node._x, node._y, node._w, node._h, col2(node.border))
+  }
+  paintButtonTexts(node)
+}
+
+function paintButtonTexts(n) {
+  if (present(n.text) === 1) {
+    if (present(n._x) === 1) {
+      let f = n.font
+      if (f === null) { f = CFG.font }
+      let col = n.color
+      if (col === null) { col = "buttonText" }
+      // Same as dialog moveChoiceHi: recolour by redrawing glyphs over the fill (no opaque clear).
+      ui_text(f, n._x, n._y, n.text, col2(col), textMaxW(n), textAlignArg(n))
+    }
+    return
+  }
+  let kids = n.children
+  if (present(kids) === 0) { return }
+  let i = 0
+  while (i < kids.length) {
+    paintButtonTexts(kids[i])
+    i = i + 1
+  }
+}
+
+// uiSetText(node, text, color?) — flash-free in-place label update (shop footer / qty pattern).
+// Node must already be laid out (`_x` from a prior uiRender). Uses ui_text_box so a shorter string
+// clears its old tail without ui_clear_rect.
+export function uiSetText(node, text, color) {
+  if (present(node) === 0) { return }
+  if (present(node._x) === 0) { return }
+  node.text = text
+  if (present(color) === 1) { node.color = color }
+  let f = node.font
+  if (f === null) { f = CFG.font }
+  let col = node.color
+  if (col === null) { col = "text" }
+  let neww = text_width(f, text)
+  let boxw = neww
+  let oldw = pick(node._lw, 0)
+  if (oldw > boxw) { boxw = oldw }
+  ui_text_box(f, node._x, node._y, text, col2(col), boxw, 0, 0, textAlignArg(node))
+  node._lw = neww
+}
+
+// makeButtonGroup(items, opts?) — selectable column of makeButtons with flash-free nav built in.
+// items: [{ label, icon?, size?, disabled? }, …] or plain strings.
+// opts: { gap?, size?, align? }
+//
+//   let menu = makeButtonGroup([
+//     { label: "Continue", icon: PROMPT_A },
+//     { label: "Quit", icon: PROMPT_B },
+//   ], { size: 32 })
+//   uiRender({ children: [menu.view(), …] })
+//   while (true) {
+//     menu.nav()                 // Up/Down → buttonStyle + buttonPaint
+//     if (menu.act() === 1) { … } // A
+//     frame()
+//   }
+export function makeButtonGroup(items, opts) {
+  let o = optsOf(opts)
+  let gap = pick(o.gap, 3)
+  let defSize = pick(o.size, CFG.iconSize)
+  let align = pick(o.align, "center")
+  let buttons = []
+  let i = 0
+  while (i < items.length) {
+    let it = items[i]
+    let label = it
+    let icon = null
+    let size = defSize
+    let disabled = 0
+    if (typeof it === 'object') {
+      if (it !== null) {
+        label = pick(it.label, "")
+        icon = pick(it.icon, null)
+        size = pick(it.size, defSize)
+        if (pick(it.disabled, 0)) { disabled = 1 }
+      }
+    }
+    let bo = { size: size }
+    if (icon !== null) { bo.icon = icon }
+    if (disabled > 0) { bo.disabled = 1 }
+    if (i === 0) { if (disabled === 0) { bo.selected = 1 } }
+    buttons.push(makeButton(label, bo))
+    i = i + 1
+  }
+  let cur = makeCursor(1, buttons.length)
+  let ST = { buttons: buttons, cur: cur, gap: gap, align: align }
+  return {
+    buttons: buttons,
+    index: () => ST.cur.index(),
+    count: () => ST.buttons.length,
+    setIndex: (idx) => {
+      let old = ST.cur.index()
+      ST.cur.setIndex(idx)
+      if (old !== idx) {
+        buttonStyle(ST.buttons[old], { selected: 0 })
+        buttonStyle(ST.buttons[idx], { selected: 1 })
+        buttonPaint(ST.buttons[old])
+        buttonPaint(ST.buttons[idx])
+      }
+    },
+    // Layout node for uiRender. extras?: extra nodes appended after the buttons (e.g. a Locked row).
+    view: (extras) => {
+      let kids = []
+      let j = 0
+      while (j < ST.buttons.length) { kids.push(ST.buttons[j]); j = j + 1 }
+      if (present(extras) === 1) {
+        let e = 0
+        while (e < extras.length) { kids.push(extras[e]); e = e + 1 }
+      }
+      return { dir: "col", gap: ST.gap, align: ST.align, children: kids }
+    },
+    // Returns 1 if the selection moved (already painted).
+    nav: () => {
+      let old = ST.cur.index()
+      if (ST.cur.nav() === 0) { return 0 }
+      let neu = ST.cur.index()
+      buttonStyle(ST.buttons[old], { selected: 0 })
+      buttonStyle(ST.buttons[neu], { selected: 1 })
+      buttonPaint(ST.buttons[old])
+      buttonPaint(ST.buttons[neu])
+      return 1
+    },
+    act: () => ST.cur.act(),
+  }
+}
+
+// makePromptBar(items, opts?) — horizontal footer of prompts.
+// items: [{ frame, label? }, …]   opts: { gap?, size?, color?, font? }
+export function makePromptBar(items, opts) {
+  let o = optsOf(opts)
+  let kids = []
+  let i = 0
+  while (i < items.length) {
+    let it = items[i]
+    kids.push(makePrompt(it.frame, pick(it.label, null), {
+      size: pick(o.size, CFG.iconSize),
+      gap: pick(o.gap, 4),
+      color: pick(o.color, "dim"),
+      font: pick(o.font, CFG.font),
+    }))
+    i = i + 1
+  }
+  return { dir: "row", gap: pick(o.barGap, 12), align: "center", children: kids }
+}
+
+// ── Cursor + Selector ───────────────────────────────────────────────────────
+// makeCursor(cols, count) — a clamped 2-D grid/list cursor over `count` cells in `cols` columns
+// (a list is cols=1). `nav()` / `act()` read the pad; prefer `navBits`/`actBits` with uiKeys() so a
+// menu pays one keys_edge() per frame instead of 4–6 key_pressed crossings.
+export function makeCursor(cols, count) {
+  let st = { i: 0, cols: cols, count: count }
+  let setCount = (m) => {
+    st.count = m
+    if (st.i >= m) { if (m > 0) { st.i = m - 1 } else { st.i = 0 } }
+  }
+  let applyNav = (left, right, up, down) => {
+    if (st.count <= 0) { return 0 }
+    let i = st.i
+    let c = st.cols
+    let moved = 0
+    if (left > 0) { if (i % c > 0) { i = i - 1; moved = 1 } }
+    if (right > 0) { if (i % c < c - 1) { if (i + 1 < st.count) { i = i + 1; moved = 1 } } }
+    if (up > 0) { if (i - c >= 0) { i = i - c; moved = 1 } }
+    if (down > 0) { if (i + c < st.count) { i = i + c; moved = 1 } }
+    st.i = i
+    return moved
+  }
+  let nav = () => {
+    return applyNav(key_pressed(BTN_LEFT), key_pressed(BTN_RIGHT), key_pressed(BTN_UP), key_pressed(BTN_DOWN))
+  }
+  let navBits = (bits) => {
+    return applyNav(uiKeyDown(bits, BTN_LEFT), uiKeyDown(bits, BTN_RIGHT), uiKeyDown(bits, BTN_UP), uiKeyDown(bits, BTN_DOWN))
+  }
+  let act = () => {
+    if (key_pressed(BTN_A) > 0) { return 1 }
+    if (key_pressed(BTN_B) > 0) { return 2 }
+    return 0
+  }
+  let actBits = (bits) => {
+    if (uiKeyDown(bits, BTN_A) > 0) { return 1 }
+    if (uiKeyDown(bits, BTN_B) > 0) { return 2 }
+    return 0
+  }
+  return {
+    index: () => st.i, count: () => st.count,
+    setIndex: (m) => { st.i = m }, setCount: setCount, nav: nav, navBits: navBits, act: act, actBits: actBits
+  }
+}
+
+// makeSelector(cfg) — the reusable "selectable list/grid" pattern: a cursor over N cells, the current
+// one highlighted, an optional DETAIL node for the selection, and ACTIONS on input. cfg:
+//   { cols?, count:()->n, cell:(i)->node, detail?:(i)->node, gap?, h?, rowH?, rowBg?,
+//     cursor?:<makePointer>, gutter?, onMove?:(i), onSelect?:(i) [A], onCancel?:(i) [B] }
+// If `h` is given the list is WINDOWED: it builds only the rows that fit in `h` and scrolls by refilling
+// them in place, so the tree it returns is the size of the VIEWPORT and never of the stock, and `select`
+// returns 0 for a scroll because there is nothing left for the caller to re-render. Overflow reserves a
+// right `SB_GUTTER` so the scrollbar never covers tags. Scroll opaque-patches text in place (no full-row
+// wipe — that flickered `rowBg`). Give text leaves a fixed `w` (or `ellip`) so shorter labels clear
+// cleanly. Falls back to `uiRelayoutRows` on shape mismatch. Calls `audio_pump` per row so BGM stays
+// on wall-clock time during the refill.
+// `cursor` (a makePointer) draws a ► sprite at the selected row (call `paintCursor()` each frame after
+// uiRender, `hideCursor()` when the list isn't focused); rows get a left `gutter` (default 10) for it.
+// Returns { index, setIndex, cursor, update, view, detail, paintCursor, hideCursor }.
+// ⚠️ KNOWN COST, AND A FAILED ATTEMPT TO FIX IT — read before trying again (2026-08-01).
+//
+// THE COST: `view()` builds a node per visible row (plus a gutter wrap each) and RETAINS them in
+// `ST.rows`/`ST.slots`, purely so a cursor move can look a row's box up. Measured on a seven-row shop
+// list: ~13 KB resident for as long as the screen is open. Every menu in the repo pays this, and it is
+// most of what makes a full-screen menu cost tens of KB to open. Rows are a fixed pitch in a fixed
+// box, so their geometry is arithmetic — the nodes are avoidable.
+//
+// THE INTENDED FIX (still the right one): `view()` returns a DEFERRED custom-paint leaf
+// (`{ w, h, paint, defer: 1 }`, see the `kind = 3` branch in the flatten pass). The engine reserves
+// the box; afterwards the component builds each visible row from `cfg.cell(i)`, lays it into its slot
+// box with `uiRelayoutInner` (opaque `fill` so a shorter label cannot leave the old tail behind),
+// paints it and DROPS it. Peak one row, residency zero, and `cfg.cell` is unchanged so every existing
+// caller keeps working. `makeListPainter` below is this same logic, working, for lists whose rows are
+// plain `{left,right}` text.
+//
+// WHY IT NEEDS `defer`: a leaf that only writes pixels can paint inline, but building a row means
+// re-entering the layout, and the paint pass is mid-iteration over the shared LN pool. Deferred
+// leaves are queued and drained once the pass is over.
+//
+// WHAT HAPPENED WHEN I TRIED IT: the whole thing compiled clean and then rendered NOTHING — no crash,
+// no panic, just an empty canvas where the party root menu should be, including its panel and border.
+// It was reverted. Do not assume the leaf or the row painter is at fault; the panel is an ordinary
+// node and it did not paint either, which points at the DRAIN not running rather than at the rows.
+//
+// WHERE TO START NEXT TIME:
+//   1. Put a `log` inside `drainDeferred` and confirm it fires AT ALL before touching anything else.
+//   2. Suspect the streamed path first. `uiStreamStep`'s first call is layout-only (`STREAM.lo = 1`)
+//      and returns early from `uiRender` BEFORE the paint tail, so a drain placed in that tail never
+//      runs for a streamed screen — and `packages/clan/party`'s `paintTree` routes EVERY screen
+//      through `uiStreamBegin`, streamed or not. A drain at `uiStreamStep`'s completion also has to
+//      run before `STREAM.raw` is released.
+//   3. Verify with a SCREENSHOT after each structural step, not just a build. This failure compiled.
+//
+// CONSTRAINTS THAT COST TIME (all real, all hit):
+//   - tish resolves closures top-down: `paintRows` must be declared BELOW `autoScroll`, `repaintCell`
+//     BELOW `paintLine`/`visRows`. A build error naming a helper means reorder, not rewrite.
+//   - `fn` is a RESERVED WORD and cannot be an object key (`{ fn: ... }` fails to parse — use `sink`).
+//   - `uiBake` must refuse a tree containing a paint leaf: a display list cannot hold a closure, so a
+//     baked screen would silently drop whatever the leaf draws. The guard is next to the `scroll` one.
+export function makeSelector(cfg) {
+  let cols = pick(cfg.cols, 1)
+  let cur = makeCursor(cols, cfg.count())
+  let gap = pick(cfg.gap, 2)
+  let PTR = pick(cfg.cursor, null)
+  let gutter = 0
+  if (present(PTR) === 1) { gutter = pick(cfg.gutter, 10) }
+  let SEL = { cell: null }   // the selected cell node (its laid-out _x/_y drive the cursor)
+  // The row height MUST match what the layout actually uses, or the scroll math drifts and the
+  // selected row gets culled. Default to the font's real line height (not the guessed lineH); the
+  // rows below are forced to exactly this height so layout pitch == autoScroll pitch.
+  let rowH = pick(cfg.rowH, text_height(CFG.font))
+  let pitch = rowH + gap
+  // A list with a viewport height is WINDOWED: it builds exactly the rows that fit and scrolls by
+  // refilling them, rather than building all `n` and culling the ones that fall outside.
+  //
+  // The cull model is what made a list the one screen still laying out per open. It put every row in the
+  // tree whether or not it could be seen, so the tree grew with the STOCK instead of the viewport, and
+  // moving the viewport changed which rows were culled — geometry that depends on live state, which
+  // `uiBake` refuses by design. A window has neither problem: `vis` rows at fixed positions, and scrolling
+  // rewrites their contents. That is how the reference SRPG's lists work, and it is what makes one bakeable.
+  let windowed = 0
+  if (present(cfg.h)) { windowed = 1 }
+  // Whole rows that fit: the largest v with v*pitch - gap <= h. Rows are forced to exactly `rowH` below,
+  // so this pitch is the layout's real pitch and the window cannot drift out of step with it.
+  let VIS = 1
+  if (windowed === 1) { while ((VIS + 1) * pitch - gap <= cfg.h) { VIS = VIS + 1 } }
+  // What a refilled row paints OVER. A row rewrite has to be opaque or the previous ware's name shows
+  // through the shorter one replacing it, so it needs the colour the list sits on.
+  let rowBg = pick(cfg.rowBg, "panel")
+  // `rows`/`slots` retain the LAST-BUILT row nodes so a cursor move can repaint just the two affected
+  // rows instead of rebuilding + re-laying-out the whole list (see moveHi). slots[k] = { row, wrap, pos }.
+  // In a windowed list `k` is the SLOT, not the item: slot 0 is whatever `topRow` currently shows.
+  let ST = { scrollY: 0, topRow: 0, rows: [], slots: [], box: null }
+  // Item index -> slot holding it, or -1 when it is scrolled out of the window.
+  let slotOf = (i) => {
+    if (windowed === 0) { return i }
+    return i - ST.topRow * cols
+  }
+  // Repaint one already-arranged row in place, WITHOUT clearing first: a select/deselect changes only a
+  // cell's text COLOUR, not its glyph shapes or positions, so the fresh paint overwrites the old exactly
+  // (multi-colour-per-tile canvas). Text cells only — assumes the row uses no icon-pool sprites.
+  // Repaint a row at its CACHED geometry — just paint(), NO measure/arrange. A recolour doesn't move
+  // anything, and the de-boxed uiRender wrote _x/_y back onto every node, so paint() alone redraws it in
+  // place. (This is what makes a cursor move fast instead of re-running the whole boxed layout.)
+  let relayoutRow = (rowNode) => {
+    paint(rowNode)
+  }
+  // Recolour slot `i`'s RETAINED cell (select → "selected", deselect → its tagged original colours) and
+  // repaint that row in place. Text cells overwrite cleanly (multi-colour canvas); no rebuild, no clear.
+  let repaintCell = (i, sel) => {
+    let k = slotOf(i)
+    if (k < 0) { return }
+    if (k >= ST.slots.length) { return }
+    let s = ST.slots[k]
+    if (present(s) === 0) { return }
+    let c = s.cell
+    if (present(c) === 0) { return }
+    if (sel === 1) {
+      if (recolorText(c, "selected") === 0) { c.sel = 1 }
+      SEL.cell = c
+    } else {
+      restoreColors(c)
+    }
+    relayoutRow(s.row)
+  }
+  // Keep the selected ROW inside the viewport, scrolling in WHOLE-ROW steps so scrollY is always a
+  // multiple of the row pitch (partial rows would spill — the cull only keeps fully-inside rows).
+  let autoScroll = (idx) => {
+    if (windowed === 0) { return 0 }
+    let row = (idx - (idx % cols)) / cols
+    let top = ST.topRow
+    if (row < top) { top = row }
+    if (row >= top + VIS) { top = row - VIS + 1 }
+    if (top < 0) { top = 0 }
+    ST.topRow = top
+    ST.scrollY = top * pitch
+    return ST.scrollY
+  }
+  // Put item `d` in slot `k`: build its cell, hang it where the old one was, and leave the row to be
+  // repainted. Only the CONTENTS move — the row node, its position and its box are the window's, not the
+  // item's, which is the whole point of the model.
+  let fillSlot = (k, d, n) => {
+    let s = ST.slots[k]
+    if (present(s) === 0) { return }
+    let fresh = { text: "", color: "text" }
+    if (d < n) { fresh = cfg.cell(d) }
+    tagColors(fresh)
+    if (d === cur.index()) {
+      if (recolorText(fresh, "selected") === 0) { fresh.sel = 1 }
+      SEL.cell = fresh
+    }
+    s.cell = fresh
+    if (present(s.wrap) === 1) { s.wrap.children[1] = fresh } else { s.row.children[s.pos] = fresh }
+  }
+  // Fast scroll path: opaque-rewrite text leaves in place — no measure/arrange, no full-row wipe.
+  // Batch under `audio_defer`: each `ui_text_box` used to mixer-catchup on its own, so a 7-row
+  // refill (×2 leaves) stacked ~1s of music steps. One `audio_pump` after the batch keeps BGM honest.
+  // Falls back to fillSlot + uiRelayoutRows when a cell's shape changes (icons, new columns, …).
+  let refillWindow = () => {
+    let n = cfg.count()
+    let first = ST.topRow * cols
+    let allOk = 1
+    audio_defer(1)
+    let k = 0
+    while (k < ST.slots.length) {
+      let d = first + k
+      let s = ST.slots[k]
+      if (present(s) === 0) { allOk = 0; break }
+      if (present(s.cell) === 0) { allOk = 0; break }
+      let rw = s.row
+      if (present(rw) === 0) { allOk = 0; break }
+      if (present(rw._x) === 0) { allOk = 0; break }
+      let fresh = { text: "", color: "text" }
+      if (d < n) { fresh = cfg.cell(d) }
+      let selected = 0
+      if (d === cur.index()) { selected = 1 }
+      if (patchTextTree(s.cell, fresh, selected, rowBg) === 0) { allOk = 0; break }
+      if (selected === 1) { SEL.cell = s.cell }
+      k = k + 1
+    }
+    if (allOk === 0) {
+      // Shape mismatch or first paint mid-flight: full rebuild of every slot.
+      k = 0
+      while (k < ST.slots.length) { fillSlot(k, first + k, n); k = k + 1 }
+      let r = 0
+      while (r < ST.rows.length) {
+        let rw = ST.rows[r]
+        if (present(rw._x) === 1) {
+          uiRelayoutRows(rw, rw._x, rw._y, rw._w, rw._h, rowBg)
+        }
+        r = r + 1
+      }
+    }
+    audio_defer(0)
+    audio_pump()
+    let b = ST.box
+    if (present(b) === 1) { b.scrollY = ST.scrollY; paintScrollbar(b) }
+  }
+  // Move highlight to `i`. Owns moveHi when the viewport stays put.
+  // Returns 1 if scrolled (caller must full-re-render view()), else 0.
+  let doSelect = (i) => {
+    let old = cur.index()
+    if (i === old) { return 0 }
+    cur.setIndex(i)
+    let prevY = ST.scrollY
+    autoScroll(i)
+    if (ST.scrollY !== prevY) {
+      // A windowed list owns its own scrolling: refill the slots in place and tell the caller NOTHING
+      // changed structurally, because nothing did. This is the move that used to cost a full rebuild and
+      // re-layout of every row in the stock.
+      if (ST.slots.length > 0) {
+        refillWindow()
+        if (present(cfg.onMove)) { cfg.onMove(i) }
+        return 0
+      }
+      if (present(cfg.onMove)) { cfg.onMove(i) }
+      return 1
+    }
+    if (ST.slots.length === 0) {
+      if (present(cfg.onMove)) { cfg.onMove(i) }
+      return 1
+    }
+    if (old !== i) { repaintCell(old, 0) }
+    repaintCell(i, 1)
+    if (present(cfg.onMove)) { cfg.onMove(i) }
+    return 0
+  }
+  return {
+    index: () => cur.index(),
+    setIndex: (i) => cur.setIndex(i),
+    cursor: cur,
+    // Drop retained row/cell graphs when leaving this screen so a tab switch doesn't keep
+    // TWO full menus' boxed nodes alive at once (GBA heap OOM).
+    clear: () => { ST.slots = []; ST.rows = []; ST.box = null; SEL.cell = null; ST.scrollY = 0; ST.topRow = 0 },
+    update: () => {
+      cur.setCount(cfg.count())
+      let old = cur.index()
+      let ch = 0
+      if (cur.nav() > 0) {
+        let neu = cur.index()
+        cur.setIndex(old)
+        doSelect(neu)
+        ch = 1
+      }
+      let a = cur.act()
+      if (a === 1) { if (present(cfg.onSelect)) { cfg.onSelect(cur.index()) } ch = 1 }
+      if (a === 2) { if (present(cfg.onCancel)) { cfg.onCancel(cur.index()) } ch = 1 }
+      return ch
+    },
+    view: () => {
+      let n = cfg.count()
+      // Settle the window BEFORE choosing which items to build — the rows that exist are the rows that
+      // are on screen, so the viewport has to be decided first.
+      autoScroll(cur.index())
+      let first = 0
+      let last = n
+      if (windowed === 1) {
+        first = ST.topRow * cols
+        last = first + VIS * cols
+        if (last > n) { last = n }
+      }
+      ST.rows = []
+      ST.slots = []
+      let rowCells = null
+      let rowNode = null
+      let i = first
+      while (i < last) {
+        // Each row is forced to exactly `rowH` so the layout pitch matches the scroll math.
+        if ((i - first) % cols === 0) {
+          rowCells = []
+          rowNode = { dir: "row", gap: gap, h: rowH, align: "center", children: rowCells }
+          ST.rows.push(rowNode)
+        }
+        let cell = cfg.cell(i)
+        tagColors(cell)   // remember originals so a deselect can restore them without rebuilding
+        if (i === cur.index()) {
+          SEL.cell = cell
+          // Highlight the selection by recolouring its text to the theme's `selected` colour; only if
+          // the cell has NO text (a pure icon/graphic) fall back to a canvas outline box, which is
+          // reliable there since it shares no tile with any glyph.
+          if (recolorText(cell, "selected") === 0) { cell.sel = 1 }
+        }
+        // Reserve a left gutter for the ► cursor so it doesn't overlap text and every row aligns.
+        // grow:1 so the wrapped cell still fills the row (cells that grow-space their own contents rely
+        // on this).
+        let placed = cell
+        let wrap = null
+        if (gutter > 0) { wrap = { dir: "row", grow: 1, align: "center", children: [{ w: gutter, h: 1, children: [] }, cell] }; placed = wrap }
+        let pos = rowCells.length
+        rowCells.push(placed)
+        // Remember where cell `i` lives (+ the cell itself) so a move can repaint just its row (moveHi).
+        ST.slots.push({ row: rowNode, wrap: wrap, pos: pos, cell: cell })
+        i = i + 1
+      }
+      let listCol = { dir: "col", gap: gap, grow: 1, children: ST.rows }
+      let box = listCol
+      if (windowed === 1) {
+        let rows = (n + cols - 1 - ((n + cols - 1) % cols)) / cols
+        let contentH = rows * pitch - gap
+        // When the bar will paint, keep a right spacer so row tags aren't under the thumb.
+        if (contentH > cfg.h) {
+          box = {
+            dir: "row", h: cfg.h, align: "stretch",
+            children: [listCol, { w: SB_GUTTER, children: [] }],
+          }
+        } else {
+          box.h = cfg.h
+        }
+        // `win`, not `scroll`: the children exactly fit, so there is nothing to cull, and a tree with no
+        // scroll container is one `uiBake` accepts. The scrollbar still wants to know how much stock is
+        // off-screen, so the numbers arrange would have recorded for a scroll container are written here
+        // instead — from the full item count, which the window itself no longer knows.
+        box.win = 1
+        box.scrollY = ST.scrollY
+        box._view = cfg.h
+        box._content = contentH
+        ST.box = box
+      }
+      return box
+    },
+    // Fast cursor move: repaint ONLY the deselected + newly-selected rows in place — no full-tree
+    // re-layout. Valid only when the viewport didn't scroll (guard with scrollChanged); every other
+    // row keeps its geometry + pixels. This is what makes cursor movement snappy on the 16MHz CPU.
+    moveHi: (oldIdx, newIdx) => {
+      if (oldIdx !== newIdx) { repaintCell(oldIdx, 0) }
+      repaintCell(newIdx, 1)
+    },
+    // Did moving to `newIdx` shift the scroll viewport? Commits the new scroll offset (a no-op when it
+    // didn't move), and returns 1 if it did — in which case the whole list must re-lay-out (the caller
+    // should do a full uiRender), else 0 (the caller may use moveHi for a cheap in-place update).
+    scrollChanged: (newIdx) => {
+      let old = ST.scrollY
+      autoScroll(newIdx)
+      if (ST.scrollY === old) { return 0 }
+      // Windowed: handled here and there is nothing for the caller to redo — same answer `select` gives,
+      // and it has to be the same one, or a caller that asks this first and then calls `moveHi` would
+      // highlight a row the window had not been refilled into.
+      if (ST.slots.length > 0) { refillWindow(); return 0 }
+      return 1
+    },
+    // select(i) — move the highlight to `i` (owns moveHi). Returns 1 if scrolled → full re-view().
+    select: doSelect,
+    detail: () => {
+      if (present(cfg.detail)) { return cfg.detail(cur.index()) }
+      return null
+    },
+    // Draw the ► cursor at the selected row (call each frame after uiRender), from the selected cell's
+    // laid-out box. No-op without a cursor. (pointerAt is a top-level fn — sprite externs don't work
+    // from a closure, so we must NOT inline the sprite ops here.)
+    paintCursor: () => {
+      if (present(PTR) === 0) { return }
+      let c = SEL.cell
+      if (present(c) === 0) { return }
+      if (present(c._x) === 0) { return }
+      pointerAtRow(PTR, c._x - gutter, c._y, c._h)
+    },
+    hideCursor: () => { if (present(PTR) === 1) { pointerHide(PTR) } }
+  }
+}
+
+// makeGrid(opts) — classic action-RPG/JRPG icon bag (fixed icon cell, optional label under, d-pad cursor).
+// opts: {
+//   cols, cellW?, cellH?, gutter?, size?,
+//   slots?,              // fixed capacity (emptyIcon pads the rest); default = count()
+//   emptyIcon?,          // frame for empty slots (default none — only filled cells)
+//   count: () => n,
+//   item: (i) => ({ icon, qty?, label? }),
+//   qty?: 0|1,           // show xN under icon when qty>1 (default 0 — keeps a tight icon grid)
+//   outline?: 0|1,       // canvas sel box around the icon (default 1). Use 0 with a cursor sprite.
+//   qtyFont?, qtyColor?, labelColor?, labelFont?,
+//   h?, rowH?, w?,       // h = viewport height → the grid SCROLLS (see below)
+//   labels?: 0|1,        // cells carry a label under the icon — only affects the default scroll rowH
+//   selected?: () => 1|0,   // when 0, no cell draws selection chrome (unfocused panel)
+//   onMove?, onSelect?, onCancel?
+// }
+// Returns { view, index, setIndex, cursor, nav, navBits, act, actBits, update, select,
+//           cellAt, clear }. cellAt(i) is the icon leaf (._x/._y for a cursor sprite).
+//
+// SCROLLING. Give `h` (the viewport height in px) and a bag bigger than the panel scrolls to keep the
+// selected row in view, in whole-row steps, with a scrollbar — same model as `makeSelector`. Every move
+// re-renders anyway (`nav`/`update`/`select` return 1), so `view()` re-solves the offset; there is no
+// in-place path to guard like the selector's `moveHi`. Rows outside the viewport are culled, so a 40-slot
+// bag only spends canvas and pool SPRITES on the rows you can see — which is what makes a big bag fit at
+// all (`uiInit({ icons })` caps the pool, and OAM caps it harder).
+//
+// Rows are forced to exactly `rowH` so the layout pitch matches the scroll math (a mismatch drifts, and a
+// drifting cull eventually hides the selected row). `rowH` defaults to the icon plus whatever `qty`/`label`
+// lines the cells carry; pass it explicitly if your cells are taller. The scrollbar draws inside the grid's
+// right edge, so give `w` (a few px wider than the columns) if a label would otherwise run under it.
+export function makeGrid(opts) {
+  let o = optsOf(opts)
+  let cols = pick(o.cols, 4)
+  if (cols < 1) { cols = 1 }
+  let size = pick(o.size, CFG.iconSize)
+  let gutter = pick(o.gutter, 4)
+  let cellW = pick(o.cellW, size)
+  let cellH = pick(o.cellH, size)
+  let showQty = pick(o.qty, 0)
+  let outline = pick(o.outline, 1)
+  let qtyFont = pick(o.qtyFont, CFG.tinyFont)
+  let qtyColor = pick(o.qtyColor, "gold")
+  let labelColor = pick(o.labelColor, "dim")
+  let labelFont = pick(o.labelFont, CFG.tinyFont)
+  let emptyIcon = pick(o.emptyIcon, null)
+  let slots = pick(o.slots, -1)
+  let cur = makeCursor(cols, 1)
+  // Row pitch for the scroll math. Default = icon + the text lines a cell can carry, using the same gaps
+  // buildCell uses (1 above qty, 2 above a label), since a row is forced to this height.
+  let rowExtra = 0
+  if (showQty > 0) { rowExtra = rowExtra + text_height(qtyFont) + 1 }
+  if (pick(o.labels, 0) > 0) { rowExtra = rowExtra + text_height(labelFont) + 2 }
+  let rowH = pick(o.rowH, cellH + rowExtra)
+  let pitch = rowH + gutter
+  let ST = { cells: [], icons: [], root: null, scrollY: 0, topRow: 0 }
+
+  // Keep the selected row inside the viewport, in WHOLE-ROW steps (a partial row would be culled and just
+  // vanish — there is no pixel clipping). Same shape as makeSelector.autoScroll.
+  let autoScroll = (idx) => {
+    if (present(o.h) === 0) { return 0 }
+    let vis = 1
+    while ((vis + 1) * pitch - gutter <= o.h) { vis = vis + 1 }
+    let row = (idx - (idx % cols)) / cols
+    let top = ST.topRow
+    if (row < top) { top = row }
+    if (row >= top + vis) { top = row - vis + 1 }
+    if (top < 0) { top = 0 }
+    ST.topRow = top
+    ST.scrollY = top * pitch
+    return ST.scrollY
+  }
+
+  let liveCount = () => {
+    if (present(o.count) === 1) { return o.count() }
+    return 0
+  }
+  let capacity = () => {
+    if (slots > 0) { return slots }
+    return liveCount()
+  }
+  let focused = () => {
+    if (present(o.selected) === 1) {
+      if (o.selected()) { return 1 }
+      return 0
+    }
+    return 1
+  }
+  let itemAt = (i) => {
+    let n = liveCount()
+    if (i >= n) {
+      if (present(emptyIcon) === 1) { return { icon: emptyIcon } }
+      return null
+    }
+    if (present(o.item) === 0) { return null }
+    return o.item(i)
+  }
+  let buildCell = (i, sel) => {
+    let it = itemAt(i)
+    if (present(it) === 0) { return null }
+    let fr = it.icon
+    if (fr === null) { fr = emptyIcon }
+    if (fr === null) { fr = 0 }
+    // Prefer a bare icon leaf (old bagGridNode shape) — wrappers × slots OOMed the GBA heap.
+    let iconNode = { icon: fr, size: size }
+    if (sel > 0) {
+      if (outline > 0) { iconNode.sel = 1 }
+    }
+    let cell = iconNode
+    if (showQty > 0) {
+      let q = it.qty
+      if (q === null) { q = 0 }
+      if (q > 1) {
+        cell = {
+          dir: "col", gap: 1, align: "center",
+          children: [iconNode, { text: "x" + q, color: qtyColor, font: qtyFont }]
+        }
+      }
+    }
+    let lab = it.label
+    if (lab === null) { lab = "" }
+    if (lab !== "") {
+      if (cell !== iconNode) {
+        cell.children.push({ text: lab, color: labelColor, font: labelFont })
+      } else {
+        cell = {
+          dir: "col", gap: 2, align: "center",
+          children: [iconNode, { text: lab, color: labelColor, font: labelFont }]
+        }
+      }
+    }
+    while (ST.icons.length <= i) { ST.icons.push(null) }
+    while (ST.cells.length <= i) { ST.cells.push(null) }
+    ST.icons[i] = iconNode
+    ST.cells[i] = cell
+    return cell
+  }
+
+  return {
+    index: () => cur.index(),
+    setIndex: (i) => cur.setIndex(i),
+    cursor: cur,
+    clear: () => { ST.cells = []; ST.icons = []; ST.root = null; ST.scrollY = 0; ST.topRow = 0 },
+    cellAt: (i) => {
+      if (i < 0) { return null }
+      if (i >= ST.icons.length) { return null }
+      return ST.icons[i]
+    },
+    nav: () => {
+      cur.setCount(capacity())
+      return cur.nav()
+    },
+    navBits: (bits) => {
+      cur.setCount(capacity())
+      return cur.navBits(bits)
+    },
+    act: () => cur.act(),
+    actBits: (bits) => cur.actBits(bits),
+    select: (i) => {
+      let n = capacity()
+      if (n <= 0) { return 0 }
+      if (i < 0) { i = 0 }
+      if (i >= n) { i = n - 1 }
+      if (i === cur.index()) { return 0 }
+      cur.setIndex(i)
+      if (present(o.onMove) === 1) { o.onMove(i) }
+      return 1
+    },
+    update: () => {
+      cur.setCount(capacity())
+      let ch = 0
+      if (cur.nav() > 0) {
+        ch = 1
+        if (present(o.onMove) === 1) { o.onMove(cur.index()) }
+      }
+      let a = cur.act()
+      if (a === 1) {
+        if (present(o.onSelect) === 1) { o.onSelect(cur.index()) }
+        ch = 1
+      }
+      if (a === 2) {
+        if (present(o.onCancel) === 1) { o.onCancel(cur.index()) }
+        ch = 1
+      }
+      return ch
+    },
+    view: () => {
+      let n = capacity()
+      cur.setCount(n)
+      ST.cells = []
+      ST.icons = []
+      let rows = []
+      let rowCells = null
+      let i = 0
+      let selOn = focused()
+      let hi = cur.index()
+      while (i < n) {
+        if (i % cols === 0) {
+          rowCells = []
+          let rowNode = { dir: "row", gap: gutter, align: "start", children: rowCells }
+          // Only a SCROLLING grid pins the row height (so the layout pitch is the scroll pitch by
+          // construction). A plain grid keeps content-sized rows, which is what its callers already lay out
+          // against — pinning them would clip any cell taller than the derived rowH.
+          if (present(o.h) === 1) { rowNode.h = rowH }
+          rows.push(rowNode)
+        }
+        let sel = 0
+        if (selOn > 0) { if (i === hi) { sel = 1 } }
+        let cell = buildCell(i, sel)
+        if (present(cell) === 1) {
+          rowCells.push(cell)
+        } else {
+          rowCells.push({ w: cellW, h: cellH, children: [] })
+        }
+        i = i + 1
+      }
+      ST.root = { dir: "col", gap: gutter, children: rows }
+      if (present(o.w) === 1) { ST.root.w = o.w }
+      if (present(o.h) === 1) {
+        ST.root.h = o.h
+        ST.root.scroll = 1
+        ST.root.scrollY = autoScroll(hi)
+      }
+      return ST.root
+    }
+  }
+}
+
+
+// ── Shared menu chrome / detail / qty (lifted from shop.tish patterns) ────────
+// These keep shop's flash-free + streamed behaviour intact: fixed-size detail slots so
+// patch() can opaque-replace without relayout; steppers update number lines via uiSetText.
+
+// Prefer this over many key_pressed() calls during menu updates (one ctx crossing).
+// (uiKeys / uiKeyDown are defined near the top of this file, next to BTN_*.)
+
+// makePanel({ title?, titleColor?, titleAlign?, border?, fill?, pad?, gap?, w?, h?, grow?, children })
+export function makePanel(opts) {
+  let o = optsOf(opts)
+  let kids = pick(o.children, [])
+  if (present(o.title) === 1) {
+    let titleNode = { text: o.title, color: pick(o.titleColor, "label") }
+    if (present(o.titleAlign) === 1) { titleNode.align = o.titleAlign }
+    let head = [titleNode]
+    let i = 0
+    while (i < kids.length) { head.push(kids[i]); i = i + 1 }
+    kids = head
+  }
+  let n = { dir: "col", pad: pick(o.pad, 6), gap: pick(o.gap, 4), children: kids }
+  if (present(o.border) === 1) { n.border = o.border }
+  if (present(o.fill) === 1) { n.fill = o.fill }
+  if (present(o.w) === 1) { n.w = o.w }
+  if (present(o.h) === 1) { n.h = o.h }
+  if (present(o.grow) === 1) { n.grow = o.grow }
+  return n
+}
+
+// makeListRow({ left, right, leftColor?, rightColor? }) — name · price style row.
+export function makeListRow(opts) {
+  let o = optsOf(opts)
+  return {
+    dir: "row", grow: 1, align: "center", justify: "between",
+    children: [
+      { text: pick(o.left, ""), color: pick(o.leftColor, "text") },
+      { text: pick(o.right, ""), color: pick(o.rightColor, "gold") }
+    ]
+  }
+}
+
+// makeDetailPanel(cfg) — icon? + name + wrapped desc + price with FIXED slots for in-place patch.
+// cfg: { w?, border?, pad?, title?, iconSize?, nameW?, descLines?, nameWrap?:1|0, font? }
+// item: { name, desc?, priceLabel?, icon? } — omit icon (or pass icon:-1) for a text-only detail.
+export function makeDetailPanel(cfg) {
+  let c = optsOf(cfg)
+  let font = pick(c.font, CFG.font)
+  let w = pick(c.w, 104)
+  let pad = pick(c.pad, 8)
+  let border = pick(c.border, "accent")
+  let title = pick(c.title, "DETAIL")
+  let titleAlign = pick(c.titleAlign, null)
+  let iconSize = pick(c.iconSize, 32)
+  let nameW = pick(c.nameW, 48)
+  let descLines = pick(c.descLines, 3)
+  let nameWrap = pick(c.nameWrap, 1)
+  let descH = descLines * text_height(font)
+  let nameH = 2 * text_height(font)
+  let ST = { nodes: null, ready: 0, descH: descH, nameW: nameW, nameH: nameH, nameWrap: nameWrap, font: font }
+
+  let build = (item) => {
+    if (present(item) === 0) {
+      ST.nodes = null
+      return makePanel({
+        title: title, titleAlign: titleAlign, border: border, pad: pad, gap: 4, w: w,
+        children: [{ text: "(empty)", color: "dim", font: font }]
+      })
+    }
+    let hasIcon = 0
+    if (present(item.icon) === 1) { if (item.icon >= 0) { hasIcon = 1 } }
+    let iconNode = null
+    if (hasIcon === 1) { iconNode = { icon: item.icon, size: iconSize } }
+    // Stamp cfg.font on every leaf — measure/paint must match patch()'s ST.font. Without this,
+    // leaves fall back to CFG.font (often a larger face) and opaque replaces leave ghost glyphs.
+    let nameNode = { text: item.name, color: "accent", w: nameW, font: font }
+    if (nameWrap === 1) { nameNode.wrap = true; nameNode.h = nameH } else { nameNode.ellip = 1 }
+    let descW = w - pad * 2
+    if (descW < 8) { descW = 88 }
+    let descNode = { text: pick(item.desc, ""), color: "text", wrap: true, w: descW, h: descH, font: font }
+    let priceNode = { text: pick(item.priceLabel, ""), color: "gold", font: font }
+    ST.nodes = { name: nameNode, desc: descNode, price: priceNode, icon: iconNode }
+    let head = nameNode
+    if (hasIcon === 1) { head = { dir: "row", gap: 6, align: "center", children: [iconNode, nameNode] } }
+    return makePanel({
+      title: title, titleAlign: titleAlign, border: border, fill: "panel", pad: pad, gap: 4, w: w,
+      children: [head, descNode, priceNode]
+    })
+  }
+
+  return {
+    view: (item) => { return build(item) },
+    placeholder: () => {
+      ST.nodes = null
+      ST.ready = 0
+      return { dir: "col", w: w, border: border, pad: pad, children: [] }
+    },
+    // Opaque in-place update. Returns 1 on success, 0 if caller must full-refresh the panel.
+    // MUST restore panel fill under each slot — bare ui_text_box clears blank glyphs to transparent
+    // and punches dark backdrop holes through fill:"panel".
+    patch: (item) => {
+      let dn = ST.nodes
+      if (present(dn) === 0) { return 0 }
+      let nm = dn.name
+      if (present(nm._x) === 0) { return 0 }
+      if (present(item) === 0) { return 0 }
+      let bg = "panel"
+      audio_pump()
+      if (present(dn.icon) === 1) { uiReframeIcon(dn.icon, item.icon) }
+      audio_pump()
+      if (ST.nameWrap === 1) {
+        uiRowText(nm, item.name, "accent", bg)
+      } else {
+        uiRowText(nm, fitText(ST.font, item.name, ST.nameW), "accent", bg)
+      }
+      audio_pump()
+      let dd = dn.desc
+      uiRowText(dd, pick(item.desc, ""), "text", bg)
+      audio_pump()
+      let pr = dn.price
+      uiRowText(pr, pick(item.priceLabel, ""), "gold", bg)
+      return 1
+    },
+    ready: () => ST.ready,
+    setReady: (v) => { ST.ready = v },
+    nodes: () => ST.nodes,
+    clear: () => { ST.nodes = null; ST.ready = 0 }
+  }
+}
+
+// makeStepper(cfg) — quantity panel with flash-free number lines (shop qty picker).
+// cfg: { w?, border?, pad?, font?, cur? }
+// view(s): s = { qty, total, after, verb, name, icon, size?, hint? }
+// set(s): opaque-update the three number lines only (qty/total/left).
+export function makeStepper(cfg) {
+  let c = optsOf(cfg)
+  let font = pick(c.font, CFG.font)
+  let w = pick(c.w, 104)
+  let pad = pick(c.pad, 8)
+  let border = pick(c.border, "selected")
+  let cur = pick(c.cur, "G")
+  let ST = { q: null, t: null, l: null, font: font, cur: cur }
+
+  let line = (txt, color) => {
+    return { text: txt, color: color, font: font, _lw: text_width(font, txt) }
+  }
+
+  return {
+    view: (s) => {
+      let o = optsOf(s)
+      let qtext = "Qty  x" + pick(o.qty, 1)
+      let ttext = "Total " + pick(o.total, 0) + " " + pick(o.cur, cur)
+      let ltext = "Left  " + pick(o.after, 0) + " " + pick(o.cur, cur)
+      ST.q = line(qtext, "title")
+      ST.t = line(ttext, "gold")
+      ST.l = line(ltext, "good")
+      let size = pick(o.size, 32)
+      let hint = pick(o.hint, "L/R U/D qty  A/B")
+      // OPAQUE, like makeDetailPanel's. A stepper is swapped into a panel box that already holds
+      // something else (the shop toggles detail ↔ quantity in place), and `uiRelayoutInner` clears a
+      // fill-less node's interior to TRANSPARENT rather than painting over it — so without this the
+      // picker showed the game straight through its own body.
+      return makePanel({
+        border: border, fill: pick(c.fill, "panel"), pad: pad, gap: 2, w: w,
+        children: [
+          { dir: "row", gap: 6, align: "center", children: [
+            { icon: o.icon, size: size },
+            { dir: "col", gap: 0, children: [
+              { text: pick(o.verb, "Buy"), color: "label" },
+              { text: pick(o.name, ""), color: "accent", wrap: true, w: 54 }
+            ] }
+          ] },
+          ST.q, ST.t, ST.l,
+          { text: hint, color: "dim" }
+        ]
+      })
+    },
+    set: (s) => {
+      let o = optsOf(s)
+      let ccy = pick(o.cur, cur)
+      if (present(ST.q) === 0) { return 0 }
+      if (present(ST.q._x) === 0) { return 0 }
+      uiSetText(ST.q, "Qty  x" + pick(o.qty, 1), "title")
+      audio_pump()
+      uiSetText(ST.t, "Total " + pick(o.total, 0) + " " + ccy, "gold")
+      audio_pump()
+      uiSetText(ST.l, "Left  " + pick(o.after, 0) + " " + ccy, "good")
+      return 1
+    },
+    lines: () => { return { q: ST.q, t: ST.t, l: ST.l } },
+    // Drop the three retained number lines. Without this the panel kept them for the rest of the
+    // session after a single use — `set()` patches them in place, so they are held on purpose while
+    // the picker is up and by nobody once it is gone.
+    clear: () => { ST.q = null; ST.t = null; ST.l = null }
+  }
+}
+
+// ── Options widgets: toggle / tabs / bar ─────────────────────────────────────
+
+function clampInt(v, lo, hi) {
+  if (v < lo) { return lo }
+  if (v > hi) { return hi }
+  return v
+}
+
+// makeToggle(label, opts?) — one labelled ON/OFF row. Flash-free set/toggle after layout.
+// opts: { on?, onLabel?, offLabel?, w?, font?, color?, gap? }
+//   let t = makeToggle("BGM", { on: 1 })
+//   uiPaint({ children: [t.view()] })
+//   t.toggle()   // flips + paints in place
+export function makeToggle(label, opts) {
+  let o = optsOf(opts)
+  let font = pick(o.font, CFG.font)
+  let onLab = pick(o.onLabel, "ON")
+  let offLab = pick(o.offLabel, "OFF")
+  let gap = pick(o.gap, 8)
+  let ST = {
+    on: 0, label: label, font: font, onLab: onLab, offLab: offLab,
+    labNode: null, valNode: null, row: null, selected: 0, color: pick(o.color, "text")
+  }
+  if (pick(o.on, 0)) { ST.on = 1 }
+
+  let valText = () => {
+    if (ST.on > 0) { return ST.onLab }
+    return ST.offLab
+  }
+  let valColor = () => {
+    if (ST.on > 0) { return "good" }
+    return "dim"
+  }
+  let applySel = () => {
+    if (present(ST.labNode) === 0) { return }
+    if (present(ST.row) === 0) { return }
+    if (ST.selected > 0) {
+      ST.labNode.color = "selected"
+      ST.row.border = "buttonSelBorder"
+    } else {
+      ST.labNode.color = ST.color
+      ST.row.border = "buttonBorder"
+    }
+  }
+  let paintVal = () => {
+    // Restore button fill under the value — bare uiSetText punches holes in the plate.
+    uiRowText(ST.valNode, valText(), valColor(), "button")
+    // Text-box can share the right-edge tile with the 1px outline — redraw chrome after.
+    if (present(ST.row) === 1) {
+      if (present(ST.row._x) === 1) {
+        if (present(ST.row.border) === 1) {
+          ui_rect(ST.row._x, ST.row._y, ST.row._w, ST.row._h, col2(ST.row.border))
+        }
+      }
+    }
+  }
+  let doSet = (v) => {
+    ST.on = 0
+    if (v) { ST.on = 1 }
+    if (present(ST.valNode) === 0) { return 0 }
+    if (present(ST.valNode._x) === 0) { return 0 }
+    paintVal()
+    return 1
+  }
+
+  return {
+    view: () => {
+      ST.labNode = { text: ST.label, color: ST.color, font: font }
+      ST.valNode = { text: valText(), color: valColor(), font: font, _lw: text_width(font, ST.onLab) }
+      // Reserve width for the longer of ON/OFF so toggling doesn't reflow.
+      let vw = text_width(font, ST.onLab)
+      let ow = text_width(font, ST.offLab)
+      if (ow > vw) { vw = ow }
+      ST.valNode.w = vw
+      ST.valNode.align = "right"
+      ST.row = {
+        dir: "row", gap: gap, align: "center", justify: "between",
+        // pad ≥ 4 keeps value text-box tiles off the 1px outline.
+        pad: 4, fill: "button", border: "buttonBorder",
+        children: [ST.labNode, ST.valNode]
+      }
+      if (present(o.w) === 1) { ST.row.w = o.w }
+      applySel()
+      return ST.row
+    },
+    on: () => ST.on,
+    selected: () => ST.selected,
+    setSelected: (v) => {
+      ST.selected = 0
+      if (v) { ST.selected = 1 }
+      applySel()
+      // Must guard ST.row before ._x — setSelected runs at group construct, before view().
+      if (present(ST.row) === 1) {
+        if (present(ST.row._x) === 1) {
+          // Value first, then chrome — outline must win over the text-box.
+          paintVal()
+          buttonPaint(ST.row)
+        }
+      }
+    },
+    set: (v) => { return doSet(v) },
+    toggle: () => {
+      if (ST.on > 0) { return doSet(0) }
+      return doSet(1)
+    },
+    row: () => ST.row,
+    clear: () => { ST.labNode = null; ST.valNode = null; ST.row = null }
+  }
+}
+
+// makeToggleGroup(items, opts?) — vertical toggles with Up/Down + A to flip (makeButtonGroup DX).
+// items: [{ label, on? }, …] or plain strings (start OFF).
+// opts: { gap?, w?, font? }
+export function makeToggleGroup(items, opts) {
+  let o = optsOf(opts)
+  let gap = pick(o.gap, 3)
+  let toggles = []
+  let i = 0
+  while (i < items.length) {
+    let it = items[i]
+    let label = it
+    let on = 0
+    if (typeof it === 'object') {
+      if (it !== null) {
+        label = pick(it.label, "")
+        if (pick(it.on, 0)) { on = 1 }
+      }
+    }
+    let to = { on: on, font: pick(o.font, CFG.font) }
+    if (present(o.w) === 1) { to.w = o.w }
+    toggles.push(makeToggle(label, to))
+    i = i + 1
+  }
+  let cur = makeCursor(1, toggles.length)
+  if (toggles.length > 0) { toggles[0].setSelected(1) }
+  let ST = { toggles: toggles, cur: cur, gap: gap }
+
+  let paintSel = (old, neu) => {
+    ST.toggles[old].setSelected(0)
+    ST.toggles[neu].setSelected(1)
+  }
+
+  return {
+    index: () => ST.cur.index(),
+    count: () => ST.toggles.length,
+    get: (i) => ST.toggles[i].on(),
+    set: (i, v) => ST.toggles[i].set(v),
+    toggleAt: (i) => ST.toggles[i].toggle(),
+    setIndex: (idx) => {
+      let old = ST.cur.index()
+      if (idx === old) { return 0 }
+      ST.cur.setIndex(idx)
+      paintSel(old, idx)
+      return 1
+    },
+    view: () => {
+      let kids = []
+      let j = 0
+      while (j < ST.toggles.length) { kids.push(ST.toggles[j].view()); j = j + 1 }
+      return { dir: "col", gap: ST.gap, children: kids }
+    },
+    nav: () => {
+      let old = ST.cur.index()
+      if (ST.cur.nav() === 0) { return 0 }
+      paintSel(old, ST.cur.index())
+      return 1
+    },
+    navBits: (bits) => {
+      let old = ST.cur.index()
+      if (ST.cur.navBits(bits) === 0) { return 0 }
+      paintSel(old, ST.cur.index())
+      return 1
+    },
+    // A flips the focused toggle. Returns 1 if flipped.
+    act: () => {
+      if (ST.cur.act() !== 1) { return 0 }
+      ST.toggles[ST.cur.index()].toggle()
+      return 1
+    },
+    actBits: (bits) => {
+      if (ST.cur.actBits(bits) !== 1) { return 0 }
+      ST.toggles[ST.cur.index()].toggle()
+      return 1
+    },
+    clear: () => {
+      let j = 0
+      while (j < ST.toggles.length) { ST.toggles[j].clear(); j = j + 1 }
+    }
+  }
+}
+
+// makeTabs(labels, opts?) — horizontal tab strip. Left/Right moves; caller swaps body on index change.
+// labels: string[]   opts: { index?, gap?, font?, w? }
+//   let tabs = makeTabs(["Items", "Status"])
+//   uiPaint({ children: [tabs.view(), bodyFor(tabs.index())] })
+//   if (tabs.navBits(k) === 1) { show(0) }
+export function makeTabs(labels, opts) {
+  let o = optsOf(opts)
+  let gap = pick(o.gap, 4)
+  let font = pick(o.font, CFG.font)
+  let nodes = []
+  let i = 0
+  while (i < labels.length) {
+    nodes.push(makeButton(labels[i], {
+      font: font, pad: 3, gap: 0,
+      selected: 0
+    }))
+    i = i + 1
+  }
+  let cur = makeCursor(labels.length, labels.length)
+  // Force single-row left/right only: cols = count so up/down are no-ops within one row.
+  // makeCursor with cols=N and count=N gives one row of N cells.
+  let start = pick(o.index, 0)
+  if (start < 0) { start = 0 }
+  if (start >= labels.length) { start = 0 }
+  cur.setIndex(start)
+  if (nodes.length > 0) { buttonStyle(nodes[start], { selected: 1 }) }
+  let ST = { nodes: nodes, cur: cur, gap: gap }
+
+  let paintSel = (old, neu) => {
+    buttonStyle(ST.nodes[old], { selected: 0 })
+    buttonStyle(ST.nodes[neu], { selected: 1 })
+    buttonPaint(ST.nodes[old])
+    buttonPaint(ST.nodes[neu])
+  }
+
+  return {
+    index: () => ST.cur.index(),
+    count: () => ST.nodes.length,
+    setIndex: (idx) => {
+      let old = ST.cur.index()
+      if (idx === old) { return 0 }
+      ST.cur.setIndex(idx)
+      if (present(ST.nodes[old]._x) === 1) {
+        paintSel(old, idx)
+      } else {
+        buttonStyle(ST.nodes[old], { selected: 0 })
+        buttonStyle(ST.nodes[idx], { selected: 1 })
+      }
+      return 1
+    },
+    view: () => {
+      return { dir: "row", gap: ST.gap, align: "center", children: ST.nodes }
+    },
+    nav: () => {
+      let old = ST.cur.index()
+      // Only Left/Right for a tab strip.
+      let moved = 0
+      if (key_pressed(BTN_LEFT) > 0) {
+        if (old > 0) { ST.cur.setIndex(old - 1); moved = 1 }
+      }
+      if (key_pressed(BTN_RIGHT) > 0) {
+        if (old + 1 < ST.nodes.length) { ST.cur.setIndex(old + 1); moved = 1 }
+      }
+      if (moved === 0) { return 0 }
+      paintSel(old, ST.cur.index())
+      return 1
+    },
+    navBits: (bits) => {
+      let old = ST.cur.index()
+      let moved = 0
+      if (uiKeyDown(bits, BTN_LEFT) > 0) {
+        if (old > 0) { ST.cur.setIndex(old - 1); moved = 1 }
+      }
+      if (uiKeyDown(bits, BTN_RIGHT) > 0) {
+        if (old + 1 < ST.nodes.length) { ST.cur.setIndex(old + 1); moved = 1 }
+      }
+      if (moved === 0) { return 0 }
+      paintSel(old, ST.cur.index())
+      return 1
+    }
+  }
+}
+
+// makeBar(opts) — HP/MP-style meter in the flex tree (canvas rects, not hud_bar sprites).
+// opts: { value?, max?, w?, h?, fill?, track?, border?, label?, font? }
+//   let hp = makeBar({ value: 40, max: 50, w: 100, fill: "good", label: "HP" })
+//   uiPaint({ children: [hp.view()] })
+//   hp.set(35)   // opaque in-place redraw
+export function makeBar(opts) {
+  let o = optsOf(opts)
+  let w = pick(o.w, 80)
+  let h = pick(o.h, 6)
+  let max = pick(o.max, 100)
+  if (max < 1) { max = 1 }
+  let value = clampInt(pick(o.value, 0), 0, max)
+  let fill = pick(o.fill, "good")
+  let track = pick(o.track, "scrollTrack")
+  let border = pick(o.border, "border")
+  let font = pick(o.font, CFG.font)
+  let label = pick(o.label, "")
+  let labelColor = pick(o.labelColor, "text")
+  let panelBg = pick(o.bg, "panel")
+  let ST = {
+    w: w, h: h, max: max, value: value, fill: fill, track: track, border: border,
+    label: label, labelColor: labelColor, panelBg: panelBg,
+    trackNode: null, fillNode: null, labelNode: null, root: null, font: font,
+    prevFw: 0, ready: 0, lastLabel: ""
+  }
+
+  let fillW = () => {
+    // Inner width (inside 1px border) — never paint over the outline.
+    let iw = ST.w - 2
+    if (iw < 1) { iw = 1 }
+    let fw = (ST.value * iw) / ST.max
+    fw = Math.floor(fw)
+    if (ST.value > 0) { if (fw < 1) { fw = 1 } }
+    if (fw > iw) { fw = iw }
+    return fw
+  }
+
+  let labelText = () => {
+    if (ST.label === "") { return "" + ST.value + "/" + ST.max }
+    return ST.label + " " + ST.value + "/" + ST.max
+  }
+
+  let paintBar = () => {
+    if (present(ST.trackNode) === 0) { return 0 }
+    if (present(ST.trackNode._x) === 0) { return 0 }
+    let x = ST.trackNode._x
+    let y = ST.trackNode._y
+    // Inner meter only — never paint the outer 1px border after the first outline.
+    let ix = x + 1
+    let iy = y + 1
+    let iw = ST.w - 2
+    let ih = ST.h - 2
+    if (iw < 1) { iw = 1 }
+    if (ih < 1) { ih = 1 }
+    let fw = fillW()
+    let prev = ST.prevFw
+
+    // Label first (may share tiles above); meter repaired after so text_box can't eat the tip.
+    if (present(ST.labelNode) === 1) {
+      let t = labelText()
+      if (t !== ST.lastLabel) {
+        uiRowText(ST.labelNode, t, ST.labelColor, ST.panelBg)
+        ST.lastLabel = t
+      }
+    }
+
+    if (ST.ready === 0) {
+      // Sync after layout paint: full inner + outline once.
+      ui_rect(ix, iy, iw, ih, col2(ST.track), 1)
+      if (fw > 0) { ui_rect(ix, iy, fw, ih, col2(ST.fill), 1) }
+      if (present(ST.border) === 1) { ui_rect(x, y, ST.w, ST.h, col2(ST.border)) }
+      ST.ready = 1
+    } else if (fw > prev) {
+      // Grow tip only — no full-track wipe (that flashes / tears mid-frame on GBA).
+      ui_rect(ix + prev, iy, fw - prev, ih, col2(ST.fill), 1)
+    } else if (fw < prev) {
+      ui_rect(ix + fw, iy, prev - fw, ih, col2(ST.track), 1)
+    }
+
+    if (present(ST.fillNode) === 1) { ST.fillNode.w = fw }
+    ST.prevFw = fw
+    return 1
+  }
+
+  return {
+    view: () => {
+      let fw = fillW()
+      ST.ready = 0
+      ST.prevFw = fw
+      ST.lastLabel = labelText()
+      // pad:1 keeps the fill child inside the outline so layout never stomps the border.
+      let fh = ST.h - 2
+      if (fh < 1) { fh = 1 }
+      ST.fillNode = { w: fw, h: fh, fill: ST.fill, children: [] }
+      ST.trackNode = {
+        dir: "row", w: ST.w, h: ST.h, pad: 1, fill: ST.track, border: ST.border,
+        children: [ST.fillNode]
+      }
+      if (ST.label !== "") {
+        let t = ST.lastLabel
+        let wide = ST.label + " " + ST.max + "/" + ST.max
+        let lw = text_width(ST.font, wide)
+        ST.labelNode = {
+          text: t, color: ST.labelColor, font: ST.font, w: lw, _lw: lw
+        }
+        // gap ≥ 8 so label text-box tiles never share a row with the track.
+        ST.root = { dir: "col", gap: 8, children: [ST.labelNode, ST.trackNode] }
+      } else {
+        ST.labelNode = null
+        ST.root = ST.trackNode
+      }
+      return ST.root
+    },
+    value: () => ST.value,
+    max: () => ST.max,
+    set: (v, m) => {
+      if (m !== null) {
+        ST.max = m
+        if (ST.max < 1) { ST.max = 1 }
+      }
+      ST.value = clampInt(v, 0, ST.max)
+      return paintBar()
+    },
+    setFrac: (frac) => {
+      let f = frac
+      if (f < 0) { f = 0 }
+      if (f > 1) { f = 1 }
+      ST.value = (f * ST.max + 0.5)
+      ST.value = clampInt(ST.value, 0, ST.max)
+      return paintBar()
+    },
+    node: () => ST.root,
+    clear: () => {
+      ST.trackNode = null; ST.fillNode = null; ST.labelNode = null; ST.root = null
+      ST.ready = 0; ST.prevFw = 0; ST.lastLabel = ""
+    }
+  }
+}

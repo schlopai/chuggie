@@ -1,0 +1,2073 @@
+{
+ "type": "map",
+ "orientation": "orthogonal",
+ "renderorder": "right-down",
+ "infinite": false,
+ "width": 15,
+ "height": 10,
+ "tilewidth": 16,
+ "tileheight": 16,
+ "nextlayerid": 4,
+ "nextobjectid": 67,
+ "version": "1.10",
+ "tiledversion": "1.11.0",
+ "tilesets": [
+  {
+   "firstgid": 1,
+   "source": "../../../assets/ninja-adventure/tiled/TilesetInteriorFloor.tsj"
+  },
+  {
+   "firstgid": 375,
+   "source": "../../../assets/ninja-adventure/tiled/TilesetWallSimple.tsj"
+  }
+ ],
+ "layers": [
+  {
+   "type": "tilelayer",
+   "name": "Ground",
+   "id": 1,
+   "width": 15,
+   "height": 10,
+   "opacity": 1,
+   "visible": true,
+   "data": [
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    321,
+    303,
+    321,
+    303,
+    321,
+    303,
+    321,
+    303,
+    321,
+    303,
+    303,
+    303,
+    303,
+    375,
+    375,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    303,
+    303,
+    303,
+    303,
+    375,
+    375,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    303,
+    303,
+    303,
+    375,
+    375,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    303,
+    303,
+    303,
+    375,
+    375,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    303,
+    303,
+    303,
+    375,
+    375,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    321,
+    303,
+    303,
+    303,
+    375,
+    375,
+    303,
+    321,
+    303,
+    321,
+    303,
+    321,
+    303,
+    321,
+    303,
+    321,
+    303,
+    321,
+    303,
+    375,
+    375,
+    303,
+    303,
+    303,
+    303,
+    303,
+    303,
+    303,
+    303,
+    303,
+    303,
+    303,
+    303,
+    303,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375,
+    375
+   ]
+  },
+  {
+   "type": "tilelayer",
+   "name": "Collision",
+   "id": 2,
+   "width": 15,
+   "height": 10,
+   "opacity": 1,
+   "visible": true,
+   "data": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ]
+  },
+  {
+   "type": "objectgroup",
+   "name": "spawns",
+   "id": 3,
+   "opacity": 1,
+   "visible": true,
+   "objects": [
+    {
+     "id": 1,
+     "name": "player",
+     "x": 112,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 2,
+     "name": "gear_naked",
+     "x": 16,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 300
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 3,
+     "name": "gear_early",
+     "x": 48,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 301
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 4,
+     "name": "gear_mid",
+     "x": 80,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 302
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 5,
+     "name": "gear_fullq1",
+     "x": 112,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 303
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 6,
+     "name": "gear_fullq2",
+     "x": 144,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 304
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 7,
+     "name": "dungeon1",
+     "x": 16,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 101
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 8,
+     "name": "dungeon2",
+     "x": 32,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 102
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 9,
+     "name": "dungeon3",
+     "x": 48,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 103
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 10,
+     "name": "dungeon4",
+     "x": 64,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 104
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 11,
+     "name": "dungeon5",
+     "x": 80,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 105
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 12,
+     "name": "dungeon6",
+     "x": 96,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 106
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 13,
+     "name": "dungeon7",
+     "x": 112,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 107
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 14,
+     "name": "dungeon8",
+     "x": 128,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 108
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 15,
+     "name": "dungeon9",
+     "x": 144,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 109
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 16,
+     "name": "cave_0",
+     "x": 16,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 17,
+     "name": "cave_1",
+     "x": 32,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 1
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 18,
+     "name": "cave_2",
+     "x": 48,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 2
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 19,
+     "name": "cave_3",
+     "x": 64,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 3
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 20,
+     "name": "cave_4",
+     "x": 80,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 4
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 21,
+     "name": "cave_5",
+     "x": 96,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 5
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 22,
+     "name": "cave_6",
+     "x": 112,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 6
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 23,
+     "name": "cave_7",
+     "x": 128,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 7
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 24,
+     "name": "cave_8",
+     "x": 144,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 8
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 25,
+     "name": "cave_9",
+     "x": 160,
+     "y": 48,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 9
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 26,
+     "name": "cave_10",
+     "x": 16,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 10
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 27,
+     "name": "cave_11",
+     "x": 32,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 11
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 28,
+     "name": "cave_12",
+     "x": 48,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 12
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 29,
+     "name": "cave_13",
+     "x": 64,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 13
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 30,
+     "name": "cave_14",
+     "x": 80,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 14
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 31,
+     "name": "cave_15",
+     "x": 96,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 15
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 32,
+     "name": "cave_16",
+     "x": 112,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 16
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 33,
+     "name": "cave_17",
+     "x": 128,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 17
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 34,
+     "name": "cave_18",
+     "x": 144,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 18
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 35,
+     "name": "cave_19",
+     "x": 160,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 110
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 19
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 1
+      }
+     ]
+    },
+    {
+     "id": 36,
+     "name": "boss1",
+     "x": 16,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 310
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 41
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 37,
+     "name": "boss2",
+     "x": 32,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 310
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 42
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 38,
+     "name": "boss3",
+     "x": 48,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 310
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 43
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 39,
+     "name": "boss4",
+     "x": 64,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 310
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 44
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 40,
+     "name": "boss5",
+     "x": 80,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 310
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 45
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 41,
+     "name": "boss6",
+     "x": 96,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 310
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 46
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 42,
+     "name": "boss7",
+     "x": 112,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 310
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 47
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 43,
+     "name": "boss8",
+     "x": 128,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 310
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 48
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 44,
+     "name": "boss9",
+     "x": 144,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 310
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 49
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 45,
+     "name": "boss10",
+     "x": 160,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 310
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 50
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 46,
+     "name": "enemy_30",
+     "x": 16,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 30
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 47,
+     "name": "enemy_31",
+     "x": 32,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 31
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 48,
+     "name": "enemy_32",
+     "x": 48,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 32
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 49,
+     "name": "enemy_33",
+     "x": 64,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 33
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 50,
+     "name": "enemy_34",
+     "x": 80,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 34
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 51,
+     "name": "enemy_35",
+     "x": 96,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 35
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 52,
+     "name": "enemy_36",
+     "x": 112,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 36
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 53,
+     "name": "enemy_37",
+     "x": 128,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 37
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 54,
+     "name": "enemy_38",
+     "x": 144,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 38
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 55,
+     "name": "enemy_39",
+     "x": 160,
+     "y": 96,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 39
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 56,
+     "name": "sandbox_bomb",
+     "x": 32,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 312
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 200
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 57,
+     "name": "sandbox_burn",
+     "x": 64,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 312
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 201
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 58,
+     "name": "sandbox_push",
+     "x": 96,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 312
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 202
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 59,
+     "name": "sandbox_flute",
+     "x": 128,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 312
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 203
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 60,
+     "name": "ow_start",
+     "x": 160,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 313
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 112
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 75
+      }
+     ]
+    },
+    {
+     "id": 61,
+     "name": "return_hub",
+     "x": 192,
+     "y": 112,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 120
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 0
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 62,
+     "name": "foe70",
+     "x": 144,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 70
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 63,
+     "name": "foe71",
+     "x": 160,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 71
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 64,
+     "name": "foe72",
+     "x": 176,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 72
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 65,
+     "name": "foe73",
+     "x": 192,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 73
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    },
+    {
+     "id": 66,
+     "name": "foe76",
+     "x": 208,
+     "y": 128,
+     "width": 16,
+     "height": 16,
+     "visible": true,
+     "properties": [
+      {
+       "name": "kind",
+       "type": "int",
+       "value": 311
+      },
+      {
+       "name": "a",
+       "type": "int",
+       "value": 76
+      },
+      {
+       "name": "b",
+       "type": "int",
+       "value": 0
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

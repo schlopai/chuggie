@@ -1,0 +1,138 @@
+// transitions — every screen transition the engine can do, run through the real scene lifecycle.
+//
+// `examples/win-demo` proved the window registers exist. It could not prove a TRANSITION works,
+// because it never changed scenes: it drove a phase counter over one static screen. The difference
+// matters, and it is the reason this example exists rather than a fourth phase in that one. A
+// transition has to survive the thing that actually happens at its midpoint — the old scene being
+// torn down and a new one built — and that is where a wipe that looked right in isolation turns
+// into a black frame, a leaked window, or a curtain painted into the floor tiles.
+//
+// So: two scenes, `packages/scene` driving `packages/transition`, and every effect cycled through a
+// real `leave()` → `enter()` swap.
+//
+// WHAT YOU SHOULD SEE: a warm screen and a cool screen trading places, once per effect, with the
+// effect's name in the corner. LEFT/RIGHT pick the effect by hand, A crosses over now. Left alone
+// it cycles by itself, which is what makes it screenshot-testable.
+//
+// ⚠️ TWO EFFECTS ARE SOFTWARE. TR_RAIN and TR_CHECKER paint the UI canvas — that is why this ROM
+// reserves 128 canvas tiles. That is small on purpose: the canvas SHARES one tile per solid colour, so
+// an opaque curtain costs one tile plus its ragged edge — not the 600 a full screen implies.
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  backdrop, terrain_new, terrain_palette, terrain_disc,
+  ui_begin, ui_text, ui_reserve_tiles, ui_clear_rect,
+  key_pressed, frame, log
+} from 'cargo:tish_agb'
+import { sceneStart, sceneStep, sceneGoto, sceneCur, sceneBusy,
+         sceneSetTransition } from '../../../packages/scene'
+import { trName, trIsSoftware, TR_COUNT } from '../../../packages/transition'
+
+// Button ordinals, not bitmasks — `key_pressed` takes an ordinal, and passing a mask compiles,
+// runs, and quietly reads the wrong button.
+let KEY_A: i32 = 0
+let KEY_LEFT: i32 = 5
+let KEY_RIGHT: i32 = 4
+
+// 0 = frame counter, 1 = selected effect, 2 = last HUD line painted, 3 = edge-detect latch.
+let S: i32[] = [0, 0, 0 - 1, 0]
+
+// How long to sit on a scene before crossing over on its own, and how long a crossing takes.
+let DWELL: i32 = 90
+let LEN: i32 = 24
+
+backdrop(0x101018)
+ui_reserve_tiles(128)
+ui_begin()
+terrain_new(240, 160)
+terrain_palette(1, 0xFFC040)
+terrain_palette(2, 0xE07030)
+
+// The two scenes are deliberately the same shape in different colours: what is being tested is the
+// TRANSITION, and two screens that differ only in hue make it obvious the swap happened at the
+// right moment — a scene that changes at the wrong time is visible as a flicker of the wrong colour
+// through a half-closed wipe.
+//
+// ⚠️ THE BOARD IS BUILT ONCE, AT BOOT, AND ONLY RECOLOURED PER SCENE. Rebuilding it inside `enter()`
+// was the obvious way to write this and it was wrong in a way worth recording: 96 `terrain_disc`
+// calls is roughly 24,000 per-pixel writes, which took EIGHTY-SEVEN frames — so the scene machine
+// sat at full black for a second and a half every crossing, and every effect looked like it hung at
+// its midpoint. The transition was fine; the scene build was not. A real game hits the same wall,
+// which is exactly why `scene.tish` swaps at full black: whatever `enter()` costs is invisible
+// there, but it is not FREE, and a slow `enter()` is felt as a transition that drags.
+function buildBoard() {
+  let r: i32 = 0
+  while (r < 8) {
+    let c: i32 = 0
+    while (c < 12) {
+      let mat: i32 = 1
+      if (((r + c) & 1) === 0) { mat = 2 }
+      terrain_disc(10 + c * 20, 10 + r * 20, 9, mat)
+      c = c + 1
+    }
+    r = r + 1
+  }
+}
+
+// ⚠️ The scenes build the BOARD and nothing else. No `sprite_new` in `enter()` — the lifecycle rule
+// `examples/iso-transitions` documents and its verify.sh enforces: anything allocated on entry must
+// be released on leave, and a transition that visits four scenes in a row will exhaust the OBJ
+// budget long before the player notices why.
+function makeScene(a: i32, b: i32, sky: i32) {
+  return {
+    // Recolouring is two palette writes and a backdrop register — a handful of cycles, so the black
+    // hold really is the one frame `scene.tish` intends it to be.
+    enter: () => { terrain_palette(1, a); terrain_palette(2, b); backdrop(sky) },
+    update: () => {},
+    leave: () => {}
+  }
+}
+
+log("TRANSITIONS boot")
+buildBoard()
+sceneStart([makeScene(0xFFC040, 0xE07030, 0x201008), makeScene(0x40C0FF, 0x3070E0, 0x081020)], 0)
+sceneSetTransition(0, LEN)
+
+while (true) {
+  // Effect selection. Only between transitions: changing the effect mid-crossing would close with
+  // one and open with another, which looks like two bugs rather than one feature.
+  if (!sceneBusy()) {
+    let l: i32 = key_pressed(KEY_LEFT)
+    let r: i32 = key_pressed(KEY_RIGHT)
+    let a: i32 = key_pressed(KEY_A)
+    if (S[3] === 0) {
+      if (l === 1) { S[1] = (S[1] + TR_COUNT - 1) % TR_COUNT; S[3] = 1 }
+      if (r === 1) { S[1] = (S[1] + 1) % TR_COUNT; S[3] = 1 }
+      if (a === 1) { S[3] = 1; S[0] = DWELL }
+    }
+    if (l === 0 && r === 0 && a === 0) { S[3] = 0 }
+    sceneSetTransition(S[1], LEN)
+  }
+
+  // Auto-advance, so an unattended headless run covers every effect in order.
+  S[0] = S[0] + 1
+  if (S[0] >= DWELL && !sceneBusy()) {
+    S[0] = 0
+    let nxt: i32 = 1 - sceneCur()
+    sceneGoto(nxt)
+    // Step to the next effect on EVERY crossing, so one unattended pass shows all eleven in about
+    // 25 seconds rather than 50 — which is the difference between a screenshot test and a soak.
+    S[1] = (S[1] + 1) % TR_COUNT
+  }
+
+  // The HUD, repainted only when the line changes.
+  //
+  // ⚠️ Repainting it DURING a software transition would fight the curtain for the same canvas, so
+  // the label is frozen while one is running — the one place a debug readout has to get out of the
+  // way of the thing it is reporting on.
+  if (S[2] !== S[1] && !sceneBusy()) {
+    S[2] = S[1]
+    ui_clear_rect(0, 0, 240, 10)
+    let tag: string = trName(S[1])
+    if (trIsSoftware(S[1])) { tag = tag + " (software)" }
+    ui_text(small, 4, 1, tag, 0xFFFFFF)
+    log("TRANSITIONS effect " + S[1] + " " + tag)
+  }
+
+  sceneStep()
+  frame()
+}

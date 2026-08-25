@@ -1,0 +1,280 @@
+// vault — the world remembering things: six chests, two triggers, and a cartridge that still knows
+// what you did after the power goes off.
+//
+// ── WHAT IT IS THE ACCEPTANCE TEST FOR ────────────────────────────────────────────────────────
+//
+// `packages/flags.tish`, which is new, and which exists because nothing in the repo owned the
+// question "has this specific thing happened yet". `save.tish` gives a game ONE 32-bit int to pack
+// its whole story into; the two topdown RPG ports and `metroidvania` each grew a private bitfield
+// instead. This is the shared answer: a named bitset over `prefs.tish`'s versioned, checksummed
+// SRAM, with triggers.
+//
+// Three things are proven here and each is visible on screen:
+//
+//   1. **Flags persist across a power cycle.** Open chests, press START, and the next boot says
+//      LOADED and shows them still open. That is not a screenshot trick — the `.sav` file is real
+//      cartridge SRAM, and a headless run proves it by running the ROM TWICE.
+//   2. **Triggers fire from a change, not a poll.** Opening the third chest grants the lantern;
+//      opening the sixth unlocks the door. Neither is checked per frame — `flagSet` queues the flip
+//      and `flagsPump` drains it, so a frame in which nothing happens costs one compare.
+//   3. **Re-asserting a flag is not an event.** Walking onto an already-open chest sets its flag
+//      again and fires nothing, because `flagSet` compares before it queues. A room that re-asserts
+//      its state on entry would otherwise re-trigger every time you walked in — which is the exact
+//      bug a hand-rolled bitfield ships with.
+//
+// ── THE SCREEN IS ALL CANVAS, NO BACKGROUND IMAGE ─────────────────────────────────────────────
+//
+// Everything here is `ui_rect`/`ui_text`, the way `examples/solitaire` draws a whole card table. No
+// `background:` import and no sprites at all, so there is nothing to contend with the canvas's glyph
+// tiles — `examples/visual-novel` records at length what a changing background does to a repainting
+// text canvas.
+
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  backdrop, ui_begin, ui_rect, ui_text, ui_clear_rect, ui_reserve_tiles,
+  frame, keys_edge, audio_defer, log
+} from 'cargo:tish_agb'
+import {
+  flagsInit, flagOn, flagSet, flagsPump, flagWatch, flagsSave, flagsFresh,
+  flagsCount, flagsChanges, flagsReset, flagName, flagNameOf, flagsCapacity
+} from '../../../packages/flags'
+import { chipCoin, chipChime, chipCancel, chipBlip } from '../../../packages/chipsfx'
+
+// ── flag ids ─────────────────────────────────────────────────────────────────────────────────
+// Plain constants, which is what "named ids" means in a language with no cheap string map. The
+// NAMES below are for the log and the debug line only.
+let CHEST0: i32 = 0        // 0..5 are the six chests
+let CHESTS: i32 = 6
+let F_LANTERN: i32 = 8
+let F_DOOR: i32 = 9
+
+let COLS: i32 = 6
+let CH_W: i32 = 28
+let CH_H: i32 = 30
+let CH_X: i32 = 16
+let CH_Y: i32 = 56
+
+// Palette
+let BG: i32 = 0x101420
+let PANEL: i32 = 0x1C2440
+let EDGE: i32 = 0x80A0E0
+let INK: i32 = 0xE8ECF8
+let DIM: i32 = 0x8890B0
+let GOLD: i32 = 0xFFD060
+let SHUT: i32 = 0x6A4A2A
+let OPEN: i32 = 0xC8A038
+let LIT: i32 = 0x70E090
+let LOCKED: i32 = 0x905060
+
+//   0 cursor  1 t  2 human  3 sig  4 msgT  5 saved
+let V: i32[] = [0, 0, 0, 0 - 1, 0, 0]
+let V_CUR: i32 = 0
+let V_T: i32 = 1
+let V_HUMAN: i32 = 2
+let V_SIG: i32 = 3
+let V_MSGT: i32 = 4
+let V_SAVED: i32 = 5
+
+let MSG = ""
+
+// ── boot ─────────────────────────────────────────────────────────────────────────────────────
+backdrop(BG)
+ui_reserve_tiles(320)
+ui_begin()
+
+// 2 slots = 64 flags, which is plenty here and leaves the other 30 prefs slots to the game.
+// ⚠️ Bump `version` and every existing cartridge reads as fresh — do that whenever a flag ID changes
+// MEANING, or a returning player inherits somebody else's story.
+let loaded: i32 = flagsInit({ magic: 0xF1A6, version: 1, count: 2, base: 0 })
+
+flagName(F_LANTERN, "LANTERN")
+flagName(F_DOOR, "VAULT DOOR")
+
+// ── the triggers ─────────────────────────────────────────────────────────────────────────────
+// Registered once, fired from `flagsPump` when something flips. Note what is NOT here: no per-frame
+// "if (chests >= 3 && !lantern)" check anywhere in the loop.
+flagWatch(F_LANTERN, (id, v) => {
+  if (v === 1) {
+    MSG = "The lantern is yours."
+    V[V_MSGT] = 90
+    chipChime()
+    log("VAULT trigger " + flagNameOf(id))
+  }
+})
+flagWatch(F_DOOR, (id, v) => {
+  if (v === 1) {
+    MSG = "The vault door grinds open."
+    V[V_MSGT] = 120
+    chipChime()
+    log("VAULT trigger " + flagNameOf(id))
+  }
+})
+
+function chestsOpen(): i32 {
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < CHESTS) {
+    n = n + flagOn(CHEST0 + i)
+    i = i + 1
+  }
+  return n
+}
+
+// The rewards are DERIVED from the chest flags, and re-derived after a load — which is the whole
+// point of a flag store. A returning player who already had the lantern still has it, without the
+// trigger firing again, because `flagSet` only queues a genuine change.
+function grade() {
+  let n: i32 = chestsOpen()
+  if (n >= 3) { flagSet(F_LANTERN, 1) }
+  if (n >= CHESTS) { flagSet(F_DOOR, 1) }
+}
+
+if (loaded === 1) {
+  MSG = "LOADED — the vault remembers."
+  log("VAULT boot LOADED chests=" + chestsOpen() + " lantern=" + flagOn(F_LANTERN)
+    + " door=" + flagOn(F_DOOR) + " set=" + flagsCount() + "/" + flagsCapacity())
+} else {
+  MSG = "A fresh cartridge."
+  log("VAULT boot FRESH")
+}
+V[V_MSGT] = 120
+// Re-derive on load WITHOUT firing the triggers again: the flags are already set, so `flagSet`
+// compares and queues nothing. Then drop whatever did queue, so a load is silent.
+grade()
+flagsPump()
+
+// ── painting ─────────────────────────────────────────────────────────────────────────────────
+let NUMS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+function numStr(n: i32) {
+  if (n <= 0) { return "0" }
+  let s = ""
+  let v: i32 = n
+  while (v > 0) {
+    s = NUMS[v % 10] + s
+    v = (v / 10) | 0
+  }
+  return s
+}
+
+function paint() {
+  ui_clear_rect(0, 0, 240, 160)
+  ui_text(small, 6, 4, "VAULT", GOLD)
+  ui_text(small, 60, 4, "chests " + numStr(chestsOpen()) + "/" + numStr(CHESTS), INK)
+  ui_text(small, 150, 4, "flags " + numStr(flagsCount()), DIM)
+
+  // The six chests.
+  let i: i32 = 0
+  while (i < CHESTS) {
+    let x: i32 = CH_X + i * (CH_W + 8)
+    let on: i32 = flagOn(CHEST0 + i)
+    let fill: i32 = SHUT
+    if (on === 1) { fill = OPEN }
+    ui_rect(x, CH_Y, CH_W, CH_H, fill, 1)
+    ui_rect(x, CH_Y, CH_W, 1, EDGE, 1)
+    ui_rect(x, CH_Y + CH_H - 1, CH_W, 1, EDGE, 1)
+    ui_rect(x, CH_Y, 1, CH_H, EDGE, 1)
+    ui_rect(x + CH_W - 1, CH_Y, 1, CH_H, EDGE, 1)
+    if (on === 1) { ui_rect(x + 6, CH_Y + 12, CH_W - 12, 6, GOLD, 1) }
+    if (V[V_CUR] === i) {
+      ui_rect(x - 3, CH_Y - 3, CH_W + 6, 2, GOLD, 1)
+      ui_rect(x - 3, CH_Y + CH_H + 1, CH_W + 6, 2, GOLD, 1)
+    }
+    i = i + 1
+  }
+
+  // Rewards, derived from the flags rather than tracked separately.
+  let ly: i32 = 100
+  let lcol: i32 = DIM
+  if (flagOn(F_LANTERN) === 1) { lcol = LIT }
+  ui_text(small, 16, ly, "LANTERN", lcol)
+  let dcol: i32 = LOCKED
+  if (flagOn(F_DOOR) === 1) { dcol = LIT }
+  ui_text(small, 100, ly, "VAULT DOOR", dcol)
+
+  // Message + controls.
+  ui_rect(0, 118, 240, 42, PANEL, 1)
+  ui_rect(0, 118, 240, 1, EDGE, 1)
+  if (V[V_MSGT] > 0) { ui_text(small, 6, 124, MSG, INK) }
+  ui_text(small, 6, 138, "left/right pick  A open  START save  SELECT wipe", DIM)
+  if (V[V_SAVED] > 0) { ui_text(small, 6, 148, "saved to cartridge", LIT) }
+  else { ui_text(small, 6, 148, "changes " + numStr(flagsChanges()) + " (unsaved)", DIM) }
+}
+paint()
+
+// ── the loop ─────────────────────────────────────────────────────────────────────────────────
+while (true) {
+  V[V_T] = V[V_T] + 1
+  if (V[V_MSGT] > 0) { V[V_MSGT] = V[V_MSGT] - 1 }
+
+  let k: i32 = keys_edge()
+  if (k > 0) { V[V_HUMAN] = 1 }
+
+  // The attract player opens a chest every 70 frames and saves once it has them all, so a headless
+  // run reaches the triggers and the cartridge write with no input at all.
+  if (V[V_HUMAN] === 0) {
+    if ((V[V_T] % 70) === 0) {
+      let n: i32 = chestsOpen()
+      if (n < CHESTS) {
+        V[V_CUR] = n
+        k = 1
+      } else if (V[V_SAVED] === 0) {
+        k = 8
+      }
+    }
+  }
+
+  if ((k & 256) > 0 && V[V_CUR] > 0) { V[V_CUR] = V[V_CUR] - 1  chipBlip() }
+  if ((k & 512) > 0 && V[V_CUR] < CHESTS - 1) { V[V_CUR] = V[V_CUR] + 1  chipBlip() }
+
+  if ((k & 1) > 0) {
+    let id: i32 = CHEST0 + V[V_CUR]
+    if (flagOn(id) === 1) {
+      // Deliberately still calls flagSet: proving that re-asserting fires nothing.
+      flagSet(id, 1)
+      MSG = "Already open."
+      V[V_MSGT] = 50
+      chipCancel()
+    } else {
+      flagSet(id, 1)
+      MSG = "Opened."
+      V[V_MSGT] = 50
+      V[V_SAVED] = 0
+      chipCoin()
+      grade()
+    }
+  }
+
+  if ((k & 8) > 0) {
+    // START: commit. `prefsSave` is a no-op when nothing is dirty, so this is safe to spam.
+    let wrote: i32 = flagsSave()
+    V[V_SAVED] = 1
+    MSG = "Written to SRAM."
+    V[V_MSGT] = 90
+    log("VAULT save wrote=" + wrote + " chests=" + chestsOpen() + " set=" + flagsCount())
+  }
+  if ((k & 4) > 0) {
+    flagsReset()
+    flagsSave()
+    V[V_SAVED] = 1
+    MSG = "Cartridge wiped."
+    V[V_MSGT] = 90
+    log("VAULT wiped")
+  }
+
+  flagsPump()
+
+  // The canvas is cold: repaint only when the picture would differ.
+  let sig: i32 = chestsOpen() * 131 + V[V_CUR] * 17 + flagOn(F_LANTERN) * 3 + flagOn(F_DOOR) * 5
+    + V[V_SAVED] * 7 + flagsChanges() * 23
+  if (V[V_MSGT] === 1 || V[V_MSGT] === 90 || V[V_MSGT] === 120 || V[V_MSGT] === 50) {
+    sig = sig + Math.imul(V[V_MSGT], 1021)
+  }
+  if (V[V_SIG] !== sig) {
+    V[V_SIG] = sig
+    audio_defer(1)
+    paint()
+    audio_defer(0)
+  }
+
+  frame()
+}

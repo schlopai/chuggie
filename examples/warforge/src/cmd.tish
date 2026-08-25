@@ -1,0 +1,154 @@
+// The command card — what a selected unit or building can do.
+//
+// Warcraft's contribution to the genre is not the units, it is that **selecting something tells you
+// what it can do**. A d-pad cannot click a 3x3 grid of icons, so this is a horizontal strip of
+// labels: L cycles the highlight, START runs it, B backs out. The strip lives in the bottom bar and
+// only repaints when the selection or the highlight changes.
+//
+// The whole card is TABLE DRIVEN. `CMD_LIST` is a flat i32 array of commands, terminated by -1, and
+// `CMD_AT` says where each owner's list begins. Adding a command to a building is one entry here
+// and one branch in `runCommand` — no per-building menu code, and nothing to keep in step but this
+// file and the runner.
+//
+// Flat arrays rather than a list-of-lists because an array of arrays in tish is a boxed `Value` per
+// row, and this is read on every selection change and every HUD repaint.
+
+// ── Commands ─────────────────────────────────────────────────────────────────
+export let C_NONE: i32 = 0 - 1
+export let C_TRAIN_PEASANT: i32 = 0
+export let C_TRAIN_FOOTMAN: i32 = 1
+export let C_TRAIN_ARCHER: i32 = 2
+export let C_BUILD_FARM: i32 = 3
+export let C_BUILD_BARRACKS: i32 = 4
+export let C_BUILD_TOWER: i32 = 5
+export let C_BUILD_SMITH: i32 = 6
+export let C_UPGRADE_KEEP: i32 = 7
+export let C_UP_WEAPON: i32 = 8
+export let C_UP_ARMOR: i32 = 9
+export let C_HARVEST_GOLD: i32 = 10
+export let C_HARVEST_WOOD: i32 = 11
+export let C_STOP: i32 = 12
+export let C_ATTACK: i32 = 13
+export let C_COUNT: i32 = 14
+
+// Six characters or fewer: the bar is 240px wide at a 7px font, and a longer label runs off it.
+//
+// This is the one UNTYPED array in the game, because it holds strings and tish typed arrays are
+// numeric. That costs ~28 bytes an element instead of 4 — fourteen entries, read only when the card
+// repaints (eight times a second), which is exactly the case where the boxed form is fine.
+export let C_NAME = []
+
+// ── Who can do what ──────────────────────────────────────────────────────────
+// Owner ids: buildings are `B_*` (0..6), units are `8 + K_*`. One flat index space so a single
+// lookup serves both, and the gap at 7 keeps the two families visually separate while debugging.
+export let OWNER_UNIT: i32 = 8
+
+// Every list, concatenated, each terminated by -1.
+export let CMD_LIST: i32[] = []
+// Where owner `i`'s list starts inside CMD_LIST, or -1 for "no commands".
+export let CMD_AT: i32[] = []
+
+// Gold / wood / food a command costs, indexed by command. Read by the card to grey out what the
+// player cannot afford, and by the runner to charge it.
+export let C_GOLD: i32[] = []
+export let C_WOOD: i32[] = []
+export let C_FOOD: i32[] = []
+// The building a C_BUILD_* command places, or -1.
+export let C_BUILDS: i32[] = []
+
+// `cmdInit` fills the tables. It is a function rather than literals because tish array literals of
+// this size are awkward to keep aligned by hand, and this runs once at boot.
+export function cmdInit(bFarm: i32, bBarr: i32, bTower: i32, bSmith: i32,
+                        gFarm: i32, wFarm: i32, gBarr: i32, wBarr: i32,
+                        gTower: i32, wTower: i32, gSmith: i32, wSmith: i32,
+                        gKeep: i32, wKeep: i32,
+                        gPeasant: i32, wPeasant: i32, gFoot: i32, wFoot: i32,
+                        gArch: i32, wArch: i32) {
+  let i: i32 = 0
+  while (i < C_COUNT) {
+    C_NAME.push("")
+    C_GOLD.push(0) C_WOOD.push(0) C_FOOD.push(0) C_BUILDS.push(0 - 1)
+    i = i + 1
+  }
+  C_NAME[C_TRAIN_PEASANT] = "PEASNT"
+  C_NAME[C_TRAIN_FOOTMAN] = "FOOTMN"
+  C_NAME[C_TRAIN_ARCHER] = "ARCHER"
+  C_NAME[C_BUILD_FARM] = "FARM"
+  C_NAME[C_BUILD_BARRACKS] = "BARRKS"
+  C_NAME[C_BUILD_TOWER] = "TOWER"
+  C_NAME[C_BUILD_SMITH] = "SMITH"
+  C_NAME[C_UPGRADE_KEEP] = "KEEP"
+  C_NAME[C_UP_WEAPON] = "WEAPON"
+  C_NAME[C_UP_ARMOR] = "ARMOR"
+  C_NAME[C_HARVEST_GOLD] = "MINE"
+  C_NAME[C_HARVEST_WOOD] = "CHOP"
+  C_NAME[C_STOP] = "STOP"
+  C_NAME[C_ATTACK] = "ATTACK"
+
+  C_GOLD[C_TRAIN_PEASANT] = gPeasant  C_WOOD[C_TRAIN_PEASANT] = wPeasant  C_FOOD[C_TRAIN_PEASANT] = 1
+  C_GOLD[C_TRAIN_FOOTMAN] = gFoot     C_WOOD[C_TRAIN_FOOTMAN] = wFoot     C_FOOD[C_TRAIN_FOOTMAN] = 1
+  C_GOLD[C_TRAIN_ARCHER] = gArch      C_WOOD[C_TRAIN_ARCHER] = wArch      C_FOOD[C_TRAIN_ARCHER] = 1
+  C_GOLD[C_BUILD_FARM] = gFarm        C_WOOD[C_BUILD_FARM] = wFarm
+  C_GOLD[C_BUILD_BARRACKS] = gBarr    C_WOOD[C_BUILD_BARRACKS] = wBarr
+  C_GOLD[C_BUILD_TOWER] = gTower      C_WOOD[C_BUILD_TOWER] = wTower
+  C_GOLD[C_BUILD_SMITH] = gSmith      C_WOOD[C_BUILD_SMITH] = wSmith
+  C_GOLD[C_UPGRADE_KEEP] = gKeep      C_WOOD[C_UPGRADE_KEEP] = wKeep
+  C_GOLD[C_UP_WEAPON] = 150           C_WOOD[C_UP_WEAPON] = 80
+  C_GOLD[C_UP_ARMOR] = 150            C_WOOD[C_UP_ARMOR] = 80
+
+  C_BUILDS[C_BUILD_FARM] = bFarm
+  C_BUILDS[C_BUILD_BARRACKS] = bBarr
+  C_BUILDS[C_BUILD_TOWER] = bTower
+  C_BUILDS[C_BUILD_SMITH] = bSmith
+
+  // 16 owner slots (7 buildings, a gap, 7 unit kinds), all "no commands" until filled below.
+  i = 0
+  while (i < 16) { CMD_AT.push(0 - 1) i = i + 1 }
+
+  // Town hall: workers, and the upgrade to a keep.
+  CMD_AT[0] = CMD_LIST.length
+  CMD_LIST.push(C_TRAIN_PEASANT) CMD_LIST.push(C_UPGRADE_KEEP) CMD_LIST.push(0 - 1)
+  // Farm (1) and the enemy camp (3) have no commands — their CMD_AT stays -1.
+  // Barracks: the army.
+  CMD_AT[2] = CMD_LIST.length
+  CMD_LIST.push(C_TRAIN_FOOTMAN) CMD_LIST.push(C_TRAIN_ARCHER) CMD_LIST.push(0 - 1)
+  // Keep: everything the hall did, minus the upgrade it already has.
+  CMD_AT[4] = CMD_LIST.length
+  CMD_LIST.push(C_TRAIN_PEASANT) CMD_LIST.push(0 - 1)
+  // Tower (5) has no commands: it shoots on its own.
+  // Blacksmith: the two upgrades.
+  CMD_AT[6] = CMD_LIST.length
+  CMD_LIST.push(C_UP_WEAPON) CMD_LIST.push(C_UP_ARMOR) CMD_LIST.push(0 - 1)
+
+  // Peasant: the builder. This is the list that makes the game an RTS.
+  CMD_AT[OWNER_UNIT + 0] = CMD_LIST.length
+  CMD_LIST.push(C_BUILD_FARM) CMD_LIST.push(C_BUILD_BARRACKS) CMD_LIST.push(C_BUILD_TOWER)
+  CMD_LIST.push(C_BUILD_SMITH) CMD_LIST.push(C_HARVEST_GOLD) CMD_LIST.push(C_HARVEST_WOOD)
+  CMD_LIST.push(C_STOP) CMD_LIST.push(0 - 1)
+  // Footman / archer / hero: fight and hold.
+  let u: i32 = 1
+  while (u < 4) {
+    CMD_AT[OWNER_UNIT + u] = CMD_LIST.length
+    CMD_LIST.push(C_ATTACK) CMD_LIST.push(C_STOP) CMD_LIST.push(0 - 1)
+    u = u + 1
+  }
+}
+
+// How many commands owner `o` has.
+export function cmdCount(o: i32): i32 {
+  if (o < 0 || o >= CMD_AT.length) { return 0 }
+  let at: i32 = CMD_AT[o]
+  if (at < 0) { return 0 }
+  let n: i32 = 0
+  while (CMD_LIST[at + n] >= 0) { n = n + 1 }
+  return n
+}
+
+// Command `i` of owner `o`, or -1.
+export function cmdAt(o: i32, i: i32): i32 {
+  if (o < 0 || o >= CMD_AT.length) { return 0 - 1 }
+  let at: i32 = CMD_AT[o]
+  if (at < 0) { return 0 - 1 }
+  if (i < 0 || i >= cmdCount(o)) { return 0 - 1 }
+  return CMD_LIST[at + i]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "repro-eco-natives",
+  "private": true,
+  "scripts": {
+    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
+    "verify": "./verify.sh",
+    "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\""
+  },
+  "devDependencies": {
+    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_game_engine": {
+        "path": "../../crates/tish-gba-game-engine"
+      }
+    }
+  },
+  "version": "0.0.0",
+  "description": "Proof ROM for the ecosystem/platformer engine natives: platformer_set_physics, platformer_launch, set_carrier, nearest_tag/entity_dist, and the patrol stun gate."
+}

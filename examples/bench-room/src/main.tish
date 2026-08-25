@@ -1,0 +1,177 @@
+// What an overworld enemy room costs, per engine phase, as the enemy count grows.
+//
+// This exists because "the room with enemies slows to a halt" is not a claim any screenshot can
+// settle: mGBA reports ~60fps whether or not the GAME is missing vblanks, so the emulator's counter
+// says nothing. `step_ticks(phase)` does — it is the ARM timer, read inside `world_step`, split into
+// the four phases the step is made of. One 59.7fps frame is ~4389 ticks. A phase whose average
+// climbs with N is the one paying per enemy; a phase that stays flat is not the problem, no matter
+// how plausible it looked in the source.
+//
+// The room is built to match the topdown RPG port's overworld: a 15x10 room camera, a snapped topdown player as
+// the camera target, and enemies spawned through the exact call sequence its `enemy()` uses —
+// same collider box, same `setHealth` i-frames, same contact `setHurt`, and movement on the two
+// NATIVE drivers it uses (`set_hopper` for the walkers, `chase` for the flyers). No tish component
+// runs per frame here, so whatever the delta between N=0 and N=24 turns out to be, it is engine
+// cost per enemy and nothing else.
+// ⚠️ LOCAL ASSETS, NOT THE SOURCE GAME'S. These were the topdown RPG port's `{hero,slime,bat}.png` until
+// `slime.png` and `bat.png` were deleted from it in `4dd90fc1`. bench-room was the only thing
+// still referring to them, so it simply stopped building — and a benchmark nobody reruns has no ROM
+// whose absence would say so. Baked from the catalog by `scripts/gen_bench_room.py`; one frame each,
+// which is all this file ever asks for (it calls `setSprite` and never animates).
+import { hero } from 'sheet32:../assets/hero.png'
+import { slimeSheet } from 'sheet32:../assets/slime.png'
+import { batSheet } from 'sheet32:../assets/bat.png'
+import { sprite_new, log } from 'cargo:tish_agb'
+import { set_hopper, step_ticks, frame_period, step_peak, step_peak_reset } from 'cargo:tish_gba_game_engine'
+import { create, entityDespawn, setupGrid, setSolid, step } from '../../../packages/engine'
+
+let TAG_PLAYER: i32 = 1
+let TAG_ENEMY: i32 = 2
+let ROOM_W: i32 = 15
+let ROOM_H: i32 = 10
+// Two rooms across, two down: enough that the room camera has somewhere to be and `same_room` /
+// off-screen culling are live, which is the regime the topdown RPG port actually runs in. A single-room grid
+// would make every cull check trivially true and hide exactly the cost we are looking for.
+let COLS: i32 = 30
+let ROWS: i32 = 20
+
+setupGrid(COLS, ROWS)
+let w: i32 = 0
+while (w < COLS) {
+  setSolid(w, 0)
+  setSolid(w, ROWS - 1)
+  w = w + 1
+}
+let h: i32 = 0
+while (h < ROWS) {
+  setSolid(0, h)
+  setSolid(COLS - 1, h)
+  h = h + 1
+}
+
+// the topdown RPG port's `setupBody`, verbatim — the collider is smaller than the 32x32 sheet and the sprite is
+// offset back over it, so the box/offset arithmetic is part of what we are timing.
+function setupBody(e, col, row, box, spd) {
+  let pad = (16 - box) / 2
+  let off = (32 - box) / 2
+  e.setPos(col * 16 + pad, row * 16 + pad)
+  e.topdown(box, box)
+  e.spriteOffset(0 - off, 0 - off)
+  e.moveSpeed(spd)
+}
+
+let p = create()
+p.setSprite(sprite_new(hero))
+setupBody(p, 7, 5, 16, 1.25)
+p.topdownSnap(2)
+p.setHealth(6)
+p.setTag(TAG_PLAYER)
+p.roomFollow(ROOM_W, ROOM_H)
+
+let foes = []
+
+function enemy(e, col, row, sheet, hp, spd, dmg) {
+  e.setSprite(sprite_new(sheet))
+  setupBody(e, col, row, 12, spd)
+  e.setHealth(hp, 12)
+  e.setTag(TAG_ENEMY)
+  e.setHurt(dmg, TAG_PLAYER, false)
+}
+
+function clearFoes() {
+  let k = 0
+  while (k < foes.length) {
+    entityDespawn(foes[k])
+    k = k + 1
+  }
+  foes = []
+}
+
+function spawnFoes(n) {
+  clearFoes()
+  let k = 0
+  while (k < n) {
+    let e = create()
+    let col = 1 + (k % 12)
+    let row = 1 + (k - (k % 12)) / 12
+    // Alternate the two native drivers its overworld actually uses, so neither is measured
+    // alone: kinds 30/32/33/34/36 are hoppers, kind 31 is a chaser.
+    if (k % 2 === 0) {
+      enemy(e, col, row, slimeSheet, 2, 0.8, 1)
+      set_hopper(e.id, 4)
+    } else {
+      enemy(e, col, row, batSheet, 2, 1.1, 1)
+      e.chase(240, 0, 2, 6)
+    }
+    foes[foes.length] = e.id
+    k = k + 1
+  }
+}
+
+// Settle before sampling: the first frames after a spawn pay one-time costs (sprite VRAM upload,
+// the room camera's first clamp) that are real but are not the sustained per-frame cost in
+// question, and averaging them in would make every level look worse than it is.
+function measure(n) {
+  spawnFoes(n)
+  let s = 0
+  while (s < 40) {
+    step()
+    s = s + 1
+  }
+  step_peak_reset()
+  let t0 = 0
+  let t1 = 0
+  let t2 = 0
+  let t3 = 0
+  let t4 = 0
+  let f = 0
+  while (f < 120) {
+    step()
+    t0 = t0 + step_ticks(0)
+    t1 = t1 + step_ticks(1)
+    t2 = t2 + step_ticks(2)
+    t3 = t3 + step_ticks(3)
+    t4 = t4 + step_ticks(4)
+    f = f + 1
+  }
+  log("N=" + n + " step=" + (t0 / 120) + " behav=" + (t1 / 120) + " native=" + (t2 / 120) + " collide=" + (t3 / 120) + " render=" + (t4 / 120))
+  log("      peak=" + step_peak(0) + " frameEMA=" + frame_period(2) + " (4389 = 60fps)")
+}
+
+// The same room, but torn down and rebuilt EVERY frame — what a room costs when its spawn latch
+// fails and the game re-enters it continuously. This is the one thing that scales with enemy count
+// without any enemy being expensive: a room with no enemies churns nothing and stays at 60fps,
+// while the same bug in a room with six makes six sprite frees, six VRAM uploads and six entity
+// builds land between two vblanks. `step_ticks` cannot see it — the work happens in the game's own
+// loop, outside `world_step` — so the number that matters here is the whole-frame period.
+function measureChurn(n) {
+  spawnFoes(n)
+  let s = 0
+  while (s < 40) {
+    spawnFoes(n)
+    step()
+    s = s + 1
+  }
+  step_peak_reset()
+  let f = 0
+  while (f < 120) {
+    spawnFoes(n)
+    step()
+    f = f + 1
+  }
+  log("CHURN N=" + n + " frameEMA=" + frame_period(2) + " peakFrame=" + frame_period(1) + " step=" + step_ticks(0))
+}
+
+log("BENCH-ROOM start")
+measure(0)
+measure(1)
+measure(3)
+measure(6)
+measure(12)
+measure(24)
+measureChurn(0)
+measureChurn(3)
+measureChurn(6)
+measureChurn(12)
+log("BENCH-ROOM done")
+while (true) { step() }

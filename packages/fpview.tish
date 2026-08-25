@@ -1,0 +1,225 @@
+// fpview.tish — a first-person view of a grid, drawn with rectangles.
+//
+// ── WHY THIS EXISTS ───────────────────────────────────────────────────────────────────────────
+//
+// Two independent reviews a day apart reached the same conclusion by different routes: the whole
+// 137-example catalogue is side-view, top-down or isometric, and **nothing renders into the screen**.
+// The first-person grid crawler — Wizardry, Eye of the Beholder, Etrian Odyssey — is the last genre
+// pillar with nothing behind it, and it is a very GBA shape.
+//
+// ── IT IS NOT A RAYCASTER, AND THAT IS THE DESIGN ─────────────────────────────────────────────
+//
+// The instinct is Wolfenstein: cast a ray per column, DDA through the grid, draw a wall slice. That
+// buys free movement and free rotation, and costs a sin/cos table, a division per column for the
+// perspective correction (the GBA has no divide instruction — `docs/MEMORY.md`), and a full redraw
+// every frame because the view changes continuously.
+//
+// A grid crawler does not move continuously. It steps one cell and turns ninety degrees, which means
+// **the view is a pure function of (cell, facing)** and there are only four facings. So the geometry
+// can be exact instead of sampled: for each depth ahead, the corridor opening is a known rectangle
+// shrinking toward a vanishing point, and a wall is either there or it is not. No trigonometry, no
+// division per column, no per-frame work at all — the screen is redrawn only when you actually move.
+//
+// This is how the games it imitates did it, and for the same reason.
+//
+// ── THE SIDE WALLS ARE STRIPS, BECAUSE `ui_rect` IS AXIS-ALIGNED ──────────────────────────────
+//
+// A side wall between depth d and d+1 is a trapezoid: its top edge slopes from the near opening's top
+// down to the far opening's top. `ui_rect` cannot draw that, so each wall is drawn as N vertical
+// strips whose heights step along the slope. At `STRIPS = 8` the stair-stepping reads as a straight
+// edge at this resolution, and the whole view costs well under a hundred rectangles.
+//
+//     fpInit({ x: 8, y: 16, w: 152, h: 112, depth: 5 })
+//     fpSetGrid(MAZE, 16, 16)        // 1 = wall, 0 = floor
+//     fpRender(col, row, facing)     // facing 0 N, 1 E, 2 S, 3 W
+//
+// ⚠️ CALL IT ON A MOVE, NOT PER FRAME. It is ~70 `ui_rect` calls; that is fine once per step and
+// ruinous sixty times a second.
+
+import { ui_rect } from 'cargo:tish_agb'
+
+let DIR_DC: i32[] = [0, 1, 0, 0 - 1]     // facing -> column delta (N E S W)
+let DIR_DR: i32[] = [0 - 1, 0, 1, 0]     // facing -> row delta
+
+// Viewport + tuning.
+//   0 x  1 y  2 w  3 h  4 depth  5 strips  6 ready
+let VP: i32[] = [0, 0, 240, 160, 5, 8, 0]
+let V_X: i32 = 0
+let V_Y: i32 = 1
+let V_W: i32 = 2
+let V_H: i32 = 3
+let V_DEPTH: i32 = 4
+let V_STRIPS: i32 = 5
+let V_READY: i32 = 6
+
+// The grid. Typed: an untyped array is 28 bytes an element against 4.
+let GRID: i32[] = []
+let GCOLS: i32 = 0
+let GROWS: i32 = 0
+
+// Palette. A face further away is simply a darker entry, so depth reads without any lighting maths.
+// `CEIL`/`FLOOR` are drawn once, at the near opening, and the wall ramps do the rest of the work.
+let CEIL: i32[] = [0x2A3450, 0x222C44, 0x1C2438, 0x161C2C, 0x121622]
+let FLOOR: i32[] = [0x4A4034, 0x3E362C, 0x342E26, 0x2A251F, 0x221E19]
+let FRONT: i32[] = [0x8A93B4, 0x737C9A, 0x5D6580, 0x4A5167, 0x3A4052]
+
+/// Set the viewport and how many cells deep to draw.
+export function fpInit(cfg) {
+  if (cfg !== null) {
+    if (cfg.x !== null) { VP[V_X] = cfg.x }
+    if (cfg.y !== null) { VP[V_Y] = cfg.y }
+    if (cfg.w !== null) { VP[V_W] = cfg.w }
+    if (cfg.h !== null) { VP[V_H] = cfg.h }
+    if (cfg.depth !== null) { VP[V_DEPTH] = cfg.depth }
+    if (cfg.strips !== null) { VP[V_STRIPS] = cfg.strips }
+  }
+  if (VP[V_DEPTH] > 5) { VP[V_DEPTH] = 5 }
+  if (VP[V_DEPTH] < 2) { VP[V_DEPTH] = 2 }
+  VP[V_READY] = 1
+}
+
+/// Hand over the map. `grid[row * cols + col]` is 1 for a wall.
+export function fpSetGrid(g: i32[], cols: i32, rows: i32) {
+  while (GRID.length > 0) { GRID.pop() }
+  let i: i32 = 0
+  while (i < cols * rows) {
+    GRID.push(g[i])
+    i = i + 1
+  }
+  GCOLS = cols
+  GROWS = rows
+}
+
+/// 1 when that cell is a wall — and OUT OF BOUNDS IS A WALL, which is what stops the renderer and
+/// the game from walking off the edge of the world into an empty screen.
+export function fpSolid(c: i32, r: i32): i32 {
+  if (c < 0 || r < 0 || c >= GCOLS || r >= GROWS) { return 1 }
+  return GRID[r * GCOLS + c]
+}
+
+// The corridor opening at depth d, as a rectangle. Each step insets by a QUARTER of the current
+// span on every side, so the opening shrinks geometrically toward a vanishing point — which is the
+// shape a perspective divide would give, at the cost of a shift instead of a division.
+//
+// Returned through a module array rather than an object: an object literal per call is a heap
+// allocation, and this runs five times a step.
+let RECT: i32[] = [0, 0, 0, 0]     // x0 y0 x1 y1
+function openingAt(d: i32) {
+  let x0: i32 = VP[V_X]
+  let y0: i32 = VP[V_Y]
+  let x1: i32 = VP[V_X] + VP[V_W]
+  let y1: i32 = VP[V_Y] + VP[V_H]
+  let i: i32 = 0
+  while (i < d) {
+    let iw: i32 = (x1 - x0) >> 2
+    let ih: i32 = (y1 - y0) >> 2
+    x0 = x0 + iw
+    x1 = x1 - iw
+    y0 = y0 + ih
+    y1 = y1 - ih
+    i = i + 1
+  }
+  RECT[0] = x0
+  RECT[1] = y0
+  RECT[2] = x1
+  RECT[3] = y1
+}
+
+// One side wall, as vertical strips stepping along the trapezoid's slope. `side` is -1 for the left
+// wall and +1 for the right.
+function sideWall(nx0: i32, ny0: i32, nx1: i32, ny1: i32,
+                  fx0: i32, fy0: i32, fx1: i32, fy1: i32, side: i32, col: i32) {
+  let n: i32 = VP[V_STRIPS]
+  let ax: i32 = nx0
+  let bx: i32 = fx0
+  if (side > 0) {
+    ax = nx1
+    bx = fx1
+  }
+  let s: i32 = 0
+  while (s < n) {
+    // Interpolate the strip's x span and its top/bottom along the slope.
+    let t0: i32 = (Math.imul(bx - ax, s) / n) + ax
+    let t1: i32 = (Math.imul(bx - ax, s + 1) / n) + ax
+    let top: i32 = (Math.imul(fy0 - ny0, s) / n) + ny0
+    let bot: i32 = (Math.imul(fy1 - ny1, s) / n) + ny1
+    let x: i32 = t0
+    let w: i32 = t1 - t0
+    if (w < 0) { x = t1  w = 0 - w }
+    if (w < 1) { w = 1 }
+    if (bot > top) { ui_rect(x, top, w, bot - top, col, 1) }
+    s = s + 1
+  }
+}
+
+/// Draw the view from `(c, r)` facing `dir`. Roughly seventy rectangles — call it when the player
+/// MOVES, never per frame.
+export function fpRender(c: i32, r: i32, dir: i32) {
+  if (VP[V_READY] === 0) { return }
+  let dc: i32 = DIR_DC[dir & 3]
+  let dr: i32 = DIR_DR[dir & 3]
+  // The left/right deltas are the facing rotated a quarter turn, which on a grid is a swap and a
+  // negate rather than a rotation matrix.
+  let lc: i32 = DIR_DC[(dir + 3) & 3]
+  let lr: i32 = DIR_DR[(dir + 3) & 3]
+  let rc: i32 = DIR_DC[(dir + 1) & 3]
+  let rr: i32 = DIR_DR[(dir + 1) & 3]
+
+  // Ceiling and floor first, as the backdrop the walls sit in front of.
+  openingAt(0)
+  let sx0: i32 = RECT[0]
+  let sy0: i32 = RECT[1]
+  let sx1: i32 = RECT[2]
+  let sy1: i32 = RECT[3]
+  let mid: i32 = (sy0 + sy1) >> 1
+  ui_rect(sx0, sy0, sx1 - sx0, mid - sy0, CEIL[0], 1)
+  ui_rect(sx0, mid, sx1 - sx0, sy1 - mid, FLOOR[0], 1)
+
+  let d: i32 = 0
+  while (d < VP[V_DEPTH]) {
+    let cc: i32 = c + Math.imul(dc, d)
+    let cr: i32 = r + Math.imul(dr, d)
+
+    openingAt(d)
+    let nx0: i32 = RECT[0]
+    let ny0: i32 = RECT[1]
+    let nx1: i32 = RECT[2]
+    let ny1: i32 = RECT[3]
+    openingAt(d + 1)
+    let fx0: i32 = RECT[0]
+    let fy0: i32 = RECT[1]
+    let fx1: i32 = RECT[2]
+    let fy1: i32 = RECT[3]
+
+    // The cell one step further along: if it is solid, the corridor ends here and the far wall is
+    // drawn filling THIS opening.
+    let ac: i32 = cc + dc
+    let ar: i32 = cr + dr
+    if (fpSolid(ac, ar) === 1) {
+      // Floor and ceiling for the last open span, then the wall face.
+      ui_rect(fx0, fy0, fx1 - fx0, fy1 - fy0, FRONT[d], 1)
+      // Side walls of the span we are standing in still show beside it.
+      if (fpSolid(cc + lc, cr + lr) === 1) {
+        sideWall(nx0, ny0, nx1, ny1, fx0, fy0, fx1, fy1, 0 - 1, shadeSide(d))
+      }
+      if (fpSolid(cc + rc, cr + rr) === 1) {
+        sideWall(nx0, ny0, nx1, ny1, fx0, fy0, fx1, fy1, 1, shadeSide(d))
+      }
+      d = VP[V_DEPTH]
+    } else {
+      if (fpSolid(cc + lc, cr + lr) === 1) {
+        sideWall(nx0, ny0, nx1, ny1, fx0, fy0, fx1, fy1, 0 - 1, shadeSide(d))
+      }
+      if (fpSolid(cc + rc, cr + rr) === 1) {
+        sideWall(nx0, ny0, nx1, ny1, fx0, fy0, fx1, fy1, 1, shadeSide(d))
+      }
+      d = d + 1
+    }
+  }
+}
+
+function shadeSide(d: i32): i32 {
+  let i: i32 = d
+  if (i > 4) { i = 4 }
+  return FRONT[i] - 0x101418
+}

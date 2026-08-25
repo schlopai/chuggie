@@ -1,0 +1,126 @@
+// ── Builder vs literal: the same screen, authored two ways, measured ────────────────────────────
+//
+// This example exists to make ONE decision concrete: should a game keep declaring UI as object
+// literals, or call a builder?
+//
+// LITERAL (today) — the game allocates a tree of boxed objects, `uiRender` walks it, reads every
+// field through a string-keyed lookup, flattens it into the native pool, then throws the tree away.
+// The objects exist only to be read once.
+//
+// BUILDER — the game calls straight into the native pool. No tree is allocated, nothing is walked,
+// nothing is thrown away. The layout and paint that follow are identical, because both paths end up
+// in the same place.
+//
+// Run it: the ROM prints ticks and heap for each path, then draws both so they can be diffed.
+//   tools/gba-shot ui-builder-vs-literal.gba /tmp/lit.ppm 240
+//   tools/gba-shot ui-builder-vs-literal.gba /tmp/bld.ppm 420
+import { log, vblank, frame, ticks, heap_free, ui_begin, ui_reserve_tiles,
+         text_width, text_height,
+         lay_reset, lay_push, lay_set_measured, lay_set_paint, lay_set_text, lay_solve,
+         ui_paint_from } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { uiInit, uiRender } from '../../../packages/ui'
+
+// ⚠️ These must be the THEME's values, not lookalikes. The first version of this file used a
+// different gold and a different panel, so the two paths drew different screens and the pixel diff
+// "failed" for a reason that had nothing to do with builder vs literal. Taken from DEFAULT_THEME in
+// packages/ui.tish: text, panel, accent.
+const WHITE: i32 = 0xB9C0D6
+const GOLD: i32 = 0xFFE06A
+const PANEL: i32 = 0x1A1626
+const ROWS: string[] = ["Cadoan", "Giza Plains", "Lutia Pass", "Eluut Sands",
+                        "Nubswood", "Ulei River", "Aisenfield", "Salikawood"]
+
+ui_reserve_tiles(320)
+uiInit({ font: body })
+let F: i32 = body
+
+// ── A. LITERAL ──────────────────────────────────────────────────────────────────────────────────
+// Eight rows means nine boxed objects (a panel plus its children), each with 4-6 properties. Every
+// one is allocated, read once by the flatten pass, and dropped.
+function buildLiteral() {
+  let kids = []
+  let i: i32 = 0
+  while (i < 8) {
+    kids.push({ text: ROWS[i], color: "text" })
+    i = i + 1
+  }
+  return { dir: "column", pad: 4, gap: 2, w: 200, fill: "panel", border: "accent", children: kids }
+}
+
+// ── B. BUILDER ──────────────────────────────────────────────────────────────────────────────────
+// The same screen, expressed as calls. Nothing is allocated: each call writes one node into the
+// native pool and returns its index. The verbosity is the honest cost — a literal nests, a builder
+// has to name its parent — and `pushText` hides most of it behind one helper.
+function pushPanel(w: i32, pad: i32, gap: i32): i32 {
+  let n: i32 = lay_push(0, 0, gap, pad, w, 0 - 1, 0, 0, 0, 0, 0, 0 - 1)
+  lay_set_paint(n, 0, WHITE, 0 - 1, PANEL, GOLD, F, 0, 0, 1, 0)
+  return n
+}
+
+function pushText(parent: i32, s): i32 {
+  let n: i32 = lay_push(1, 0, 0, 0, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, parent)
+  lay_set_measured(n, text_width(F, s), text_height(F))
+  lay_set_paint(n, 1, WHITE, 0 - 1, 0 - 1, 0 - 1, F, 0, 0, 1, 0)
+  lay_set_text(n, s)
+  return n
+}
+
+function buildBuilder() {
+  lay_reset()
+  let root: i32 = pushPanel(200, 4, 2)
+  let i: i32 = 0
+  while (i < 8) {
+    pushText(root, ROWS[i])
+    i = i + 1
+  }
+  // ⚠️ The same root box uiRender uses (the full screen), or the two paths lay out differently and
+  // the pixel diff reports a difference that has nothing to do with authoring style.
+  lay_solve(0, 0, 240, 160)
+}
+
+// ⚠️ Timer2 WRAPS at 65536 (~250ms) and a render runs longer than that, so a raw subtraction can
+// come out negative — it did, on the first version of this file. Correct every delta.
+function lap(a: i32, b: i32): i32 {
+  let d: i32 = b - a
+  if (d < 0) { d = d + 65536 }
+  return d
+}
+
+log("start")
+
+// ── measure A ───────────────────────────────────────────────────────────────────────────────────
+// ⚠️ Heap is sampled around the BUILD, not the render: the point is what the authoring style itself
+// costs, and uiRender's canvas work is common to both.
+let h0: i32 = heap_free(64)
+let t0: i32 = ticks()
+let tree = buildLiteral()
+let t1: i32 = ticks()
+let h1: i32 = heap_free(64)
+// ⚠️ NO `ui_begin` here: `uiRender` opens the canvas itself, and two in one frame trips the engine's
+// guard ("the previous canvas has not released its VRAM yet"). The builder path below DOES need one,
+// because it paints without uiRender.
+uiRender(tree)
+let t2: i32 = ticks()
+// ⚠️ TOTAL is the fair number. The literal's build looks cheap only because it DEFERS the text
+// measurement into uiRender's flatten; the builder pays it up front. Compare build+draw, not build.
+log("literal: build=" + lap(t0, t1) + "t  render=" + lap(t1, t2) + "t  TOTAL=" + lap(t0, t2) +
+    "t  heap=" + (h0 - h1) + "b")
+let fr: i32 = 0
+while (fr < 120) { frame() fr = fr + 1 }
+
+// ── measure B ───────────────────────────────────────────────────────────────────────────────────
+let h2: i32 = heap_free(64)
+let t3: i32 = ticks()
+buildBuilder()
+let t4: i32 = ticks()
+let h3: i32 = heap_free(64)
+ui_begin()
+let idx: i32 = 0
+while (idx < 9) { idx = ui_paint_from(idx) + 1 }
+let t5: i32 = ticks()
+log("builder: build=" + lap(t3, t4) + "t  paint=" + lap(t4, t5) + "t  TOTAL=" + lap(t3, t5) +
+    "t  heap=" + (h2 - h3) + "b")
+log("rows=8, nodes=9 both paths")
+while (fr < 300) { frame() fr = fr + 1 }
+log("done")

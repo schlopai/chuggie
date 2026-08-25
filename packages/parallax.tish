@@ -1,0 +1,90 @@
+// Parallax backdrops for a scrolling game — layers that drift past the world at their own speed.
+//
+// ── Full picture: docs/gba-backgrounds.md ────────────────────────────────────────────────────────
+// The four-layer budget, the priority rule, the one-palette-set constraint, and PER-SCANLINE BANDING
+// (`bg_bands` / `sceneBands` — several depths out of ONE layer, which is the way past the ceiling
+// this module runs into). Worked example: examples/bands-demo.
+//
+// ── IF YOUR MAP IS A TILED SCENE, YOU PROBABLY DO NOT WANT THIS MODULE ────────────────────────────
+// A `scene:` map carries its own backdrops: give the layer a parallax factor in Tiled (1.0 = locked
+// to the camera, 0 = pinned to the screen) and an int `priority` property, and `loadSceneRom` builds
+// it with everything below already handled. That is the better answer whenever the map is a .tmj —
+// the sky is painted in the editor next to the town, and it shares the scene's tileset, so point 1
+// below cannot go wrong. See examples/oakhollow.
+//
+// What is left here is for backdrops that are NOT part of a map: a title screen, a menu, a layer
+// built from tish data at runtime.
+//
+//   import { parallaxLayer, PX_STATIC, PX_FAR, PX_MID, PX_NEAR } from '../../../packages/parallax'
+//
+//   parallaxLayer(atlas, ATLAS_COLS, 16, 16, level.hills, 3, PX_MID,  PX_MID / 2)
+//   parallaxLayer(atlas, ATLAS_COLS, 16, 16, level.sky,   3, PX_FAR,  PX_STATIC)
+//   loadStreamMap(level, atlas)     // the world itself, priority 2
+//
+// After that there is nothing to call per frame: the layers re-derive their scroll from the camera
+// inside `frame()` (see tish-agb `bg_parallax`), so they stay pinned to the world even while a
+// dialog box owns the loop and the game isn't stepping.
+//
+// ── THREE THINGS THAT WILL BITE YOU ───────────────────────────────────────────────────────────────
+//
+// 1. ONE ATLAS FOR EVERYTHING. `bg_new`, `tilemap_new` and `tilemap_stream` each call agb's
+//    `set_background_palettes`, which REPLACES all 16 background palettes. Two different
+//    `background:` imports on screen at once therefore fight, and the loser renders in the winner's
+//    colours. So bake the sky, the hills and the world tileset into a SINGLE `background:` image and
+//    build every layer from it — agb merges the whole file into one palette set at compile time.
+//    That is why these take a tileset + a GID grid rather than a picture.
+//
+// 2. FOUR LAYERS, TOTAL. The GBA has exactly four background layers and agb aborts on the fifth.
+//    `frame()` budgets them: the UI canvas is reserved first (once `uiInit` has run it is always
+//    there), then everything else fills what's left, in creation order. So a game with menus gets
+//    THREE — e.g. two parallax layers plus a single-layer map. Give the map a second tile layer and
+//    the furthest parallax layer silently stops being drawn.
+//
+// 3. THE WORLD MAP MUST BE PRIORITY 2, SO EVERYTHING BEHIND IT IS PRIORITY 3. World sprites are
+//    drawn at priority 2, and an object beats a background of the SAME priority — that tie is what
+//    puts characters in front of the map. Put the map at priority 1 to "make room" and it draws over
+//    the player instead, which looks like the player having failed to spawn.
+//
+//    That leaves ONE priority for every backdrop, so two parallax layers share it and the tie is
+//    broken by creation order: the background created FIRST draws in front. Build them near-to-far
+//    — treeline, then sky.
+//
+// 4. LAYERS BEHIND THE WORLD NEED THE WORLD TO HAVE HOLES. A backdrop only shows through where the
+//    layers above it have no tile. In a map that means GID 0 — an ABSENT tile, not a transparent
+//    one — so leave the sky cells of the world layer empty and paint the sky here instead.
+import { tilemap_new, bg_parallax, bg_scroll, bg_set_visible } from 'cargo:tish_agb'
+
+// Scroll multipliers, in 1/256ths of the camera. Named because the numbers are meaningless on sight
+// and every game wants roughly this ladder; pass a raw number for anything in between.
+export let PX_STATIC: i32 = 0     // pinned to the screen — a flat sky that never moves
+export let PX_FAR: i32 = 32       // 1/8 speed — a distant mountain range
+export let PX_MID: i32 = 96       // 3/8 speed — hills, a treeline, a far rooftop silhouette
+export let PX_NEAR: i32 = 176     // 11/16 speed — the row of buildings just behind the street
+export let PX_WORLD: i32 = 256    // locked to the camera — the same speed as the world itself
+
+// Build one parallax layer from `gids` (a `w`x`h` grid of tile ids into `tileset`, the same shape a
+// map layer uses) at `priority` (3 = furthest back … 0 = front), scrolling at `mulX`/`mulY` 256ths of
+// the camera. Returns the background handle, for `parallaxSpeed` / `parallaxVisible` later.
+//
+// Sizing: the GBA wraps a background at 256x256 px, so a 32x32-tile grid tiles seamlessly forever in
+// both axes — which is what you want for sky and hills. A smaller grid still works, it just repeats
+// sooner. The art itself has to be seamless left-to-right; nothing here can hide a hard edge.
+export function parallaxLayer(tileset, tilesetCols, w, h, gids, priority, mulX, mulY) {
+  let bg = tilemap_new(tileset, tilesetCols, w, h, gids, priority)
+  bg_parallax(bg, mulX, mulY)
+  return bg
+}
+
+// Change a layer's drift after the fact — a storm that speeds the clouds up, a room whose backdrop
+// should sit still. Same 256ths as `parallaxLayer`.
+export function parallaxSpeed(bg, mulX, mulY) { bg_parallax(bg, mulX, mulY) }
+
+// Show/hide a layer without rebuilding it. Hiding does NOT give the slot back to another layer this
+// frame — the budget in `frame()` counts only visible layers, so hiding the sky in a cave really
+// does free a slot for something else.
+export function parallaxVisible(bg, on) { bg_set_visible(bg, on ? 1 : 0) }
+
+// Take a layer off automatic tracking and place it by hand, in pixels. For a backdrop that isn't a
+// function of the camera at all — clouds that drift on their own clock, a waterfall that scrolls
+// down while the player stands still. Call it every frame; `parallaxSpeed` puts it back on the camera.
+export function parallaxOffset(bg, x, y) { bg_scroll(bg, x, y) }

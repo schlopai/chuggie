@@ -1,0 +1,82 @@
+// iso-sprite — TRUE isometric on the GBA (approach A). There is no isometric hardware mode: each
+// tile is an isometric-cube SPRITE placed by an iso projection and drawn back-to-front (painter's
+// algorithm). tish-agb's `sprite_set_depth` does the z-sort in the OAM, so the moving player
+// correctly slips in front of nearer tiles and behind farther ones. Art: the vendored CC0
+// Devil's Work.shop isometric block pack (assets/iso-blocks), sliced into 16x16 frames.
+import { blocks } from 'sheet:../assets/blocks.png'
+import { sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_depth, key_held, frame } from 'cargo:tish_agb'
+
+// Frame indices in blocks.png (see tools/pack_blocks.py).
+let GRASS: i32 = 0
+let DIRT: i32 = 1
+let STONE: i32 = 2
+let WATER: i32 = 3
+let SAND: i32 = 4
+let PLAYER: i32 = 5
+
+// The map — an N×N grid of tile types, row 0 = the BACK edge.
+let N: i32 = 8
+let map = [
+  4, 4, 4, 4, 4, 4, 4, 4,
+  4, 0, 0, 0, 0, 0, 0, 4,
+  4, 0, 3, 3, 0, 0, 0, 4,
+  4, 0, 3, 3, 0, 2, 0, 4,
+  4, 0, 0, 0, 0, 2, 0, 4,
+  4, 0, 0, 1, 0, 2, 0, 4,
+  4, 0, 0, 0, 0, 0, 0, 4,
+  4, 4, 4, 4, 4, 4, 4, 4
+]
+
+// Isometric projection: the cubes' top face is a 16-wide × 8-tall diamond, so one grid step is
+// (±8, +4) px. OX/OY centre the diamond field on the 240×160 screen. A tile at (col,row) sits at
+// depth col+row (bigger = nearer the camera = drawn in front); we scale by 4 so the player, tracked
+// in QUARTER-tile units, can sort cleanly between whole-tile rows.
+let OX: i32 = 112
+let OY: i32 = 26
+function isoX(c, r) { return OX + (c - r) * 8 }
+function isoY(c, r) { return OY + (c + r) * 4 }
+
+// One sprite per tile, positioned + depth-tagged once (the terrain never moves).
+let r: i32 = 0
+while (r < N) {
+  let c = 0
+  while (c < N) {
+    let s = sprite_new(blocks)
+    sprite_set_frame(s, map[r * N + c])
+    sprite_set_pos(s, isoX(c, r), isoY(c, r))
+    sprite_set_depth(s, (c + r) * 4)
+    c = c + 1
+  }
+  r = r + 1
+}
+
+// Player token, tracked in quarter-tile units (integers → clean fixed-step motion, no floats).
+// 4 units = 1 tile; holding the d-pad glides one unit/frame along the four diamond edges.
+let MAXU = (N - 1) * 4
+let px = 3 * 4
+let py = 4 * 4
+let player = sprite_new(blocks)
+sprite_set_frame(player, PLAYER)
+
+function clampU(v) {
+  if (v < 0) { return 0 }
+  if (v > MAXU) { return MAXU }
+  return v
+}
+
+while (true) {
+  if (key_held(9) > 0) { px = clampU(px + 1) }   // right → +col (down-right on screen)
+  if (key_held(8) > 0) { px = clampU(px - 1) }   // left  → -col (up-left)
+  if (key_held(7) > 0) { py = clampU(py + 1) }   // down  → +row (down-left)
+  if (key_held(6) > 0) { py = clampU(py - 1) }   // up    → -row (up-right)
+
+  // Quarter-tile iso projection (2 px per unit horizontally, 1 px vertically). Raise the token 6 px
+  // so it stands ON the tile surface rather than embedded in it.
+  sprite_set_pos(player, OX + (px - py) * 2, OY + (px + py) - 6)
+  // The player is a tall sprite standing ON the ground, so its 16px body overlaps the tiles a step
+  // or two in FRONT of it (which have higher col+row depth). Sorting it just +1 above its own tile
+  // let those nearer tiles draw over it (worst mid-step). On a flat field nothing occludes a
+  // character, so keep it in a layer ahead of all ground tiles (max tile depth here is 14*4 = 56).
+  sprite_set_depth(player, (px + py) + 100)
+  frame()
+}

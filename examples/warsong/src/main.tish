@@ -1,0 +1,613 @@
+// warsong — Warsong Gulch CTF. Hot match loop is INLINE (no module-state calls).
+// Boot/select may call helpers; the while-match body only touches arrays + natives.
+// See docs/perf-rules.md §2: a module-state fn is ~117 ticks; warsong had ~60/frame.
+// Match HUD is dirty-only (makeBar.set / uiSetText) — never uiRender per frame.
+
+import { wsg } from 'scene:../assets/wsg.tmj'
+import { wsg16 } from 'sheet:../assets/wsg16.png'
+import {
+  frame, log, backdrop, bg_clear, keys_held, keys_edge, input_x, input_y,
+  heap_free, ui_clear, sprite_set_visible
+} from 'cargo:tish_agb'
+import {
+  set_camera_target, world_step, entity_count, entity_hp, entity_x, entity_y,
+  topdown_move, topdown_speed, swing, set_transform
+} from 'cargo:tish_gba_game_engine'
+import { loadSceneRom, entityApi } from '../../../packages/engine'
+
+import {
+  UNITS, U_ENT, U_TEAM, U_ALIVE, U_TAG, U_CLASS, U_SPEC, U_ROLE, U_POWER,
+  U_ROOT, U_SLOW, U_STUN, U_GCD, U_REZ, U_CD, U_CDN,
+  PLAYER, targetId, unitsInit, unitKill, unitRezTick, unitSyncPos, U_XS, U_YS,
+  TAG_ALLIANCE, TAG_HORDE, TEAM_A, TEAM_H
+} from './units'
+import { classesInit, classSkill, CLS_COUNT, SPEC_COUNT } from './classes'
+import { skillsBuild, skillCast, botTryCast, botTryAuto } from './skills'
+import { statusClear, statusTick } from './status'
+import {
+  flagInit, SCORE_A, SCORE_H, SCORE_MAX, F_STATE, F_CARRIER, F_ENT, F_SPR, F_X, F_Y,
+  FS_HOME, FS_CARRY, FS_DROP
+} from './flag'
+import { botsAssignRoster } from './bots'
+import { fxBuild, fxClear, fxStep } from './fx'
+import { fctBuild, fctReset, fctClear, fctStep } from './fct'
+import { hpBarsBuild, hpBarsHide, hpBarsStep } from './hpbar'
+import {
+  hudBoot, hudPaintSelect, hudPaintSelectOpen, hudMatchOpen, hudMatchTick, hudVictory, hudResetSelect,
+  hudLeaveSelectClear
+} from './hud'
+import {
+  SPAWN_A_X, SPAWN_A_Y, SPAWN_H_X, SPAWN_H_Y,
+  FLAG_A_X, FLAG_A_Y, FLAG_H_X, FLAG_H_Y,
+  BASE_A_X0, BASE_A_Y0, BASE_A_X1, BASE_A_Y1,
+  BASE_H_X0, BASE_H_Y0, BASE_H_X1, BASE_H_Y1
+} from './arena'
+
+let PH_SELECT: i32 = 0
+let PH_MATCH: i32 = 1
+let PH_OVER: i32 = 2
+
+let phase: i32 = 0
+let selClass: i32 = 0
+let selSpec: i32 = 0
+let frames: i32 = 0
+let pendingMatchHud: i32 = 0
+
+// Player mover state — locals in THIS file so the match loop never calls unitDrive.
+let pDash: i32 = 0
+let pDdx: i32 = 0
+let pDdy: i32 = 0
+let pTap: i32 = 0
+let pTx: i32 = 0
+let pTy: i32 = 0
+let pPix: i32 = 0
+let pPiy: i32 = 0
+let pRun: i32 = 0
+let pSpd: i32 = 0
+let lastSpd: i32[] = [0, 0, 0, 0, 0, 0]
+// Cached bot destination (see the stagger in the bot pass).
+let BTX: i32[] = [0, 0, 0, 0, 0, 0]
+let BTY: i32[] = [0, 0, 0, 0, 0, 0]
+
+let WALK_SPD: i32 = 2
+let DASH_SPD: i32 = 4
+let RUN_SPD: i32 = 3
+let CARRIER_SPD: i32 = 1
+let DASH_FRAMES: i32 = 10
+let TAP_WINDOW: i32 = 12
+let PICK_R2: i32 = 196
+// Healer standoff band around its heal target (px^2): closer than NEAR it backs off, past FAR it
+// closes, in between it holds — so the healed unit stays visible.
+let HEAL_NEAR2: i32 = 24 * 24
+let HEAL_FAR2: i32 = 36 * 36
+let REZ_FRAMES: i32 = 90
+let MAX_HP: i32 = 40
+
+function beginMatch() {
+  entityApi({ grid: 0, platformer: 0, dialogue: 0, extra: 0 })
+  loadSceneRom(wsg)
+  classesInit()
+  statusClear()
+  unitsInit(wsg16)
+  skillsBuild(wsg16)
+  flagInit(wsg16)
+  botsAssignRoster(selClass, selSpec)
+  // seed the position snapshot before the first frame of logic reads it
+  unitSyncPos()
+  BTX[0] = U_XS[0]; BTX[1] = U_XS[1]; BTX[2] = U_XS[2]
+  BTX[3] = U_XS[3]; BTX[4] = U_XS[4]; BTX[5] = U_XS[5]
+  BTY[0] = U_YS[0]; BTY[1] = U_YS[1]; BTY[2] = U_YS[2]
+  BTY[3] = U_YS[3]; BTY[4] = U_YS[4]; BTY[5] = U_YS[5]
+  fxBuild(wsg16)
+  fxClear()
+  fctBuild(wsg16)
+  fctReset()
+  hpBarsBuild(wsg16)
+  // ui_clear this frame; uiRender match chrome on the NEXT frame (ui_begin rule).
+  hudLeaveSelectClear()
+  pendingMatchHud = 1
+  set_camera_target(U_ENT[PLAYER])
+  topdown_speed(U_ENT[PLAYER], WALK_SPD)
+  pSpd = WALK_SPD
+  lastSpd[0] = 0; lastSpd[1] = 0; lastSpd[2] = 0
+  lastSpd[3] = 0; lastSpd[4] = 0; lastSpd[5] = 0
+  pDash = 0; pRun = 0; pTap = 0; pPix = 0; pPiy = 0
+  targetId = 0 - 1
+  log("WSG START cls=" + selClass + " spec=" + selSpec + " ENT=" + entity_count())
+}
+
+backdrop(0)
+bg_clear()
+ui_clear()
+frame()
+log("WSG BOOT select")
+classesInit()
+hudBoot(wsg16)
+
+phase = PH_SELECT
+selClass = 0
+selSpec = 0
+hudPaintSelectOpen(selClass, selSpec)
+
+while (true) {
+  let held: i32 = keys_held()
+  let edge: i32 = keys_edge()
+
+  if (phase === PH_SELECT) {
+    if (((edge >> 5) & 1) !== 0) {
+      selClass = selClass + 1
+      if (selClass >= CLS_COUNT) { selClass = 0 }
+    }
+    if (((edge >> 4) & 1) !== 0) {
+      selClass = selClass - 1
+      if (selClass < 0) { selClass = CLS_COUNT - 1 }
+    }
+    if (((edge >> 6) & 1) !== 0) {
+      selSpec = selSpec - 1
+      if (selSpec < 0) { selSpec = SPEC_COUNT - 1 }
+    }
+    if (((edge >> 7) & 1) !== 0) {
+      selSpec = selSpec + 1
+      if (selSpec >= SPEC_COUNT) { selSpec = 0 }
+    }
+    if (((edge >> 0) & 1) !== 0 || ((edge >> 3) & 1) !== 0) {
+      beginMatch()
+      phase = PH_MATCH
+      frame()
+    } else {
+      hudPaintSelect(selClass, selSpec)
+      frame()
+    }
+  } else if (phase === PH_MATCH) {
+    if (pendingMatchHud !== 0) {
+      pendingMatchHud = 0
+      hudMatchOpen(wsg16, selClass, selSpec)
+      frame()
+    } else {
+    // ── L skill wheel / A primary / B secondary (inline) ──
+    // bank: 0 = free, 1 = L wheel open
+    let bank: i32 = 0
+    if (((held >> 4) & 1) !== 0) { bank = 1 }
+    let slot: i32 = 0 - 1
+    if (bank === 1) {
+      if (((edge >> 6) & 1) !== 0) { slot = 0 }
+      else if (((edge >> 7) & 1) !== 0) { slot = 1 }
+      else if (((edge >> 8) & 1) !== 0) { slot = 2 }
+      else if (((edge >> 9) & 1) !== 0) { slot = 3 }
+      else if (((edge >> 0) & 1) !== 0) { slot = 4 }
+      else if (((edge >> 1) & 1) !== 0) { slot = 5 }
+      else if (((edge >> 2) & 1) !== 0) { slot = 7 }
+    } else {
+      if (((edge >> 0) & 1) !== 0) { slot = 0 }
+      else if (((edge >> 1) & 1) !== 0) { slot = 6 }
+    }
+
+    // ── soft target: R nearest foe; Select clears ──
+    if (bank === 0) {
+      if (((edge >> 5) & 1) !== 0) {
+        let px0: i32 = U_XS[PLAYER]
+        let py0: i32 = U_YS[PLAYER]
+        let foe: i32 = TAG_HORDE
+        if (U_TEAM[PLAYER] === TEAM_H) { foe = TAG_ALLIANCE }
+        let best: i32 = 0 - 1
+        let bestD: i32 = 999999
+        let i: i32 = 0
+        while (i < UNITS) {
+          if (U_ALIVE[i] !== 0 && U_TAG[i] === foe) {
+            let dx: i32 = U_XS[i] - px0
+            let dy: i32 = U_YS[i] - py0
+            let d2: i32 = Math.imul(dx, dx) + Math.imul(dy, dy)
+            if (d2 < bestD) { bestD = d2; best = U_ENT[i] }
+          }
+          i = i + 1
+        }
+        targetId = best
+      }
+      if (((edge >> 2) & 1) !== 0) { targetId = 0 - 1 }
+    }
+
+    // ── player mover (inline) ──
+    let ix: i32 = input_x()
+    let iy: i32 = input_y()
+    let busy: i32 = 0
+    if (bank !== 0) { ix = 0; iy = 0; busy = 1 }
+    if (U_ROOT[PLAYER] > 0) { U_ROOT[PLAYER] = U_ROOT[PLAYER] - 1; busy = 1 }
+    if (U_STUN[PLAYER] > 0) { U_STUN[PLAYER] = U_STUN[PLAYER] - 1; busy = 1; ix = 0; iy = 0 }
+    if (U_SLOW[PLAYER] > 0) { U_SLOW[PLAYER] = U_SLOW[PLAYER] - 1 }
+
+    let carrying: i32 = 0
+    if (F_CARRIER[0] === PLAYER || F_CARRIER[1] === PLAYER) { carrying = 1 }
+
+    if (pTap > 0) { pTap = pTap - 1 }
+    let fresh: i32 = 0
+    if ((ix !== 0 || iy !== 0) && pPix === 0 && pPiy === 0) { fresh = 1 }
+    if (fresh !== 0) {
+      if (pTap > 0 && ix === pTx && iy === pTy && busy === 0 && pDash <= 0 && carrying === 0) {
+        pDash = DASH_FRAMES
+        pDdx = ix
+        pDdy = iy
+        pTap = 0
+        pRun = 0
+        if (pSpd !== DASH_SPD) { pSpd = DASH_SPD; topdown_speed(U_ENT[PLAYER], DASH_SPD) }
+      } else {
+        pTap = TAP_WINDOW
+        pTx = ix
+        pTy = iy
+      }
+    }
+    pPix = ix
+    pPiy = iy
+
+    if (U_ALIVE[PLAYER] !== 0) {
+      if (busy !== 0) {
+        topdown_move(U_ENT[PLAYER], 0, 0)
+      } else if (pDash > 0) {
+        pDash = pDash - 1
+        topdown_move(U_ENT[PLAYER], pDdx, pDdy)
+        if (pDash <= 0) {
+          if (ix !== 0 || iy !== 0) {
+            pRun = 1
+            if (pSpd !== RUN_SPD) { pSpd = RUN_SPD; topdown_speed(U_ENT[PLAYER], RUN_SPD) }
+          } else {
+            pRun = 0
+            if (pSpd !== WALK_SPD) { pSpd = WALK_SPD; topdown_speed(U_ENT[PLAYER], WALK_SPD) }
+          }
+        }
+      } else if (pRun !== 0 && carrying === 0) {
+        if (ix === 0 && iy === 0) {
+          pRun = 0
+          if (pSpd !== WALK_SPD) { pSpd = WALK_SPD; topdown_speed(U_ENT[PLAYER], WALK_SPD) }
+        } else {
+          topdown_move(U_ENT[PLAYER], ix, iy)
+        }
+      } else {
+        let spd: i32 = WALK_SPD
+        if (carrying !== 0) { spd = CARRIER_SPD }
+        if (U_SLOW[PLAYER] > 0) { spd = 1 }
+        if (pSpd !== spd) { pSpd = spd; topdown_speed(U_ENT[PLAYER], spd) }
+        topdown_move(U_ENT[PLAYER], ix, iy)
+      }
+    }
+
+    // player CDs (GCD + all 12 skill slots — missing slot ticks made skills feel one-shot)
+    if (U_GCD[PLAYER] > 0) { U_GCD[PLAYER] = U_GCD[PLAYER] - 1 }
+    if (U_CDN[PLAYER] > 0) {
+      let pci: i32 = Math.imul(PLAYER, 12)
+      let pcs: i32 = 0
+      let pcLive: i32 = 0
+      while (pcs < 12) {
+        if (U_CD[pci] > 0) {
+          U_CD[pci] = U_CD[pci] - 1
+          if (U_CD[pci] > 0) { pcLive = pcLive + 1 }
+        }
+        pci = pci + 1
+        pcs = pcs + 1
+      }
+      U_CDN[PLAYER] = pcLive
+    }
+    if (U_POWER[PLAYER] < 100 && (frames & 3) === 0) { U_POWER[PLAYER] = U_POWER[PLAYER] + 1 }
+
+    // skills: ONLY on edge (A/B or L+wheel) — never spam skillCast
+    if (slot >= 0) {
+      let sid: i32 = classSkill(U_CLASS[PLAYER], U_SPEC[PLAYER], slot)
+      skillCast(PLAYER, sid, targetId, slot)
+    }
+    if (bank === 0 && targetId >= 0 && U_GCD[PLAYER] === 0 && (frames & 15) === 0) {
+      swing(U_ENT[PLAYER], TAG_HORDE, 3, 2, 14, 8)
+      if (U_TEAM[PLAYER] === TEAM_H) { swing(U_ENT[PLAYER], TAG_ALLIANCE, 3, 2, 14, 8) }
+      U_GCD[PLAYER] = 18
+    }
+    // DoT / HoT ticks
+    statusTick()
+
+    // ── bots: role steer + class kit casts ──
+    let u: i32 = 1
+    while (u < UNITS) {
+      // (rez is handled for every unit — player included — in the deaths pass below)
+      if (U_GCD[u] > 0) { U_GCD[u] = U_GCD[u] - 1 }
+      if (U_ROOT[u] > 0) { U_ROOT[u] = U_ROOT[u] - 1 }
+      if (U_SLOW[u] > 0) { U_SLOW[u] = U_SLOW[u] - 1 }
+      if (U_STUN[u] > 0) { U_STUN[u] = U_STUN[u] - 1 }
+      // Walk the 12 CD slots with a running index (`u * 12 + bcs` per iteration was an integer
+      // multiply — a soft-float multiply here — in a 60-iteration-per-frame loop), and only when
+      // this unit actually has something on cooldown: most frames it does not.
+      if (U_CDN[u] > 0) {
+        let bci: i32 = Math.imul(u, 12)
+        let bcs: i32 = 0
+        let bcLive: i32 = 0
+        while (bcs < 12) {
+          if (U_CD[bci] > 0) {
+            U_CD[bci] = U_CD[bci] - 1
+            if (U_CD[bci] > 0) { bcLive = bcLive + 1 }
+          }
+          bci = bci + 1
+          bcs = bcs + 1
+        }
+        U_CDN[u] = bcLive
+      }
+      if (U_POWER[u] < 100 && ((frames + u) & 3) === 0) { U_POWER[u] = U_POWER[u] + 1 }
+
+      if (U_ALIVE[u] !== 0 && U_STUN[u] <= 0 && U_ROOT[u] <= 0) {
+        let bx: i32 = U_XS[u]
+        let by: i32 = U_YS[u]
+        let tx: i32 = BTX[u]
+        let ty: i32 = BTY[u]
+        let car: i32 = 0
+        if (F_CARRIER[0] === u || F_CARRIER[1] === u) { car = 1 }
+
+        // Re-pick the destination on a stagger — one bot per frame. Choosing it scans every unit
+        // (nearest foe / lowest ally), and a chase target that is 3 frames stale is invisible at
+        // 1-2 px a frame, while re-deriving it for 5 bots every frame was the largest slice left
+        // in the bot pass.
+        if ((frames & 3) === (u & 3) || car !== 0) {
+        tx = bx
+        ty = by
+
+        if (car !== 0) {
+          // Carry flag home
+          if (U_TEAM[u] === TEAM_A) { tx = SPAWN_A_X; ty = SPAWN_A_Y }
+          else { tx = SPAWN_H_X; ty = SPAWN_H_Y }
+        } else if (U_ROLE[u] === 2) {
+          // Runner: return own drop, else steal enemy flag / hunt carrier
+          let own: i32 = U_TEAM[u]
+          let ef: i32 = 1
+          if (U_TEAM[u] === TEAM_H) { ef = 0 }
+          if (F_STATE[own] === FS_DROP) {
+            tx = F_X[own]; ty = F_Y[own]
+          } else if (F_STATE[ef] === FS_CARRY) {
+            let c: i32 = F_CARRIER[ef]
+            if (c >= 0) { tx = U_XS[c]; ty = U_YS[c] }
+            else { tx = F_X[ef]; ty = F_Y[ef] }
+          } else {
+            tx = F_X[ef]; ty = F_Y[ef]
+          }
+        } else if (U_ROLE[u] === 1) {
+          // Healer: stick to lowest-HP ally (prefer player on Alliance)
+          let best: i32 = u
+          let bestHp: i32 = 999
+          let ai: i32 = 0
+          while (ai < UNITS) {
+            if (U_ALIVE[ai] !== 0 && U_TEAM[ai] === U_TEAM[u]) {
+              let hp: i32 = entity_hp(U_ENT[ai])
+              if (hp < bestHp) { bestHp = hp; best = ai }
+            }
+            ai = ai + 1
+          }
+          if (U_TEAM[u] === TEAM_A && U_ALIVE[PLAYER] !== 0) {
+            let php: i32 = entity_hp(U_ENT[PLAYER])
+            if (php <= bestHp + 4) { best = PLAYER }
+          }
+          tx = U_XS[best]
+          ty = U_YS[best]
+          // Stand off instead of hugging: a healer walking onto its target's exact position hides
+          // the target's sprite. Approach past HEAL_FAR, back off inside HEAL_NEAR, hold between.
+          let sdx: i32 = bx - tx
+          let sdy: i32 = by - ty
+          let sd2: i32 = Math.imul(sdx, sdx) + Math.imul(sdy, sdy)
+          if (sd2 === 0) {
+            tx = bx + 16
+            ty = by
+          } else if (sd2 < HEAL_NEAR2) {
+            tx = bx + sdx
+            ty = by + sdy
+          } else if (sd2 <= HEAL_FAR2) {
+            tx = bx
+            ty = by
+          }
+        } else {
+          // Peel: hunt nearest foe (prefer enemy flag carrier)
+          let hunted: i32 = 0 - 1
+          if (F_STATE[0] === FS_CARRY && U_TEAM[F_CARRIER[0]] !== U_TEAM[u]) {
+            hunted = F_CARRIER[0]
+          } else if (F_STATE[1] === FS_CARRY && U_TEAM[F_CARRIER[1]] !== U_TEAM[u]) {
+            hunted = F_CARRIER[1]
+          }
+          if (hunted < 0) {
+            let foeTag: i32 = TAG_HORDE
+            if (U_TEAM[u] === TEAM_H) { foeTag = TAG_ALLIANCE }
+            let bestD: i32 = 999999
+            let fi: i32 = 0
+            while (fi < UNITS) {
+              if (U_ALIVE[fi] !== 0 && U_TAG[fi] === foeTag) {
+                let fdx: i32 = U_XS[fi] - bx
+                let fdy: i32 = U_YS[fi] - by
+                let d2: i32 = Math.imul(fdx, fdx) + Math.imul(fdy, fdy)
+                if (d2 < bestD) { bestD = d2; hunted = fi }
+              }
+              fi = fi + 1
+            }
+          }
+          if (hunted >= 0) {
+            tx = U_XS[hunted]
+            ty = U_YS[hunted]
+          } else {
+            tx = (FLAG_A_X + FLAG_H_X) >> 1
+            ty = (FLAG_A_Y + FLAG_H_Y) >> 1
+          }
+        }
+
+        BTX[u] = tx
+        BTY[u] = ty
+        }
+
+        let bix: i32 = 0
+        let biy: i32 = 0
+        if (tx > bx + 2) { bix = 1 }
+        if (tx < bx - 2) { bix = 0 - 1 }
+        if (ty > by + 2) { biy = 1 }
+        if (ty < by - 2) { biy = 0 - 1 }
+        let bspd: i32 = WALK_SPD
+        if (car !== 0) { bspd = CARRIER_SPD }
+        if (U_SLOW[u] > 0) { bspd = 1 }
+        if (lastSpd[u] !== bspd) {
+          lastSpd[u] = bspd
+          topdown_speed(U_ENT[u], bspd)
+        }
+        topdown_move(U_ENT[u], bix, biy)
+
+        // Class kit: cast on staggered frames; auto-attack between casts
+        if ((frames & 15) === (u & 15)) {
+          botTryCast(u, frames)
+        } else if ((frames & 31) === ((u * 7) & 31)) {
+          botTryAuto(u)
+        }
+      } else if (U_ALIVE[u] !== 0) {
+        topdown_move(U_ENT[u], 0, 0)
+      }
+      u = u + 1
+    }
+    // ── flag CTF (inline) ──
+    let ft: i32 = 0
+    while (ft < 2) {
+      if (F_STATE[ft] === FS_CARRY) {
+        let c: i32 = F_CARRIER[ft]
+        if (c < 0 || U_ALIVE[c] === 0) {
+          F_STATE[ft] = FS_DROP
+          F_CARRIER[ft] = 0 - 1
+        } else {
+          F_X[ft] = U_XS[c]
+          F_Y[ft] = U_YS[c]
+        }
+      }
+      // pickup / return
+      if (F_STATE[ft] !== FS_CARRY) {
+        let j: i32 = 0
+        while (j < UNITS) {
+          if (U_ALIVE[j] !== 0) {
+            let dx: i32 = U_XS[j] - F_X[ft]
+            let dy: i32 = U_YS[j] - F_Y[ft]
+            if (Math.imul(dx, dx) + Math.imul(dy, dy) <= PICK_R2) {
+              if (U_TEAM[j] === ft) {
+                if (F_STATE[ft] === FS_DROP) {
+                  F_STATE[ft] = FS_HOME
+                  F_CARRIER[ft] = 0 - 1
+                  if (ft === 0) { F_X[0] = FLAG_A_X; F_Y[0] = FLAG_A_Y }
+                  else { F_X[1] = FLAG_H_X; F_Y[1] = FLAG_H_Y }
+                  set_transform(F_ENT[ft], F_X[ft], F_Y[ft])
+                  sprite_set_visible(F_SPR[ft], 1)
+                }
+              } else if (F_CARRIER[0] !== j && F_CARRIER[1] !== j) {
+                F_STATE[ft] = FS_CARRY
+                F_CARRIER[ft] = j
+                sprite_set_visible(F_SPR[ft], 0)
+              }
+            }
+          }
+          j = j + 1
+        }
+      }
+      ft = ft + 1
+    }
+    // capture
+    if (F_STATE[0] === FS_CARRY && F_STATE[1] === FS_HOME) {
+      let c0: i32 = F_CARRIER[0]
+      if (c0 >= 0 && U_TEAM[c0] === TEAM_H) {
+        let x0: i32 = U_XS[c0]
+        let y0: i32 = U_YS[c0]
+        if (x0 >= BASE_H_X0 && x0 < BASE_H_X1 && y0 >= BASE_H_Y0 && y0 < BASE_H_Y1) {
+          SCORE_H = SCORE_H + 1
+          F_STATE[0] = FS_HOME
+          F_CARRIER[0] = 0 - 1
+          F_X[0] = FLAG_A_X
+          F_Y[0] = FLAG_A_Y
+          set_transform(F_ENT[0], F_X[0], F_Y[0])
+          sprite_set_visible(F_SPR[0], 1)
+        }
+      }
+    }
+    if (F_STATE[1] === FS_CARRY && F_STATE[0] === FS_HOME) {
+      let c1: i32 = F_CARRIER[1]
+      if (c1 >= 0 && U_TEAM[c1] === TEAM_A) {
+        let x1: i32 = U_XS[c1]
+        let y1: i32 = U_YS[c1]
+        if (x1 >= BASE_A_X0 && x1 < BASE_A_X1 && y1 >= BASE_A_Y0 && y1 < BASE_A_Y1) {
+          SCORE_A = SCORE_A + 1
+          F_STATE[1] = FS_HOME
+          F_CARRIER[1] = 0 - 1
+          F_X[1] = FLAG_H_X
+          F_Y[1] = FLAG_H_Y
+          set_transform(F_ENT[1], F_X[1], F_Y[1])
+          sprite_set_visible(F_SPR[1], 1)
+        }
+      }
+    }
+    // deaths
+    let d: i32 = 0
+    while (d < UNITS) {
+      if (U_ALIVE[d] !== 0 && entity_hp(U_ENT[d]) <= 0) {
+        if (F_CARRIER[0] === d) {
+          F_STATE[0] = FS_DROP
+          F_CARRIER[0] = 0 - 1
+          F_X[0] = U_XS[d]
+          F_Y[0] = U_YS[d]
+          sprite_set_visible(F_SPR[0], 1)
+        }
+        if (F_CARRIER[1] === d) {
+          F_STATE[1] = FS_DROP
+          F_CARRIER[1] = 0 - 1
+          F_X[1] = U_XS[d]
+          F_Y[1] = U_YS[d]
+          sprite_set_visible(F_SPR[1], 1)
+        }
+        // Send the body to its own graveyard and hide it; unitRezTick below walks the timer and
+        // puts the unit back on ITS OWN side at full HP (without this a corpse stayed on the field
+        // and the player never respawned at all).
+        unitKill(d)
+      } else if (U_ALIVE[d] === 0) {
+        unitRezTick(d)
+      }
+      d = d + 1
+    }
+
+    // (statusTick removed from hot path — CC stamps live on U_ROOT/SLOW/STUN)
+    world_step()
+
+    // ── position snapshot ───────────────────────────────────────────────────
+    // entity_x/entity_y return `fixed`, so EVERY read lowers to a soft-float divide plus Value
+    // boxing: measured 53 ticks each, or 107 written `entity_x(e) | 0`, against 2.9 for a typed
+    // array read. Read each unit's position ONCE, right after world_step has moved everyone, and
+    // let the visuals below plus the whole of next frame's logic (bots, CTF, deaths, skills) read
+    // U_XS/U_YS. Anything that teleports an entity mid-frame refreshes its own slot.
+    let sy: i32 = 0
+    while (sy < UNITS) {
+      let sxv: i32 = entity_x(U_ENT[sy])
+      let syv: i32 = entity_y(U_ENT[sy])
+      U_XS[sy] = sxv
+      U_YS[sy] = syv
+      sy = sy + 1
+    }
+
+    // world-space feedback: impact/cast art, damage numbers, floating health bars
+    fxStep()
+    fctStep()
+    hpBarsStep()
+
+    // dirty HUD only (bars + text patches — no uiRender)
+    hudMatchTick(bank)
+
+    if (SCORE_A >= SCORE_MAX || SCORE_H >= SCORE_MAX) {
+      phase = PH_OVER
+      fxClear()
+      fctClear()
+      hpBarsHide()
+      if (SCORE_A >= SCORE_MAX) { hudVictory(1) }
+      else { hudVictory(0) }
+      log("WSG OVER A=" + SCORE_A + " H=" + SCORE_H)
+    }
+
+    frames = frames + 1
+    if ((frames & 255) === 0) {
+      log("WSG ENT=" + entity_count() + " HEAP=" + heap_free())
+    }
+    frame()
+    }
+  } else {
+    if (((edge >> 3) & 1) !== 0) {
+      phase = PH_SELECT
+      hudResetSelect()
+      bg_clear()
+      hudPaintSelectOpen(selClass, selSpec)
+    }
+    frame()
+  }
+}

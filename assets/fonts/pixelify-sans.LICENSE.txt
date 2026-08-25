@@ -1,0 +1,14 @@
+Pixelify Sans — by The Pixelify Sans Project Authors (OFL 1.1)
+
+  https://github.com/eifetx/Pixelify-Sans
+
+Copyright 2021 The Pixelify Sans Project Authors.
+
+Licensed under the SIL Open Font License, Version 1.1.
+See pixelify-sans.OFL.txt in this directory for the full OFL text.
+
+Vendored as pixelify-sans.ttf / pixelify-sans-bold.ttf (static Regular + Bold).
+Bake with FreeType mono hinting (fontdue AA cannot snap this outline pixel face):
+  Regular → @11  (TTFStem X≈92u → 1px)
+  Bold    → @16  (outline stems ≈127u; @11 crushes weight to Regular's 1px stems)
+

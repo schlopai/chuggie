@@ -1,0 +1,214 @@
+// AKARI — components. A top-down action-RPG on the engine's free-movement genre.
+//   Player   — 8-directional movement, a context action (A: talk/open what you face, else swing the
+//              sword), a thrown ninja star (B), soft-death respawn
+//   Npc      — stands in town; talk to it (A) for a line of dialogue
+//   Slime / Bat / Skeleton — chase the player and deal contact damage; the sword cuts them down
+//   Boss     — the Demon of the Hollow Shrine: tanky, relentless; its fall earns a heart container
+//   Chest / Heart — an openable chest (gems) and a floor heart that heals on pickup
+//
+// Enemies run in the engine's fast `tick` hook (raw data ctx, no per-frame wrapper) — each reads the
+// player's position, steers toward it via `topdown_move`, and picks its walk frame. That keeps a room
+// of enemies cheap. The player is one entity, so it uses the rich `update` hook.
+//
+// Sprite sheets: the hero is 11 cols [idle, walk×4, attack×4, throw×2] × 4 rows (facing D/U/L/R);
+// monsters and NPCs are 5 cols [idle, walk×4] × 4 rows. So HERO stride = 11, MONSTER stride = 5.
+import { input_x, input_y, key_pressed } from 'cargo:tish_agb'
+import { bullet_style, fire_bullet, set_anim, entity_x, entity_y, set_transform } from 'cargo:tish_gba_game_engine'
+import { updateHearts } from '../../../packages/engine'
+import { dialogSay, dialogUpdate, dialogActive } from '../../../packages/dialog'
+import {
+  topdownMoverInit, topdownMoverDrive,
+  TD_WALK_SPEED, TD_DASH, TD_RUN, TD_WALK, topdownSetActor
+} from '../../../packages/topdown'
+
+import { starSheet } from 'sheet:../assets/shuriken.png'
+import { gameState } from './state'
+
+// packages/topdown no longer imports the engine crate (schlopai/chuggie-engine#68); the game supplies how
+// an actor's position is read and written. Installed once, at module init, before any drive runs.
+topdownSetActor(entity_x, entity_y, set_transform)
+import { sfxSlash, sfxThrow, sfxWhoosh, sfxCoin } from './audio'
+
+export let TAG_PLAYER: i32 = 1
+export let TAG_ENEMY: i32 = 2
+// Re-export so factories can spawn the hero at the shared walk speed without importing topdown.
+export let PLAYER_SPEED: i32 = TD_WALK_SPEED
+
+let HERO_STRIDE: i32 = 11
+let MON_STRIDE: i32 = 5
+let A_BTN: i32 = 0            // context action: talk / open what you face, else swing the sword
+let B_BTN: i32 = 1            // secondary weapon: throw a ninja star
+
+// Sword swing: a short-lived hitbox `REACH` px in front, `SWORD` size, living `SWING_TTL` frames.
+let REACH: i32 = 3
+let SWORD: i32 = 16
+let SWING_TTL: i32 = 14
+let ATK_FRAMES: i32 = 14      // how long the attack pose plays (the player is rooted during it)
+
+// Thrown ninja star: a native flying hurt box (it spawns, flies, damages, and retires with no
+// per-frame tish callback — like a shmup bullet), launched from the player's centre along the
+// facing. Walls stop it, so a star can't sail out of the room; the cooldown keeps B from
+// becoming a stream of them. The throw pose (cols 9–10) plays while you stay free to move.
+const STAR_SPEED = 3.0     // px/frame — fixed-point, so the typed `fire_bullet` gets a real speed
+let STAR_BOX: i32 = 8         // hitbox px — the art is a 16px cell drawn centred on it
+let STAR_TTL: i32 = 90
+let STAR_COOL: i32 = 20       // frames between throws
+let THROW_FRAMES: i32 = 12    // how long the throw pose plays (no root — a flick on the move)
+
+// ── Player ───────────────────────────────────────────────────────────────────
+// Idle/walk/run animation on the 9-col hero sheet for the current facing. Dash and run reuse the
+// walk cycle at a faster step so the legs match the higher speed.
+function heroAnim(this_, base, mode) {
+  if (mode === TD_DASH) { this_.play(base + 1, 4, 2, true) }
+  else if (mode === TD_RUN) { this_.play(base + 1, 4, 4, true) }
+  else if (mode === TD_WALK) { this_.play(base + 1, 4, 6, true) }
+  else { this_.play(base, 1, 1, false) }
+}
+
+// Hurl a star along the player's facing, spawned just outside its hitbox so it doesn't start
+// inside the thrower. `set_anim` spins the 2-frame sheet while it flies.
+function throwStar(this_) {
+  sfxThrow()
+  bullet_style(starSheet, 0, STAR_BOX, 1, TAG_ENEMY, 0, STAR_TTL)
+  let vx = 0.0
+  let vy = STAR_SPEED
+  let f = this_.facing4()
+  if (f === 1) { vy = 0.0 - STAR_SPEED }
+  else if (f === 2) { vx = 0.0 - STAR_SPEED; vy = 0.0 }
+  else if (f === 3) { vx = STAR_SPEED; vy = 0.0 }
+  let star = fire_bullet(this_.x + 6.0 + vx * 3.0, this_.y + 6.0 + vy * 3.0, vx, vy)
+  set_anim(star, 2, 3)
+}
+
+export const Player = {
+  start: ({ this }) => {
+    this.setTag(TAG_PLAYER)
+    this.data.atk = 0
+    this.data.toss = 0
+    this.data.cool = 0
+    this.data.wasDash = 0
+    topdownMoverInit(this.data, TD_WALK_SPEED)
+  },
+  update: ({ this }) => {
+    updateHearts(this.hp(), 2)   // HUD: 2 hp per heart (half-hearts)
+    let d = this.data
+    if (d.cool > 0) { d.cool = d.cool - 1 }
+    if (dialogActive()) { dialogUpdate(); return }  // frozen while talking
+
+    // Shared walk / double-tap dash / hold-to-run. Still ticks the tap history while swinging so a
+    // press during the attack pose can still arm a dash; `busy` stops it from moving.
+    let busy = 0
+    if (d.atk > 0) { busy = 1 }
+    let mode = topdownMoverDrive(this, d, input_x(), input_y(), busy)
+    if (mode === TD_DASH && d.wasDash === 0) { sfxWhoosh() }
+    d.wasDash = 0
+    if (mode === TD_DASH) { d.wasDash = 1 }
+
+    // ── attacking: rooted, the swing pose plays out (the hitbox was spawned on the press) ──
+    if (d.atk > 0) {
+      d.atk = d.atk - 1
+      this.play(this.facing4() * HERO_STRIDE + 5, 4, 3, false)   // attack cols 5-8
+      return
+    }
+
+    // Dash owns the frame (locked direction, fast legs) — no attack / throw mid-burst.
+    if (mode === TD_DASH) {
+      heroAnim(this, this.facing4() * HERO_STRIDE, mode)
+      return
+    }
+
+    // A is one CONTEXT action: it talks to / opens whatever stands in front of you, and swings the
+    // sword when nothing does — so the player never has to pick a button for the situation.
+    if (key_pressed(A_BTN) > 0) {
+      if (this.interactTD(10)) { return }                 // an NPC / a chest answered the press
+      if (gameState.hasSword) {
+        this.attack(TAG_ENEMY, 1, REACH, SWORD, SWING_TTL) // facing hitbox; i-frames land it once
+        sfxSlash()
+        d.atk = ATK_FRAMES
+        return
+      }
+    }
+    // B is the secondary weapon: a ninja star, thrown at range. No sword pose and no root — the
+    // sword is A's business, and the throw is a flick of the wrist you can do on the move.
+    if (key_pressed(B_BTN) > 0 && gameState.hasStars && d.cool <= 0) {
+      throwStar(this)
+      d.toss = THROW_FRAMES
+      d.cool = STAR_COOL
+    }
+    if (d.toss > 0) {
+      d.toss = d.toss - 1
+      this.play(this.facing4() * HERO_STRIDE + 9, 2, 4, false)   // throw cols 9-10
+      return
+    }
+    heroAnim(this, this.facing4() * HERO_STRIDE, mode)
+  },
+  // Soft death: revive at the current area's entrance with full health (no game-over screen).
+  onDeath: ({ this }) => {
+    this.setHealth(this.maxHp())
+    this.setPos(gameState.entryX, gameState.entryY)
+  }
+}
+
+// ── Town NPCs ──────────────────────────────────────────────────────────────────
+// Collider + blocker live on the component (not stamped onto the map at spawn): the box travels
+// with the entity, so a cutscene walk can't leave an invisible wall behind.
+export const Npc = {
+  start: ({ this }) => {
+    this.setCollider(14, 14)
+    this.block()
+  },
+  onInteract: ({ this }) => {
+    dialogSay(this.data.lines, {
+      speaker: this.data.name,
+      portrait: this.data.face,
+      portraitSize: 32,
+    })
+  }
+}
+
+// ── Enemies ────────────────────────────────────────────────────────────────────
+// Slimes / skeletons / bats have NO tish behaviour at all — movement, facing, and animation run in
+// the engine's native `chase_system` (set up by the factory via `this.chase(...)`), so a room of
+// enemies costs zero per-frame tish callbacks (the shmup lesson). Contact damage + the sword + i-frames
+// + knockback are native too. Only the boss keeps a component, for its `onDeath` reward hook.
+export const Boss = {
+  onDeath: ({ this }) => {
+    gameState.bossDead = true         // the main loop grants the heart container + victory line
+    this.despawn()
+  }
+}
+
+// ── Chest: open once (A while facing it) for gems ──────────────────────────────
+// (Closed frame 2 is set by the factory in main.tish — a behaviour with no `update` may not run
+// `start`, so the initial frame is set at spawn.)
+export const Chest = {
+  onInteract: ({ this }) => {
+    if (this.data.open) { return }
+    this.data.open = true
+    this.setFrame(3)                  // open chest
+    gameState.gems = gameState.gems + 5
+    sfxCoin()
+    dialogSay(["A cache of spirit gems!", "+5 gems."])
+  }
+}
+
+// ── Heart pickup: heals on contact ─────────────────────────────────────────────
+export const Heart = {
+  onCollide: ({ this, other }) => {
+    if (other.tag() !== TAG_PLAYER) { return }
+    other.heal(2)
+    this.despawn()
+  }
+}
+
+// Town NPC dialogue (kept here with the components; the factory in main.tish wires it by spawn kind).
+export const LINES_ELDER = ["The blight seeps from the Hollow Shrine.",
+                            "Cleanse it, and Willow Vale may yet see spring."]
+export const LINES_WOMAN = ["My lantern won't stay lit since the shadow came.",
+                            "Be careful up at the shrine, little one."]
+export const LINES_MERCHANT = ["Gems? I'd trade for them...",
+                               "once the roads are safe again."]
+export const LINES_SENSEI = ["A is your whole hand: it speaks to those before you,",
+                             "and cuts when no one is.",
+                             "B throws a star, for what you cannot reach.",
+                             "Tap a way twice to dash — hold, and you will keep running."]

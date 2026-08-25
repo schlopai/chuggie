@@ -1,0 +1,44 @@
+target
+**/*.gba
+*.log
+.tish/
+
+# npm: examples reference the tish CLI (@tishlang/tish) as a normal dependency; installs are local.
+node_modules/
+package-lock.json
+# `npm run shot` writes a headless preview here (committed specimens are named <example>.png).
+**/screenshot.png
+
+# itch.io HTML5 packages from `npm run itch -- publish <example>`
+/dist/itch/
+
+# compiled headless screenshot renderer (rebuilt on demand by scripts/screenshot.sh)
+/tools/gba-shot
+*.ppm
+.pnpm-store/
+
+# tish-gba-scenepack build artifacts: `scene:` / `isoboard:` / `isobattle:` imports pack these at every
+# `tish build` (crates/tish-gba-scenepack) — regenerated, not hand-edited or committed.
+*.atlas.png
+*.map.bin
+*.board.png
+
+# Derived asset-search index (rebuild: python3 -m asset_search.cli build). Regenerated
+# from catalog/*.json + the PNGs, not hand-edited.
+/assets/ninja-adventure/catalog/search/
+__pycache__/
+*.sav
+*.gba.bak
+
+# generated per build (scripts/stamp_build.py)
+.buildno
+src/buildid.tish
+
+# macOS
+.DS_Store
+
+# local claude settings
+.claude/settings.local.json
+
+# compiled helper tools (build from the .c sources)
+/tools/gba-link

@@ -1,0 +1,83 @@
+# PSG-only Meadow — same tune as overworld, LR35902 voices only (no DirectSound).
+# Use this to confirm scroll UI does not hitch pure PSG BGM.
+deck 1
+bpm 108
+
+track Lead id lead gen gameBoyDmg * 4
+  gen type pulse duty 50 env_mode constant vol 12
+  gen vib_rate 5 vib_amt 12
+  note 67 0 0.5 v 110
+  note 69 0.5 0.5 v 100
+  note 71 1 0.5 v 110
+  note 74 1.5 0.5 v 120
+  note 71 2 0.5 v 100
+  note 69 2.5 0.5 v 95
+  note 67 3 1 v 110
+  note 74 4 0.5 v 115
+  note 76 4.5 0.5 v 110
+  note 79 5 0.75 v 120
+  note 76 5.75 0.25 v 100
+  note 74 6 0.5 v 110
+  note 71 6.5 0.5 v 100
+  note 69 7 0.5 v 95
+  note 67 7.5 0.5 v 105
+  note 64 8 0.5 v 100
+  note 67 8.5 0.5 v 105
+  note 69 9 0.5 v 110
+  note 71 9.5 0.5 v 115
+  note 74 10 1 v 120
+  note 71 11 0.5 v 100
+  note 69 11.5 0.5 v 95
+  note 67 12 1 v 110
+  note 64 13 1 v 90
+  note 62 14 1 v 85
+  note 60 15 1 v 100
+
+track Harmony id harm gen gameBoyDmg * 4
+  gen type pulse duty 25 env_mode constant vol 6
+  note 60 0 2 v 80
+  note 62 2 2 v 75
+  note 64 4 2 v 85
+  note 62 6 2 v 75
+  note 60 8 2 v 80
+  note 57 10 2 v 70
+  note 55 12 2 v 75
+  note 60 14 2 v 85
+
+track Bass id bass gen gameBoyDmg * 4
+  gen type wave wave_shape saw vol 15
+  note 36 0 1 v 120
+  note 36 1 1 v 90
+  note 38 2 1 v 110
+  note 38 3 1 v 85
+  note 40 4 1 v 120
+  note 40 5 1 v 90
+  note 38 6 1 v 110
+  note 36 7 1 v 100
+  note 36 8 1 v 120
+  note 33 9 1 v 100
+  note 31 10 1 v 110
+  note 31 11 1 v 90
+  note 36 12 1 v 120
+  note 38 13 1 v 100
+  note 40 14 1 v 110
+  note 36 15 1 v 115
+
+track Hats id hats gen gameBoyDmg * 4
+  gen type noise noise_mode short vol 8 env_mode step env_step 1
+  note 72 0.5 0.06 v 70
+  note 72 1.5 0.06 v 55
+  note 72 2.5 0.06 v 70
+  note 72 3.5 0.06 v 60
+  note 72 4.5 0.06 v 70
+  note 72 5.5 0.06 v 55
+  note 72 6.5 0.06 v 70
+  note 72 7.5 0.08 v 80
+  note 72 8.5 0.06 v 70
+  note 72 9.5 0.06 v 55
+  note 72 10.5 0.06 v 70
+  note 72 11.5 0.06 v 60
+  note 72 12.5 0.06 v 70
+  note 72 13.5 0.06 v 55
+  note 72 14.5 0.06 v 70
+  note 72 15.5 0.08 v 75

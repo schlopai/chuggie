@@ -1,0 +1,7 @@
+// Variant: FLOOR + one `font:` import. Isolates whether a font is rasterized at boot or lazily on
+// first draw — the difference between a cost every game pays and one only a game that draws text does.
+import { log, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+
+log("BB font handle=" + body)
+while (true) { frame() }

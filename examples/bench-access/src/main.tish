@@ -1,0 +1,304 @@
+// bench-access — what a DATA ACCESS and a FUNCTION CALL actually cost on GBA.
+//
+// WHY THIS EXISTS. Every optimisation in this repo has come from removing calls or removing array
+// accesses, and every time the number behind that decision was inferred from a whole subsystem
+// rather than measured on its own. `packages/grid.tish` justified `gridSimMove` with "~150 ticks per
+// user tish function call"; `drop_attack.tish` was rewritten around "~40 ticks per module-level
+// typed-array read"; both numbers were divided out of a larger measurement and neither was ever
+// checked directly. This checks them directly, one operation at a time.
+//
+// One GBA frame is 4,389 ticks. That is the number that turns any of these into "fits" or "does not".
+//
+// WHAT IT MEASURES, and why each one is here:
+//
+//   LOCAL[i]      a typed array declared inside the function — the cheap case, and the baseline
+//                 everything else is a multiple of.
+//   MODULE[i]     the same array at module scope. `docs/memory-perf-review-2026-07.md` S-10 records
+//                 that a module typed array has no by-reference read form, so every element access
+//                 re-borrows. If that is true, this is the single most important number in the repo:
+//                 grid.tish, drop_game.tish and every entity store are built out of it.
+//   HOISTED       reading a module array through a local alias, if that is even expressible — the
+//                 obvious workaround, priced.
+//   call0..call8  a cross-module call with 0, 1, 4 and 8 integer arguments. The slope is the
+//                 per-argument cost and the intercept is the call itself. `docs/` claims ~42 ticks
+//                 plus ~28 per argument; the drop work inferred ~167 for a 6-argument call.
+//   call4arr      call4 plus an `i32[]` parameter. The DIFFERENCE is what passing an array across a
+//                 module boundary costs — inferred at ~551 ticks during the drop work, which is
+//                 enough to make batching through an array parameter a pessimisation.
+//   farRead       module-array reads on the FAR side of a boundary, to confirm a module array costs
+//                 the same wherever it lives.
+//
+// Every measurement is N iterations divided by N, so the loop overhead is included and stated rather
+// than subtracted — a per-op number that pretends the loop is free is how "it should be ~5 ticks"
+// survives contact with a 40-tick reality.
+//
+// ⚠️ `timer_read()` is 16 bit and wraps every ~15 frames. Every span here is a few thousand ticks
+// inside one frame, which is safe; do not extend a span across a `frame()`.
+
+import { timer_read, frame, log, backdrop } from 'cargo:tish_agb'
+import { call0, call1, call4, call8, call4arr, call4arr7, farRead, bigRead } from './lib'
+
+let N: i32 = 1000
+
+// The subject: a module-level typed array, exactly the shape grid.tish and drop_game.tish use.
+let MODULE: i32[] = []
+let mi: i32 = 0
+while (mi < 64) { MODULE.push(mi); mi = mi + 1 }
+
+let OUT: i32[] = []
+let oi: i32 = 0
+while (oi < 8) { OUT.push(0); oi = oi + 1 }
+
+// A sink, so nothing measured can be optimised away as dead.
+// THE SIZE QUESTION. `MODULE` is 64 entries; drop_tables' arrays are 84 to 2,240, and its inner
+// loop measured ~20x what a 1.35-tick read predicts. If access cost scales with the array's SIZE
+// that changes how every big table in this repo should be laid out — grid.tish's planes included.
+let BIGMOD: i32[] = []
+let bmi: i32 = 0
+while (bmi < 2048) { BIGMOD.push(bmi & 63); bmi = bmi + 1 }
+
+// THE REPRESENTATION QUESTION, and it turned out to be the whole story. `MODULE` and `BIGMOD` are
+// built with `.push()` in a loop, so the compiler keeps them as a `VmRef<Vec<i32>>` and an index
+// lowers to `.borrow().get(i)` — direct, typed, ~1.35 ticks. A LITERAL array is promoted to a Rust
+// `static` instead (good: it lives in ROM, not RAM) and its index path is BOXED: the generated code
+// builds a `Value::Number(i as f64)`, matches it back out to a usize, reads the array as f64 and
+// converts to i32. Per element. Hoisting the index into an `i32` local does NOT help — the boxing is
+// in the promoted-array read, not in the index expression.
+//
+// Every generated table in drop-gba is a literal, which is why its attack builder measured ~20x what
+// this bench predicted.
+let LITERAL: i32[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                      16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+                      32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+                      48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+
+let OUT7: i32[] = []
+let o7: i32 = 0
+while (o7 < 64) { OUT7.push(0); o7 = o7 + 1 }
+
+let SINK: i32[] = [0]
+
+function benchLocal(n: i32): i32 {
+  let local: i32[] = []
+  let i: i32 = 0
+  while (i < 64) { local.push(i); i = i + 1 }
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + local[k & 63]; k = k + 1 }
+  return acc
+}
+
+function benchModule(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + MODULE[k & 63]; k = k + 1 }
+  return acc
+}
+
+// The control for the two above: the same loop with NO array access at all. Subtracting this is
+// what turns "ticks per iteration" into "ticks per access".
+// Same loop as benchModule, same number of reads, same index range — only the array is 32x bigger.
+function benchBigModule(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + BIGMOD[k & 63]; k = k + 1 }
+  return acc
+}
+
+// Reads are measured above; a WRITE is a different operation and had never been priced. drop-gba's
+// atkBuild does one module-array write per cell and its inner loop costs ~20x what the read number
+// predicts, so this is the remaining candidate.
+function benchModuleWrite(n: i32): i32 {
+  let k: i32 = 0
+  while (k < n) { BIGMOD[k & 63] = k; k = k + 1 }
+  return BIGMOD[0]
+}
+
+// Identical loop to benchModule; the ONLY difference is that this array was written as a literal.
+function benchLiteral(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + LITERAL[k & 63]; k = k + 1 }
+  return acc
+}
+
+function benchLoop(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + (k & 63); k = k + 1 }
+  return acc
+}
+
+function benchCall0(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + call0(); k = k + 1 }
+  return acc
+}
+
+function benchCall1(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + call1(k); k = k + 1 }
+  return acc
+}
+
+function benchCall4(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + call4(k, 1, 2, 3); k = k + 1 }
+  return acc
+}
+
+function benchCall8(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + call8(k, 1, 2, 3, 4, 5, 6, 7); k = k + 1 }
+  return acc
+}
+
+function benchCall4Arr(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + call4arr(OUT, k & 7, k, 1, 2); k = k + 1 }
+  return acc
+}
+
+function benchCall4Arr7(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + call4arr7(OUT7, (k & 3) * 8, k, 1, 2); k = k + 1 }
+  return acc
+}
+
+function benchBigRead(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < n) { acc = acc + bigRead(1, k & 7, k & 5); k = k + 1 }
+  return acc
+}
+
+function benchFarRead(n: i32): i32 {
+  let acc: i32 = 0
+  let k: i32 = 0
+  while (k < 16) { acc = acc + farRead(n / 16); k = k + 1 }
+  return acc
+}
+
+function per(total: i32, n: i32): i32 { return (total * 100) / n }
+
+backdrop(0)
+
+// ⚠️ ONE MEASUREMENT PER FRAME, AND EVERY SPAN KEPT UNDER 4,389 TICKS.
+//
+// The first version of this file took all nine spans back to back from module scope. `timer_read()`
+// is 16 bit; the run was ~50,000 ticks with no `frame()` in it, so everything after the first wrap
+// was garbage — a call measured at 0.026 ticks and the array-parameter case came out NEGATIVE. The
+// array numbers were fine because they happened to fit in the first frame, which is exactly how a
+// wrapped measurement gets believed: the plausible half is real.
+//
+// So: `frame()` between every span, and N chosen per bench so the span stays inside one frame. The
+// call benches use a much smaller N than the array ones for that reason alone.
+let AN: i32 = 1000
+let CN: i32 = 10
+// bigRead is the realistic accessor and it is EXPENSIVE — at AN it overran a frame and the timer
+// wrapped to a negative span. Its own N, sized to stay inside one frame.
+let BN: i32 = 20
+// The write-heavy array-parameter bench is the most expensive op measured; its own N.
+let WN: i32 = 5
+// The literal-array read is the most expensive per-element op measured; at AN it overran a frame.
+let RN: i32 = 40
+
+frame()
+let t0: i32 = timer_read()
+SINK[0] = SINK[0] + benchLoop(AN)
+let t1: i32 = timer_read()
+frame()
+let u0: i32 = timer_read()
+SINK[0] = SINK[0] + benchLocal(AN)
+let u1: i32 = timer_read()
+frame()
+let v0: i32 = timer_read()
+SINK[0] = SINK[0] + benchModule(AN)
+let v1: i32 = timer_read()
+frame()
+let m0: i32 = timer_read()
+SINK[0] = SINK[0] + benchBigModule(AN)
+let m1: i32 = timer_read()
+frame()
+let l0: i32 = timer_read()
+SINK[0] = SINK[0] + benchLiteral(RN)
+let l1: i32 = timer_read()
+frame()
+let n0: i32 = timer_read()
+SINK[0] = SINK[0] + benchModuleWrite(AN)
+let n1: i32 = timer_read()
+frame()
+let w0: i32 = timer_read()
+SINK[0] = SINK[0] + benchLoop(CN)
+let w1: i32 = timer_read()
+frame()
+let a0: i32 = timer_read()
+SINK[0] = SINK[0] + benchCall0(CN)
+let a1: i32 = timer_read()
+frame()
+let b0: i32 = timer_read()
+SINK[0] = SINK[0] + benchCall1(CN)
+let b1: i32 = timer_read()
+frame()
+let c0: i32 = timer_read()
+SINK[0] = SINK[0] + benchCall4(CN)
+let c1: i32 = timer_read()
+frame()
+let d0: i32 = timer_read()
+SINK[0] = SINK[0] + benchCall8(CN)
+let d1: i32 = timer_read()
+frame()
+let e0: i32 = timer_read()
+SINK[0] = SINK[0] + benchCall4Arr(CN)
+let e1: i32 = timer_read()
+frame()
+let f0: i32 = timer_read()
+SINK[0] = SINK[0] + benchBigRead(BN)
+let f1: i32 = timer_read()
+frame()
+let g0: i32 = timer_read()
+SINK[0] = SINK[0] + benchCall4Arr7(WN)
+let g1: i32 = timer_read()
+frame()
+
+// Hundredths of a tick per operation, so a sub-tick difference is still visible.
+log("BENCH-ACCESS array n=" + AN + ", calls n=" + CN + " (ticks*100 per op; one frame = 4389)")
+log("  loop-only      " + per(t1 - t0, AN))
+log("  LOCAL[i]       " + per(u1 - u0, AN))
+log("  MODULE[i]      " + per(v1 - v0, AN))
+log("  BIGMOD[i] 2048 " + per(m1 - m0, AN))
+log("  MODULE[i]=  wr " + per(n1 - n0, AN))
+log("  LITERAL[i]     " + per(l1 - l0, RN))
+log("  loop-only(CN)  " + per(w1 - w0, CN))
+log("  call0()        " + per(a1 - a0, CN))
+log("  call1(a)       " + per(b1 - b0, CN))
+log("  call4(a..d)    " + per(c1 - c0, CN))
+log("  call8(a..h)    " + per(d1 - d0, CN))
+log("  call4arr(arr)  " + per(e1 - e0, CN))
+log("  bigRead(g,r,c) " + per(f1 - f0, BN))
+log("  call4arr7 (7w)  " + per(g1 - g0, WN))
+log("BENCH-ACCESS RAW loop=" + (t1 - t0) + " local=" + (u1 - u0) + " module=" + (v1 - v0) + " bigmod=" + (m1 - m0) + " modwr=" + (n1 - n0) + " literal=" + (l1 - l0)
+  + " loopC=" + (w1 - w0) + " c0=" + (a1 - a0) + " c1=" + (b1 - b0) + " c4=" + (c1 - c0)
+  + " c8=" + (d1 - d0) + " c4arr=" + (e1 - e0) + " big=" + (f1 - f0) + " c4arr7=" + (g1 - g0) + " sink=" + SINK[0])
+// Every span must be positive and inside a frame, or the timer wrapped and the numbers are fiction.
+let worst: i32 = v1 - v0
+if ((a1 - a0) > worst) { worst = a1 - a0 }
+if ((e1 - e0) > worst) { worst = e1 - e0 }
+let ok: i32 = 1
+if ((t1 - t0) <= 0 || (u1 - u0) <= 0 || (v1 - v0) <= 0 || (a1 - a0) <= 0) { ok = 0 }
+if ((b1 - b0) <= 0 || (c1 - c0) <= 0 || (d1 - d0) <= 0 || (e1 - e0) <= 0) { ok = 0 }
+if ((f1 - f0) <= 0) { ok = 0 }
+if ((f1 - f0) > worst) { worst = f1 - f0 }
+if ((g1 - g0) <= 0 || (m1 - m0) <= 0 || (n1 - n0) <= 0 || (l1 - l0) <= 0) { ok = 0 }
+if ((g1 - g0) > worst) { worst = g1 - g0 }
+if (worst >= 4389) { ok = 0 }
+log("BENCH-ACCESS SANE " + ok + " worstSpan=" + worst + " (must be 1, and worstSpan < 4389)")
+log("BENCH-ACCESS DONE")
+
+while (true) { frame() }

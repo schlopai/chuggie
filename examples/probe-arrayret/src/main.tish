@@ -1,0 +1,89 @@
+// probe-arrayret — can a tish function RETURN an array on the GBA?
+//
+// Why this exists: `packages/cutscene.tish` says a cutscene must be a sequence of blocking calls
+// rather than a timeline, because "an array-RETURNING tish function hangs the GBA codegen (#553)".
+// That note has no regression test anywhere in the tish tree, unlike #556 and #558 which are fixed
+// and tested — so its status is unknown, and it is the single fact that decides whether a
+// data-driven cutscene/script format is possible at all.
+//
+// One data point already exists, found while wiring the clan bridge into the isoboard SRPG example: an IMPORTED
+// function that constructs and returns an array fails to compile when called at MODULE INIT
+// (`cannot find value 'deployList__m18' in this scope`), but the identical pattern works when
+// called from inside a function body (`clanJobsForRace` in packages/clan/state.tish does exactly
+// this and ships). This probe pins down the rest of the matrix.
+//
+// Four cases, each reported separately so a failure says WHICH pattern is broken:
+//
+//   A  same-module fn  → array of numbers,  called from inside a function
+//   B  imported fn     → array of numbers,  called from inside a function
+//   C  same-module fn  → array of numbers,  called at MODULE INIT
+//   D  imported fn     → array of OBJECTS,  called from inside a function   ← the cutscene shape
+//
+// Case C is expected to be the compile failure. It is included but commented out, because if it
+// fails the whole ROM fails to build and the other three report nothing — see the note at the
+// bottom for how to test it.
+//
+// Each case prints PASS or FAIL with what it actually got, so a screenshot is the whole result.
+import { hud_text, frame, log } from 'cargo:tish_agb'
+import { makeNums, makeTimeline } from './lib'
+
+// Case A — same module, constructed array of numbers.
+function localNums(n) {
+  let out = []
+  let i = 0
+  while (i < n) {
+    out.push(i * 10)
+    i = i + 1
+  }
+  return out
+}
+
+function checkA() {
+  let a = localNums(4)
+  if (a.length !== 4) { return "A FAIL len=" + a.length }
+  if (a[0] !== 0) { return "A FAIL [0]=" + a[0] }
+  if (a[3] !== 30) { return "A FAIL [3]=" + a[3] }
+  return "A PASS local nums"
+}
+
+function checkB() {
+  let b = makeNums(4)
+  if (b.length !== 4) { return "B FAIL len=" + b.length }
+  if (b[3] !== 30) { return "B FAIL [3]=" + b[3] }
+  return "B PASS import nums"
+}
+
+function checkD() {
+  let t = makeTimeline()
+  if (t.length !== 3) { return "D FAIL len=" + t.length }
+  // Walk it the way a cutscene interpreter would: read a field off each element in order.
+  let sum = 0
+  let i = 0
+  while (i < t.length) {
+    sum = sum + t[i].op * 100 + t[i].a
+    i = i + 1
+  }
+  // 1*100+30 + 2*100+120 + 3*100+7 = 130 + 320 + 307 = 757
+  if (sum !== 757) { return "D FAIL sum=" + sum }
+  return "D PASS import objs"
+}
+
+let ra = checkA()
+let rb = checkB()
+let rd = checkD()
+
+log(ra)
+log(rb)
+log(rd)
+
+hud_text(0, 8, 20, "array-return probe")
+hud_text(1, 8, 40, ra)
+hud_text(2, 8, 56, rb)
+hud_text(3, 8, 72, rd)
+hud_text(4, 8, 96, "C: see README")
+
+let f: i32 = 0
+while (f < 600) {
+  frame()
+  f = f + 1
+}

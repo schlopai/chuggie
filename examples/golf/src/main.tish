@@ -1,0 +1,328 @@
+// golf — nine holes of top-down mini-golf, and the acceptance test for the engine's rigid discs.
+//
+// ── What it is the acceptance test for ────────────────────────────────────────────────────────
+//
+// `dynamic_system` with a SINGLE body, which is the case that pins down the part of a physics
+// engine everything else papers over: **coming to rest.**
+//
+// Golf is the only thing in this repo whose correct answer is a POSITION THE BALL SETTLES AT. A
+// game that merely integrates looks fine in motion and is unplayable, because a caller diffing
+// `entity_x` two frames apart cannot tell "resting" from "moving very slowly", and every threshold
+// it might guess in tish re-implements — worse — a decision the engine already made with the real
+// velocity. So rest is an engine state: `body_asleep(e)` is 1 when the ball has stopped, and this
+// game's entire loop is "wait for that, then let the player aim again".
+//
+// It also exercises the SURFACE plane: green, rough, sand and two slopes are one mechanism — a
+// per-tile class carrying a constant acceleration and a friction — rather than three special cases.
+// A slope is wind is a conveyor.
+//
+// ── Why top-down and not side-on ─────────────────────────────────────────────
+//
+// Side-view golf needs a heightfield, real swept collision at drive speeds, and a second collision
+// path that nothing else in the engine would use. Top-down makes golf and soccer THE SAME PHYSICS
+// with different tuning, which is why there is one `dynamic_system` and not two genre packages.
+//
+// ── Controls ──────────────────────────────────────────────────────────────────
+// LEFT/RIGHT aim · A holds to charge and releases to hit · the ball must stop before the next shot.
+// It plays itself until you touch the pad.
+
+import { hole1 } from 'scene:../assets/hole1.tmj'
+import { hole2 } from 'scene:../assets/hole2.tmj'
+import { hole3 } from 'scene:../assets/hole3.tmj'
+import { hole4 } from 'scene:../assets/hole4.tmj'
+import { hole5 } from 'scene:../assets/hole5.tmj'
+import { hole6 } from 'scene:../assets/hole6.tmj'
+import { hole7 } from 'scene:../assets/hole7.tmj'
+import { hole8 } from 'scene:../assets/hole8.tmj'
+import { hole9 } from 'scene:../assets/hole9.tmj'
+import { golf8 } from 'sheet8:../assets/golf8.png'
+import {
+  frame, log, backdrop, hud_text, key_held, key_pressed, key_released,
+  sprite_new, sprite_set_frame, sprite_set_visible, sprite_set_pos, heap_free, bg_clear
+} from 'cargo:tish_agb'
+import {
+  spawn, set_transform, attach_sprite, set_sprite_offset, world_step,
+  entity_x, entity_y, entity_count, set_camera_target,
+  set_dynamic, body_impulse, body_asleep, body_speed2,
+  surface_def, grid_set_surface
+} from 'cargo:tish_gba_game_engine'
+import {
+  loadSceneRom, mapSpawnCount, mapSpawnCol, mapSpawnRow, mapSpawnKind
+} from '../../../packages/engine'
+
+// ── Surface classes. The ids are scripts/gen_golf.py's. ──────────────────────
+let S_GREEN: i32 = 0
+let S_ROUGH: i32 = 1
+let S_SAND: i32 = 2
+let S_SLOPE_E: i32 = 3
+let S_SLOPE_S: i32 = 4
+
+let F_BALL: i32 = 0
+let F_CUP: i32 = 1
+let F_ARROW: i32 = 2
+
+let TILE: i32 = 16
+let HOLES: i32 = 9
+
+// ── State. Flat typed scalars: read several times a frame. ───────────────────
+let ball: i32 = 0 - 1
+let bspr: i32 = 0 - 1
+let cupspr: i32 = 0 - 1
+let arrspr: i32 = 0 - 1
+
+let hole: i32 = 1
+let par: i32 = 3
+let strokes: i32 = 0
+let total: i32 = 0
+let toPar: i32 = 0
+let cupCol: i32 = 0
+let cupRow: i32 = 0
+let teeCol: i32 = 0
+let teeRow: i32 = 0
+
+let aim: i32 = 0            // 1/256ths of a turn
+let power: i32 = 0          // 0..MAXP, charged while A is held
+let MAXP: i32 = 48
+// Strokes over par at which the hole is conceded — golf's own cap, and what lets an attract
+// driver that cannot path around a wall still walk the whole course.
+let MAX_OVER: i32 = 6
+let charging: i32 = 0
+let sunkHold: i32 = 0
+let attract: i32 = 1
+let lastHud: i32 = 0 - 1
+
+/// Read one hole's object layer: the surface rects, the tee, the cup and the par.
+///
+/// Walked ONCE per hole, behind the load, never on a played frame. `grid_set_surface` is a native
+/// call per cell and a 20x12 hole is 240 of them worst case — fine here, and exactly the kind of
+/// loop that must never appear in the frame loop.
+function readHole() {
+  let n: i32 = mapSpawnCount()
+  let i: i32 = 0
+  while (i < n) {
+    let k: i32 = mapSpawnKind(i)
+    let c: i32 = mapSpawnCol(i)
+    let r: i32 = mapSpawnRow(i)
+    if (k === 100) { teeCol = c; teeRow = r }
+    else if (k === 101) { cupCol = c; cupRow = r }
+    else if (k >= 200) { par = k - 200 }
+    i = i + 1
+  }
+}
+
+function loadHole(n: i32) {
+  // ⚠️ TEAR DOWN, THEN LET A FRAME COMMIT, THEN BUILD.
+  //
+  // `loadSceneRom` is `scene_stream` + `grid_from_map` and tears nothing down, so nine holes
+  // streamed back to back retain nine maps: the heap fell ~2 KB per hole and kept falling on the
+  // SECOND lap over the same nine scenes, which is what tells a leak apart from the first-touch
+  // retention a scene legitimately has. agb does not return a background's tiles until a frame
+  // boundary, so the `frame()` between is load-bearing rather than cosmetic — without it the old
+  // map and the new one are both held at the moment the new one is allocated.
+  bg_clear()
+  frame()
+  if (n === 1) { loadSceneRom(hole1) }
+  else if (n === 2) { loadSceneRom(hole2) }
+  else if (n === 3) { loadSceneRom(hole3) }
+  else if (n === 4) { loadSceneRom(hole4) }
+  else if (n === 5) { loadSceneRom(hole5) }
+  else if (n === 6) { loadSceneRom(hole6) }
+  else if (n === 7) { loadSceneRom(hole7) }
+  else if (n === 8) { loadSceneRom(hole8) }
+  else { loadSceneRom(hole9) }
+
+  par = 3
+  readHole()
+
+  // Surface rects come back as objects; walk them again now the grid exists.
+  let i: i32 = 0
+  let cnt: i32 = mapSpawnCount()
+  while (i < cnt) {
+    let k: i32 = mapSpawnKind(i)
+    // The generator emits one object PER CELL, because the spawn accessors expose col/row and not
+    // the object's extent — so a rect would arrive as its top-left corner and the ROM would have to
+    // re-invent the size, which is how a bunker ends up offset from the sand you can see.
+    if (k < 100) { grid_set_surface(mapSpawnCol(i), mapSpawnRow(i), k) }
+    i = i + 1
+  }
+
+  strokes = 0
+  sunkHold = 0
+  charging = 0
+  power = 0
+  set_transform(ball, teeCol * TILE + 4, teeRow * TILE + 4)
+  // ⚠️ Re-arm the disc AFTER the scene load. `loadSceneRom` clears the world, so the ball's
+  // components — and its rest state — do not survive it. A hole that started with a sleeping ball
+  // would never accept a shot.
+  set_dynamic(ball, 6, 200, 246, 0.20, 1)
+  sprite_set_visible(bspr, 1)
+  sprite_set_pos(cupspr, cupCol * TILE + 4, cupRow * TILE + 4)
+  sprite_set_visible(cupspr, 1)
+  log("GOLF HOLE " + n + " par=" + par + " tee=" + teeCol + "," + teeRow + " cup=" + cupCol + "," + cupRow)
+  log("HEAP " + heap_free())
+}
+
+/// The ball is in the cup when it is at rest inside the cup's tile.
+///
+/// Rest is REQUIRED, not decoration: a ball crossing the cup at speed lips out, which is the rule
+/// real golf has and the one that makes a slope hole interesting rather than a formality.
+function sunk(): i32 {
+  if (body_asleep(ball) === 0) { return 0 }
+  let bx: i32 = entity_x(ball)
+  let by: i32 = entity_y(ball)
+  let dx: i32 = bx - (cupCol * TILE + 4)
+  let dy: i32 = by - (cupRow * TILE + 4)
+  if (dx < 0) { dx = 0 - dx }
+  if (dy < 0) { dy = 0 - dy }
+  if (dx <= 6 && dy <= 6) { return 1 }
+  return 0
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+
+backdrop(0)
+
+ball = spawn()
+bspr = sprite_new(golf8)
+sprite_set_frame(bspr, F_BALL)
+attach_sprite(ball, bspr)
+set_sprite_offset(ball, 0 - 4, 0 - 4)
+set_camera_target(ball)
+
+cupspr = sprite_new(golf8)
+sprite_set_frame(cupspr, F_CUP)
+arrspr = sprite_new(golf8)
+sprite_set_frame(arrspr, F_ARROW)
+
+// The five surface classes, defined ONCE. `ax`/`ay` are px/frame^2 and `friction` is Q8 retention:
+// 246/256 on the green, 232 in the rough, 200 in sand — a bunker eats a ball rather than blocking
+// it, which is what a bunker is for.
+surface_def(S_GREEN, 0, 0, 246)
+surface_def(S_ROUGH, 0, 0, 232)
+surface_def(S_SAND, 0, 0, 200)
+surface_def(S_SLOPE_E, 0.06, 0, 246)
+surface_def(S_SLOPE_S, 0, 0.06, 246)
+
+loadHole(hole)
+log("GOLF BOOT ENT " + entity_count())
+
+let t: i32 = 0
+while (true) {
+  t = t + 1
+
+  let atRest: i32 = body_asleep(ball)
+
+  // ── input ────────────────────────────────────────────────────────────────
+  if (key_pressed(0) === 1 || key_held(4) === 1 || key_held(5) === 1) { attract = 0 }
+
+  if (sunkHold > 0) {
+    sunkHold = sunkHold - 1
+    if (sunkHold === 0) {
+      total = total + strokes
+      toPar = toPar + (strokes - par)
+      log("GOLF SUNK hole=" + hole + " strokes=" + strokes + " par=" + par + " total=" + total + " toPar=" + toPar)
+      hole = hole + 1
+      if (hole > HOLES) {
+        log("GOLF ROUND total=" + total + " toPar=" + toPar)
+        hole = 1
+        total = 0
+        toPar = 0
+      }
+      loadHole(hole)
+    }
+  } else if (atRest === 1) {
+    if (attract === 1) {
+      // Aim at the cup and fire at a fixed cadence. Deliberately coarse — it should take a few
+      // strokes, or a verify that counts strokes could not tell a hole from a gimme.
+      let dx: i32 = (cupCol * TILE + 4) - entity_x(ball)
+      let dy: i32 = (cupRow * TILE + 4) - entity_y(ball)
+      // Eight-way aim from the sign of each axis: no atan2, no division.
+      if (dx > 4 && dy > 4) { aim = 32 }
+      else if (dx > 4 && dy < 0 - 4) { aim = 224 }
+      else if (dx < 0 - 4 && dy > 4) { aim = 96 }
+      else if (dx < 0 - 4 && dy < 0 - 4) { aim = 160 }
+      else if (dx > 4) { aim = 0 }
+      else if (dx < 0 - 4) { aim = 128 }
+      else if (dy > 4) { aim = 64 }
+      else { aim = 192 }
+      // ⚠️ POWER SCALES WITH DISTANCE, and the first version did not.
+      //
+      // With a fixed power the driver overshot the cup, flipped its aim, overshot back, and did
+      // that forever — nineteen strokes on a par 2 and never a sink. That is not a physics bug and
+      // it is not a bad heuristic; it is the absence of one. Manhattan distance, shifted: no sqrt,
+      // no divide, and a ball near the cup gets a tap rather than another full swing.
+      let adx: i32 = dx
+      let ady: i32 = dy
+      if (adx < 0) { adx = 0 - adx }
+      if (ady < 0) { ady = 0 - ady }
+      let dist: i32 = adx + ady
+      if ((t & 63) === 0) {
+        let pow: i32 = 1 + (dist >> 5)
+        if (pow > 4) { pow = 4 }
+        strokes = strokes + 1
+        body_impulse(ball, aim, pow)
+        log("GOLF SHOT hole=" + hole + " stroke=" + strokes + " aim=" + aim + " pow=" + pow + " d=" + dist)
+      }
+    } else {
+      if (key_held(5) === 1) { aim = (aim + 253) & 255 }
+      if (key_held(4) === 1) { aim = (aim + 3) & 255 }
+      if (key_held(0) === 1) {
+        charging = 1
+        power = power + 1
+        if (power > MAXP) { power = MAXP }
+      } else if (charging === 1) {
+        charging = 0
+        strokes = strokes + 1
+        // Power maps to px/frame through a shift, never a divide.
+        body_impulse(ball, aim, 1 + (power >> 4))
+        log("GOLF SHOT hole=" + hole + " stroke=" + strokes + " aim=" + aim + " pow=" + power)
+        power = 0
+      }
+    }
+    if (sunk() === 1 && strokes > 0) { sunkHold = 48 }
+    // PICK UP. Real golf caps a hole rather than letting a player grind it, and here it does a
+    // second job: the attract driver aims straight at the cup, so a hole with a wall between the
+    // two (2, 6, 9) is one it can never finish. Without a cap the soak would sit on hole 2 forever
+    // and a verifier would report nine holes as "not reached" when the physics was fine.
+    else if (strokes >= par + MAX_OVER) {
+      log("GOLF PICKUP hole=" + hole + " strokes=" + strokes)
+      sunkHold = 24
+    }
+  }
+
+  // ── chrome ───────────────────────────────────────────────────────────────
+  // The aim arrow is a plain sprite parked next to the ball; it is only meaningful while the ball
+  // is at rest, so it is hidden the rest of the time rather than left pointing at nothing.
+  if (atRest === 1 && sunkHold === 0) {
+    sprite_set_visible(arrspr, 1)
+    let ax: i32 = entity_x(ball)
+    let ay: i32 = entity_y(ball)
+    if (aim === 0) { ax = ax + 10 }
+    else if (aim === 128) { ax = ax - 10 }
+    else if (aim === 64) { ay = ay + 10 }
+    else if (aim === 192) { ay = ay - 10 }
+    else if (aim === 32) { ax = ax + 7; ay = ay + 7 }
+    else if (aim === 96) { ax = ax - 7; ay = ay + 7 }
+    else if (aim === 160) { ax = ax - 7; ay = ay - 7 }
+    else { ax = ax + 7; ay = ay - 7 }
+    sprite_set_pos(arrspr, ax - 4, ay - 4)
+  } else {
+    sprite_set_visible(arrspr, 0)
+  }
+
+  // hud_text is SPRITES — one OBJ entry per glyph group — so it is written only when the line
+  // actually changes, never per frame.
+  let hud: i32 = hole * 1000 + strokes * 10 + par
+  if (hud !== lastHud) {
+    hud_text(0, 4, 4, "H" + hole + " PAR " + par + " ST " + strokes)
+    lastHud = hud
+  }
+
+  if ((t & 511) === 0) {
+    log("GOLF TELE hole=" + hole + " strokes=" + strokes + " v2=" + body_speed2(ball)
+      + " rest=" + body_asleep(ball) + " ENT " + entity_count())
+    log("HEAP " + heap_free())
+  }
+
+  world_step()
+}

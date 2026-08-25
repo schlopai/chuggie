@@ -1,0 +1,154 @@
+// microgame.tish — the WarioWare-shaped harness: a bag of four-second games, a speed ramp, lives.
+//
+// ── THE INVERSION, and it is the whole design ─────────────────────────────────────────────────
+//
+// This harness does NOT call your microgame. Your microgame calls IT.
+//
+// The obvious shape is a registry of `{ start, tick, verdict }` callbacks and a harness that
+// dispatches them. On this target that is the wrong shape twice over: a tish closure costs ~151
+// bytes of heap whether it is ever called or not, so twenty registered microgames cost ~9 KB before
+// one of them runs; and `examples/bench-behav` prices a boxed per-frame callback at ~1,000 ticks of
+// a 4,389-tick frame, so the DISPATCH alone is a quarter of the budget every frame.
+//
+// So the harness owns time, lives, the ramp and the verdict — the parts every microgame shares —
+// and the cartridge owns a plain `if/else` over the current game id. That branch is a direct call
+// in the game's own module, which costs nothing:
+//
+//     mgStep()
+//     if (mgPhase() === MG_PLAY) {
+//       if (g === G_CATCH)      { catchTick() }
+//       else if (g === G_DODGE) { dodgeTick() }
+//     }
+//
+// Adding a microgame is one `else if` and one function. It costs no heap until it is written, and
+// nothing at all per frame while another game is up. This is the same inversion `packages/search`
+// uses, for the same measured reason.
+//
+// ── What the harness owns ─────────────────────────────────────────────────────────────────────
+//
+// A round is four phases, and the timings are the genre's, not arbitrary: a prompt you can read
+// (INTRO), a game short enough to be a reflex (PLAY), a beat to see whether you won (VERDICT), and
+// a gap before the next prompt (GAP).
+//
+// The SPEED RAMP is a divisor on the play window, not a multiplier on anything the game does. A
+// microgame written against `mgFramesLeft()` therefore gets harder for free and cannot desync from
+// the ramp, which is the bug you get when each game scales its own speed.
+//
+// ⚠️ Lives are spent on a LOSS, never on a timeout-with-no-verdict. A microgame that forgets to call
+// `mgWin()` would otherwise be unloseable, and that reads as "the harness is broken" rather than as
+// the missing call it is — so `mgResolve` treats "no verdict by the end of PLAY" as a loss and says
+// so in the log.
+
+import { log } from 'cargo:tish_agb'
+
+export let MG_INTRO: i32 = 0
+export let MG_PLAY: i32 = 1
+export let MG_VERDICT: i32 = 2
+export let MG_GAP: i32 = 3
+export let MG_OVER: i32 = 4
+
+export let MG_UNDECIDED: i32 = 0
+export let MG_WON: i32 = 1
+export let MG_LOST: i32 = 2
+
+// One flat typed row, not an object: a field read on a boxed map is a string-keyed lookup, and the
+// harness is read several times per frame by whichever microgame is up.
+// [0] phase  [1] timer  [2] game  [3] outcome  [4] lives  [5] round  [6] speed  [7] wins
+let M: i32[] = [0, 0, 0, 0, 3, 0, 0, 0]
+
+let INTRO_FRAMES: i32 = 48
+let VERDICT_FRAMES: i32 = 36
+let GAP_FRAMES: i32 = 12
+let PLAY_FRAMES: i32 = 240
+// The floor is a playability bound, not a tuning knob: below ~1.5s a four-second game stops being
+// a reflex test and starts being a coin flip.
+let PLAY_FLOOR: i32 = 96
+let SPEED_EVERY: i32 = 4
+
+/// Start a run. `lives` is the whole cartridge's budget, WarioWare-style.
+export function mgInit(lives: i32) {
+  M[0] = MG_INTRO
+  M[1] = INTRO_FRAMES
+  M[2] = 0
+  M[3] = MG_UNDECIDED
+  M[4] = lives
+  M[5] = 0
+  M[6] = 0
+  M[7] = 0
+}
+
+/// Hand the harness the next game id. Called by the cartridge when `mgPhase()` reaches `MG_GAP`,
+/// so the cartridge owns game SELECTION (shuffled bag, fixed order, whatever) and the harness owns
+/// everything else.
+export function mgNext(game: i32) {
+  M[2] = game
+  M[3] = MG_UNDECIDED
+  M[0] = MG_INTRO
+  M[1] = INTRO_FRAMES
+  M[5] = M[5] + 1
+  // Every SPEED_EVERY rounds the play window shortens by an eighth, to the floor.
+  if (M[5] % SPEED_EVERY === 0) { M[6] = M[6] + 1 }
+}
+
+/// Advance one frame. Call once per frame, before the current microgame's tick.
+export function mgStep() {
+  if (M[0] === MG_OVER) { return }
+  M[1] = M[1] - 1
+  if (M[1] > 0) { return }
+  if (M[0] === MG_INTRO) {
+    M[0] = MG_PLAY
+    M[1] = mgPlayFrames()
+    return
+  }
+  if (M[0] === MG_PLAY) {
+    // ⚠️ Time ran out with no verdict. That is a LOSS, and it is logged as a distinct reason,
+    // because a microgame that never calls mgWin()/mgLose() is a bug that otherwise presents as
+    // "the harness ate my win".
+    if (M[3] === MG_UNDECIDED) {
+      M[3] = MG_LOST
+      log("MG TIMEOUT game=" + M[2])
+    }
+    if (M[3] === MG_LOST) { M[4] = M[4] - 1 } else { M[7] = M[7] + 1 }
+    log("MG RESULT game=" + M[2] + " outcome=" + M[3] + " lives=" + M[4] + " round=" + M[5])
+    M[0] = MG_VERDICT
+    M[1] = VERDICT_FRAMES
+    return
+  }
+  if (M[0] === MG_VERDICT) {
+    if (M[4] <= 0) {
+      M[0] = MG_OVER
+      M[1] = 0
+      log("MG OVER rounds=" + M[5] + " wins=" + M[7])
+      return
+    }
+    M[0] = MG_GAP
+    M[1] = GAP_FRAMES
+    return
+  }
+  // MG_GAP expired and the cartridge did not call mgNext. Hold rather than advance, so a missing
+  // call stalls visibly instead of running a game that was never set up.
+  M[1] = 1
+}
+
+/// How long this round's PLAY phase lasts, after the ramp. A microgame that reads
+/// `mgFramesLeft()` rather than counting its own frames gets the ramp for free.
+export function mgPlayFrames(): i32 {
+  let f: i32 = PLAY_FRAMES
+  let s: i32 = M[6]
+  while (s > 0) { f = f - (f >> 3); s = s - 1 }
+  if (f < PLAY_FLOOR) { f = PLAY_FLOOR }
+  return f
+}
+
+export function mgPhase(): i32 { return M[0] }
+export function mgGame(): i32 { return M[2] }
+export function mgFramesLeft(): i32 { return M[1] }
+export function mgLives(): i32 { return M[4] }
+export function mgRound(): i32 { return M[5] }
+export function mgWins(): i32 { return M[7] }
+export function mgOutcome(): i32 { return M[3] }
+
+/// Report the outcome. First call wins — a microgame that keeps detecting its win condition every
+/// frame after it fires cannot bank the round twice.
+export function mgWin() { if (M[0] === MG_PLAY && M[3] === MG_UNDECIDED) { M[3] = MG_WON } }
+export function mgLose() { if (M[0] === MG_PLAY && M[3] === MG_UNDECIDED) { M[3] = MG_LOST } }

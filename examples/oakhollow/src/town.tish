@@ -1,0 +1,166 @@
+// Who lives in Oakhollow, what they say, and what the two shops sell.
+//
+// Everything here is DATA. The components in components.tish are generic (`PfNpc`, `PfSign`,
+// `PfDoor` come straight out of packages/platformer) and behaviour comes from the fields each
+// entity is spawned with, so adding a townsperson is a row in a table rather than a new component.
+
+// Entity kinds. These are the `kind` property on a spawn object in the .tmj level files — add a
+// townsperson by dropping an object in Tiled and giving it the matching number.
+export let KIND_ELDER: i32 = 0
+export let KIND_MERCHANT: i32 = 1
+export let KIND_SMITH: i32 = 2
+export let KIND_INNKEEP: i32 = 3
+export let KIND_GUARD: i32 = 4
+export let KIND_KID: i32 = 5
+export let KIND_FISHER: i32 = 6
+export let KIND_BAKER: i32 = 7
+export let KIND_SIGN: i32 = 8
+export let KIND_DOOR: i32 = 9
+// Not a townsperson: the cell the hero arrives in. It is a spawn like any other so that the level
+// file says where you start, instead of a table of coordinates kept in step with it by hand.
+export let KIND_PLAYER: i32 = 10
+
+// npcs.png holds four idle frames per townsperson, in the same order as the kinds above, then the
+// kid's six-frame walk cycle. Portraits sit at the matching index in ui32.png.
+export let NPC_IDLE_FRAMES: i32 = 4
+export let KID_WALK: i32 = 32
+export let KID_WALK_FRAMES: i32 = 6
+
+// ui32.png layout, from the generator: portraits, then the ware icons, then the cursor.
+export let WARE_ICON0: i32 = 8
+export let CURSOR_FRAME: i32 = 20
+
+export function npcFrame(kind) { return kind * NPC_IDLE_FRAMES }
+export function npcPortrait(kind) { return kind }
+
+// ── what everybody says ──────────────────────────────────────────────────────────────────────────
+// Multi-line arrays become multi-page dialog boxes; `packages/dialog` pages them on A.
+export const LINES = [
+  ["Oakhollow was three farms and a well, once.",
+   "Then someone dug too deep under the square,",
+   "and we have been building downwards ever since.",
+   "Mind the hatches, traveller."],                                   // elder
+  ["Everything I have, I carried up that ladder.",
+   "So mind the prices."],                                            // merchant
+  ["Down here the forge never goes out.",
+   "Steel first. Conversation after."],                               // smith
+  ["Room's upstairs, ale's downstairs.",
+   "Rest a while — it's on the house today."],                        // innkeep
+  ["Nobody goes over the roofs but me.",
+   "...and you, apparently. Fine. Don't fall."],                      // guard
+  ["I can get from the docks to the bell tower",
+   "without touching the square once!",
+   "Bet you can't."],                                                 // kid
+  ["The water under the town is warmer than the sea.",
+   "Something down there is still burning."],                         // fisher
+  ["Bread's out of the oven at dawn.",
+   "You're early. Or very late."],                                    // baker
+]
+
+// The first sign stands where you arrive, and carries the controls — a town would put its notice
+// board at the gate anyway, and it beats an opening text box the player has to dismiss before the
+// game will start moving.
+export const SIGN_LINES = [
+  ["OAKHOLLOW. Population: fewer every winter.",
+   "D-PAD walk · B run · A jump · A talk",
+   "UP ladders · DOWN crouch, B+DOWN slide",
+   "Fall past a ledge to grab it."],
+  ["EAST: the guard house and the lookout.", "WEST: the square, the inn, the forge below."],
+  ["NOTICE: the rooftop planks are for", "the watch only.", "(Somebody has crossed this out.)"],
+]
+
+// ── the shops ────────────────────────────────────────────────────────────────────────────────────
+// `packages/shop` takes stock as plain objects and asks the GAME for gold, bag and the buy/sell
+// verdict — so the economy below is the whole of it, and the shop UI never knows what a coin is.
+export const STORE_STOCK = [
+  { id: 0, name: "Tonic", icon: WARE_ICON0 + 0, price: 24, desc: "Restores a few hearts. Tastes of pine." },
+  { id: 1, name: "Vale Map", icon: WARE_ICON0 + 1, price: 60, desc: "Every road out of Oakhollow. Both of them." },
+  { id: 2, name: "Hot Meal", icon: WARE_ICON0 + 2, price: 12, desc: "Whatever the pot has. Filling." },
+  { id: 3, name: "Boots", icon: WARE_ICON0 + 3, price: 90, desc: "Stitched for ladders and wet stone." },
+  { id: 4, name: "Ring", icon: WARE_ICON0 + 4, price: 140, desc: "Copper. The shine is honest, at least." },
+  { id: 5, name: "Charm", icon: WARE_ICON0 + 5, price: 200, desc: "Wards off whatever is under the town." },
+]
+
+export const FORGE_STOCK = [
+  { id: 6, name: "Knife", icon: WARE_ICON0 + 6, price: 45, desc: "Short, quick, and honest about it." },
+  { id: 7, name: "Star", icon: WARE_ICON0 + 7, price: 70, desc: "Throwing steel. Comes back if you're lucky." },
+  { id: 8, name: "Mail", icon: WARE_ICON0 + 8, price: 260, desc: "Scale over leather. Heavy on a ladder." },
+  { id: 9, name: "Helm", icon: WARE_ICON0 + 9, price: 180, desc: "Iron. Dents instead of your head." },
+  { id: 10, name: "Blades", icon: WARE_ICON0 + 10, price: 320, desc: "The watch carry these. You did not hear it from me." },
+  { id: 11, name: "Arrows", icon: WARE_ICON0 + 11, price: 30, desc: "A bundle of twelve. Fletched with gull." },
+]
+
+// ── the purse ────────────────────────────────────────────────────────────────────────────────────
+// A tiny economy, deliberately: the point is to show what `shopOpen` asks of a game, not to be one.
+// `bag` is parallel arrays rather than an array of objects because the shop re-reads it on every
+// render and a tish array of objects is a boxed allocation per row per frame.
+let GOLD: i32 = 300
+let bagIds = []
+let bagQty = []
+
+export function gold() { return GOLD }
+export function addGold(n) { GOLD = GOLD + n }
+
+function wareById(id) {
+  let si = 0
+  while (si < STORE_STOCK.length) {
+    if (STORE_STOCK[si].id === id) { return STORE_STOCK[si] }
+    si = si + 1
+  }
+  let fi = 0
+  while (fi < FORGE_STOCK.length) {
+    if (FORGE_STOCK[fi].id === id) { return FORGE_STOCK[fi] }
+    fi = fi + 1
+  }
+  return null
+}
+
+function bagSlot(id) {
+  let bi = 0
+  while (bi < bagIds.length) {
+    if (bagIds[bi] === id) { return bi }
+    bi = bi + 1
+  }
+  return 0 - 1
+}
+
+// What the SELL tab lists: one row per item actually held, priced at half what it cost. Rebuilt on
+// demand rather than kept as state, so buying and selling only ever touch the two flat arrays.
+export function bag() {
+  let out = []
+  let bi = 0
+  while (bi < bagIds.length) {
+    if (bagQty[bi] > 0) {
+      let w = wareById(bagIds[bi])
+      if (w !== null) {
+        out.push({ id: w.id, name: w.name, icon: w.icon, price: w.price / 2, qty: bagQty[bi], desc: w.desc })
+      }
+    }
+    bi = bi + 1
+  }
+  return out
+}
+
+// Return 1 to accept the transaction, 0 to refuse it — the shop reads the answer and either plays
+// the sale or leaves the picker alone, so a game can decline without the UI having to know why.
+export function onBuy(id, qty, cost) {
+  if (cost > GOLD) { return 0 }
+  GOLD = GOLD - cost
+  let slot = bagSlot(id)
+  if (slot < 0) {
+    bagIds.push(id)
+    bagQty.push(qty)
+  } else {
+    bagQty[slot] = bagQty[slot] + qty
+  }
+  return 1
+}
+
+export function onSell(id, qty, gain) {
+  let slot = bagSlot(id)
+  if (slot < 0) { return 0 }
+  if (bagQty[slot] < qty) { return 0 }
+  bagQty[slot] = bagQty[slot] - qty
+  GOLD = GOLD + gain
+  return 1
+}

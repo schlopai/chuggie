@@ -1,0 +1,27 @@
+{
+  "name": "warheads",
+  "private": true,
+  "scripts": {
+    "assets": "python3 ../../scripts/gen_warheads_tables.py && python3 ../../scripts/gen_warheads.py",
+    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
+    "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png 900",
+    "link": "npm run build && ../../scripts/link.sh \"$npm_package_name.gba\"",
+    "verify": "./verify.sh",
+    "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
+  },
+  "devDependencies": {
+    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
+    }
+  },
+  "description": "Warheads: turn-based artillery across a scrolling star field, with three ship classes, nine weapons and gravity that curves every shot. Playable against the CPU or a second console over the link cable."
+}

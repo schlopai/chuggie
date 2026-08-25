@@ -1,0 +1,124 @@
+// fx-demo — Ninja Adventure FX sprites + GBA PSG audio.
+// Left/Right picks an effect; A (or auto-timer) plays it once with a matching SFX.
+// A quiet chip bed runs underneath so music + one-shot FX share the four PSG channels.
+import { slash } from "sheet32:../../../assets/ninja-adventure/FX/Attack/SlashCurved/SpriteSheet.png"
+import { circ } from "sheet32:../../../assets/ninja-adventure/FX/Attack/CircularSlash/SpriteSheet.png"
+import { cutx } from "sheet32:../../../assets/ninja-adventure/FX/Attack/CutX/SpriteSheet.png"
+import { claw } from "sheet32:../../../assets/ninja-adventure/FX/Attack/Claw/SpriteSheet.png"
+import { cut } from "sheet32:../../../assets/ninja-adventure/FX/Attack/Cut/SpriteSheet.png"
+import { ring } from "sheet32:../../../assets/ninja-adventure/FX/Magic/Circle/SpriteSheetOrange.png"
+import { ice } from "sheet32:../../../assets/ninja-adventure/FX/Elemental/Ice/SpriteSheet.png"
+import { body } from "font:../../../assets/fonts/tinypixel.ttf@7"
+import { title } from "font:../../../assets/fonts/peaberry.ttf@16"
+import { bed } from "chip:../../akari/assets/audio/town.chip"
+import {
+  backdrop, text_draw,
+  sprite_new, sprite_set_sheet, sprite_set_frame, sprite_set_pos, sprite_set_visible,
+  frame, key_pressed, chip_play,
+} from "cargo:tish_agb"
+import {
+  chipSlash, chipWhoosh, chipHit, chipChime, chipThrow,
+} from "../../../packages/chipsfx"
+
+let BTN_A: i32 = 0
+let BTN_LEFT: i32 = 8
+let BTN_RIGHT: i32 = 9
+
+// Each entry: sheet, frame count, ticks-per-frame, label, sfx id (see playSfx).
+// Attack / magic sheets are 32×32 one-shots (4 frames). Ice is a 10-frame 32×32 strip.
+let FX = [
+  { sheet: slash, frames: 4, rate: 4, name: "Slash curved", sfx: 0 },
+  { sheet: circ, frames: 4, rate: 4, name: "Circular slash", sfx: 1 },
+  { sheet: cutx, frames: 4, rate: 4, name: "Cut X", sfx: 2 },
+  { sheet: claw, frames: 4, rate: 4, name: "Claw", sfx: 0 },
+  { sheet: cut, frames: 4, rate: 4, name: "Cut", sfx: 0 },
+  { sheet: ring, frames: 4, rate: 5, name: "Magic ring", sfx: 3 },
+  { sheet: ice, frames: 10, rate: 4, name: "Ice shard", sfx: 4 },
+]
+
+let N = FX.length
+let CX: i32 = 104  // (240 - 32) / 2
+let CY: i32 = 64
+
+let S = {
+  idx: 0,
+  frame: 0,
+  tick: 0,
+  playing: 0,
+  idle: 0,
+  sp: -1,
+}
+
+backdrop(0x0C1020)
+chip_play(bed)
+
+S.sp = sprite_new(slash)
+sprite_set_pos(S.sp, CX, CY)
+sprite_set_visible(S.sp, 0)
+
+function playSfx(id) {
+  if (id === 0) { chipSlash() }
+  if (id === 1) { chipWhoosh() }
+  if (id === 2) { chipHit() }
+  if (id === 3) { chipChime() }
+  if (id === 4) { chipThrow() }
+}
+
+function paintHud() {
+  let fx = FX[S.idx]
+  text_draw(title, 0, 8, 6, "FX DEMO", 0xE8E0D0, 0x201810)
+  text_draw(body, 1, 8, 28, fx.name, 0x8CE0FF)
+  text_draw(body, 2, 8, 40, (S.idx + 1) + "/" + N, 0x667788)
+  text_draw(body, 3, 8, 148, "< > select   A replay", 0x556677)
+}
+
+function trigger() {
+  let fx = FX[S.idx]
+  sprite_set_sheet(S.sp, fx.sheet, 0)
+  sprite_set_pos(S.sp, CX, CY)
+  sprite_set_visible(S.sp, 1)
+  S.frame = 0
+  S.tick = 0
+  S.playing = 1
+  S.idle = 0
+  playSfx(fx.sfx)
+}
+
+function select(next) {
+  if (next < 0) { next = N - 1 }
+  if (next >= N) { next = 0 }
+  S.idx = next
+  paintHud()
+  trigger()
+}
+
+paintHud()
+trigger()
+
+while (true) {
+  if (key_pressed(BTN_LEFT) > 0) { select(S.idx - 1) }
+  if (key_pressed(BTN_RIGHT) > 0) { select(S.idx + 1) }
+  if (key_pressed(BTN_A) > 0) { trigger() }
+
+  if (S.playing > 0) {
+    let fx = FX[S.idx]
+    S.tick = S.tick + 1
+    if (S.tick >= fx.rate) {
+      S.tick = 0
+      S.frame = S.frame + 1
+      if (S.frame >= fx.frames) {
+        sprite_set_visible(S.sp, 0)
+        S.playing = 0
+        S.idle = 0
+      } else {
+        sprite_set_frame(S.sp, S.frame)
+      }
+    }
+  } else {
+    // Auto-replay so the demo self-plays headless.
+    S.idle = S.idle + 1
+    if (S.idle >= 90) { trigger() }
+  }
+
+  frame()
+}

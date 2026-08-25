@@ -1,0 +1,6 @@
+// Variant: FLOOR + packages/ui only.
+import { log, frame } from 'cargo:tish_agb'
+import { uiInit } from '../../../packages/ui'
+
+log("BB ui fn=" + (typeof uiInit))
+while (true) { frame() }

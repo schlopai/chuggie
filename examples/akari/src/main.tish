@@ -1,0 +1,648 @@
+// AKARI — a top-down action-RPG on the Ninja Adventure pack, built entirely from tish components on the
+// chuggie-engine engine. The whole game is here: a title screen, an opening cutscene, the town of Willow
+// Vale, and the Hollow Shrine dungeon with real-time sword combat, chase-AI enemies, a boss, and a
+// heart-container upgrade. Both areas are Tiled maps baked into ROM (`scene:`), streamed as the
+// camera scrolls; entities are spawned from each map's object layer and given a component by kind.
+//
+// Flow:  title → build Willow Vale → opening cutscene (the Elder gives you the blade) → play.
+// Walk into a house doorway to enter its interior; the cave north of the torii warps to the shrine.
+//
+// Hero uses `sheet64:` (64×64, body centered for blade overhang). NPCs/items stay `sheet32:`.
+// Sprite Size Debug imports sheet: / sheet32 / sheet64 debug sheets for side-by-side comparison.
+import { hero } from 'sheet64:../assets/hero.png'
+import { hero16 } from 'sheet:../assets/debug-hero16.png'
+import { hero32 } from 'sheet32:../assets/debug-hero32.png'
+import { hero64 } from 'sheet64:../assets/debug-hero64.png'
+import { slimeSheet } from 'sheet32:../assets/slime.png'
+import { batSheet } from 'sheet32:../assets/bat.png'
+import { skeletonSheet } from 'sheet32:../assets/skeleton.png'
+import { bossSheet } from 'sheet32:../assets/boss.png'
+import { elderSheet } from 'sheet32:../assets/elder.png'
+import { womanSheet } from 'sheet32:../assets/woman.png'
+import { merchantSheet } from 'sheet32:../assets/merchant.png'
+import { senseiSheet } from 'sheet32:../assets/sensei.png'
+import { heartsSheet } from 'sheet32:../assets/hearts.png'
+import { itemsSheet } from 'sheet32:../assets/items.png'
+import { town } from 'scene:../assets/town.tmj'
+import { shrine } from 'scene:../assets/shrine.tmj'
+import { house0 } from 'scene:../assets/house0.tmj'
+import { house1 } from 'scene:../assets/house1.tmj'
+import { house2 } from 'scene:../assets/house2.tmj'
+import { house3 } from 'scene:../assets/house3.tmj'
+import { sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_hud, backdrop, sprite_clear, bg_clear, key_pressed, key_live, ui_clear } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { arrowFont } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { faces } from 'sheet32:../assets/faces32.png'
+import { titleBg } from 'background:../assets/title-bg.png'
+import { titleScreen } from '../../../packages/title'
+import { mount, create, loadScene, loadSceneRom, setupHearts, updateHearts, mapSpawnCount, mapSpawn, step, hudText, entityApi, entity, entityDespawn, entityX, entityY } from '../../../packages/engine'
+import { uiInit } from '../../../packages/ui'
+import { dialogInit, dialogSay, dialogActive, dialogUpdate, dialogSpeed, dialogSpeedGet } from '../../../packages/dialog'
+import { cutWait, cutSay, cutWalk, cutFace } from '../../../packages/cutscene'
+import * as components from './components'
+import { Player, Npc, Boss, Chest, Heart, TAG_PLAYER, TAG_ENEMY, PLAYER_SPEED,
+         LINES_ELDER, LINES_WOMAN, LINES_MERCHANT, LINES_SENSEI } from './components'
+import { gameState } from './state'
+import { playAreaMusic, musicOn, setMusicOn, sfxOn, setSfxOn } from './audio'
+import { FACE_ELDER, FACE_WOMAN, FACE_MERCHANT, FACE_SENSEI, FACE_CURSOR, PROMPT_A, PROMPT_B } from './faces'
+import { initSave, hasSave, writeSave, readSave, resetGameState, formatSaveDetail } from './save'
+import { pauseMenu, pauseWarmLater, pauseWarmPump, pauseBlocked, optionsMenu, fileSelectMenu, fileWarm } from '../../../packages/menu'
+
+// Spawn kinds — must match scripts/gen_akari_maps.py.
+let K_PLAYER: i32 = 0
+let K_ELDER: i32 = 20
+let K_WOMAN: i32 = 21
+let K_MERCHANT: i32 = 22
+let K_SENSEI: i32 = 23
+let K_SLIME: i32 = 30
+let K_BAT: i32 = 31
+let K_SKELETON: i32 = 32
+let K_BOSS: i32 = 40
+let K_CHEST: i32 = 12
+let K_HEART: i32 = 13
+
+let SCENE_TOWN: i32 = 0
+let SCENE_SHRINE: i32 = 1
+let SCENE_HOUSE0: i32 = 2
+let SCENE_HOUSE1: i32 = 3
+let SCENE_HOUSE2: i32 = 4
+let SCENE_HOUSE3: i32 = 5
+
+// Where to stand in town after leaving a building / the shrine (set when you enter so the exit
+// drops you just outside the door you came through).
+let warpExitCol: i32 = 18
+let warpExitRow: i32 = 5
+
+// The live entities the main loop needs to reach across a frame (the player for warps/HUD, the
+// elder for the opening cutscene). Refreshed by `populate` on every scene load.
+let sceneReg = { player: null, elder: null }
+
+mount(components)
+
+// ── entity factory: give a fresh entity its sprite + components for a spawn kind ──
+// A top-down body centred in its tile, with its sprite CELL centred on the hitbox. `cell` is the
+// sheet's cell size — 64 for the hero (`sheet64:`, room for the blade to overhang), 32 for the
+// 32×32 monster sheets. Getting `cell` wrong draws the art (cell-hero)/2 px off its own hitbox:
+// with the hero's 64 used for a 32px monster, every enemy appeared a full tile up-left of the box
+// that actually collides, so hits and contact damage landed on empty ground.
+let HERO_SPRITE: i32 = 64
+let MON_SPRITE: i32 = 32
+function setupBody(e, col, row, box, spd, cell) {
+  let pad = (16 - box) / 2
+  let off = (cell - box) / 2
+  e.setPos(col * 16 + pad, row * 16 + pad)
+  e.topdown(box, box)
+  e.spriteOffset(0 - off, 0 - off)
+  e.moveSpeed(spd)
+}
+function npc(e, col, row, sheet, lines, name, face) {
+  e.setPos(col * 16 + 1, row * 16 + 1)
+  e.setSprite(sprite_new(sheet))
+  e.spriteOffset(-9, -9)        // 32 sprite over the Npc component's 14 collider
+  e.animate(2, 30)              // gentle idle bob (frames 0-1, slow)
+  e.behave(Npc, { lines: lines, name: name, face: face })
+}
+// An enemy with NATIVE chase AI (no per-frame tish callback): `stride` = the sheet's cols per facing
+// row (5 = directional idle+4walk), or 0 for a non-directional flap loop over `flap` frames (a bat).
+function enemy(e, col, row, sheet, hp, spd, dmg, aggro, stride, flap, animSpeed) {
+  e.setSprite(sprite_new(sheet))
+  setupBody(e, col, row, 12, spd, MON_SPRITE)
+  e.setHealth(hp, 12)          // short i-frames so a sword combo lands
+  e.setTag(TAG_ENEMY)
+  e.setHurt(dmg, TAG_PLAYER, false)   // rams the player on contact
+  e.chase(aggro, stride, flap, animSpeed)
+}
+
+// Shrine rooms are 15×10 tiles. Only the current room's entities are live — others stay in
+// `deferredSpawns` until the room camera arrives, and leaving a room despawns + re-parks them.
+// Loading all four rooms at once (or accumulating as you climb) OOMs the GBA heap.
+let deferredSpawns = []
+let roomLive = []          // { e, k, col, row } for non-player entities in the active shrine room
+let shrineRoomBase = -1
+
+function roomBase(row) {
+  return row - (row % 10)
+}
+
+function spawnKind(kind, k, col, row, control) {
+  let e = create()
+  if (k === K_PLAYER) {
+    e.setSprite(sprite_new(hero))
+    setupBody(e, col, row, 12, PLAYER_SPEED, HERO_SPRITE)
+    e.setHealth(gameState.maxHp)
+    if (gameState.loadHp > 0) {
+      if (gameState.loadHp < gameState.maxHp) {
+        e.hurt(gameState.maxHp - gameState.loadHp)
+      }
+      gameState.loadHp = 0
+    }
+    e.setTag(TAG_PLAYER)
+    gameState.playerId = e.id
+    gameState.entryX = col * 16 + 2
+    gameState.entryY = row * 16 + 2
+    gameState.entryCol = col
+    gameState.entryRow = row
+    if (control) { e.behave(Player, {}) }
+    sceneReg.player = e.id
+    if (kind === SCENE_SHRINE) { e.roomFollow(15, 10) } else { e.follow() }
+  } else if (k === K_ELDER) { npc(e, col, row, elderSheet, LINES_ELDER, "Elder", FACE_ELDER); sceneReg.elder = e.id }
+  else if (k === K_WOMAN) { npc(e, col, row, womanSheet, LINES_WOMAN, "Mika", FACE_WOMAN) }
+  else if (k === K_MERCHANT) { npc(e, col, row, merchantSheet, LINES_MERCHANT, "Merchant", FACE_MERCHANT) }
+  else if (k === K_SENSEI) { npc(e, col, row, senseiSheet, LINES_SENSEI, "Sensei", FACE_SENSEI) }
+  else if (k === K_SLIME) { enemy(e, col, row, slimeSheet, 2, 0.8, 1, 200, 0, 4, 10) }
+  else if (k === K_BAT) { enemy(e, col, row, batSheet, 2, 1.1, 1, 240, 0, 2, 6) }
+  else if (k === K_SKELETON) { enemy(e, col, row, skeletonSheet, 4, 1.0, 1, 200, 5, 0, 7) }
+  else if (k === K_BOSS) {
+    e.setSprite(sprite_new(bossSheet))
+    setupBody(e, col, row, 14, 0.7, MON_SPRITE)
+    e.setHealth(14, 20)
+    e.setTag(TAG_ENEMY)
+    e.setHurt(2, TAG_PLAYER, false)
+    e.chase(300, 0, 6, 8)
+    e.behave(Boss, {})
+  } else if (k === K_CHEST) {
+    e.setPos(col * 16 + 1, row * 16 + 1)
+    e.setSprite(sprite_new(itemsSheet))
+    e.setCollider(14, 14)
+    e.spriteOffset(-9, -9)
+    e.setFrame(2)
+    e.behave(Chest, {})
+  } else if (k === K_HEART) {
+    e.setPos(col * 16 + 2, row * 16 + 2)
+    e.setSprite(sprite_new(itemsSheet))
+    e.setCollider(12, 12)
+    e.spriteOffset(-10, -10)
+    e.setFrame(0)
+    e.behave(Heart, {})
+  }
+  // Track shrine mobs/props so we can unload them when the room camera leaves. The ID, not the wrapper:
+  // wrappers are pooled, so a stored one names whatever entity borrowed the slot next — parking room 2
+  // through `s.e.despawn()` despawned the PLAYER and the game simply stopped responding.
+  if (kind === SCENE_SHRINE) {
+    if (k !== K_PLAYER) {
+      roomLive.push({ id: e.id, k: k, col: col, row: row })
+    }
+  }
+}
+
+function parkRoomLive() {
+  let i = 0
+  while (i < roomLive.length) {
+    let s = roomLive[i]
+    // Safe if already dead (despawn is a no-op on a stale id). Re-queue so revisiting works.
+    entityDespawn(s.id)
+    deferredSpawns.push({ k: s.k, col: s.col, row: s.row })
+    i = i + 1
+  }
+  roomLive = []
+}
+
+function spawnDeferredRoom(base) {
+  let left = []
+  let i = 0
+  while (i < deferredSpawns.length) {
+    let s = deferredSpawns[i]
+    if (roomBase(s.row) === base) {
+      spawnKind(SCENE_SHRINE, s.k, s.col, s.row, false)
+    } else {
+      left.push(s)
+    }
+    i = i + 1
+  }
+  deferredSpawns = left
+}
+
+function enterShrineRoom(base) {
+  if (base === shrineRoomBase) { return }
+  parkRoomLive()
+  shrineRoomBase = base
+  spawnDeferredRoom(base)
+}
+
+// Build every entity for the freshly-loaded scene. `pcol`/`prow` (>= 0) override the player's spawn
+// tile — used when arriving through a warp; -1 uses the map's own player spawn. `control` attaches
+// the Player component (held back during the opening cutscene).
+function populate(kind, pcol, prow, control) {
+  deferredSpawns = []
+  roomLive = []
+  let n = mapSpawnCount()
+  let prefRow = prow
+  if (prefRow < 0) {
+    let j = 0
+    while (j < n) {
+      let sp0 = mapSpawn(j)
+      if (sp0.kind === K_PLAYER) { prefRow = sp0.row; break }
+      j = j + 1
+    }
+  }
+  if (prefRow < 0) { prefRow = 0 }
+  shrineRoomBase = roomBase(prefRow)
+
+  let i = 0
+  while (i < n) {
+    let sp = mapSpawn(i)
+    let k = sp.kind
+    let col = sp.col
+    let row = sp.row
+    if (k === K_PLAYER) {
+      if (pcol >= 0) { col = pcol; row = prow }
+    } else if (kind === SCENE_SHRINE) {
+      if (roomBase(row) !== shrineRoomBase) {
+        deferredSpawns.push({ k: k, col: col, row: row })
+        i = i + 1
+        continue
+      }
+    }
+    spawnKind(kind, k, col, row, control)
+    i = i + 1
+  }
+  // Rebuild the HUD (the sprite arena was cleared on scene load). Sprites are 32px, so the heart art
+  // sits at each cell's top-left with an 18px gap (no overlap); prime it full so it isn't drawn empty
+  // before the Player component starts ticking it.
+  setupHearts(heartsSheet, gameState.maxHp / 2, 8, 6, 18)
+  updateHearts(gameState.maxHp, 2)
+}
+
+// Tear down the current area and build another, placing the player at (pcol, prow).
+function enterScene(kind, pcol, prow) {
+  gameState.scene = kind
+  loadScene(() => {
+    if (kind === SCENE_TOWN) { loadSceneRom(town) }
+    else if (kind === SCENE_SHRINE) { loadSceneRom(shrine) }
+    else if (kind === SCENE_HOUSE0) { loadSceneRom(house0) }
+    else if (kind === SCENE_HOUSE1) { loadSceneRom(house1) }
+    else if (kind === SCENE_HOUSE2) { loadSceneRom(house2) }
+    else { loadSceneRom(house3) }
+    populate(kind, pcol, prow, true)
+  })
+  // Swap BGM after the scene is up — mixer alloc during loadScene was tipping shrine entry OOM.
+  if (kind === SCENE_SHRINE) { playAreaMusic(1) }
+  else { playAreaMusic(0) }
+  // Queue the pause chrome; the game loop rasterizes it a line per frame. Start then only flips
+  // visibility — UI-canvas DynamicTile rebuilds were ~0.6s+ per open.
+  pauseWarmLater({
+    title: "PAUSE",
+    status: ["Hearts 0/0", "Gems 0"],
+    items: [{ label: "Resume" }, { label: "Options" }, { label: "Save" }, { label: "Title" }],
+    prompts: [{ label: "Select" }, { label: "Back" }],
+  })
+}
+
+// Pause → Options. Its own retained sprite-text slots (base 64, clear of pause at 24 and file select), so it
+// too is a visibility flip after the first open. `set` runs as the player flips a row, which is the point:
+// muting the BGM is audible immediately, with no apply step.
+let TEXT_CPS: i32[] = [1, 2, 4]
+function textSpeedIndex() {
+  let cps = dialogSpeedGet()
+  let i = 0
+  while (i < TEXT_CPS.length) {
+    if (TEXT_CPS[i] >= cps) { return i }
+    i = i + 1
+  }
+  return TEXT_CPS.length - 1
+}
+function showOptions() {
+  optionsMenu({
+    title: "OPTIONS",
+    rows: [
+      { label: "Music", get: () => musicOn(), set: (v) => setMusicOn(v) },
+      { label: "Sound", get: () => sfxOn(), set: (v) => setSfxOn(v) },
+      {
+        label: "Text", choices: ["Slow", "Normal", "Fast"],
+        get: () => textSpeedIndex(), set: (v) => dialogSpeed(TEXT_CPS[v]),
+      },
+      { label: "Back", onSelect: () => {} },
+    ],
+    prompts: [{ label: "Change" }, { label: "Back" }],
+  })
+}
+
+// ── warps: a tile the player can step onto to travel between areas ──
+function pxTile(px) {
+  let frac = px % 1          // entity positions are fixed-point → drop the sub-pixel part first
+  let ipx = px - frac
+  let m = ipx % 16
+  return (ipx - m) / 16
+}
+// Remember where to drop the player when they next return to town (just outside the door).
+function setTownExit(col, row) {
+  warpExitCol = col
+  warpExitRow = row
+}
+// Returns the destination scene for the player's current tile, or -1 for none.
+// Town house doors and the cave mouth enter; house/shrine south doorways return to town.
+function warpAt(scene, col, row) {
+  if (scene === SCENE_TOWN) {
+    if (col === 18 && row === 3) { setTownExit(18, 5); return SCENE_SHRINE }   // cave mouth
+    if (col === 6 && row === 20) { setTownExit(6, 21); return SCENE_HOUSE0 }
+    if (col === 32 && row === 19) { setTownExit(32, 20); return SCENE_HOUSE1 }
+    if (col === 11 && row === 25) { setTownExit(11, 26); return SCENE_HOUSE2 }
+    if (col === 30 && row === 26) { setTownExit(30, 27); return SCENE_HOUSE3 }
+  } else if (scene === SCENE_SHRINE) {
+    if (row === 38 && col >= 6 && col <= 8) { return SCENE_TOWN }
+  } else {
+    // House interiors: south doorway (row 9, cols 6-8) leads back outside.
+    if (row === 9 && col >= 6 && col <= 8) { return SCENE_TOWN }
+  }
+  return -1
+}
+
+// The opening cutscene: the Elder crosses the plaza, warns of the blight, and hands over the blade.
+// A plain sequence of blocking calls — no step array (an array-returning fn hangs the GBA codegen).
+function opening() {
+  let elder = sceneReg.elder                    // an id: wrappers are pooled and must not be held (see engine.tish)
+  let face = { portrait: FACE_ELDER, portraitSize: 32 }
+  cutWait(30)
+  // Nameless NARRATION — the Elder hasn't crossed the plaza yet, so no name/portrait here (he walks in
+  // on the cutWalk below, and speaks with his name from the next line on).
+  cutSay(["Willow Vale grows quiet... too quiet."], "")
+  cutWalk(elder, 19 * 16 + 1, 14 * 16 + 1, 64, 0)
+  cutFace(elder, 0)
+  cutSay(["A shadow blight seeps from the old Hollow Shrine.",
+          "It creeps nearer with every fallen night."], "Elder", face)
+  cutSay(["Take this blade, young one.",
+          "Press A to speak — or to strike, when none stand before you.",
+          "Press B to throw a ninja star."], "Elder", face)
+  gameState.hasSword = true
+  cutSay(["The cave north of the torii will lead you in.",
+          "Cleanse the shrine, and bring back the light."], "Elder", face)
+  gameState.openingDone = true
+}
+
+// ── the persistent game loop: step the world, resolve warps, grant the boss reward ──
+// Returns when the player quits to the title screen from the pause menu.
+function gameLoop() {
+  let latched = false
+  let quit = false
+  let startHeld = 0   // edge-latch for Start (key_live — see tish-agb key_live docs)
+  while (quit === false) {
+    step()
+    // Rasterize one queued pause line per frame — keeps the warm off the area-load clock.
+    pauseWarmPump()
+
+    // Start → pause (blocked while a dialog box owns input). Use key_live + latch so a tap
+    // isn't missed across the world_step/frame boundary.
+    let startDown = 0
+    if (key_live(3) > 0) { startDown = 1 }
+    let startEdge = 0
+    if (startDown > 0) { if (startHeld === 0) { startEdge = 1 } }
+    startHeld = startDown
+    if (pauseBlocked() === 0) {
+      if (startEdge > 0) {
+        let p = sceneReg.player
+        let hearts = (entity(p).hp() + 1) / 2
+        let maxH = gameState.maxHp / 2
+        let status = [
+          "Hearts " + hearts + "/" + maxH,
+          "Gems " + gameState.gems,
+        ]
+        let choice = pauseMenu({
+          title: "PAUSE",
+          status: status,
+          items: [
+            { label: "Resume" },
+            { label: "Options" },
+            { label: "Save" },
+            { label: "Title" },
+          ],
+          prompts: [
+            { frame: PROMPT_A, label: "Select" },
+            { frame: PROMPT_B, label: "Back" },
+          ],
+        })
+        startHeld = 1   // ignore Start still held from opening/closing the menu
+        if (choice === 1) {
+          showOptions()
+        } else if (choice === 2) {
+          let tc = pxTile(entityX(p) + 6)
+          let tr = pxTile(entityY(p) + 6)
+          if (writeSave(entity(p).hp(), tc, tr) > 0) {
+            dialogSay(["Game saved."])
+            while (dialogActive()) { dialogUpdate(); step() }
+          } else {
+            dialogSay(["Save failed."])
+            while (dialogActive()) { dialogUpdate(); step() }
+          }
+        } else if (choice === 3) {
+          quit = true
+        }
+      }
+    }
+
+    // Shrine: unload the old room and spawn the new one when the room camera advances.
+    if (gameState.scene === SCENE_SHRINE) {
+      let pr = pxTile(entityY(sceneReg.player) + 6)
+      enterShrineRoom(roomBase(pr))
+    }
+
+    // Boss cleared → heart container (one heart of max HP + a full heal) and a victory line.
+    if (gameState.bossDead && !gameState.bossHandled) {
+      gameState.bossHandled = true
+      gameState.maxHp = gameState.maxHp + 2
+      entity(sceneReg.player).setHealth(gameState.maxHp)
+      dialogSay(["The shadow breaks — the shrine is cleansed!",
+                 "A heart container! Your vessel grows.",
+                 "Return to Willow Vale when you are ready."])
+    }
+
+    // Warp when the player steps onto a travel tile (latched so it fires once per entry).
+    // `entityX`/`entityY` read the native transform: `sceneReg.player` is an ID, because entity wrappers
+    // are pooled and a stored one would be pointing at whatever borrowed the slot next.
+    let p = sceneReg.player
+    let tc = pxTile(entityX(p) + 6)
+    let tr = pxTile(entityY(p) + 6)
+    let dest = warpAt(gameState.scene, tc, tr)
+    if (dest >= 0) {
+      if (!latched) {
+        latched = true
+        if (dest === SCENE_TOWN) { enterScene(SCENE_TOWN, warpExitCol, warpExitRow) }
+        else if (dest === SCENE_SHRINE) { enterScene(SCENE_SHRINE, 7, 37) }
+        else { enterScene(dest, 7, 7) }   // house interiors: centre, just inside the exit
+      }
+    } else {
+      latched = false
+    }
+  }
+}
+
+// ── DEBUG: attack-frame inspector ──────────────────────────────────────────────
+// Lays out all 16 hero attack frames (4 facings × 4 swing frames) as HUD sprites so the composited
+// katana seating can be inspected exactly as the GBA renders them (palette quantization and all).
+// The hero sheet is 9 cols [idle, walk0..3, attack0..3] × 4 rows (facing D/U/L/R), so an attack frame
+// is  row * 9 + (5 + swingFrame).  Reached from the title menu's "Attack Debug" option.
+// 64px sprites can't grid 4 facings x 4 frames on a 240x160 screen (4x64=256 in both axes),
+// so this pages one facing at a time; L/R cycles DN/UP/LF/RT.
+function debugAttackGrid() {
+  sprite_clear(); bg_clear()
+  backdrop(0x202834)
+  let labels = ["DN", "UP", "LF", "RT"]
+  let BTN_LEFT = 8
+  let BTN_RIGHT = 9
+  let d = 0
+
+  hudText(0, 4, 4, "Attack Debug (64px)  L/R: facing")
+  hudText(1, 100, 92, labels[d])
+  hudText(2, 4, 106, "f0        f1        f2        f3")
+
+  let s0 = sprite_new(hero)
+  let s1 = sprite_new(hero)
+  let s2 = sprite_new(hero)
+  let s3 = sprite_new(hero)
+  sprite_set_hud(s0, 1)
+  sprite_set_hud(s1, 1)
+  sprite_set_hud(s2, 1)
+  sprite_set_hud(s3, 1)
+  sprite_set_pos(s0, 4, 20)
+  sprite_set_pos(s1, 60, 20)
+  sprite_set_pos(s2, 116, 20)
+  sprite_set_pos(s3, 172, 20)
+  sprite_set_frame(s0, d * 9 + 5)
+  sprite_set_frame(s1, d * 9 + 6)
+  sprite_set_frame(s2, d * 9 + 7)
+  sprite_set_frame(s3, d * 9 + 8)
+
+  while (true) {
+    let moved = 0
+    if (key_pressed(BTN_LEFT) > 0) { d = (d + 3) % 4; moved = 1 }
+    if (key_pressed(BTN_RIGHT) > 0) { d = (d + 1) % 4; moved = 1 }
+    if (moved > 0) {
+      sprite_set_frame(s0, d * 9 + 5)
+      sprite_set_frame(s1, d * 9 + 6)
+      sprite_set_frame(s2, d * 9 + 7)
+      sprite_set_frame(s3, d * 9 + 8)
+      hudText(1, 100, 92, labels[d])
+    }
+    step()
+  }
+}
+
+// ── DEBUG: 16 / 32 / 64 sprite size inspector ──────────────────────────────────
+// Same idle (or attack-f1) at 16 / 32 / 64 px side by side (true GBA sprite sizes).
+function debugSpriteSizes() {
+  sprite_clear(); bg_clear()
+  backdrop(0x202834)
+  let labels = ["DN", "UP", "LF", "RT"]
+  let BTN_A = 0
+  let BTN_LEFT = 8
+  let BTN_RIGHT = 9
+  let facing = 0
+  let atk = 0
+
+  hudText(0, 28, 2, "Sprite Size Debug")
+  hudText(1, 28, 18, "16px")
+  hudText(2, 88, 18, "32px")
+  hudText(3, 152, 18, "64px")
+
+  let s16 = sprite_new(hero16)
+  let s32 = sprite_new(hero32)
+  let s64 = sprite_new(hero64)
+  sprite_set_hud(s16, 1)
+  sprite_set_hud(s32, 1)
+  sprite_set_hud(s64, 1)
+  sprite_set_pos(s16, 36, 48)
+  sprite_set_pos(s32, 88, 40)
+  sprite_set_pos(s64, 140, 24)
+
+  while (true) {
+    if (key_pressed(BTN_LEFT) > 0) { facing = (facing + 3) % 4 }
+    if (key_pressed(BTN_RIGHT) > 0) { facing = (facing + 1) % 4 }
+    if (key_pressed(BTN_A) > 0) { atk = 1 - atk }
+
+    let f = facing + atk * 4
+    sprite_set_frame(s16, f)
+    sprite_set_frame(s32, f)
+    sprite_set_frame(s64, f)
+
+    let mode = "idle"
+    if (atk > 0) { mode = "atk1" }
+    hudText(4, 8, 140, labels[facing] + " " + mode + "  L/R face A mode")
+    step()
+  }
+}
+
+// ── boot: title → file select → play (returns to title on Quit / cancel) ──
+function startNewGame() {
+  let slot = fileSelectMenu({ mode: "new", formatDetail: formatSaveDetail })
+  if (slot < 0) { return }
+  resetGameState()
+  gameState.saveSlot = slot
+  loadScene(() => { loadSceneRom(town); populate(SCENE_TOWN, -1, -1, false) })
+  playAreaMusic(0)
+  pauseWarmLater({
+    title: "PAUSE",
+    status: ["Hearts 0/0", "Gems 0"],
+    items: [{ label: "Resume" }, { label: "Save" }, { label: "Title" }],
+    prompts: [{ label: "Select" }, { label: "Back" }],
+  })
+  opening()
+  entity(sceneReg.player).behave(Player, {})
+  gameState.hasSword = true
+  gameState.openingDone = true
+  gameLoop()
+}
+
+function continueGame() {
+  let slot = fileSelectMenu({ mode: "continue", formatDetail: formatSaveDetail })
+  if (slot < 0) { return }
+  if (readSave(slot) === 0) { return }
+  let kind = gameState.scene
+  let pc = gameState.loadCol
+  let pr = gameState.loadRow
+  enterScene(kind, pc, pr)
+  playAreaMusic(kind === SCENE_SHRINE ? 1 : 0)
+  gameLoop()
+}
+
+function runTitle() {
+  sprite_clear()
+  bg_clear()
+  ui_clear()
+  let menu = []
+  if (hasSave() > 0) {
+    menu.push({ label: "Continue", onSelect: () => { continueGame() } })
+  }
+  menu.push({ label: "New Game", onSelect: () => { startNewGame() } })
+  menu.push({ label: "Attack Debug", onSelect: () => { debugAttackGrid() } })
+  menu.push({ label: "Sprite Size Debug", onSelect: () => { debugSpriteSizes() } })
+  let title = titleScreen({
+    background: titleBg,
+    title: "AKARI",
+    menu: menu,
+    menuX: 72,
+    copyright: "(c) 2026 Willow Vale",
+  })
+  // Rasterize the file picker while the title is already up and nothing is on a clock, so New Game /
+  // Continue opens it in a frame. Warm the mode the player is most likely to take first.
+  let firstMode = "new"
+  if (hasSave() > 0) { firstMode = "continue" }
+  fileWarm({ mode: firstMode, formatDetail: formatSaveDetail })
+  title.run()
+}
+
+// UI + dialog + SRAM, then the title (loops when Quit returns from play).
+
+// This is a top-down action RPG: it moves with `topdown`/`chase` and never calls a grid-step or a
+// platformer method, and never asks for a lifetime / offscreen-despawn / onScreen. Those three groups are
+// 22 of the wrapper's ~55 closures, and a wrapper costs ~9K per entity — dropping them measured ~14K back
+// on this game's town, heap its dialog boxes and area loads were failing to allocate from.
+entityApi({ grid: 0, platformer: 0, extra: 0 })
+// Portrait + a few prompt icons in the pause footer — keep the pool modest for shrine heap.
+// tileReserve 224 = this game's measured peak (180 live canvas tiles: a full-width box's border plus
+// three lines of glyph cells) with room for a taller one. agb's per-tile bookkeeping grows to hold that
+// peak and NEVER shrinks, so the choice is only ever WHEN to pay ~35K for it: at boot, or in the middle
+// of the intro cutscene on a heap the scene has already filled — which is where this game died. Sizing it
+// to the peak matters: reserving more (320) forces one extra doubling and wastes 20K.
+uiInit({ font: body, sheet: faces, icons: 6, iconSize: 32, tileReserve: 224 })
+dialogInit({
+  font: body, bodyW: 176, arrowFont: arrowFont,
+  cursorSheet: faces, cursorFrame: FACE_CURSOR,
+  blipChip: 1,
+  // Hold exactly one solved shape. Cutscene lines vary in height, i.e. in shape, so a bigger cache mostly
+  // holds shapes that never come back — and one shape is ~14K here.
+  cacheShapes: 1,
+})
+initSave()
+
+while (true) {
+  runTitle()
+}

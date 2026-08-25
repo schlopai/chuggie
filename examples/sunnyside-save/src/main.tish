@@ -1,0 +1,149 @@
+// Sunnyside de-risk 6 (examples/sunnyside/SPEC.md §ladder): the save schema.
+//
+// The farm's whole mutable state — 96 plot cells of state/stage/watered plus
+// day, gold, harvest count and the world seed — packed into the versioned,
+// checksummed prefs.tish block: 6 bits per cell, 5 cells per 32-bit slot
+// (20 slots), scalars after.  Two claims are tested:
+//
+//   * pack/unpack is lossless — asserted IN RAM on every boot
+//     ("PASS packroundtrip")
+//   * the cartridge round-trips it — a two-boot protocol: a fresh SRAM gets
+//     a canonical farm seeded and saved ("SAVE SEEDED hash=…"), the next
+//     boot must restore the identical hash and advance the day
+//     ("SAVE RESTORED hash=… day=…"); verify.sh runs the ROM twice on one
+//     .sav and diffs the hashes.
+import {
+  frame, log, backdrop, hud_text,
+} from 'cargo:tish_agb'
+import {
+  prefsInit, prefsGet, prefsSet, prefsSave, prefsFresh,
+} from '../../../packages/prefs'
+
+let CELLS: i32 = 96
+let PER_SLOT: i32 = 5      // 6 bits x 5 = 30 of 32 bits
+let PLOT_SLOTS: i32 = 20   // ceil(96/5)
+let S_DAY: i32 = 20
+let S_GOLD: i32 = 21
+let S_HARVEST: i32 = 22
+let S_SEED: i32 = 23
+
+let PSTATE: i32[] = []
+let PSTAGE: i32[] = []
+let PWET: i32[] = []
+let zf: i32 = 0
+while (zf < 96) { PSTATE.push(0); zf = zf + 1 }
+zf = 0
+while (zf < 96) { PSTAGE.push(0); zf = zf + 1 }
+zf = 0
+while (zf < 96) { PWET.push(0); zf = zf + 1 }
+
+let fails: i32 = 0
+
+function plotHash(): i32 {
+  let h: i32 = 7
+  let i: i32 = 0
+  while (i < CELLS) {
+    h = ((h << 5) - h + PSTATE[i] * 16 + PSTAGE[i] * 2 + PWET[i]) & 1048575
+    i = i + 1
+  }
+  return h
+}
+
+/// The canonical day-1 farm the first boot seeds: deterministic, exercises
+/// every state/stage/wet combination.
+function seedCanonical() {
+  let i: i32 = 0
+  while (i < CELLS) {
+    PSTATE[i] = i % 3
+    if (PSTATE[i] === 2) { PSTAGE[i] = (i * 7) % 6 } else { PSTAGE[i] = 0 }
+    PWET[i] = i % 2
+    i = i + 1
+  }
+}
+
+function cellPacked(i: i32): i32 {
+  return PSTATE[i] * 16 + PSTAGE[i] * 2 + PWET[i]
+}
+
+function packToPrefs() {
+  let s: i32 = 0
+  while (s < PLOT_SLOTS) {
+    let v: i32 = 0
+    let k: i32 = PER_SLOT - 1
+    while (k >= 0) {
+      let i: i32 = s * PER_SLOT + k
+      v = v * 64
+      if (i < CELLS) { v = v + cellPacked(i) }
+      k = k - 1
+    }
+    prefsSet(s, v)
+    s = s + 1
+  }
+}
+
+function unpackFromPrefs() {
+  let s: i32 = 0
+  while (s < PLOT_SLOTS) {
+    let v: i32 = prefsGet(s)
+    let k: i32 = 0
+    while (k < PER_SLOT) {
+      let i: i32 = s * PER_SLOT + k
+      if (i < CELLS) {
+        let c: i32 = v % 64
+        PSTATE[i] = c / 16
+        PSTAGE[i] = (c / 2) % 8
+        PWET[i] = c % 2
+      }
+      v = v / 64
+      k = k + 1
+    }
+    s = s + 1
+  }
+}
+
+backdrop(0x304058)
+hud_text(0, 4, 4, "SUNNYSIDE SAVE")
+
+prefsInit({ magic: 0x5346, version: 1, count: 24 })   // "FS"
+
+// claim 1: pack -> scramble -> unpack restores the exact arrays
+seedCanonical()
+let before: i32 = plotHash()
+packToPrefs()
+let i: i32 = 0
+while (i < CELLS) { PSTATE[i] = 0; PSTAGE[i] = 0; PWET[i] = 0; i = i + 1 }
+unpackFromPrefs()
+if (plotHash() === before) {
+  log("PASS packroundtrip hash=" + before)
+} else {
+  log("FAIL packroundtrip " + before + " != " + plotHash())
+  fails = fails + 1
+}
+
+// claim 2: the cartridge round-trip
+if (prefsFresh() > 0) {
+  seedCanonical()
+  packToPrefs()
+  prefsSet(S_DAY, 1)
+  prefsSet(S_GOLD, 120)
+  prefsSet(S_HARVEST, 0)
+  prefsSet(S_SEED, 7)
+  prefsSave()
+  log("SAVE SEEDED hash=" + plotHash() + " day=1 gold=120")
+  hud_text(1, 4, 20, "SEEDED DAY 1")
+} else {
+  unpackFromPrefs()
+  let day: i32 = prefsGet(S_DAY)
+  let gold: i32 = prefsGet(S_GOLD)
+  log("SAVE RESTORED hash=" + plotHash() + " day=" + day + " gold=" + gold
+    + " seed=" + prefsGet(S_SEED))
+  // live on: the day advances and the save is rewritten, so a third boot
+  // proves repeated writes too
+  prefsSet(S_DAY, day + 1)
+  prefsSave()
+  log("SAVE ADVANCED day=" + (day + 1))
+  hud_text(1, 4, 20, "RESTORED DAY " + day)
+}
+
+log("DONE fails " + fails)
+while (true) { frame() }

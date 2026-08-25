@@ -1,0 +1,72 @@
+// Platformer combat components, showing off the reusable engine pieces:
+//   Player — run/walk, coyote + buffered + variable-height jump, drop through one-way platforms,
+//            HP with a hearts HUD, stomp enemies, respawn on death.
+//   Enemy  — a patrol that turns at walls and ledges, damages the player on touch, dies when stomped.
+import { input_x, input_y, key_pressed, key_held } from 'cargo:tish_agb'
+import { keyReleased, updateHearts } from '../../../packages/engine'
+
+let A: i32 = 0   // jump
+let B: i32 = 1   // run
+
+// Hero animation: 4-frame sheet (0 idle, 1-2 run, 3 jump/fall), flipped for left.
+function animateHero(e, dx, running) {
+  if (dx < 0) { e.setFlip(true); e.data.face = -1 }
+  else if (dx > 0) { e.setFlip(false); e.data.face = 1 }
+  else { e.setFlip(e.data.face < 0) }
+
+  if (!e.onGround()) {
+    e.play(3, 1, 1, false)
+  } else if (dx !== 0) {
+    e.play(1, 2, running ? 4 : 7, true)   // faster cycle while running
+  } else {
+    e.play(0, 1, 1, false)
+  }
+}
+
+export const Player = {
+  start: ({ this }) => { this.data.face = 1 },
+  update: ({ this }) => {
+    let dx = input_x()
+    let running = key_held(B) > 0
+    this.run(running)
+    this.moveX(dx)
+    // A = jump (buffered + coyote); Down+A drops through a one-way platform; release A = short hop.
+    if (key_pressed(A) > 0) {
+      if (input_y() > 0) { this.drop() } else { this.jump() }
+    }
+    if (keyReleased(A) > 0) { this.jumpRelease() }
+    animateHero(this, dx, running)
+    updateHearts(this.hp(), 2)   // half-hearts: each heart = 2 hp
+  },
+  // No auto-despawn: on death, warp back to the start and refill health.
+  onDeath: ({ this }) => {
+    this.setPos(this.data.spawnX, this.data.spawnY)
+    this.heal(this.maxHp())
+  }
+}
+
+// ⚠️⚠️ THE PATROL IS NATIVE (`e.patrol(1)` in main.tish). There is deliberately NO `tick` hook.
+//
+// This file used to carry one, under a comment claiming the `tick` ABI was "one tish call + plain
+// field access, no per-op ABI trip" — and then, two lines later, that `entity.patrol()` was the
+// zero-tish version. The comment was written from the docs, not from the generated code. `s` is a
+// BOXED object: `s.x` is `get_prop(&(s).clone(), "x")` — clone the object, then a string-keyed
+// lookup — every `+` is `ops::add(&Value, &Value)`, `tileSolid(…)` is a boxed cross-module
+// `value_call`, and the `/ 16` pair are software divisions (the ARM7TDMI has no divide instruction).
+//
+// All of that was billed per enemy per frame, and `world_step` skips OFF-SCREEN entities, so it was
+// charged only for the enemies actually visible: fine in an empty corridor, and well under half
+// speed with two enemies on screen. See docs/perf-rules.md §7 and examples/sunny-land, where the
+// same six lines were the whole slowdown.
+export const Enemy = {
+  // Player lands on top → stomp (enemy dies, player bounces). Otherwise the player takes a hit
+  // (the health system's i-frames stop repeated damage while the player is in contact).
+  onCollide: ({ this, other }) => {
+    if (other.y + 6 < this.y) {
+      this.hurt(99)
+      other.bounce(4)
+    } else {
+      other.hurt(1)
+    }
+  }
+}

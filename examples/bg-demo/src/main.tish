@@ -1,0 +1,29 @@
+// A world screen written in tish: a tiled background, a sprite that walks over it
+// facing its direction, and a sound effect on button press. Every capability here
+// is a tish-agb binding (`cargo:`) or a scheme import (`background:`/`asset:`/`wav:`)
+// contributed by tish-agb — no edits to the tish compiler.
+import { grass } from 'background:../assets/grass.png'
+import { player } from 'asset:../assets/player.png'
+import { blip } from 'wav:../assets/blip.wav'
+import {
+  bg_new, sprite_new, sprite_set_pos, sprite_set_flip,
+  input_x, input_y, key_pressed, sound_play, frame
+} from 'cargo:tish_agb'
+
+let map = bg_new(grass)
+let hero = sprite_new(player)
+
+let px: i32 = 100
+let py: i32 = 72
+while (true) {
+  let dx: i32 = input_x()
+  px = px + dx
+  py = py + input_y()
+  if (dx > 0) { sprite_set_flip(hero, 0) }
+  if (dx < 0) { sprite_set_flip(hero, 1) }
+  sprite_set_pos(hero, px, py)
+
+  if (key_pressed(0) > 0) { sound_play(blip) }
+
+  frame()
+}

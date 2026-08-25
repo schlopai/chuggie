@@ -1,0 +1,34 @@
+// Isolate akari E0599: native i32[] cell-captured by FunDecl, then nested arrow indexes it.
+// Bug: arrow did VmRef::new on an already-VmRef local → VmRef<VmRef<Vec>> and .get fails.
+import { log, vblank } from 'cargo:tish_agb'
+
+let TEXT_CPS: i32[] = [1, 2, 4]
+
+function textSpeedIndex() {
+  return 1
+}
+
+function dialogSpeed(cps: i32) {
+  let i: i32 = 0
+  while (i < TEXT_CPS.length) {
+    if (TEXT_CPS[i] >= cps) { return i }
+    i = i + 1
+  }
+  return TEXT_CPS.length - 1
+}
+
+function makeMenu() {
+  return {
+    get: () => textSpeedIndex(),
+    set: (v) => dialogSpeed(TEXT_CPS[v]),
+  }
+}
+
+let menu = makeMenu()
+log("set=" + menu.set(1))
+let f: i32 = 0
+while (f < 130) {
+  vblank()
+  f = f + 1
+}
+log("repro-654-vec-cell-arrow done")

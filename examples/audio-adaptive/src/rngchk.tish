@@ -1,0 +1,8 @@
+import { log, frame } from 'cargo:tish_agb'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+rngSeed(0, 20260812)
+let i: i32 = 0
+let out: string = ""
+while (i < 8) { out = out + rngBelow(0, 100) + " "; i = i + 1 }
+log("RNGCHK " + out)
+while (true) { frame() }

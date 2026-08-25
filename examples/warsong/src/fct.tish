@@ -1,0 +1,168 @@
+// fct.tish — floating combat text, drawn as SPRITES.
+//
+// Damage is applied from several places (engine `swing`/`set_hurt` contact, tish `unitApplyDamage`,
+// DoT/HoT ticks), and the engine ones never call back into tish. So instead of hooking every site we
+// poll each unit's HP once a frame and turn the delta into a popup — one place, no missed source.
+//
+// The numbers are baked digit frames (wsg16 30..39 red, 40..49 green — scripts/gen_wsg.py), NOT
+// text_draw: a text_draw paint measured ~1,000 ticks on device, a quarter of the whole 4,389-tick
+// frame budget, and four hits in one frame ate a frame outright. A digit sprite costs a
+// sprite_set_frame plus a sprite_set_pos (~3 ticks each) and can therefore rise AND track its unit
+// every single frame. Colour carries the sign, so no +/- glyph is needed.
+
+import { sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_visible, sprite_set_hud } from 'cargo:tish_agb'
+import { entity_hp } from 'cargo:tish_gba_game_engine'
+import { UNITS, U_ENT, U_ALIVE, U_XS, U_YS } from './units'
+import { fxHit, fxHealRing } from './fx'
+
+export let DIG_RED: i32 = 30
+export let DIG_GREEN: i32 = 40
+
+let SLOTS: i32 = 4
+let DIGITS: i32 = 2
+let TTL: i32 = 30
+
+// Two digit sprites per popup, laid out [slot0 tens, slot0 ones, slot1 tens, ...].
+let dSpr: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let pTtl: i32[] = [0, 0, 0, 0]
+let pX: i32[] = [0, 0, 0, 0]
+let pY: i32[] = [0, 0, 0, 0]
+
+let lastHp: i32[] = [0, 0, 0, 0, 0, 0]
+let wasAlive: i32[] = [1, 1, 1, 1, 1, 1]
+let live: i32 = 0
+let built: i32 = 0
+
+export function fctBuild(sheet: i32) {
+  if (built === 0) {
+    built = 1
+    let i: i32 = 0
+    while (i < SLOTS * DIGITS) {
+      let s: i32 = sprite_new(sheet)
+      sprite_set_hud(s, 0)
+      sprite_set_visible(s, 0)
+      dSpr[i] = s
+      i = i + 1
+    }
+  }
+}
+
+/// Re-baseline every unit's HP without emitting popups (call on match start and after a rez).
+export function fctResync() {
+  let i: i32 = 0
+  while (i < UNITS) {
+    lastHp[i] = entity_hp(U_ENT[i])
+    wasAlive[i] = U_ALIVE[i]
+    i = i + 1
+  }
+}
+
+export function fctClear() {
+  if (built === 0) { return }
+  let s: i32 = 0
+  while (s < SLOTS) {
+    pTtl[s] = 0
+    sprite_set_visible(dSpr[s * DIGITS], 0)
+    sprite_set_visible(dSpr[s * DIGITS + 1], 0)
+    s = s + 1
+  }
+  live = 0
+}
+
+export function fctReset() {
+  fctClear()
+  fctResync()
+}
+
+/// Show `n` (clamped 1..99) over unit `u` in `base` (DIG_RED / DIG_GREEN). Steals the oldest slot
+/// when all are busy so the newest hit always shows.
+export function fctPush(u: i32, n: i32, base: i32) {
+  if (built === 0) { return }
+  let v: i32 = n
+  if (v < 1) { v = 1 }
+  if (v > 99) { v = 99 }
+
+  let best: i32 = 0 - 1
+  let bestTtl: i32 = 99999
+  let s: i32 = 0
+  while (s < SLOTS) {
+    if (pTtl[s] <= 0) { best = s; s = SLOTS } else if (pTtl[s] < bestTtl) { bestTtl = pTtl[s]; best = s }
+    s = s + 1
+  }
+  if (best < 0) { return }
+
+  // tens/ones without a division — the GBA has no divide instruction and v is bounded at 99.
+  let tens: i32 = 0
+  let ones: i32 = v
+  while (ones >= 10) { ones = ones - 10; tens = tens + 1 }
+
+  pTtl[best] = TTL
+  pX[best] = U_XS[u] - 6
+  pY[best] = U_YS[u] - 20
+
+  let hi: i32 = dSpr[best * DIGITS]
+  let lo: i32 = dSpr[best * DIGITS + 1]
+  if (tens > 0) {
+    sprite_set_frame(hi, base + tens)
+    sprite_set_pos(hi, pX[best], pY[best])
+    sprite_set_visible(hi, 1)
+  } else {
+    sprite_set_visible(hi, 0)
+  }
+  sprite_set_frame(lo, base + ones)
+  sprite_set_pos(lo, pX[best] + 6, pY[best])
+  sprite_set_visible(lo, 1)
+  live = 1
+}
+
+/// Poll HP deltas -> popups + impact art, then age the live popups. Call once per match frame,
+/// AFTER the position snapshot so U_XS/U_YS are current.
+export function fctStep() {
+  let i: i32 = 0
+  while (i < UNITS) {
+    let hp: i32 = entity_hp(U_ENT[i])
+    if (U_ALIVE[i] === 0) {
+      lastHp[i] = hp
+      wasAlive[i] = 0
+    } else if (wasAlive[i] === 0) {
+      // first frame back from the graveyard: the full-HP restore is not a heal
+      wasAlive[i] = 1
+      lastHp[i] = hp
+    } else {
+      let d: i32 = hp - lastHp[i]
+      if (d !== 0) {
+        lastHp[i] = hp
+        if (d < 0) {
+          fctPush(i, 0 - d, DIG_RED)
+          fxHit(U_XS[i], U_YS[i])
+        } else {
+          fctPush(i, d, DIG_GREEN)
+          fxHealRing(U_XS[i], U_YS[i])
+        }
+      }
+    }
+    i = i + 1
+  }
+
+  if (live === 0) { return }
+  let any: i32 = 0
+  let s: i32 = 0
+  while (s < SLOTS) {
+    if (pTtl[s] > 0) {
+      pTtl[s] = pTtl[s] - 1
+      let hi: i32 = dSpr[s * DIGITS]
+      let lo: i32 = dSpr[s * DIGITS + 1]
+      if (pTtl[s] <= 0) {
+        sprite_set_visible(hi, 0)
+        sprite_set_visible(lo, 0)
+      } else {
+        any = 1
+        pY[s] = pY[s] - 1
+        sprite_set_pos(hi, pX[s], pY[s])
+        sprite_set_pos(lo, pX[s] + 6, pY[s])
+      }
+    }
+    s = s + 1
+  }
+  live = any
+}

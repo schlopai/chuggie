@@ -1,0 +1,1141 @@
+[
+  {
+    "room": 0,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 1,
+    "count": 4,
+    "list_idx": 2,
+    "enemies": [
+      3,
+      4,
+      3,
+      4
+    ]
+  },
+  {
+    "room": 2,
+    "count": 4,
+    "list_idx": 2,
+    "enemies": [
+      3,
+      4,
+      3,
+      4
+    ]
+  },
+  {
+    "room": 3,
+    "count": 1,
+    "list_idx": 31,
+    "enemies": []
+  },
+  {
+    "room": 4,
+    "count": 6,
+    "list_idx": 1,
+    "enemies": [
+      3,
+      4,
+      3,
+      4,
+      3,
+      4
+    ]
+  },
+  {
+    "room": 5,
+    "count": 6,
+    "list_idx": 38,
+    "enemies": []
+  },
+  {
+    "room": 6,
+    "count": 6,
+    "list_idx": 36,
+    "enemies": []
+  },
+  {
+    "room": 7,
+    "count": 1,
+    "list_idx": 2,
+    "enemies": [
+      3
+    ]
+  },
+  {
+    "room": 8,
+    "count": 1,
+    "list_idx": 31,
+    "enemies": []
+  },
+  {
+    "room": 9,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 10,
+    "count": 1,
+    "list_idx": 1,
+    "enemies": [
+      3
+    ]
+  },
+  {
+    "room": 11,
+    "count": 1,
+    "list_idx": 16,
+    "enemies": [
+      35
+    ]
+  },
+  {
+    "room": 12,
+    "count": 6,
+    "list_idx": 14,
+    "enemies": [
+      19,
+      27,
+      27,
+      27,
+      22,
+      48
+    ]
+  },
+  {
+    "room": 13,
+    "count": 6,
+    "list_idx": 14,
+    "enemies": [
+      19,
+      27,
+      27,
+      27,
+      22,
+      48
+    ]
+  },
+  {
+    "room": 14,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 15,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 16,
+    "count": 4,
+    "list_idx": 1,
+    "enemies": [
+      3,
+      4,
+      3,
+      4
+    ]
+  },
+  {
+    "room": 17,
+    "count": 6,
+    "list_idx": 36,
+    "enemies": []
+  },
+  {
+    "room": 18,
+    "count": 6,
+    "list_idx": 1,
+    "enemies": [
+      3,
+      4,
+      3,
+      4,
+      3,
+      4
+    ]
+  },
+  {
+    "room": 19,
+    "count": 4,
+    "list_idx": 37,
+    "enemies": []
+  },
+  {
+    "room": 20,
+    "count": 4,
+    "list_idx": 2,
+    "enemies": [
+      3,
+      4,
+      3,
+      4
+    ]
+  },
+  {
+    "room": 21,
+    "count": 6,
+    "list_idx": 36,
+    "enemies": []
+  },
+  {
+    "room": 22,
+    "count": 1,
+    "list_idx": 31,
+    "enemies": []
+  },
+  {
+    "room": 23,
+    "count": 1,
+    "list_idx": 31,
+    "enemies": []
+  },
+  {
+    "room": 24,
+    "count": 1,
+    "list_idx": 31,
+    "enemies": []
+  },
+  {
+    "room": 25,
+    "count": 1,
+    "list_idx": 31,
+    "enemies": []
+  },
+  {
+    "room": 26,
+    "count": 6,
+    "list_idx": 14,
+    "enemies": [
+      19,
+      27,
+      27,
+      27,
+      22,
+      48
+    ]
+  },
+  {
+    "room": 27,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 28,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 29,
+    "count": 6,
+    "list_idx": 26,
+    "enemies": [
+      35,
+      36,
+      35,
+      36,
+      43,
+      23
+    ]
+  },
+  {
+    "room": 30,
+    "count": 6,
+    "list_idx": 14,
+    "enemies": [
+      19,
+      27,
+      27,
+      27,
+      22,
+      48
+    ]
+  },
+  {
+    "room": 31,
+    "count": 6,
+    "list_idx": 26,
+    "enemies": [
+      35,
+      36,
+      35,
+      36,
+      43,
+      23
+    ]
+  },
+  {
+    "room": 32,
+    "count": 1,
+    "list_idx": 33,
+    "enemies": []
+  },
+  {
+    "room": 33,
+    "count": 1,
+    "list_idx": 33,
+    "enemies": []
+  },
+  {
+    "room": 34,
+    "count": 1,
+    "list_idx": 2,
+    "enemies": [
+      3
+    ]
+  },
+  {
+    "room": 35,
+    "count": 4,
+    "list_idx": 2,
+    "enemies": [
+      3,
+      4,
+      3,
+      4
+    ]
+  },
+  {
+    "room": 36,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 37,
+    "count": 4,
+    "list_idx": 26,
+    "enemies": [
+      35,
+      36,
+      35,
+      36
+    ]
+  },
+  {
+    "room": 38,
+    "count": 6,
+    "list_idx": 26,
+    "enemies": [
+      35,
+      36,
+      35,
+      36,
+      43,
+      23
+    ]
+  },
+  {
+    "room": 39,
+    "count": 6,
+    "list_idx": 26,
+    "enemies": [
+      35,
+      36,
+      35,
+      36,
+      43,
+      23
+    ]
+  },
+  {
+    "room": 40,
+    "count": 6,
+    "list_idx": 26,
+    "enemies": [
+      35,
+      36,
+      35,
+      36,
+      43,
+      23
+    ]
+  },
+  {
+    "room": 41,
+    "count": 4,
+    "list_idx": 16,
+    "enemies": [
+      35,
+      36,
+      35,
+      36
+    ]
+  },
+  {
+    "room": 42,
+    "count": 6,
+    "list_idx": 15,
+    "enemies": [
+      27,
+      22,
+      0,
+      0,
+      43,
+      43
+    ]
+  },
+  {
+    "room": 43,
+    "count": 6,
+    "list_idx": 39,
+    "enemies": []
+  },
+  {
+    "room": 44,
+    "count": 4,
+    "list_idx": 14,
+    "enemies": [
+      19,
+      27,
+      27,
+      27
+    ]
+  },
+  {
+    "room": 45,
+    "count": 5,
+    "list_idx": 42,
+    "enemies": []
+  },
+  {
+    "room": 46,
+    "count": 4,
+    "list_idx": 9,
+    "enemies": [
+      9,
+      8,
+      9,
+      8
+    ]
+  },
+  {
+    "room": 47,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 48,
+    "count": 1,
+    "list_idx": 33,
+    "enemies": []
+  },
+  {
+    "room": 49,
+    "count": 1,
+    "list_idx": 33,
+    "enemies": []
+  },
+  {
+    "room": 50,
+    "count": 6,
+    "list_idx": 36,
+    "enemies": []
+  },
+  {
+    "room": 51,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 52,
+    "count": 4,
+    "list_idx": 15,
+    "enemies": [
+      27,
+      22,
+      0,
+      0
+    ]
+  },
+  {
+    "room": 53,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 54,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 55,
+    "count": 1,
+    "list_idx": 8,
+    "enemies": [
+      8
+    ]
+  },
+  {
+    "room": 56,
+    "count": 6,
+    "list_idx": 40,
+    "enemies": []
+  },
+  {
+    "room": 57,
+    "count": 1,
+    "list_idx": 47,
+    "enemies": []
+  },
+  {
+    "room": 58,
+    "count": 6,
+    "list_idx": 39,
+    "enemies": []
+  },
+  {
+    "room": 59,
+    "count": 4,
+    "list_idx": 15,
+    "enemies": [
+      27,
+      22,
+      0,
+      0
+    ]
+  },
+  {
+    "room": 60,
+    "count": 1,
+    "list_idx": 10,
+    "enemies": [
+      7
+    ]
+  },
+  {
+    "room": 61,
+    "count": 4,
+    "list_idx": 3,
+    "enemies": [
+      2,
+      1,
+      2,
+      1
+    ]
+  },
+  {
+    "room": 62,
+    "count": 5,
+    "list_idx": 42,
+    "enemies": []
+  },
+  {
+    "room": 63,
+    "count": 1,
+    "list_idx": 9,
+    "enemies": [
+      9
+    ]
+  },
+  {
+    "room": 64,
+    "count": 1,
+    "list_idx": 33,
+    "enemies": []
+  },
+  {
+    "room": 65,
+    "count": 1,
+    "list_idx": 33,
+    "enemies": []
+  },
+  {
+    "room": 66,
+    "count": 1,
+    "list_idx": 4,
+    "enemies": [
+      1
+    ]
+  },
+  {
+    "room": 67,
+    "count": 1,
+    "list_idx": 47,
+    "enemies": []
+  },
+  {
+    "room": 68,
+    "count": 4,
+    "list_idx": 7,
+    "enemies": [
+      8,
+      8,
+      8,
+      8
+    ]
+  },
+  {
+    "room": 69,
+    "count": 1,
+    "list_idx": 26,
+    "enemies": [
+      35
+    ]
+  },
+  {
+    "room": 70,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 71,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 72,
+    "count": 4,
+    "list_idx": 16,
+    "enemies": [
+      35,
+      36,
+      35,
+      36
+    ]
+  },
+  {
+    "room": 73,
+    "count": 6,
+    "list_idx": 40,
+    "enemies": []
+  },
+  {
+    "room": 74,
+    "count": 6,
+    "list_idx": 13,
+    "enemies": [
+      27,
+      27,
+      27,
+      27,
+      43,
+      43
+    ]
+  },
+  {
+    "room": 75,
+    "count": 6,
+    "list_idx": 4,
+    "enemies": [
+      1,
+      2,
+      1,
+      2,
+      1,
+      15
+    ]
+  },
+  {
+    "room": 76,
+    "count": 5,
+    "list_idx": 42,
+    "enemies": []
+  },
+  {
+    "room": 77,
+    "count": 4,
+    "list_idx": 3,
+    "enemies": [
+      2,
+      1,
+      2,
+      1
+    ]
+  },
+  {
+    "room": 78,
+    "count": 4,
+    "list_idx": 3,
+    "enemies": [
+      2,
+      1,
+      2,
+      1
+    ]
+  },
+  {
+    "room": 79,
+    "count": 5,
+    "list_idx": 43,
+    "enemies": []
+  },
+  {
+    "room": 80,
+    "count": 5,
+    "list_idx": 2,
+    "enemies": [
+      3,
+      4,
+      3,
+      4,
+      26
+    ]
+  },
+  {
+    "room": 81,
+    "count": 5,
+    "list_idx": 3,
+    "enemies": [
+      2,
+      1,
+      2,
+      1,
+      1
+    ]
+  },
+  {
+    "room": 82,
+    "count": 4,
+    "list_idx": 35,
+    "enemies": []
+  },
+  {
+    "room": 83,
+    "count": 5,
+    "list_idx": 34,
+    "enemies": []
+  },
+  {
+    "room": 84,
+    "count": 4,
+    "list_idx": 41,
+    "enemies": []
+  },
+  {
+    "room": 85,
+    "count": 1,
+    "list_idx": 7,
+    "enemies": [
+      8
+    ]
+  },
+  {
+    "room": 86,
+    "count": 4,
+    "list_idx": 7,
+    "enemies": [
+      8,
+      8,
+      8,
+      8
+    ]
+  },
+  {
+    "room": 87,
+    "count": 4,
+    "list_idx": 41,
+    "enemies": []
+  },
+  {
+    "room": 88,
+    "count": 4,
+    "list_idx": 41,
+    "enemies": []
+  },
+  {
+    "room": 89,
+    "count": 4,
+    "list_idx": 26,
+    "enemies": [
+      35,
+      36,
+      35,
+      36
+    ]
+  },
+  {
+    "room": 90,
+    "count": 4,
+    "list_idx": 7,
+    "enemies": [
+      8,
+      8,
+      8,
+      8
+    ]
+  },
+  {
+    "room": 91,
+    "count": 4,
+    "list_idx": 35,
+    "enemies": []
+  },
+  {
+    "room": 92,
+    "count": 4,
+    "list_idx": 3,
+    "enemies": [
+      2,
+      1,
+      2,
+      1
+    ]
+  },
+  {
+    "room": 93,
+    "count": 4,
+    "list_idx": 3,
+    "enemies": [
+      2,
+      1,
+      2,
+      1
+    ]
+  },
+  {
+    "room": 94,
+    "count": 5,
+    "list_idx": 3,
+    "enemies": [
+      2,
+      1,
+      2,
+      1,
+      1
+    ]
+  },
+  {
+    "room": 95,
+    "count": 5,
+    "list_idx": 42,
+    "enemies": []
+  },
+  {
+    "room": 96,
+    "count": 6,
+    "list_idx": 36,
+    "enemies": []
+  },
+  {
+    "room": 97,
+    "count": 5,
+    "list_idx": 3,
+    "enemies": [
+      2,
+      1,
+      2,
+      1,
+      1
+    ]
+  },
+  {
+    "room": 98,
+    "count": 5,
+    "list_idx": 3,
+    "enemies": [
+      2,
+      1,
+      2,
+      1,
+      1
+    ]
+  },
+  {
+    "room": 99,
+    "count": 6,
+    "list_idx": 44,
+    "enemies": []
+  },
+  {
+    "room": 100,
+    "count": 5,
+    "list_idx": 42,
+    "enemies": []
+  },
+  {
+    "room": 101,
+    "count": 4,
+    "list_idx": 41,
+    "enemies": []
+  },
+  {
+    "room": 102,
+    "count": 4,
+    "list_idx": 41,
+    "enemies": []
+  },
+  {
+    "room": 103,
+    "count": 4,
+    "list_idx": 7,
+    "enemies": [
+      8,
+      8,
+      8,
+      8
+    ]
+  },
+  {
+    "room": 104,
+    "count": 4,
+    "list_idx": 7,
+    "enemies": [
+      8,
+      8,
+      8,
+      8
+    ]
+  },
+  {
+    "room": 105,
+    "count": 4,
+    "list_idx": 7,
+    "enemies": [
+      8,
+      8,
+      8,
+      8
+    ]
+  },
+  {
+    "room": 106,
+    "count": 4,
+    "list_idx": 41,
+    "enemies": []
+  },
+  {
+    "room": 107,
+    "count": 6,
+    "list_idx": 44,
+    "enemies": []
+  },
+  {
+    "room": 108,
+    "count": 4,
+    "list_idx": 4,
+    "enemies": [
+      1,
+      2,
+      1,
+      2
+    ]
+  },
+  {
+    "room": 109,
+    "count": 4,
+    "list_idx": 4,
+    "enemies": [
+      1,
+      2,
+      1,
+      2
+    ]
+  },
+  {
+    "room": 110,
+    "count": 6,
+    "list_idx": 44,
+    "enemies": []
+  },
+  {
+    "room": 111,
+    "count": 5,
+    "list_idx": 40,
+    "enemies": []
+  },
+  {
+    "room": 112,
+    "count": 4,
+    "list_idx": 26,
+    "enemies": [
+      35,
+      36,
+      35,
+      36
+    ]
+  },
+  {
+    "room": 113,
+    "count": 5,
+    "list_idx": 3,
+    "enemies": [
+      2,
+      1,
+      2,
+      1,
+      1
+    ]
+  },
+  {
+    "room": 114,
+    "count": 4,
+    "list_idx": 34,
+    "enemies": []
+  },
+  {
+    "room": 115,
+    "count": 4,
+    "list_idx": 3,
+    "enemies": [
+      2,
+      1,
+      2,
+      1
+    ]
+  },
+  {
+    "room": 116,
+    "count": 1,
+    "list_idx": 14,
+    "enemies": [
+      19
+    ]
+  },
+  {
+    "room": 117,
+    "count": 6,
+    "list_idx": 39,
+    "enemies": []
+  },
+  {
+    "room": 118,
+    "count": 4,
+    "list_idx": 14,
+    "enemies": [
+      19,
+      27,
+      27,
+      27
+    ]
+  },
+  {
+    "room": 119,
+    "count": 1,
+    "list_idx": 0,
+    "enemies": [
+      24
+    ]
+  },
+  {
+    "room": 120,
+    "count": 4,
+    "list_idx": 7,
+    "enemies": [
+      8,
+      8,
+      8,
+      8
+    ]
+  },
+  {
+    "room": 121,
+    "count": 5,
+    "list_idx": 13,
+    "enemies": [
+      27,
+      27,
+      27,
+      27,
+      43
+    ]
+  },
+  {
+    "room": 122,
+    "count": 4,
+    "list_idx": 13,
+    "enemies": [
+      27,
+      27,
+      27,
+      27
+    ]
+  },
+  {
+    "room": 123,
+    "count": 6,
+    "list_idx": 16,
+    "enemies": [
+      35,
+      36,
+      35,
+      36,
+      43,
+      43
+    ]
+  },
+  {
+    "room": 124,
+    "count": 6,
+    "list_idx": 16,
+    "enemies": [
+      35,
+      36,
+      35,
+      36,
+      43,
+      43
+    ]
+  },
+  {
+    "room": 125,
+    "count": 4,
+    "list_idx": 9,
+    "enemies": [
+      9,
+      8,
+      9,
+      8
+    ]
+  },
+  {
+    "room": 126,
+    "count": 4,
+    "list_idx": 8,
+    "enemies": [
+      8,
+      7,
+      8,
+      7
+    ]
+  },
+  {
+    "room": 127,
+    "count": 1,
+    "list_idx": 9,
+    "enemies": [
+      9
+    ]
+  }
+]

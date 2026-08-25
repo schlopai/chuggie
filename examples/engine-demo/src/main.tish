@@ -1,0 +1,35 @@
+// The Behaviour bridge: a component written in TISH, ticked by the RUST engine.
+// The `Bouncer` component reads the entity's position each frame and flips its
+// velocity at the screen edges — so the sprite bounces around. The game just
+// defines the component and attaches it; the engine's pipeline runs it.
+import { player } from 'asset:../assets/player.png'
+import { sprite_new } from 'cargo:tish_agb'
+import {
+  spawn, set_transform, attach_sprite,
+  define_component, add_behaviour,
+  entity_x, entity_y, set_body, world_step
+} from 'cargo:tish_gba_game_engine'
+
+// A Unity-style component, in tish. `self` is this instance's data; `e` is the
+// entity; `dt` is the frame delta. It drives the entity via the engine API.
+define_component('Bouncer', {
+  update: (me, e, dt) => {
+    let x = entity_x(e)
+    let y = entity_y(e)
+    if (x < 8.0)   { me.vx = 0.7 }
+    if (x > 216.0) { me.vx = -0.7 }
+    if (y < 8.0)   { me.vy = 0.6 }
+    if (y > 136.0) { me.vy = -0.6 }
+    set_body(e, me.vx, me.vy)
+  }
+})
+
+let e = spawn()
+set_transform(e, 100.0, 70.0)
+attach_sprite(e, sprite_new(player))
+add_behaviour(e, 'Bouncer', { vx: 0.7, vy: 0.6 })
+
+// The engine ticks the Bouncer component + moves + renders, all in one call.
+while (true) {
+  world_step()
+}

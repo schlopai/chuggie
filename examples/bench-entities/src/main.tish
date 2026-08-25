@@ -1,0 +1,70 @@
+// Frame-budget spike: 100-entity movement + O(n^2) AABB collision in typed tish.
+// Measures per-update cost against the ~4389-tick GBA frame budget (Divider64).
+import { timer_read, log, frame } from 'cargo:tish_agb'
+
+let n: i32 = 100
+let xs: number[] = []
+let ys: number[] = []
+let vxs: number[] = []
+let vys: number[] = []
+
+let i: i32 = 0
+while (i < n) {
+  xs.push((i * 7) % 240)
+  ys.push((i * 13) % 160)
+  vxs.push((i % 3) - 1)
+  vys.push((i % 5) - 2)
+  i = i + 1
+}
+
+let f: i32 = 0
+let reported: i32 = 0
+while (f < 240) {
+  let t0 = timer_read()
+
+  // movement + edge bounce
+  let a = 0
+  while (a < n) {
+    let nx = xs[a] + vxs[a]
+    let ny = ys[a] + vys[a]
+    if (nx < 0) { vxs[a] = 0 - vxs[a]; nx = 0 }
+    if (nx > 232) { vxs[a] = 0 - vxs[a]; nx = 232 }
+    if (ny < 0) { vys[a] = 0 - vys[a]; ny = 0 }
+    if (ny > 152) { vys[a] = 0 - vys[a]; ny = 152 }
+    xs[a] = nx
+    ys[a] = ny
+    a = a + 1
+  }
+
+  // O(n^2) AABB overlap count
+  let hits = 0
+  let b = 0
+  while (b < n) {
+    let c = b + 1
+    while (c < n) {
+      let dx = xs[b] - xs[c]
+      let dy = ys[b] - ys[c]
+      if (dx < 0) { dx = 0 - dx }
+      if (dy < 0) { dy = 0 - dy }
+      if (dx < 16) {
+        if (dy < 16) { hits = hits + 1 }
+      }
+      c = c + 1
+    }
+    b = b + 1
+  }
+
+  let t1 = timer_read()
+  if (reported === 0) {
+    if (f === 120) {
+      log("ticks_per_update:")
+      log(t1 - t0)
+      log("collision_hits:")
+      log(hits)
+      reported = 1
+    }
+  }
+  frame()
+  f = f + 1
+}
+log("bench done")

@@ -1,0 +1,96 @@
+// prismfall — behaviours. As in spectra, almost nothing lives here: the lens is packages/chroma, the
+// controller is packages/platformer, physics and entities are the engine crates.
+//
+// ⚠️ NO `tick` HOOK. A `tick` gets a boxed `s`, every field touch is a clone plus a string-keyed
+// lookup, and it is billed per on-screen entity.
+import { input_x, input_y } from 'cargo:tish_agb'
+import { platformerInit, platformerDrive, platformerAnimate } from '../../../packages/platformer'
+
+// ⚠️ THE PICKUP'S IDENTITY IS ITS TAG, NOT ITS `data`. In an `onCollide` hook the OTHER entity is
+// bound by `hookOther(other, null)` — its `data` is NULL, always. Reading `other.data.id` therefore
+// throws inside the hook, which fails SILENTLY: no error, no log, the collision simply never
+// registers. The symptom was that no lens could ever be picked up, so L/R did nothing for the whole
+// game and the colour mechanic looked completely broken.
+//
+// So each pickup carries its identity in its tag: lens n is TAG_LENS + n, log n is TAG_LOG + n.
+export let TAG_PLAYER: i32 = 1
+export let TAG_PRISM: i32 = 2
+export let TAG_SAVE: i32 = 3
+export let TAG_GOAL: i32 = 4
+export let TAG_LENS: i32 = 10      // + lens id (1 DUSK, 2 VOID, 3 WHITE)
+export let TAG_LOG: i32 = 20       // + log id
+
+// A 64x64 sheet over a 16x16 box, with the anchor taken from `examples/dark-hero` rather than
+// re-derived: that example measured -24,-47 to line the figure's feet and hands up with the tiles,
+// and the sheet is identical.
+export let BOX_W: i32 = 16
+export let BOX_H: i32 = 16
+export let SPR_OX: i32 = 0 - 24
+export let SPR_OY: i32 = 0 - 47
+
+// Frames in hero_sheet.png — the DARK-Hero 64x64 sheet, tone-mapped onto this game's four values
+// (see the note in the generator). Ranges as that pack documents them:
+//   Idle 0..8 · Run 8..16 · Jump 16..20 · Fall 20..24 · Land 24..36 · Hit 67..69 · Death 69..79
+export const CLIPS = {
+  idle: [0, 8, 6, 1],
+  walk: [8, 8, 5, 1],
+  run: [8, 8, 3, 1],
+  jump: [16, 4, 4, 0],
+  fall: [20, 4, 5, 1],
+  land: [24, 12, 2, 0],
+  hurt: [67, 2, 4, 0],
+  dead: [69, 10, 5, 0]
+}
+
+// Signals, read through a function: a mutable module binding reached through a namespace import is
+// a different thing from the module's own view of it, and the failure is silent.
+let sigLens: i32 = 0 - 1     // which lens id was just picked up
+let sigLog: i32 = 0 - 1      // which log id was just touched
+let sigFlags: i32 = 0        // bit 0 prism, bit 1 save, bit 2 goal
+
+/// Every signal this frame in ONE word, cleared as it is read:
+///   bits 0-3   lens id + 1 (0 = none)
+///   bits 4-8   log id + 1  (0 = none)
+///   bits 9-11  prism / save / goal flags
+///
+/// One call rather than three. A boxed call is ~117 ticks and this game had to find ~500 to hold
+/// 60fps; three reads to move a dozen bits was the easiest place to find them.
+export function takeSignals(): i32 {
+  let m: i32 = (sigLens + 1) | ((sigLog + 1) << 4) | (sigFlags << 9)
+  sigLens = 0 - 1
+  sigLog = 0 - 1
+  sigFlags = 0
+  return m
+}
+
+// The pickups carry their id in `a`, set from the .tmj spawn, so one component serves all of them.
+export const Player = {
+  start: ({ this }) => {
+    platformerInit(this, this.data, {
+      boxW: BOX_W, boxH: BOX_H, spriteOX: SPR_OX, spriteOY: SPR_OY,
+      ladders: 0, ledges: 0, wallSlide: 0, slide: 0,
+      walkSpeed: 1.9, runSpeed: 3.0, landFrames: 4
+    })
+  },
+  update: ({ this }) => {
+    let d = this.data
+    platformerDrive(this, d, input_x(), input_y(), 0)
+    platformerAnimate(this, d, CLIPS)
+  },
+  onCollide: ({ this, other }) => {
+    let t: i32 = other.tag()
+    if (t >= TAG_LOG) { sigLog = t - TAG_LOG }
+    if (t >= TAG_LENS && t < TAG_LOG) { sigLens = t - TAG_LENS }
+    if (t === TAG_PRISM) { sigFlags = sigFlags | 1 }
+    if (t === TAG_SAVE) { sigFlags = sigFlags | 2 }
+    if (t === TAG_GOAL) { sigFlags = sigFlags | 4 }
+  }
+}
+
+// These tag themselves from their OWN data, which is valid: `hookSelf` binds a component's own data
+// properly. It is only the *other* side of a collision that arrives with null data.
+export const LensPickup = { start: ({ this }) => { this.setTag(TAG_LENS + this.data.id) } }
+export const LogNode = { start: ({ this }) => { this.setTag(TAG_LOG + this.data.id) } }
+export const Prism = { start: ({ this }) => { this.setTag(TAG_PRISM) } }
+export const SavePoint = { start: ({ this }) => { this.setTag(TAG_SAVE) } }
+export const Goal = { start: ({ this }) => { this.setTag(TAG_GOAL) } }

@@ -1,0 +1,76 @@
+// Native paint vs the boxed paint it replaces, on the same screen.
+//
+// Frames 0-112 draw through `ui_paint_all` (ONE crossing per frame); frames 112-215 redraw the
+// identical screen with per-node `ui_text`/`ui_rect` calls, the way packages/ui does today.
+// Screenshot both and diff: they must be byte-identical. That is the whole contract.
+//
+//   tools/gba-shot repro-ui-paint.gba /tmp/native.ppm 180
+//   tools/gba-shot repro-ui-paint.gba /tmp/boxed.ppm  400
+//
+// ⚠️⚠️ CHECK THE SCREEN HAS CONTENT BEFORE TRUSTING "IDENTICAL". This example passed twice while
+// drawing NOTHING: a uniform white framebuffer compares equal to another uniform white framebuffer.
+// Both causes are worth knowing — `ui_reserve_tiles` had been dropped, so the canvas had no VRAM to
+// allocate; and the loop used `vblank()` instead of `frame()`, so nothing was ever committed. Count
+// distinct colours (this screen has 4, top share ~55%), not just equality.
+import { log, vblank, frame, ui_begin, ui_text, ui_rect, ui_reserve_tiles,
+         lay_reset, lay_push, lay_set_measured, lay_set_paint, lay_set_text, lay_solve,
+         lay_x, lay_y, lay_w, lay_h, ui_paint_all, text_width, text_height } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+// ⚠️ The display has to be configured before anything drawn shows up — a bare `ui_begin` on an
+// uninitialised screen paints into nothing and the framebuffer stays uniform WHITE. An earlier
+// version of this file "passed" that way: both paint paths produced the same blank screen.
+import { uiInit } from '../../../packages/ui'
+
+const WHITE: i32 = 0xFFFFFF
+const GOLD: i32 = 0xF4C430
+const PANEL: i32 = 0x1A1428
+
+const LABELS: string[] = ["Cadoan", "Giza Plains", "Lutia Pass", "Eluut Sands"]
+
+// Build the same tree both ways: a padded column panel with four text rows.
+function build(f: i32): i32 {
+  lay_reset()
+  let root: i32 = lay_push(0, 0, 2, 4, 200, 0 - 1, 0, 0, 0, 0, 0, 0 - 1)
+  lay_set_paint(root, 0, WHITE, 0 - 1, PANEL, GOLD, f, 0, 0, 1, 0)
+  let i: i32 = 0
+  while (i < 4) {
+    let n: i32 = lay_push(1, 0, 0, 0, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, root)
+    lay_set_measured(n, text_width(f, LABELS[i]), text_height(f))
+    lay_set_paint(n, 1, WHITE, 0 - 1, 0 - 1, 0 - 1, f, 0, 0, 1, 0)
+    lay_set_text(n, LABELS[i])
+    i = i + 1
+  }
+  lay_solve(20, 20, 200, 120)
+  return root
+}
+
+// ⚠️ BOTH are needed: `uiInit` sets the theme/font, `ui_reserve_tiles` gives the canvas its VRAM.
+// Without the reserve nothing can allocate and the screen stays uniform white — which an earlier
+// version of this file read as "both paths agree".
+ui_reserve_tiles(320)
+uiInit({ font: body })
+log("start")
+
+let f: i32 = body
+let root: i32 = build(f)
+
+// ── path A: one native call ──────────────────────────────────────────────────────────────────────
+ui_begin()
+ui_paint_all()
+let fr: i32 = 0
+while (fr < 100) { frame() fr = fr + 1 }
+log("native painted")
+
+// ── path B: the boxed shape — per-node calls, exactly what packages/ui does ──────────────────────
+ui_begin()
+ui_rect(lay_x(root), lay_y(root), lay_w(root), lay_h(root), PANEL, 1)
+ui_rect(lay_x(root), lay_y(root), lay_w(root), lay_h(root), GOLD)
+let k: i32 = 0
+while (k < 4) {
+  let n: i32 = k + 1
+  ui_text(f, lay_x(n), lay_y(n), LABELS[k], WHITE, 512, "left")
+  k = k + 1
+}
+while (fr < 200) { frame() fr = fr + 1 }
+log("boxed painted")
+log("done")

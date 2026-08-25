@@ -1,0 +1,147 @@
+// RTS de-risk A1 — the flow field, and whether 24 units can follow one at 60fps.
+//
+// This is the load-bearing assumption of the whole RTS design, so it gets its own ROM before any
+// game is written. The measured entity ceiling is ~20-25 live entities at 60fps (~60 ticks each of
+// a 4,389-tick frame), and an RTS wants every one of them walking somewhere at once.
+//
+// What is being tested, precisely:
+//   1. `flow_goal` — ONE breadth-first search shared by every unit, rebuilt only when the goal
+//      moves. If pathing were per-unit this ROM would not run at half speed, it would crawl.
+//   2. `set_seek` — native movement down that field. Zero tish per unit per frame; the loop below
+//      touches units only when the ORDER changes.
+//   3. The course has three staggered barriers with one gap each, so a unit that merely steers at
+//      the goal jams against the first wall. Units reaching the right-hand side is the proof that
+//      the field is actually being followed.
+//
+// Pass: the EMA (`frame_period(2)`) stays under 4,389 with all 24 walking.
+//   GBA_SHOT_LOG=1 ../../scripts/screenshot.sh rts-flow.gba /tmp/f.png 900 "60:right,200:right"
+import { maze } from 'scene:../assets/maze.tmj'
+import { knight } from 'sheet:../../../assets/ninja-adventure/Actor/Character/Knight/SpriteSheet.png'
+import { sprite_new, camera_set, key_held, ticks, log, scene_stream } from 'cargo:tish_agb'
+import {
+  grid_from_map, spawn, set_transform, attach_sprite, set_collider,
+  set_topdown, topdown_speed, entity_x, entity_y, set_seek, flow_goal, seek_arrived, world_step, frame_period,
+} from 'cargo:tish_gba_game_engine'
+
+// Knight/SpriteSheet.png is the catalog's `standard-4dir` layout: 4 columns per row, rows 0-3 are
+// walk Down/Up/Left/Right. `stride` = 4 tells the seek system where each facing's clip starts.
+let STRIDE: i32 = 4
+let UNITS: i32 = 24
+let FIELD: i32 = 0
+
+scene_stream(maze)
+grid_from_map()
+
+// Every unit is created ONCE, here. An RTS never spawns mid-battle (perf-rules §6); this spike does
+// not either, so the numbers it produces are the numbers a real game would see.
+let ent: i32[] = []
+let i: i32 = 0
+while (i < UNITS) {
+  let e: i32 = spawn()
+  // Six columns of four, packed into the left pocket before the first barrier.
+  let col: i32 = 1 + (i - ((i / 4) * 4))
+  let row: i32 = 2 + (i / 4) * 2
+  set_transform(e, col * 16 + 8, row * 16 + 8)
+  attach_sprite(e, sprite_new(knight))
+  set_collider(e, 10, 10)
+  set_topdown(e)
+  topdown_speed(e, 1)
+  ent.push(e)
+  i = i + 1
+}
+
+// The goal the player drags around with the d-pad. Held in CELLS because that is what a flow field
+// is indexed by — converting once here beats converting per unit per frame.
+let goalCol: i32 = 27
+let goalRow: i32 = 10
+flow_goal(FIELD, goalCol, goalRow)
+
+// Orders are issued once and then not touched. `set_seek` is called only when the goal actually
+// moves, which is the whole point: a settled army costs this loop nothing at all.
+//
+// The arrive radius is STAGGERED per unit (8, 15, 22 … px) so the group settles into a blob around
+// the destination instead of twenty-four sprites in one 16px cell. This is the cheap half of the
+// separation problem, and it is the half that matters: see the README for why the expensive half
+// (making units physically push each other) was measured and rejected.
+i = 0
+while (i < UNITS) {
+  set_seek(ent[i], FIELD, 8 + (i - ((i / 6) * 6)) * 7, STRIDE, 6)
+  i = i + 1
+}
+
+let frameNo: i32 = 0
+let peak: i32 = 0
+let stamp: i32 = ticks()
+let hold: i32 = 0
+let allIn: i32 = 0
+
+while (true) {
+  let dc: i32 = 0
+  let dr: i32 = 0
+  if (key_held(9) === 1) { dc = 1 }
+  if (key_held(8) === 1) { dc = 0 - 1 }
+  if (key_held(7) === 1) { dr = 1 }
+  if (key_held(6) === 1) { dr = 0 - 1 }
+  // Repeat-throttle the cursor: the d-pad is read every frame but the goal steps ~7 times a second,
+  // so holding a direction does not rebuild the field 60 times a second.
+  if (hold > 0) { hold = hold - 1 }
+  if ((dc !== 0 || dr !== 0) && hold === 0) {
+    hold = 8
+    goalCol = goalCol + dc
+    goalRow = goalRow + dr
+    if (goalCol < 1) { goalCol = 1 }
+    if (goalRow < 1) { goalRow = 1 }
+    if (goalCol > 28) { goalCol = 28 }
+    if (goalRow > 18) { goalRow = 18 }
+    // Idempotent when the goal has not changed, so calling it unconditionally would also be correct
+    // — it is gated here only to keep the cost visible in the trace.
+    flow_goal(FIELD, goalCol, goalRow)
+    // Re-arm every unit: `set_seek` clears the arrived latch so a settled crowd starts walking again.
+    let k: i32 = 0
+    while (k < UNITS) {
+      set_seek(ent[k], FIELD, 8 + (k - ((k / 6) * 6)) * 7, STRIDE, 6)
+      k = k + 1
+    }
+  }
+
+  // Follow the goal with the camera, clamped to the map (480x320 against a 240x160 screen).
+  let cx: i32 = goalCol * 16 - 120
+  let cy: i32 = goalRow * 16 - 80
+  if (cx < 0) { cx = 0 }
+  if (cy < 0) { cy = 0 }
+  if (cx > 240) { cx = 240 }
+  if (cy > 160) { cy = 160 }
+  camera_set(cx, cy)
+
+  world_step()
+
+  // Instrumentation. `ticks()` + `log()` only — a text overlay costs more than what it measures,
+  // and `frame_stats()` returns a string (perf-rules §5).
+  let now: i32 = ticks()
+  let per: i32 = (now - stamp) & 0xFFFF
+  stamp = now
+  if (per > peak) { peak = per }
+  frameNo = frameNo + 1
+  if ((frameNo & 63) === 0) {
+    // Byte-identical log line in every build of this spike — two differently-instrumented builds
+    // are not a before and an after (perf-rules, "How to measure").
+    //
+    // The arrival probe rides on the SAME frame as the log rather than getting a timer of its own:
+    // 24 boxed `seek_arrived` reads plus a concat cost more than a frame of the thing being
+    // measured, and spread over clean frames they would put the cost of WATCHING the flow field
+    // into the flow field's own number. It also stops entirely once it has latched.
+    let arrived: i32 = 0
+    if (allIn === 0) {
+      let k2: i32 = 0
+      while (k2 < UNITS) {
+        if (seek_arrived(ent[k2]) === 1) { arrived = arrived + 1 }
+        k2 = k2 + 1
+      }
+      if (arrived === UNITS) { allIn = 1 }
+    } else {
+      arrived = UNITS
+    }
+    log("P" + peak + " E" + frame_period(2) + " A" + arrived)
+    peak = 0
+  }
+}

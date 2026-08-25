@@ -1,0 +1,20 @@
+{
+  "name": "cutscene-raw",
+  "private": true,
+  "scripts": {
+    "assets": "python3 ../../scripts/gen_cutscene_raw.py",
+    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
+    "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png 200",
+    "verify": "./verify.sh",
+    "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
+  },
+  "devDependencies": { "@tishlang/tish": "file:../../../../tish/tish/npm/tish" },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": { "path": "../../crates/tish-agb" },
+      "tish_gba_scenepack": { "path": "../../crates/tish-gba-scenepack" }
+    }
+  },
+  "description": "A staged cutscene in a game that cannot link the game-engine crate: raw sprites, no entities, no dialog package. The actor walks into frame, the camera pans, and a choice branches — the three beats schlopai/chuggie-engine#66 records as currently impossible."
+}

@@ -1,0 +1,21 @@
+# A deliberately plain tune: ONE steady lead note per beat on pulse ch1, a pad on ch2, noise on ch4.
+# Steady and unchanging so any damage to it is obvious in a spectrum rather than a matter of taste.
+deck 1
+bpm 120
+
+track Lead id lead gen gameBoyDmg * 8
+  gen type pulse duty 50 env_mode constant vol 12
+  note 72 0 0.9 v 110
+  note 72 1 0.9 v 110
+  note 72 2 0.9 v 110
+  note 72 3 0.9 v 110
+
+track Harm id harm gen gameBoyDmg * 8
+  gen type pulse duty 25 env_mode constant vol 8
+  note 48 0 4 v 90
+
+track Drums id drums gen gameBoyDmg * 8
+  gen type noise vol 8 noise_mode long
+  gen attack 0 decay 0.05 sustain 0 release 0.02
+  note 45 0 0.2 v 110
+  note 45 2 0.2 v 110

@@ -1,0 +1,88 @@
+// status.tish — SoA auras (DoT / HoT / absorb ticks). Engine has no native DoT.
+
+import {
+  UNITS, U_ALIVE, U_ABSORB, U_ROOT, U_SLOW, U_STUN,
+  unitApplyDamage, unitHeal
+} from './units'
+
+export let ST_DOT: i32 = 1
+export let ST_HOT: i32 = 2
+export let ST_ABSORB: i32 = 3
+export let ST_ROOT: i32 = 4
+export let ST_SLOW: i32 = 5
+export let ST_STUN: i32 = 6
+
+let AURA_N: i32 = 24
+let A_KIND: i32[] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+let A_UNIT: i32[] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+let A_TICKS: i32[] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+let A_POT: i32[] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+let A_EVERY: i32[] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+let A_ACC: i32[] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+
+export function statusClear() {
+  let i: i32 = 0
+  while (i < AURA_N) { A_KIND[i] = 0; i = i + 1 }
+}
+
+export function statusAdd(unit: i32, kind: i32, ticks: i32, pot: i32, every: i32) {
+  if (unit < 0 || unit >= UNITS) { return }
+  // Instant CC kinds also stamp unit columns for the mover.
+  if (kind === ST_ROOT) { U_ROOT[unit] = ticks }
+  if (kind === ST_SLOW) { U_SLOW[unit] = ticks }
+  if (kind === ST_STUN) { U_STUN[unit] = ticks }
+  if (kind === ST_ABSORB) { U_ABSORB[unit] = U_ABSORB[unit] + pot; return }
+
+  let i: i32 = 0
+  while (i < AURA_N) {
+    if (A_KIND[i] === 0) {
+      A_KIND[i] = kind
+      A_UNIT[i] = unit
+      A_TICKS[i] = ticks
+      A_POT[i] = pot
+      A_EVERY[i] = every
+      if (every < 1) { A_EVERY[i] = 30 }
+      A_ACC[i] = 0
+      return
+    }
+    i = i + 1
+  }
+}
+
+export function statusTick() {
+  let i: i32 = 0
+  while (i < AURA_N) {
+    if (A_KIND[i] !== 0) {
+      let u: i32 = A_UNIT[i]
+      if (U_ALIVE[u] === 0) {
+        A_KIND[i] = 0
+      } else {
+        A_TICKS[i] = A_TICKS[i] - 1
+        A_ACC[i] = A_ACC[i] + 1
+        if (A_ACC[i] >= A_EVERY[i]) {
+          A_ACC[i] = 0
+          if (A_KIND[i] === ST_DOT) {
+            // Bypass i-frames via set_hp path.
+            unitApplyDamage(u, A_POT[i])
+          } else if (A_KIND[i] === ST_HOT) {
+            unitHeal(u, A_POT[i])
+          }
+        }
+        if (A_TICKS[i] <= 0) { A_KIND[i] = 0 }
+      }
+    }
+    i = i + 1
+  }
+}

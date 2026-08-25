@@ -1,0 +1,65 @@
+// A two-area tile-locked overworld whose maps are authored as Tiled-shaped data (see
+// maps.tish): each scene renders a tile layer from a shared tileset and derives collision
+// from the map's solid GIDs. A Door entity carries the scene to warp to in its data.
+import { tileset } from 'background:../assets/tileset.png'
+// All sprite sheets go through the `sheet:` scheme so their handles share one numbering
+// (mixing `asset:` and `sheet:` collides handles — they register into the same arena).
+import { heroSheet } from 'sheet:../assets/hero.png'
+import { doorSprite } from 'sheet:../assets/door.png'
+import { villagerSprite } from 'sheet:../assets/villager.png'
+import { elderSprite } from 'sheet:../assets/elder.png'
+import { keeperSprite } from 'sheet:../assets/keeper.png'
+import { sprite_new } from 'cargo:tish_agb'
+import { mount, create, loadMap, step } from '../../../packages/engine'
+import { townMap, houseMap } from './maps'
+import * as components from './components'
+import { Player, Npc, Elder, Door } from './components'
+
+mount(components)
+
+// A townsperson standing on the grid: its own sprite `sheet` and a component.
+function person(col, row, comp, sheet) {
+  let e = create()
+  e.onGrid(col, row)
+  e.setSprite(sprite_new(sheet))
+  e.behave(comp, {})
+  return e
+}
+
+// The grassy town: render its map, then place the hero, two NPCs, and a door to the house.
+function townScene() {
+  loadMap(townMap, tileset)
+
+  let hero = create()
+  hero.onGrid(3, 4)
+  hero.setSprite(sprite_new(heroSheet))
+  hero.behave(Player, {})
+
+  person(7, 4, Npc, villagerSprite)
+  person(11, 6, Elder, elderSprite)
+
+  let door = create()
+  door.onGrid(7, 1)
+  door.setSprite(sprite_new(doorSprite))
+  door.behave(Door, { to: houseScene })
+}
+
+// The house interior: render its map, then the hero, a shopkeeper, and a door back to town.
+function houseScene() {
+  loadMap(houseMap, tileset)
+
+  let hero = create()
+  hero.onGrid(4, 2)
+  hero.setSprite(sprite_new(heroSheet))
+  hero.behave(Player, {})
+
+  person(2, 2, Npc, keeperSprite)
+
+  let exit = create()
+  exit.onGrid(4, 5)
+  exit.setSprite(sprite_new(doorSprite))
+  exit.behave(Door, { to: townScene })
+}
+
+townScene()
+while (true) { step() }

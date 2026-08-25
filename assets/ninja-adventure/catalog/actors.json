@@ -1,0 +1,7923 @@
+{
+ "pattern": "index_actors.py \u2014 structural index of every Ninja Adventure actor (Character / Monster /\nBoss / Animal / CharacterAnimated) into catalog/actors.json + actors.md.\n\nNo vision needed: the frame layout is fixed by the pack convention (established from the\nSeparateAnim clip dims + a rendered Walk sheet):\n\n  Combined SpriteSheet.png, row = direction/action, col = frame (16x16 frames):\n    64x112 (4x7)  standard character : rows 0-3 walk DOWN/UP/LEFT/RIGHT (4 frames each),\n                                       row 4 idle, row 5 attack, row 6 jump\n    64x64  (4x4)  simple/monster     : rows 0-3 walk DOWN/UP/LEFT/RIGHT (4 frames), no actions\n    Wx16   (Nx1)  strip              : N single-row frames (tiny critters / effects)\n  SeparateAnim/*.png : Walk 64x64 (dir x frame); Idle/Attack/Jump 64x16 (4 frames, facing down);\n                       Dead/Item/Special1/Special2 16x16 (single frame).\n  Faceset.png 38x38  : dialogue portrait.",
+ "shared": {
+  "assets/ninja-adventure/Actor/Character/Shadow.png": [
+   12,
+   7
+  ]
+ },
+ "actors": [
+  {
+   "name": "Cat",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Cat",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/Cat/SpriteSheet.png",
+    "dims": [
+     32,
+     16
+    ],
+    "layout": "strip",
+    "note": "2-frame single-row strip"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/Cat/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "CatBlack",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/CatBlack",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/CatBlack/SpriteSheet.png",
+    "dims": [
+     32,
+     16
+    ],
+    "layout": "strip",
+    "note": "2-frame single-row strip"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/CatBlack/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "FacesetYellow.png": [
+     38,
+     38
+    ],
+    "SpriteSheetYellow.png": [
+     32,
+     16
+    ]
+   }
+  },
+  {
+   "name": "CatCyclop",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/CatCyclop",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/CatCyclop/SpriteSheet.png",
+    "dims": [
+     32,
+     16
+    ],
+    "layout": "strip",
+    "note": "2-frame single-row strip"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/CatCyclop/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "CatOrange",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/CatOrange",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/CatOrange/SpriteSheet.png",
+    "dims": [
+     44,
+     17
+    ],
+    "layout": "large-or-irregular",
+    "note": "44x17; frame size not 16px (large sprite / boss) \u2014 inspect"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/CatOrange/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "FacesetBrown.png": [
+     38,
+     38
+    ],
+    "SpriteSheetFaceset.png": [
+     44,
+     17
+    ]
+   }
+  },
+  {
+   "name": "CatWhite",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/CatWhite",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/CatWhite/SpriteSheet.png",
+    "dims": [
+     34,
+     15
+    ],
+    "layout": "large-or-irregular",
+    "note": "34x15; frame size not 16px (large sprite / boss) \u2014 inspect"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/CatWhite/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "FacesetGray.png": [
+     38,
+     38
+    ],
+    "SpriteSheetGray.png": [
+     34,
+     15
+    ]
+   }
+  },
+  {
+   "name": "Chicken",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Chicken",
+   "extra_pngs": {
+    "FacesetBlack.png": [
+     38,
+     38
+    ],
+    "FacesetBrown.png": [
+     38,
+     38
+    ],
+    "FacesetCute.png": [
+     38,
+     38
+    ],
+    "FacesetWhite.png": [
+     38,
+     38
+    ],
+    "SpriteSheetBlack.png": [
+     32,
+     16
+    ],
+    "SpriteSheetBrown.png": [
+     32,
+     16
+    ],
+    "SpriteSheetCute.png": [
+     32,
+     16
+    ],
+    "SpriteSheetWhite.png": [
+     32,
+     16
+    ]
+   }
+  },
+  {
+   "name": "Cow",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Cow",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/Cow/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "SpriteSheetWhite.png": [
+     32,
+     16
+    ],
+    "SpriteSheetWhiteSide.png": [
+     48,
+     16
+    ]
+   }
+  },
+  {
+   "name": "Dog",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Dog",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/Dog/SpriteSheet.png",
+    "dims": [
+     32,
+     16
+    ],
+    "layout": "strip",
+    "note": "2-frame single-row strip"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/Dog/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Dog2",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Dog2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/Dog2/SpriteSheet.png",
+    "dims": [
+     32,
+     16
+    ],
+    "layout": "strip",
+    "note": "2-frame single-row strip"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/Dog2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "DogBlack",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/DogBlack",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/DogBlack/SpriteSheet.png",
+    "dims": [
+     36,
+     17
+    ],
+    "layout": "large-or-irregular",
+    "note": "36x17; frame size not 16px (large sprite / boss) \u2014 inspect"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/DogBlack/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "FacesetWhite.png": [
+     38,
+     38
+    ],
+    "SpriteSheetWhite.png": [
+     36,
+     17
+    ]
+   }
+  },
+  {
+   "name": "DogOrange",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/DogOrange",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/DogOrange/SpriteSheet.png",
+    "dims": [
+     36,
+     16
+    ],
+    "layout": "large-or-irregular",
+    "note": "36x16; frame size not 16px (large sprite / boss) \u2014 inspect"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/DogOrange/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "FacesetBrown.png": [
+     38,
+     38
+    ],
+    "SpriteSheetBrown.png": [
+     36,
+     16
+    ]
+   }
+  },
+  {
+   "name": "DogYellow",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/DogYellow",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/DogYellow/SpriteSheet.png",
+    "dims": [
+     42,
+     17
+    ],
+    "layout": "large-or-irregular",
+    "note": "42x17; frame size not 16px (large sprite / boss) \u2014 inspect"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/DogYellow/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "FacesetBlack.png": [
+     38,
+     38
+    ],
+    "SpriteSheetBlack.png": [
+     42,
+     17
+    ]
+   }
+  },
+  {
+   "name": "Donkey",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Donkey",
+   "extra_pngs": {
+    "FacesetGrey.png": [
+     38,
+     38
+    ],
+    "SpriteSheeGreySide.png": [
+     46,
+     16
+    ],
+    "SpriteSheetGrey.png": [
+     32,
+     16
+    ]
+   }
+  },
+  {
+   "name": "Fish",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Fish",
+   "extra_pngs": {
+    "FacesetRed.png": [
+     38,
+     38
+    ],
+    "FacesetWhite.png": [
+     38,
+     38
+    ],
+    "FacesetYellow.png": [
+     38,
+     38
+    ],
+    "SpriteSheetRed.png": [
+     32,
+     16
+    ],
+    "SpriteSheetWhite.png": [
+     32,
+     16
+    ],
+    "SpriteSheetYellow.png": [
+     32,
+     16
+    ]
+   }
+  },
+  {
+   "name": "Frog",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Frog",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/Frog/SpriteSheet.png",
+    "dims": [
+     32,
+     16
+    ],
+    "layout": "strip",
+    "note": "2-frame single-row strip"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/Frog/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Hamster",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Hamster",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/Hamster/SpriteSheet.png",
+    "dims": [
+     30,
+     15
+    ],
+    "layout": "large-or-irregular",
+    "note": "30x15; frame size not 16px (large sprite / boss) \u2014 inspect"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/Hamster/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "FacesetBrown.png": [
+     38,
+     38
+    ],
+    "FacesetDark.png": [
+     38,
+     38
+    ],
+    "FacesetGray.png": [
+     38,
+     38
+    ],
+    "SpriteSheetBrown.png": [
+     30,
+     13
+    ],
+    "SpriteSheetDark.png": [
+     30,
+     14
+    ],
+    "SpriteSheetGray.png": [
+     30,
+     15
+    ]
+   }
+  },
+  {
+   "name": "Horse",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Horse",
+   "extra_pngs": {
+    "FacesetBlack.png": [
+     38,
+     38
+    ],
+    "FacesetBrown.png": [
+     38,
+     38
+    ],
+    "SpriteSheetBlack.png": [
+     32,
+     16
+    ],
+    "SpriteSheetBlackSide.png": [
+     46,
+     16
+    ],
+    "SpriteSheetBrown.png": [
+     32,
+     16
+    ],
+    "SpriteSheetBrownSide.png": [
+     46,
+     16
+    ]
+   }
+  },
+  {
+   "name": "Hyena",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Hyena",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/Hyena/SpriteSheet.png",
+    "dims": [
+     28,
+     13
+    ],
+    "layout": "large-or-irregular",
+    "note": "28x13; frame size not 16px (large sprite / boss) \u2014 inspect"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/Hyena/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "FacesetBrown.png": [
+     38,
+     38
+    ],
+    "SpriteSheetBrown.png": [
+     28,
+     13
+    ]
+   }
+  },
+  {
+   "name": "Lion",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Lion",
+   "extra_pngs": {
+    "FacesetOrange.png": [
+     38,
+     38
+    ],
+    "FacesetRed.png": [
+     38,
+     38
+    ],
+    "FacesetWhite.png": [
+     38,
+     38
+    ],
+    "FacesetYellow.png": [
+     38,
+     38
+    ],
+    "SpriteSheetOrange.png": [
+     32,
+     23
+    ],
+    "SpriteSheetOrangeSide.png": [
+     60,
+     16
+    ],
+    "SpriteSheetRed.png": [
+     32,
+     23
+    ],
+    "SpriteSheetRedSide.png": [
+     60,
+     16
+    ],
+    "SpriteSheetWhite.png": [
+     32,
+     23
+    ],
+    "SpriteSheetWhiteSide.png": [
+     60,
+     16
+    ],
+    "SpriteSheetYellow.png": [
+     32,
+     23
+    ],
+    "SpriteSheetYellowSide.png": [
+     60,
+     16
+    ]
+   }
+  },
+  {
+   "name": "LionCub",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/LionCub",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/LionCub/SpriteSheet.png",
+    "dims": [
+     32,
+     16
+    ],
+    "layout": "strip",
+    "note": "2-frame single-row strip"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/LionCub/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Faceset2.png": [
+     38,
+     38
+    ],
+    "SpriteSheet2.png": [
+     32,
+     16
+    ]
+   }
+  },
+  {
+   "name": "Lioness",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Lioness",
+   "extra_pngs": {
+    "FacesetLioness.png": [
+     38,
+     38
+    ],
+    "FacesetLioness2.png": [
+     38,
+     38
+    ],
+    "SpriteSheeLlioness.png": [
+     32,
+     23
+    ],
+    "SpriteSheeLlioness2.png": [
+     32,
+     23
+    ],
+    "SpriteSheetLioness2Side.png": [
+     60,
+     16
+    ],
+    "SpriteSheetLionessSide.png": [
+     60,
+     16
+    ]
+   }
+  },
+  {
+   "name": "Monkey",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Monkey",
+   "extra_pngs": {
+    "FacesetBlack.png": [
+     38,
+     38
+    ],
+    "FacesetBrown.png": [
+     38,
+     38
+    ],
+    "FacesetGrey.png": [
+     38,
+     38
+    ],
+    "SpriteSheetBlack.png": [
+     32,
+     16
+    ],
+    "SpriteSheetBrown.png": [
+     32,
+     16
+    ],
+    "SpriteSheetGrey.png": [
+     32,
+     16
+    ]
+   }
+  },
+  {
+   "name": "Parrot",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Parrot",
+   "extra_pngs": {
+    "FacesetBlue.png": [
+     38,
+     38
+    ],
+    "FacesetRed.png": [
+     38,
+     38
+    ],
+    "SpriteSheetBlue.png": [
+     32,
+     16
+    ],
+    "SpriteSheetRed.png": [
+     32,
+     16
+    ]
+   }
+  },
+  {
+   "name": "Pig",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Pig",
+   "extra_pngs": {
+    "FacesetBlack.png": [
+     38,
+     38
+    ],
+    "FacesetPink.png": [
+     38,
+     38
+    ],
+    "FacesetRed.png": [
+     38,
+     38
+    ],
+    "SpriteSheetBlack.png": [
+     32,
+     16
+    ],
+    "SpriteSheetPink.png": [
+     32,
+     16
+    ],
+    "SpriteSheetRed.png": [
+     32,
+     16
+    ]
+   }
+  },
+  {
+   "name": "Racoon",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/Racoon",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/Racoon/SpriteSheet.png",
+    "dims": [
+     32,
+     16
+    ],
+    "layout": "strip",
+    "note": "2-frame single-row strip"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/Racoon/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "WildBoar",
+   "group": "Animal",
+   "dir": "assets/ninja-adventure/Actor/Animal/WildBoar",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Animal/WildBoar/SpriteSheet.png",
+    "dims": [
+     34,
+     16
+    ],
+    "layout": "large-or-irregular",
+    "note": "34x16; frame size not 16px (large sprite / boss) \u2014 inspect"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Animal/WildBoar/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "FacesetGray.png": [
+     38,
+     38
+    ],
+    "SpriteSheetGray.png": [
+     34,
+     16
+    ]
+   }
+  },
+  {
+   "name": "DemonCyclop",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/DemonCyclop",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Boss/DemonCyclop/Sprite.png",
+    "dims": [
+     37,
+     33
+    ],
+    "layout": "large-or-irregular",
+    "note": "37x33; frame size not 16px (large sprite / boss) \u2014 inspect"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/DemonCyclop/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Hit.png": [
+     150,
+     50
+    ],
+    "Idle.png": [
+     250,
+     50
+    ],
+    "Walk.png": [
+     300,
+     50
+    ]
+   }
+  },
+  {
+   "name": "DemonCyclop2",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/DemonCyclop2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Boss/DemonCyclop2/Sprite.png",
+    "dims": [
+     37,
+     33
+    ],
+    "layout": "large-or-irregular",
+    "note": "37x33; frame size not 16px (large sprite / boss) \u2014 inspect"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/DemonCyclop2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Hit.png": [
+     150,
+     50
+    ],
+    "Idle.png": [
+     250,
+     50
+    ],
+    "Walk.png": [
+     300,
+     50
+    ]
+   }
+  },
+  {
+   "name": "DragonBlue",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/DragonBlue",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/DragonBlue/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Body1.png": [
+     31,
+     27
+    ],
+    "Body2.png": [
+     31,
+     27
+    ],
+    "BodyEnd.png": [
+     29,
+     40
+    ],
+    "Head.png": [
+     44,
+     46
+    ],
+    "Preview.png": [
+     636,
+     290
+    ],
+    "Wing.png": [
+     57,
+     57
+    ]
+   }
+  },
+  {
+   "name": "DragonGreen",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/DragonGreen",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/DragonGreen/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Body1.png": [
+     31,
+     27
+    ],
+    "Body2.png": [
+     31,
+     27
+    ],
+    "BodyEnd.png": [
+     29,
+     40
+    ],
+    "Head.png": [
+     44,
+     46
+    ],
+    "Preview.png": [
+     636,
+     290
+    ],
+    "Wing.png": [
+     57,
+     57
+    ]
+   }
+  },
+  {
+   "name": "GiantBamboo",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/GiantBamboo",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantBamboo/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Attack.png": [
+     310,
+     62
+    ],
+    "Charge.png": [
+     186,
+     62
+    ],
+    "Hit.png": [
+     248,
+     62
+    ],
+    "Idle.png": [
+     372,
+     62
+    ],
+    "Walk.png": [
+     744,
+     62
+    ]
+   }
+  },
+  {
+   "name": "GiantBamboo2",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/GiantBamboo2",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantBamboo2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Attack.png": [
+     310,
+     62
+    ],
+    "Charge.png": [
+     186,
+     62
+    ],
+    "Hit.png": [
+     248,
+     62
+    ],
+    "Idle.png": [
+     372,
+     62
+    ],
+    "Walk.png": [
+     744,
+     62
+    ]
+   }
+  },
+  {
+   "name": "GiantBlueSamurai",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/GiantBlueSamurai",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantBlueSamurai/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "AttackLeft.png": [
+     384,
+     96
+    ],
+    "AttackRight.png": [
+     384,
+     96
+    ],
+    "ChargeLeft.png": [
+     288,
+     96
+    ],
+    "ChargeRight.png": [
+     288,
+     96
+    ],
+    "Hit.png": [
+     384,
+     48
+    ],
+    "Idle.png": [
+     576,
+     48
+    ],
+    "Walk.png": [
+     576,
+     48
+    ]
+   }
+  },
+  {
+   "name": "GiantFlam",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/GiantFlam",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantFlam/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Hit.png": [
+     150,
+     50
+    ],
+    "Idle.png": [
+     250,
+     50
+    ]
+   }
+  },
+  {
+   "name": "GiantFrog",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/GiantFrog",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantFrog/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Attack.png": [
+     120,
+     40
+    ],
+    "Charge.png": [
+     280,
+     40
+    ],
+    "Hit.png": [
+     120,
+     40
+    ],
+    "Idle40x40.png": [
+     200,
+     40
+    ],
+    "Jump.png": [
+     240,
+     40
+    ]
+   }
+  },
+  {
+   "name": "GiantFrog2",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/GiantFrog2",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantFrog2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Attack.png": [
+     120,
+     40
+    ],
+    "Charge.png": [
+     280,
+     40
+    ],
+    "Hit.png": [
+     120,
+     40
+    ],
+    "Idle.png": [
+     200,
+     40
+    ],
+    "Jump.png": [
+     240,
+     40
+    ]
+   }
+  },
+  {
+   "name": "GiantRacoon",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/GiantRacoon",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantRacoon/Sprite.png",
+    "dims": [
+     55,
+     50
+    ],
+    "layout": "large-or-irregular",
+    "note": "55x50; frame size not 16px (large sprite / boss) \u2014 inspect"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantRacoon/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Attack.png": [
+     240,
+     60
+    ],
+    "Charge.png": [
+     120,
+     60
+    ],
+    "Idle.png": [
+     360,
+     60
+    ],
+    "Jump.png": [
+     300,
+     60
+    ]
+   }
+  },
+  {
+   "name": "GiantRacoonGold",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/GiantRacoonGold",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantRacoonGold/Sprite.png",
+    "dims": [
+     43,
+     48
+    ],
+    "layout": "large-or-irregular",
+    "note": "43x48; frame size not 16px (large sprite / boss) \u2014 inspect"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantRacoonGold/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Attack.png": [
+     240,
+     60
+    ],
+    "Charge.png": [
+     120,
+     60
+    ],
+    "Idle.png": [
+     360,
+     60
+    ],
+    "Jump.png": [
+     300,
+     60
+    ]
+   }
+  },
+  {
+   "name": "GiantRedSamurai",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/GiantRedSamurai",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantRedSamurai/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "AttackLeft.png": [
+     384,
+     96
+    ],
+    "AttackRight.png": [
+     384,
+     96
+    ],
+    "ChargeLeft.png": [
+     288,
+     96
+    ],
+    "ChargeRight.png": [
+     288,
+     96
+    ],
+    "Hit.png": [
+     384,
+     48
+    ],
+    "Idle.png": [
+     576,
+     48
+    ],
+    "Walk.png": [
+     576,
+     48
+    ]
+   }
+  },
+  {
+   "name": "GiantSlime",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/GiantSlime",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantSlime/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Hit.png": [
+     310,
+     52
+    ],
+    "Idle.png": [
+     310,
+     52
+    ],
+    "Jump.png": [
+     806,
+     52
+    ]
+   }
+  },
+  {
+   "name": "GiantSlime2",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/GiantSlime2",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantSlime2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Hit.png": [
+     310,
+     52
+    ],
+    "Idle.png": [
+     310,
+     52
+    ],
+    "Jump.png": [
+     806,
+     52
+    ]
+   }
+  },
+  {
+   "name": "GiantSpirit",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/GiantSpirit",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/GiantSpirit/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Hit.png": [
+     150,
+     50
+    ],
+    "Idle.png": [
+     250,
+     50
+    ]
+   }
+  },
+  {
+   "name": "SquidGreen",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/SquidGreen",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/SquidGreen/Faceset.png",
+    "dims": [
+     38,
+     37
+    ]
+   },
+   "extra_pngs": {
+    "Attack.png": [
+     456,
+     79
+    ],
+    "AttackLoop.png": [
+     304,
+     79
+    ],
+    "Hit.png": [
+     304,
+     79
+    ],
+    "Idle.png": [
+     304,
+     79
+    ],
+    "Shoot.png": [
+     380,
+     79
+    ],
+    "Walk.png": [
+     304,
+     79
+    ]
+   }
+  },
+  {
+   "name": "SquidRed",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/SquidRed",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/SquidRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Attack.png": [
+     456,
+     79
+    ],
+    "AttackLoop.png": [
+     304,
+     79
+    ],
+    "Hit.png": [
+     304,
+     79
+    ],
+    "Idle.png": [
+     304,
+     79
+    ],
+    "Shoot.png": [
+     380,
+     79
+    ],
+    "Walk.png": [
+     304,
+     79
+    ]
+   }
+  },
+  {
+   "name": "TenguBlue",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/TenguBlue",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/TenguBlue/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Attack.png": [
+     1230,
+     82
+    ],
+    "Hit.png": [
+     544,
+     68
+    ],
+    "Idle.png": [
+     408,
+     68
+    ],
+    "Trans.png": [
+     748,
+     68
+    ],
+    "Walk.png": [
+     820,
+     82
+    ]
+   }
+  },
+  {
+   "name": "TenguRed",
+   "group": "Boss",
+   "dir": "assets/ninja-adventure/Actor/Boss/TenguRed",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Boss/TenguRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "Attack.png": [
+     1230,
+     82
+    ],
+    "Hit.png": [
+     656,
+     82
+    ],
+    "Idle.png": [
+     492,
+     82
+    ],
+    "Trans.png": [
+     902,
+     82
+    ],
+    "Walk.png": [
+     820,
+     82
+    ]
+   }
+  },
+  {
+   "name": "Boy",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Boy",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Boy/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Boy/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "CamouflageGreen",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/CamouflageGreen",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/CamouflageGreen/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/CamouflageGreen/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "CamouflageRed",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/CamouflageRed",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/CamouflageRed/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/CamouflageRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "CaveLion",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/CaveLion",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/CaveLion/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/CaveLion/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "CaveLion2",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/CaveLion2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/CaveLion2/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/CaveLion2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Cavegirl",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Cavegirl",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Cavegirl/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Cavegirl/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Cavegirl2",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Cavegirl2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Cavegirl2/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Cavegirl2/Faceset.png",
+    "dims": [
+     37,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Caveman",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Caveman",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Caveman/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Caveman/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Caveman2",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Caveman2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Caveman2/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Caveman2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Child",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Child",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Child/SpriteSheet.png",
+    "dims": [
+     64,
+     32
+    ],
+    "layout": "grid-16",
+    "note": "4x2 of 16px frames (non-standard; inspect)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Child/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "DemonGreen",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/DemonGreen",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/DemonGreen/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/DemonGreen/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "DemonRed",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/DemonRed",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/DemonRed/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/DemonRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "EggBoy",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/EggBoy",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/EggBoy/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/EggBoy/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "EggGirl",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/EggGirl",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/EggGirl/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/EggGirl/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Eskimo",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Eskimo",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Eskimo/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Eskimo/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "FighterRed",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/FighterRed",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/FighterRed/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/FighterRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "FighterWhite",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/FighterWhite",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/FighterWhite/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/FighterWhite/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Flam",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Flam",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Flam/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Flam/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "GladiatorBlue",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/GladiatorBlue",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/GladiatorBlue/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/GladiatorBlue/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "GoldStatue",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/GoldStatue",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/GoldStatue/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/GoldStatue/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "GreenPig",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/GreenPig",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/GreenPig/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/GreenPig/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Hunter",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Hunter",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Hunter/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Hunter/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Inspector",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Inspector",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Inspector/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Inspector/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Knight",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Knight",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Knight/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Knight/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "KnightGold",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/KnightGold",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/KnightGold/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/KnightGold/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Lion",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Lion",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Lion/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Lion/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "LionBoy",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/LionBoy",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/LionBoy/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/LionBoy/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "LionOrange",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/LionOrange",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/LionOrange/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/LionOrange/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "LionYellow",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/LionYellow",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/LionYellow/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/LionYellow/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "ManGreen",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/ManGreen",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/ManGreen/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   },
+   "extra_pngs": {
+    "Faceset1.png": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "MaskFrog",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/MaskFrog",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/MaskFrog/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/MaskFrog/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   },
+   "extra_pngs": {
+    "Dead14.png": [
+     16,
+     16
+    ]
+   }
+  },
+  {
+   "name": "MaskGoldRacoon",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/MaskGoldRacoon",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/MaskGoldRacoon/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/MaskGoldRacoon/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "MaskRacoon",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/MaskRacoon",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/MaskRacoon/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/MaskRacoon/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Master",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Master",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Master/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Master/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Monk",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Monk",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Monk/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Monk/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Monk2",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Monk2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Monk2/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Monk2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Monkey",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Monkey",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Monkey/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Monkey/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "MonkeyBoxerBlue",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/MonkeyBoxerBlue",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/MonkeyBoxerBlue/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/MonkeyBoxerBlue/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "MonkeyBoxerRed",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/MonkeyBoxerRed",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/MonkeyBoxerRed/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/MonkeyBoxerRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaBlue",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaBlue",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaBlue/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaBlue/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaBlue2",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaBlue2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaBlue2/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaBlue2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaBomb",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaBomb",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaBomb/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaBomb/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaDark",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaDark",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaDark/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaDark/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaEskimo",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaEskimo",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaEskimo/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaEskimo/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaFire",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaFire",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaFire/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaFire/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaGray",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaGray",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaGray/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaGray/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaGreen",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaGreen",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaGreen/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaGreen/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaLeaf",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaLeaf",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaLeaf/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaLeaf/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaMageBlack",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaMageBlack",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaMageBlack/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaMageBlack/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaMageOrange",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaMageOrange",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaMageOrange/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaMageOrange/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaMasked",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaMasked",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaMasked/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaMasked/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaRed",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaRed",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaRed/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaRed2",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaRed2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaRed2/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaRed2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaThunder",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaThunder",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaThunder/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaThunder/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaWater",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaWater",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaWater/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaWater/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaYellow",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/NinjaYellow",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaYellow/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/NinjaYellow/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Noble",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Noble",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Noble/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Noble/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "OldMan",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/OldMan",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/OldMan/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/OldMan/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "OldMan2",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/OldMan2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/OldMan2/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/OldMan2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "OldMan3",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/OldMan3",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/OldMan3/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/OldMan3/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "OldWoman",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/OldWoman",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/OldWoman/SpriteSheet.png",
+    "dims": [
+     64,
+     32
+    ],
+    "layout": "grid-16",
+    "note": "4x2 of 16px frames (non-standard; inspect)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/OldWoman/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Pig",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Pig",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Pig/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Pig/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Princess",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Princess",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Princess/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Princess/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "RedGladiator",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/RedGladiator",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/RedGladiator/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/RedGladiator/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "RedNinja3",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/RedNinja3",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/RedNinja3/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/RedNinja3/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "RobotCamouflage",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/RobotCamouflage",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/RobotCamouflage/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/RobotCamouflage/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "RobotGreen",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/RobotGreen",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/RobotGreen/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/RobotGreen/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "RobotGrey",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/RobotGrey",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/RobotGrey/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/RobotGrey/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Samurai",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Samurai",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Samurai/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Samurai/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "SamuraiBlue",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/SamuraiBlue",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/SamuraiBlue/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/SamuraiBlue/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "SamuraiRed",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/SamuraiRed",
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/SamuraiRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   },
+   "extra_pngs": {
+    "redsamurai.png": [
+     64,
+     112
+    ]
+   }
+  },
+  {
+   "name": "Shaman",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Shaman",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Shaman/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Shaman/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "ShamanLion",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/ShamanLion",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/ShamanLion/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/ShamanLion/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Skeleton",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Skeleton",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Skeleton/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Skeleton/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "SkeletonDemon",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/SkeletonDemon",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/SkeletonDemon/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/SkeletonDemon/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "SorcererBlack",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/SorcererBlack",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/SorcererBlack/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/SorcererBlack/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "SorcererOrange",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/SorcererOrange",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/SorcererOrange/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/SorcererOrange/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Spirit",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Spirit",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Spirit/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Spirit/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Statue",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Statue",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Statue/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Statue/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Sultan",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Sultan",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Sultan/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Sultan/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Sultan2",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Sultan2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Sultan2/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Sultan2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Tengu",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Tengu",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Tengu/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Tengu/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Tengu2",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Tengu2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Tengu2/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Tengu2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Vampire",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Vampire",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Vampire/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Vampire/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Village6",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Village6",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Village6/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Village6/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Villager",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Villager",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Villager/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Villager/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Villager2",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Villager2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Villager2/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Villager2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Villager3",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Villager3",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Villager3/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Villager3/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Villager4",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Villager4",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Villager4/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Villager4/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Villager5",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Villager5",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Villager5/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Villager5/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Villager6",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Villager6",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Villager6/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Villager6/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Woman",
+   "group": "Character",
+   "dir": "assets/ninja-adventure/Actor/Character/Woman",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Character/Woman/SpriteSheet.png",
+    "dims": [
+     64,
+     112
+    ],
+    "layout": "standard-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames; row4 idle; row5 attack; row6 jump"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Character/Woman/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "separate_anim": {
+    "Attack": [
+     64,
+     16
+    ],
+    "Dead": [
+     16,
+     16
+    ],
+    "Idle": [
+     64,
+     16
+    ],
+    "Item": [
+     16,
+     16
+    ],
+    "Jump": [
+     64,
+     16
+    ],
+    "Special1": [
+     16,
+     16
+    ],
+    "Special2": [
+     16,
+     16
+    ],
+    "Walk": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "NinjaGreen",
+   "group": "CharacterAnimated",
+   "dir": "assets/ninja-adventure/Actor/CharacterAnimated/NinjaGreen",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/CharacterAnimated/NinjaGreen/SpriteSheet.png",
+    "dims": [
+     256,
+     544
+    ],
+    "layout": "grid-16",
+    "note": "16x34 of 16px frames (non-standard; inspect)"
+   },
+   "separate_anim": {
+    "Attack": [
+     128,
+     128
+    ],
+    "Climb": [
+     32,
+     128
+    ],
+    "Dead": [
+     32,
+     64
+    ],
+    "Hit": [
+     128,
+     64
+    ],
+    "Idle": [
+     128,
+     128
+    ],
+    "Item": [
+     32,
+     64
+    ],
+    "Jump": [
+     96,
+     128
+    ],
+    "Pickup": [
+     32,
+     64
+    ],
+    "Push": [
+     128,
+     128
+    ],
+    "Roll": [
+     128,
+     96
+    ],
+    "Swim": [
+     128,
+     128
+    ],
+    "Walk": [
+     128,
+     128
+    ]
+   }
+  },
+  {
+   "name": "Weapon",
+   "group": "CharacterAnimated",
+   "dir": "assets/ninja-adventure/Actor/CharacterAnimated/Weapon",
+   "extra_pngs": {
+    "Axe.png": [
+     256,
+     256
+    ],
+    "Hammer.png": [
+     256,
+     256
+    ],
+    "Katana.png": [
+     256,
+     256
+    ],
+    "Net.png": [
+     256,
+     256
+    ],
+    "Pickaxe.png": [
+     256,
+     256
+    ]
+   }
+  },
+  {
+   "name": "Axolot",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Axolot",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Axolot/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Axolot/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "AxolotBlue",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/AxolotBlue",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/AxolotBlue/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/AxolotBlue/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Bamboo",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Bamboo",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Bamboo/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Bamboo/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "BambooYellow",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/BambooYellow",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/BambooYellow/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/BambooYellow/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Bear",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Bear",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Bear/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Bear/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Beast",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Beast",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Beast/Beast.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Beast/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Beast2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Beast2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Beast2/Beast2.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Beast2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "BlueBat",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/BlueBat",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/BlueBat/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/BlueBat/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Butterfly",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Butterfly",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Butterfly/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Butterfly/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "ButterflyBlue",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/ButterflyBlue",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/ButterflyBlue/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/ButterflyBlue/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Cyclope",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Cyclope",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Cyclope/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Cyclope/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Cyclope2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Cyclope2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Cyclope2/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Cyclope2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Dragon",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Dragon",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Dragon/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Dragon/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "DragonYellow",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/DragonYellow",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/DragonYellow/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/DragonYellow/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Eye",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Eye",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Eye/Eye.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Eye/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Eye2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Eye2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Eye2/Eye2.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Eye2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Fish",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Fish",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Fish/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Fish/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "FishRed",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/FishRed",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/FishRed/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/FishRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Flam",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Flam",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Flam/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Flam/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Flam2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Flam2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Flam2/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Flam2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "GoldRacoon",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/GoldRacoon",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/GoldRacoon/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/GoldRacoon/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "GreenOctopus",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/GreenOctopus",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/GreenOctopus/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/GreenOctopus/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Grey Trex",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Grey Trex",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Grey Trex/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Grey Trex/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "HeartGreen",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/HeartGreen",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/HeartGreen/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/HeartGreen/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "HeartRed",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/HeartRed",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/HeartRed/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/HeartRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "KappaGreen",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/KappaGreen",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/KappaGreen/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/KappaGreen/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "KappaRed",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/KappaRed",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/KappaRed/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/KappaRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "LanternGreen",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/LanternGreen",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/LanternGreen/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/LanternGreen/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "LanternRed",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/LanternRed",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/LanternRed/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/LanternRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Larva",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Larva",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Larva/Larva.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Larva/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Larva2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Larva2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Larva2/Larva2.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Larva2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Lizard",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Lizard",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Lizard/Lizard.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Lizard/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Lizard2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Lizard2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Lizard2/Lizard2.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Lizard2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Mole",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Mole",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mole/Mole.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mole/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Mole2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Mole2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mole2/Mole2.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mole2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Mollusc",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Mollusc",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mollusc/Mollusc.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mollusc/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Mollusc2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Mollusc2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mollusc2/Mollusc2.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mollusc2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Mouse",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Mouse",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mouse/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mouse/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "MouseBlack",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/MouseBlack",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/MouseBlack/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/MouseBlack/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Mushroom",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Mushroom",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mushroom/Mushroom.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mushroom/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "mushroom.png": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Mushroom2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Mushroom2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mushroom2/Mushroom2.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Mushroom2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   },
+   "extra_pngs": {
+    "mushroom2.png": [
+     64,
+     64
+    ]
+   }
+  },
+  {
+   "name": "Octopus",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Octopus",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Octopus/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Octopus/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Octopus2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Octopus2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Octopus2/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Octopus2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Owl",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Owl",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Owl/Owl.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Owl/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Owl2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Owl2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Owl2/Owl2.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Owl2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Panda",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Panda",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Panda/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Panda/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Racoon",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Racoon",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Racoon/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Racoon/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "RedOctopus",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/RedOctopus",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/RedOctopus/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/RedOctopus/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Reptile",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Reptile",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Reptile/Reptile.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Reptile/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Reptile2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Reptile2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Reptile2/Reptile2.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Reptile2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Skull",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Skull",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Skull/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Skull/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "SkullBlue",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/SkullBlue",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/SkullBlue/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/SkullBlue/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Slime",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Slime",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Slime/Slime.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Slime/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Slime2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Slime2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Slime2/Slime2.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Slime2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Slime3",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Slime3",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Slime3/Slime3.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Slime3/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Slime4",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Slime4",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Slime4/Slime4.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Slime4/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Snake",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Snake",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Snake/Snake.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Snake/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Snake2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Snake2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Snake2/Snake2.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Snake2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Snake3",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Snake3",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Snake3/Snake3.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Snake3/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Snake4",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Snake4",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Snake4/Snake4.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Snake4/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "SpiderRed",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/SpiderRed",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/SpiderRed/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/SpiderRed/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "SpiderYellow",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/SpiderYellow",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/SpiderYellow/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/SpiderYellow/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Spirit",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Spirit",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Spirit/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Spirit/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "Spirit2",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/Spirit2",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/Spirit2/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/Spirit2/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "TRex",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/TRex",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/TRex/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/TRex/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  },
+  {
+   "name": "YellowsBat",
+   "group": "Monster",
+   "dir": "assets/ninja-adventure/Actor/Monster/YellowsBat",
+   "sheet": {
+    "file": "assets/ninja-adventure/Actor/Monster/YellowsBat/SpriteSheet.png",
+    "dims": [
+     64,
+     64
+    ],
+    "layout": "walk-4dir",
+    "note": "rows0-3 walk D/U/L/R x4 frames (no action rows)"
+   },
+   "faceset": {
+    "file": "assets/ninja-adventure/Actor/Monster/YellowsBat/Faceset.png",
+    "dims": [
+     38,
+     38
+    ]
+   }
+  }
+ ]
+}

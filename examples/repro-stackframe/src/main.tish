@@ -1,0 +1,9 @@
+import { log, vblank } from 'cargo:tish_agb'
+
+type M = { x: i32, y: i32, name: string }
+const m0: M = { x: 4, y: 5, name: "hi" }
+function sum(m: M): i32 { return m.x + m.y }
+log("s=" + sum(m0))
+let fr: i32 = 0
+while (fr < 20) { vblank() fr = fr + 1 }
+log("done")

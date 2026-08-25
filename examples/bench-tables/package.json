@@ -1,0 +1,19 @@
+{
+  "name": "bench-tables",
+  "private": true,
+  "scripts": {
+    "assets": "python3 ../../scripts/gen_bench_tables.py",
+    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
+    "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png",
+    "verify": "./verify.sh",
+    "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
+  },
+  "devDependencies": { "@tishlang/tish": "file:../../../../tish/tish/npm/tish" },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": { "path": "../../crates/tish-agb" }
+    }
+  },
+  "description": "What a generated table costs to read: a promoted array literal against the same data built with push(), each reached directly and through a state-touching accessor, plus whether a warmed copy earns its fill."
+}

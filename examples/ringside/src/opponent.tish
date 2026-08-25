@@ -1,0 +1,116 @@
+// BRUNO THE BULL — the whole opponent, as data.
+//
+// There is no AI in this file and no code worth the name: seven attacks, three script blocks, and
+// a difficulty knob. That is the point. A second boxer is a second file exactly like this one, and
+// nothing in `packages/boxing.tish` has to know it exists.
+//
+// ── HOW TO READ AN ATTACK ─────────────────────────────────────────────────────────────────────
+//
+//   boxDefAttack(id, tellF, windF, hitF, recF, kind)
+//     tellF  the READABLE wind-up. The only information the player gets, and the only number
+//            difficulty touches. Everything else stays fixed across all three difficulties.
+//     windF  committed. Too late to read, still time to react — this is where a counter lands.
+//     hitF   frames the fist is out.
+//     recF   recovery after a punch that landed or was blocked.
+//
+//   boxDefAttackHit(id, dmg, avoid, target, counterF, vulnF)
+//     avoid    which defence beats it. THE guessing game, in one column.
+//     counterF how long before contact a player punch counts as a counter.
+//     vulnF    the free-hit window after a whiff. The reward for reading the tell.
+//
+// ⚠️ EVERY ATTACK MUST BE BEATABLE ON REACTION FROM ITS TELL ALONE at difficulty 0. Difficulty
+// shortens tells; it never removes them. `verify.sh` asserts the floor independently, because this
+// is the one balance number a later tweak could silently destroy the game with.
+
+import { boxDefAttack, boxDefAttackHit, boxDefScript, boxDefOpponent, boxDefPlayer,
+         AV_DODGE_L, AV_DODGE_R, AV_DUCK, AV_BLOCK, AV_NONE,
+         TG_HEAD, TG_BODY } from '../../../packages/boxing'
+
+// Attack ids. These are also `A_KIND` values, which the drawing code maps to poses.
+export let AT_JAB_L: i32 = 0
+export let AT_JAB_R: i32 = 1
+export let AT_BODY: i32 = 2
+export let AT_OVERHAND: i32 = 3
+export let AT_UPPER: i32 = 4
+export let AT_FLURRY: i32 = 5
+export let AT_HAYMAKER: i32 = 6
+
+// kind -> which family of poses to draw
+export let K_LEFT: i32 = 0
+export let K_RIGHT: i32 = 1
+export let K_BODY: i32 = 2
+export let K_HIGH: i32 = 3
+
+export function defineBruno() {
+  boxDefPlayer(100, 12, 4, 5, 24)
+  //             hp  hearts  jab body upper
+
+  boxDefOpponent(120, 55, 60)
+  //              hp  guard%  phase-1 hp
+
+  // ── 0/1: the jabs. Long tell, small damage, generous punish. These are what round 1 teaches,
+  //        and they are the only attacks a new player should meet for the first thirty seconds.
+  boxDefAttack(AT_JAB_L, 20, 8, 6, 12, K_LEFT)
+  boxDefAttackHit(AT_JAB_L, 6, AV_DODGE_R + AV_BLOCK, TG_HEAD, 7, 26)
+  boxDefAttack(AT_JAB_R, 20, 8, 6, 12, K_RIGHT)
+  boxDefAttackHit(AT_JAB_R, 6, AV_DODGE_L + AV_BLOCK, TG_HEAD, 7, 26)
+
+  // ── 2: the body hook. Blocking HIGH does not save you — the block flag is absent, so a player
+  //      who answers everything with UP eats this one every time. It is the anti-turtle attack.
+  boxDefAttack(AT_BODY, 24, 10, 7, 14, K_BODY)
+  boxDefAttackHit(AT_BODY, 9, AV_DUCK, TG_BODY, 9, 32)
+
+  // ── 3: the overhand. UNBLOCKABLE — `AV_NONE` on the block bit, dodge either way or wear it.
+  //      This is `fighter.tish`'s KIND_UNBLOCKABLE column doing the same job in one number.
+  boxDefAttack(AT_OVERHAND, 28, 10, 8, 16, K_HIGH)
+  boxDefAttackHit(AT_OVERHAND, 12, AV_DODGE_L + AV_DODGE_R + AV_NONE, TG_HEAD, 11, 42)
+
+  // ── 4: the uppercut. Fastest tell in the set and the biggest punish window — the trade that
+  //      makes reading worth more than guarding.
+  boxDefAttack(AT_UPPER, 16, 7, 6, 14, K_HIGH)
+  boxDefAttackHit(AT_UPPER, 14, AV_DODGE_L + AV_DODGE_R, TG_HEAD, 6, 48)
+
+  // ── 5: the flurry. Not a special case anywhere in the engine — see the script below, where a run
+  //      of ZERO-GAP steps simply is a flurry.
+  boxDefAttack(AT_FLURRY, 14, 6, 5, 8, K_LEFT)
+  boxDefAttackHit(AT_FLURRY, 5, AV_DODGE_R + AV_BLOCK, TG_HEAD, 5, 20)
+
+  // ── 6: the haymaker. Phase 2 only. The longest tell in the game and 24 damage — nearly a quarter
+  //      of the player's health — because a punch you had thirty-six frames to read should hurt.
+  boxDefAttack(AT_HAYMAKER, 36, 12, 9, 20, K_BODY)
+  boxDefAttackHit(AT_HAYMAKER, 24, AV_DUCK, TG_HEAD, 14, 72)
+
+  // ══ PHASE 0 — the opening. Single strikes, long gaps, jabs only at first. Teaching. ══════════
+  boxDefScript(0, AT_JAB_L, 90)
+  boxDefScript(0, AT_JAB_R, 84)
+  boxDefScript(0, AT_JAB_L, 70)
+  boxDefScript(0, AT_BODY, 96)
+  boxDefScript(0, AT_JAB_R, 74)
+  boxDefScript(0, AT_UPPER, 100)
+  boxDefScript(0, AT_JAB_L, 70)
+  boxDefScript(0, AT_OVERHAND, 104)
+
+  // ══ PHASE 1 — hurt. Shorter gaps, and the first two-strike chains. ══════════════════════════
+  boxDefScript(1, AT_JAB_L, 56)
+  boxDefScript(1, AT_JAB_R, 0)          // gap 0 = the previous punch chains straight into this one
+  boxDefScript(1, AT_BODY, 70)
+  boxDefScript(1, AT_UPPER, 62)
+  boxDefScript(1, AT_JAB_R, 50)
+  boxDefScript(1, AT_JAB_L, 0)
+  boxDefScript(1, AT_OVERHAND, 78)
+  boxDefScript(1, AT_BODY, 60)
+
+  // ══ PHASE 2 — rage. The flurry, the haymaker, and the shortest gaps in the game. Every landed
+  //    punch is followed by a taunt (boxing.tish does this), so rage is sloppier as well as
+  //    stronger — which is what keeps it winnable rather than simply longer. ═══════════════════
+  boxDefScript(2, AT_FLURRY, 44)
+  boxDefScript(2, AT_FLURRY, 0)
+  boxDefScript(2, AT_FLURRY, 0)
+  boxDefScript(2, AT_HAYMAKER, 72)
+  boxDefScript(2, AT_UPPER, 48)
+  boxDefScript(2, AT_BODY, 46)
+  boxDefScript(2, AT_JAB_L, 40)
+  boxDefScript(2, AT_JAB_R, 0)
+  boxDefScript(2, AT_OVERHAND, 66)
+  boxDefScript(2, AT_HAYMAKER, 80)
+}

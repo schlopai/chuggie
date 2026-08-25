@@ -1,0 +1,15 @@
+// A real sprite from a PNG asset, moved with the d-pad.
+// The `asset:` import bakes the image into the ROM (agb include_aseprite) and
+// binds `player` to an i32 sprite-sheet handle; `sprite_new` renders it.
+import { player } from 'asset:../assets/player.png'
+import { sprite_new, sprite_set_pos, input_x, input_y, frame } from 'cargo:tish_agb'
+
+let s = sprite_new(player)
+let px: i32 = 100
+let py: i32 = 72
+while (true) {
+  px = px + input_x()
+  py = py + input_y()
+  sprite_set_pos(s, px, py)
+  frame()
+}

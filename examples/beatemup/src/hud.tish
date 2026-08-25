@@ -1,0 +1,173 @@
+// The brawler HUD: a health bar, a score, and a combo counter.
+//
+// Same two rules as examples/versus, for the same measured reasons:
+//
+//   1. The bars are `ui_rect` on the UI background canvas, not `hud_bar` — that clamps to 64px wide
+//      and spends a 1 KiB DynamicSprite per bar, and this game already has twelve character sprites
+//      competing for the 32 KB of sprite VRAM.
+//   2. Anything whose NUMBER changes is a digit sprite, not text. `text_draw` is free while a string
+//      is unchanged and expensive the moment it changes, and the score changes on the frames a hit
+//      lands — the busiest ones there are.
+//
+// ⚠️⚠️ AND THE WORDS ARE `ui_text`, NOT `text_draw`. Sprite text allocates SPRITE VRAM per letter
+// group — a 16px banner is several 32x32 objects, i.e. several KB of the 32 KB the four fighters
+// and their overlays are already competing for. With a banner up and four actors animating this
+// crashed the ROM outright: `panicked at sprite_allocator.rs: have space for sprites: SpriteFull`.
+// Canvas text costs background tiles instead, of which there is room to spare.
+import { ui_rect, ui_clear_rect, ui_text, text_width,
+         sprite_set_frame, sprite_set_pos, sprite_set_visible } from 'cargo:tish_agb'
+
+let BAR_X: i32 = 8
+let BAR_Y: i32 = 14
+let BAR_W: i32 = 92
+let BAR_H: i32 = 8
+
+let COL_FRAME: i32 = 0x1a1420
+let COL_TRACK: i32 = 0x4a3446
+let COL_FILL: i32 = 0x74d858
+let COL_LOW: i32 = 0xd83a2a
+
+let SCORE_DIGITS: i32 = 6
+let COMBO_DIGITS: i32 = 2
+
+// D[0..5] score digits, D[6..7] combo digits.
+let D: i32[] = [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1]
+let L: i32[] = [0 - 1, 0 - 1, 0 - 1]
+let L_HP: i32 = 0
+let L_SCORE: i32 = 1
+let L_COMBO: i32 = 2
+
+// Ten powers of ten, so rendering a score is a table lookup and a subtract rather than six integer
+// divisions — the ARM7TDMI has no divide instruction and a `/ 10` is a call into a software routine.
+let POW10: i32[] = [1, 10, 100, 1000, 10000, 100000]
+
+export function hudBindDigits(s0: i32, s1: i32, s2: i32, s3: i32, s4: i32, s5: i32,
+                              c0: i32, c1: i32) {
+  D[0] = s0
+  D[1] = s1
+  D[2] = s2
+  D[3] = s3
+  D[4] = s4
+  D[5] = s5
+  D[6] = c0
+  D[7] = c1
+  let i: i32 = 0
+  while (i < SCORE_DIGITS) {
+    sprite_set_pos(D[i], 236 - (SCORE_DIGITS - i) * 11, 4)
+    sprite_set_visible(D[i], 0)
+    i = i + 1
+  }
+  sprite_set_pos(D[6], BAR_X + 2, 26)
+  sprite_set_pos(D[7], BAR_X + 15, 26)
+  sprite_set_visible(D[6], 0)
+  sprite_set_visible(D[7], 0)
+  L[L_HP] = 0 - 1
+  L[L_SCORE] = 0 - 1
+  L[L_COMBO] = 0 - 1
+}
+
+export function hudFrame(font: i32, name: string) {
+  ui_rect(BAR_X - 2, BAR_Y - 2, BAR_W + 4, BAR_H + 4, COL_FRAME, 1)
+  ui_rect(BAR_X, BAR_Y, BAR_W, BAR_H, COL_TRACK, 1)
+  ui_text(font, BAR_X, 3, name, 0xffe6a0, 240, "left", 0x2a1810)
+  L[L_HP] = 0 - 1
+}
+
+// One packed word from beatemupHudView: hp | maxHp << 8 | combo << 16.
+export function hudUpdate(view: i32, score: i32) {
+  let hp: i32 = view & 255
+  let max: i32 = (view >> 8) & 255
+  let combo: i32 = (view >> 16) & 255
+
+  let fill: i32 = 0
+  if (hp > 0) {
+    fill = ((hp * BAR_W) / max) | 0
+    if (fill < 1) { fill = 1 }
+  }
+  if (fill !== L[L_HP]) {
+    // Repaint the DELTA, not the bar: a full-width canvas fill on the frame a hit lands is what
+    // pushes a busy frame over budget. Damage only ever shrinks it.
+    if (fill < L[L_HP]) {
+      if (L[L_HP] > 0) { ui_rect(BAR_X + fill, BAR_Y, L[L_HP] - fill, BAR_H, COL_TRACK, 1) }
+      else { ui_rect(BAR_X, BAR_Y, BAR_W, BAR_H, COL_TRACK, 1) }
+    } else {
+      ui_rect(BAR_X, BAR_Y, BAR_W, BAR_H, COL_TRACK, 1)
+      if (fill > 0) { ui_rect(BAR_X, BAR_Y, fill, BAR_H, barColour(hp, max), 1) }
+    }
+    L[L_HP] = fill
+  }
+
+  if (score !== L[L_SCORE]) {
+    L[L_SCORE] = score
+    // Leading zeros are hidden, not drawn: this font's zero is a hollow rectangle, and six of them
+    // is a row of empty boxes where a score should be.
+    let seen: i32 = 0
+    let i: i32 = 0
+    while (i < SCORE_DIGITS) {
+      let p: i32 = POW10[SCORE_DIGITS - 1 - i]
+      let d: i32 = 0
+      let v: i32 = score
+      while (v >= p) { v = v - p d = d + 1 }
+      score = v
+      if (d > 0) { seen = 1 }
+      if (seen === 1 || i === SCORE_DIGITS - 1) {
+        sprite_set_visible(D[i], 1)
+        sprite_set_frame(D[i], d)
+      } else {
+        sprite_set_visible(D[i], 0)
+      }
+      i = i + 1
+    }
+  }
+
+  if (combo !== L[L_COMBO]) {
+    L[L_COMBO] = combo
+    if (combo < 2) {
+      sprite_set_visible(D[6], 0)
+      sprite_set_visible(D[7], 0)
+    } else {
+      let t: i32 = 0
+      let v: i32 = combo
+      while (v >= 10) { v = v - 10 t = t + 1 }
+      sprite_set_visible(D[7], 1)
+      sprite_set_frame(D[7], v)
+      if (t > 0) { sprite_set_visible(D[6], 1) sprite_set_frame(D[6], t) }
+      else { sprite_set_visible(D[6], 0) }
+    }
+  }
+}
+
+function barColour(hp: i32, max: i32): i32 {
+  if (hp * 4 <= max) { return COL_LOW }
+  return COL_FILL
+}
+
+// Centred with `text_width`, not with a guessed half-width — "GO!" and "GAME OVER" are 3 and 9
+// glyphs of a proportional font and no constant is right for both.
+//
+// Banner and subtitle live in a band of the canvas that nothing else draws into, so clearing one is
+// clearing its rows — `ui_clear_rect` snaps out to whole 8x8 tiles, which is why they are 24 rows
+// apart rather than adjacent.
+let BANNER_Y: i32 = 52
+let SUB_Y: i32 = 76
+
+export function hudBanner(font: i32, msg: string) {
+  ui_clear_rect(0, BANNER_Y - 2, 240, 22)
+  if (msg === "") { return }
+  ui_text(font, 120 - (text_width(font, msg) >> 1), BANNER_Y, msg, 0xffd24a, 240, "left", 0x2a1010)
+}
+
+export function hudSubtitle(font: i32, msg: string) {
+  ui_clear_rect(0, SUB_Y - 2, 240, 14)
+  if (msg === "") { return }
+  ui_text(font, 120 - (text_width(font, msg) >> 1), SUB_Y, msg, 0xd8c8e0, 240, "left", 0x1a1020)
+}
+
+export function hudClear() {
+  ui_clear_rect(0, 0, 240, 40)
+  ui_clear_rect(0, BANNER_Y - 2, 240, 22)
+  ui_clear_rect(0, SUB_Y - 2, 240, 14)
+  L[L_HP] = 0 - 1
+  L[L_SCORE] = 0 - 1
+  L[L_COMBO] = 0 - 1
+}

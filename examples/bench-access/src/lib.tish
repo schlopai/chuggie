@@ -1,0 +1,55 @@
+// The far side of a module boundary. Nothing here is interesting; the point is that calling it
+// crosses a module, which is the thing being priced.
+
+let FAR: i32[] = []
+let fi: i32 = 0
+while (fi < 64) { FAR.push(fi); fi = fi + 1 }
+
+export function call0(): i32 { return 1 }
+export function call1(a: i32): i32 { return a }
+export function call4(a: i32, b: i32, c: i32, d: i32): i32 { return a + b + c + d }
+export function call8(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32, h: i32): i32 {
+  return a + b + c + d + e + f + g + h
+}
+/// Same body as call4, plus an ARRAY parameter it writes through. The difference between the two
+/// is the price of passing an `i32[]` across a module boundary.
+export function call4arr(out: i32[], base: i32, a: i32, b: i32, c: i32): i32 {
+  out[base] = a + b + c
+  return a
+}
+/// Reads N elements of a MODULE-LEVEL typed array in this module.
+export function farRead(n: i32): i32 {
+  let acc: i32 = 0
+  let i: i32 = 0
+  while (i < n) { acc = acc + FAR[i]; i = i + 1 }
+  return acc
+}
+
+// A FAITHFUL REPLICA of packages/drop_tables.tish's `rColourPattern`: a cross-module accessor that
+// branches on a module-level flag and indexes a LARGE module array with computed strides. The
+// trivial `call1`..`call8` above are the best case and inline away; this is the shape the engine
+// actually calls in its hot loops, and the two turned out to be nothing alike.
+let FLAG: i32[] = [0]
+let BIG_A: i32[] = []
+let BIG_B: i32[] = []
+let bi: i32 = 0
+while (bi < 2048) { BIG_A.push(bi & 63); BIG_B.push((bi * 7) & 63); bi = bi + 1 }
+
+export function bigRead(group: i32, row: i32, col: i32): i32 {
+  if (FLAG[0] === 1) { return BIG_B[(((group - 1) * 8 + row) * 6) + col] }
+  return BIG_A[(((group - 1) * 8 + row) * 7) + col]
+}
+
+/// Same as `call4arr` but writes SEVEN elements instead of one. If an array parameter is priced per
+/// CALL the two are the same; if it is priced per WRITE, this is ~7x. That question decides whether
+/// batching through an array parameter is worth anything at all.
+export function call4arr7(out: i32[], base: i32, a: i32, b: i32, c: i32): i32 {
+  out[base + 0] = a
+  out[base + 1] = b
+  out[base + 2] = c
+  out[base + 3] = a
+  out[base + 4] = b
+  out[base + 5] = c
+  out[base + 6] = a
+  return a
+}

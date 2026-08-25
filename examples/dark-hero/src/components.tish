@@ -1,0 +1,195 @@
+// Dark Hero — an animation-state showcase. The Hero component is a mostly self-contained state
+// machine driving every clip on the combined sheet from physics + input + tile probes:
+//   Idle / Run / Jump / Fall  — from grounded + horizontal input + vertical velocity (`vy`)
+//   Land                      — a one-shot on touchdown after being airborne
+//   Ledge Grab / Grab Idle    — falling into a wall's top edge grabs it; the body is `hold`-frozen
+//   Ledge Climb               — press up/jump while hanging: play the climb, then teleport onto the ledge
+//   Hit                       — when HP drops (detected by watching hp); the health system flickers i-frames
+//   Death                     — at 0 HP: play it out, then respawn
+// The Hazard is a stompable spike orb: stomp it from above to pop it; touch its side and you take a hit.
+import { input_x, input_y, key_pressed, key_held } from 'cargo:tish_agb'
+import { keyReleased, tileSolid, updateHearts } from '../../../packages/engine'
+
+let A: i32 = 0   // jump / climb
+let B: i32 = 1   // run
+
+export let TAG_PLAYER: i32 = 1
+
+// Frame ranges on hero.png (see scripts/gen_darkhero.py) — [start, count].
+let IDLE: i32 = 0
+let N_IDLE: i32 = 8
+let RUN: i32 = 8
+let N_RUN: i32 = 8
+let JUMP: i32 = 16
+let N_JUMP: i32 = 4
+let FALL: i32 = 20
+let N_FALL: i32 = 4
+let LAND: i32 = 24
+let N_LAND: i32 = 12
+let LGRAB: i32 = 36
+let N_LGRAB: i32 = 4
+let LHANG: i32 = 40
+let N_LHANG: i32 = 14
+let CLIMB: i32 = 54
+let N_CLIMB: i32 = 13
+let HIT: i32 = 67
+let N_HIT: i32 = 2
+let DEATH: i32 = 69
+let N_DEATH: i32 = 10
+
+let CLIMB_SPD: i32 = 4
+let HIT_FRAMES: i32 = 14
+let DEATH_HOLD: i32 = 60   // frames to hold the final death frame before respawning
+
+// Floor a pixel coordinate to its tile row/col (level coords are non-negative).
+function tcol(px) { let m = px % 16; return (px - m) / 16 }
+
+// Is the box (top-left px,py; 16x16) falling into a grabbable ledge on its `face` side? A ledge = a
+// solid tile at the box's top row with an EMPTY tile just above it (the wall's top edge). Returns the
+// hang position + the on-top climb target, or null.
+function ledgeAt(px, py, face) {
+  let row = tcol(py)
+  let col = face > 0 ? tcol(px + 16) : tcol(px - 1)
+  if (tileSolid(col, row) && !tileSolid(col, row - 1)) {
+    let topY = row * 16
+    // Hitbox FLUSH to the wall face (never overlapping it, or you'd fall/walk through on release); the
+    // centred sprite then puts the grip hand ~4px from the corner. `hy = topY + 8` lines the raised
+    // hand (sheet cell y≈39, spriteOffset -47) up with the ledge's top edge.
+    return {
+      hx: face > 0 ? col * 16 - 16 : (col + 1) * 16,   // right edge / left edge on the wall face
+      hy: topY + 8,
+      cx: face > 0 ? col * 16 : col * 16 - 16,         // stand ON the ledge tile after climbing
+      cy: topY - 16
+    }
+  }
+  return null
+}
+
+function respawn(e) {
+  e.setPos(e.data.spawnX, e.data.spawnY)
+  e.heal(e.maxHp())
+  e.data.mode = 0
+  e.data.lastHp = e.maxHp()
+}
+
+// modes: 0 normal (physics-derived), 1 land, 2 hang, 3 climb, 4 hit, 5 dead
+export const Hero = {
+  start: ({ this }) => {
+    this.setTag(TAG_PLAYER)
+    this.data.face = 1
+    this.data.mode = 0
+    this.data.t = 0
+    this.data.wasAir = false
+    this.data.lastHp = this.maxHp()
+  },
+  update: ({ this }) => {
+    let d = this.data
+    updateHearts(this.hp(), 2)   // hearts HUD (2 hp per heart → half-hearts)
+
+    // ── DEAD: play death once, hold, then respawn ──
+    if (d.mode === 5) {
+      this.play(DEATH, N_DEATH, 5, false)
+      d.t = d.t + 1
+      if (d.t > N_DEATH * 5 + DEATH_HOLD) { respawn(this) }
+      return
+    }
+
+    let hp = this.hp()
+    if (hp < d.lastHp && hp > 0) { d.mode = 4; d.t = 0; this.bounce(2) }  // took a non-fatal hit
+    d.lastHp = hp
+
+    let grounded = this.onGround()
+    let vy = this.vy()
+    let dx = input_x()
+
+    // ── HANG: frozen on a ledge; facing LOCKED to the grab side (input must not flip it) ──
+    if (d.mode === 2) {
+      this.setFlip(d.face < 0)
+      this.play(LHANG, N_LHANG, 6, true)
+      if (key_pressed(A) > 0 || input_y() < 0) { d.mode = 3 }   // A / Up → climb
+      else if (input_y() > 0) { this.hold(false); d.mode = 0 }  // Down → drop
+      return
+    }
+    // ── CLIMB: slide the body from the hang spot UP and OVER onto the ledge as the clip plays, so it
+    // pulls toward the platform (not straight up), then release into normal physics on top. ──
+    if (d.mode === 3) {
+      this.setFlip(d.face < 0)
+      this.play(CLIMB, N_CLIMB, CLIMB_SPD, false)
+      if (typeof d.ct !== 'number') { d.ct = 0 }
+      d.ct = d.ct + 1
+      let total = N_CLIMB * CLIMB_SPD
+      let p = d.ct / total
+      if (p > 1) { p = 1 }
+      this.setPos(d.hx + (d.cx - d.hx) * p, d.hy + (d.cy - d.hy) * p)
+      if (d.ct >= total) { this.setPos(d.cx, d.cy); this.hold(false); d.mode = 0; d.ct = 0 }
+      return
+    }
+
+    // ── normal: facing now follows input ──
+    if (dx < 0) { d.face = -1 } else if (dx > 0) { d.face = 1 }
+    this.setFlip(d.face < 0)
+
+    let running = key_held(B) > 0
+    this.run(running)
+    this.moveX(dx)
+    // (`grounded` first: tish's `&&` moves a bare-variable RIGHT operand — a reused var must be left.)
+    if (grounded && key_pressed(A) > 0) { this.jump() }
+    if (keyReleased(A) > 0) { this.jumpRelease() }
+
+    // ledge grab: falling into a wall's top edge (skip briefly after landing)
+    if (!grounded && vy > 0 && d.mode !== 1) {
+      let g = ledgeAt(this.x, this.y, d.face)
+      if (g) {
+        this.setPos(g.hx, g.hy); this.hold(true)
+        d.hx = g.hx; d.hy = g.hy; d.cx = g.cx; d.cy = g.cy; d.mode = 2
+        return
+      }
+    }
+
+    // ── animation ──
+    if (d.mode === 4) {                                  // hit stagger
+      this.play(HIT, N_HIT, 4, false)
+      d.t = d.t + 1
+      if (d.t >= HIT_FRAMES) { d.mode = 0 }
+    } else if (!grounded) {
+      if (vy < 0) { this.play(JUMP, N_JUMP, 4, false) } else { this.play(FALL, N_FALL, 5, true) }
+      d.mode = 0
+    } else if (d.mode === 1) {                           // landing recovery
+      this.play(LAND, N_LAND, 3, false)
+      d.t = d.t + 1
+      if (d.t >= N_LAND * 3 || dx !== 0) { d.mode = 0 }
+    } else if (d.wasAir) {                               // just touched down → start Land
+      d.mode = 1; d.t = 0; this.play(LAND, N_LAND, 3, false)
+    } else if (dx !== 0) {
+      this.play(RUN, N_RUN, running ? 3 : 4, true)
+    } else {
+      this.play(IDLE, N_IDLE, 9, true)
+    }
+    d.wasAir = !grounded
+  },
+  onDeath: ({ this }) => { this.data.mode = 5; this.data.t = 0 }
+}
+
+// Spike orb: patrols its platform (turns at walls/ledges), hurts on side contact, pops when stomped.
+//
+// ⚠️⚠️ THE PATROL IS NATIVE (`z.patrol(2)` in main.tish) — deliberately no `tick` hook. It had one,
+// and `s` in a `tick` is a BOXED object: `s.x` is `get_prop(&(s).clone(), "x")` (clone, then a
+// string-keyed lookup), every `+` is `ops::add(&Value, &Value)`, `tileSolid(…)` is a boxed
+// cross-module `value_call`, and the `/ 16` pair are software divisions. All per orb, per frame —
+// and `world_step` skips off-screen entities, so it was charged only for the orbs actually visible.
+// See docs/perf-rules.md §7.
+//
+// The grounded gate that used to live here — only reverse while `s.grounded`, because an airborne
+// probe sees no ground ahead, reads it as a ledge and flips every frame, landing on a random
+// heading — is now IN `patrol_system` itself, where every platformer patrol gets it.
+export const Hazard = {
+  onCollide: ({ this, other }) => {
+    if (other.tag() !== TAG_PLAYER) { return }
+    if (other.y + 8 < this.y) {     // player landed on top → pop it, player bounces
+      this.hurt(99)
+      other.bounce(6)
+    } else {
+      other.hurt(1)                 // side contact → player takes a hit (health system's i-frames gate it)
+    }
+  }
+}

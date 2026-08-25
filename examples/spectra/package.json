@@ -1,0 +1,23 @@
+{
+  "name": "spectra",
+  "private": true,
+  "scripts": {
+    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
+    "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png 240",
+    "assets": "python3 ../../scripts/gen_spectra.py",
+    "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png assets/*.atlas.png assets/*.map.bin",
+    "verify": "./verify.sh"
+  },
+  "devDependencies": {
+    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": { "path": "../../crates/tish-agb" },
+      "tish_gba_game_engine": { "path": "../../crates/tish-gba-game-engine" },
+      "tish_gba_scenepack": { "path": "../../crates/tish-gba-scenepack" }
+    }
+  },
+  "description": "A four-colour puzzle-platformer where the lens is the level."
+}

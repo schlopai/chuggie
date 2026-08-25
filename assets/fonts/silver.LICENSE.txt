@@ -1,0 +1,14 @@
+Silver — pixel font by Poppy Works (CC BY 4.0)
+
+  https://poppyworks.itch.io/silver
+  http://poppy.works/
+
+Copyright 2019 Poppy Works (Itou Hiro, Yoon Design, Wolfgang Wozniak).
+
+Licensed under Creative Commons Attribution 4.0 International (CC BY 4.0).
+Free for personal and commercial use with attribution to Poppy Works.
+If your production’s total budget or earnings exceed $100,000 USD, or you
+need urgent support, contact hello@poppy.works for a commercial license.
+
+Vendored as silver.ttf from the upstream TTF release.
+Designed for **16px**; fonts-demo uses `@19` (cleanest integer grid). Prefer `font:…/silver.ttf@19`.

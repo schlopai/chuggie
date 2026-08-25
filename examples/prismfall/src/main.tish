@@ -1,0 +1,292 @@
+// PRISMFALL — a metroidvania-shaped game whose abilities are colours.
+//
+// One connected facility, four zones, and the thing that opens each one is a LENS rather than a key.
+// What is not in your lens is not there: not drawn, not solid, not under your feet. You start with
+// DAWN and can only look at the world one band at a time; the DUSK and VOID lenses are somewhere in
+// the building, and the last gate opens only under WHITE, with all three lit at once.
+//
+// ⚠️ THE GATES ARE CHROMA DOORS, NOT PHASE BLOCKS, and the difference is the whole design. A phase
+// BLOCK is solid only while its band is LIT — so a wall built of them is passable to a player who
+// has NOT found the lens, which is precisely backwards. A DOOR is the inverse: shut in every lens
+// but its own. `scripts/gen_prismfall.py` proves the gating holds with a reachability check that
+// models gravity, jump arcs and lens switching; it caught this and three other leaks that were
+// invisible in the map's ASCII.
+//
+// ⚠️ THE MAIN LOOP CALLS `step()` AND NOTHING ELSE — no `frame()`. `world_step` already renders and
+// waits for vblank, so `step(); frame()` presents twice and locks the game to 30fps.
+import { facility } from 'scene:../assets/facility.tmj'
+import { heroSheet } from 'sheet64:../assets/hero_sheet.png'
+import { sprite_new, log, hud_text } from 'cargo:tish_agb'
+import { set_transform } from 'cargo:tish_gba_game_engine'
+import {
+  mount, create, loadScene, loadSceneRom, step, entityApi, entityRefs, entityX, entityY,
+  mapSpawnCount, mapSpawnKind, mapSpawnCol, mapSpawnRow, mapSpawnA
+} from '../../../packages/engine'
+import * as components from './components'
+import {
+  Player,
+  BOX_W, BOX_H, SPR_OX, SPR_OY, TAG_PLAYER
+} from './components'
+import { W_COLS, W_ROWS, W_CHUNK_COLS, W_CHUNKS, W_CELL, W_CELL_CHUNK,
+         W_PICKUPS, W_PICKUP } from './world'
+import { LOGS, LOG_TITLE, LOG_START, LOG_LINE } from './story'
+import {
+  chromaInit, chromaSetBackdrop, chromaBegin, chromaCell, chromaChunkEnd, chromaEnd, chromaGrid,
+  chromaTick, chromaLens, chromaGrant, chromaOwned, chromaLumens, chromaLumenAdd,
+  chromaLearn, chromaLearnObj, chromaSetPal, chromaPaint
+} from '../../../packages/chroma-world'
+
+let TILE: i32 = 16
+let LAYER_BAND: i32 = 0          // band A is scene layer 0; see the layer-order note in the generator
+let LUMEN_MAX: i32 = 600
+let LUMEN_DRAIN: i32 = 2
+
+// Lens backdrops. The only palette write a lens makes — `backdrop` is the one colour on this machine
+// that can be aimed by name rather than by whatever index the asset optimiser happened to choose.
+// ⚠️ THESE MUST BE OBVIOUSLY DIFFERENT FROM EACH OTHER. Under the four-colour rule the backdrop is
+// the ONLY per-lens cue there is — every band is drawn in the same BAND index, because two lit bands
+// would be two colours. The first set differed by a few points of blue and, after the hardware's
+// 15-bit quantisation, the three lenses were indistinguishable. If you cannot tell the lens from a
+// still frame, the mechanic has no feedback.
+// FOUR COLOURS PER LENS, and the lantern replaces ALL of them — backdrop, every solid surface, the
+// live band, and the accent. That is what "switching palettes" has to mean; changing only the
+// backdrop left three quarters of the screen identical and the mechanic looked broken.
+//
+// The three tile colours as AUTHORED in the atlas. chroma looks these up at boot to discover which
+// palette entries hold them, because agb's assignment is nondeterministic across builds.
+let ART_DARK: i32 = 0x101821      // the sprite's outline; the lens writes its backdrop here
+let ART_INK: i32 = 0x6b7b8c
+let ART_BAND: i32 = 0xe76339
+let ART_ACC: i32 = 0xffffff
+
+// ── THE FOUR PALETTES, CGA-STYLE ────────────────────────────────────────────────────────────────
+// Four colours chosen as a SET, the way a CGA palette was: not "black, white and two accents", but
+// four values picked to sit against each other. Dropping the reflex to spend two entries on black
+// and white frees both for hue, which is where each lens gets its character.
+//
+// The halftone in the tile art then doubles this: a checkerboard of any two of these reads as a
+// value between them, so four entries carry roughly seven apparent tones and the world has depth
+// without a fifth colour ever hitting the screen.
+//
+// The ACCENT is white in every lens on purpose — the hero is a silhouette drawn in it, and a sprite
+// cannot follow a background palette (separate bank), so the one colour the player is made of has
+// to be the one colour that never moves.
+//
+// CGA palettes are CONTRASTING HUES, not a ramp of one. A monochrome set (all orange, all blue)
+// throws away the format's whole trick: dithering two colours that are FAR APART manufactures a
+// third the hardware never stored — cyan over magenta reads violet, amber over navy reads brown.
+// Four contrasting entries plus halftone is worth far more apparent colours than four tints of one.
+//
+//                      backdrop   surfaces   band       accent
+let PAL_DAWN: i32[]  = [0x101828, 0xd04020, 0xffc020, 0xffffff]   // navy · red · gold  (CGA 0)
+let PAL_DUSK: i32[]  = [0x100820, 0x20b0c0, 0xe040c0, 0xffffff]   // cyan · magenta     (CGA 1)
+let PAL_VOID: i32[]  = [0x081408, 0x30a040, 0xe0d040, 0xffffff]   // green · yellow     (CGA 0)
+let PAL_WHITE: i32[] = [0x202028, 0x8090a8, 0xf0f0ff, 0xffffff]   // everything lit
+
+// Spawn kinds, in the order `KINDS` lists them in the generator.
+let K_PLAYER: i32 = 0
+let K_DUSK: i32 = 1
+let K_VOID: i32 = 2
+let K_WHITE: i32 = 3
+let K_PRISM: i32 = 4
+let K_LOG: i32 = 5
+let K_SAVE: i32 = 6
+let K_GOAL: i32 = 7
+
+entityApi({ grid: 0, topdown: 0, dialogue: 0, extra: 0 })
+entityRefs(1)
+mount(components)
+
+chromaInit(LAYER_BAND, LUMEN_MAX, LUMEN_DRAIN)
+chromaSetBackdrop(0, PAL_DAWN[0])
+chromaSetBackdrop(1, PAL_DUSK[0])
+chromaSetBackdrop(2, PAL_VOID[0])
+chromaSetBackdrop(3, PAL_WHITE[0])
+chromaSetPal(0, PAL_DAWN[1], PAL_DAWN[2], PAL_DAWN[3])
+chromaSetPal(1, PAL_DUSK[1], PAL_DUSK[2], PAL_DUSK[3])
+chromaSetPal(2, PAL_VOID[1], PAL_VOID[2], PAL_VOID[3])
+chromaSetPal(3, PAL_WHITE[1], PAL_WHITE[2], PAL_WHITE[3])
+
+let heroId: i32 = 0 - 1
+let heroSpr: i32 = 0 - 1
+let spawnCol: i32 = 0
+let spawnRow: i32 = 0
+let deaths: i32 = 0
+
+// The log currently on screen, and how long it stays. Logs are the only story delivery: no cutscene
+// stops the game, and nothing is spoken at the player.
+// One flag per pickup: a lens is picked up once, a log reads once per visit.
+let TAKEN: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+let logShown: i32 = 0 - 1
+let logFor: i32 = 0
+let touchTick: i32 = 0
+let LOG_HOLD: i32 = 260
+
+function spawnHero(col: i32, row: i32) {
+  let e = create()
+  e.setPos(col * TILE, row * TILE)
+  heroSpr = sprite_new(heroSheet)
+  e.setSprite(heroSpr)
+  e.spriteOffset(SPR_OX, SPR_OY)
+  e.platformer(BOX_W, BOX_H)
+  e.setTag(TAG_PLAYER)
+  e.behave(Player, {})
+  e.follow()
+  heroId = e.id
+  spawnCol = col
+  spawnRow = row
+}
+
+function buildFacility() {
+  loadSceneRom(facility)
+
+  // The lens, AFTER the stream: `scene_stream` builds the layers and re-derives the backdrop from
+  // the atlas as it goes, so anything set first is gone before the first frame draws.
+  chromaGrid(W_CHUNK_COLS)
+  chromaBegin()
+  let i: i32 = 0
+  let prev: i32 = 0 - 1
+  while (i < W_CELL.length) {
+    let ck: i32 = W_CELL_CHUNK[i]
+    // The cells arrive sorted by chunk, so a change of chunk id closes the previous one's slice.
+    if (ck !== prev && prev >= 0) { chromaChunkEnd(prev) }
+    prev = ck
+    chromaCell(W_CELL[i])
+    i = i + 1
+  }
+  if (prev >= 0) { chromaChunkEnd(prev) }
+  // Discover which palette entries hold the atlas's colours, THEN light the lens. Must be after the
+  // stream: the palettes do not exist until the scene has uploaded them.
+  log("bg pal " + chromaLearn(ART_DARK, ART_INK, ART_BAND, ART_ACC))
+  chromaEnd(0)
+
+  // Only the PLAYER is spawned as an entity. Everything else touchable is a coordinate in
+  // `W_PICKUP` — see the note in the generator: fifteen collider entities cost ~1,500 ticks a frame
+  // and took this game from 60fps to 40, for objects that never move.
+  let n: i32 = mapSpawnCount()
+  let sp: i32 = 0
+  while (sp < n) {
+    if (mapSpawnKind(sp) === K_PLAYER) { spawnHero(mapSpawnCol(sp), mapSpawnRow(sp)) }
+    sp = sp + 1
+  }
+  let ti: i32 = 0
+  while (ti < 32) {
+    TAKEN[ti] = 0
+    ti = ti + 1
+  }
+  // The sprite palette exists only once a sprite has been created, so this comes after the spawns.
+  log("obj pal bank " + chromaLearnObj(ART_DARK, ART_INK, ART_BAND, ART_ACC))
+  // ⚠️ REPAINT once the sprite bank is known. `chromaEnd` painted before any sprite existed, so that
+  // first paint could only reach the background — the hero spent the opening frames in the colours
+  // it was baked with, which is two colours the palette has no room for.
+  chromaPaint(chromaLens())
+  log("facility " + W_COLS + "x" + W_ROWS + " cells " + W_CELL.length)
+}
+
+loadScene(buildFacility)
+
+/// Put a log on screen. Sprite text, not the UI canvas: the canvas fights a background that changes,
+/// and `hud_text` is free while a string is unchanged — which it is, for the whole time a log is up.
+function showLog(id: i32) {
+  if (id < 0 || id >= LOGS) { return }
+  logShown = id
+  logFor = LOG_HOLD
+  hud_text(0, 12, 12, LOG_TITLE[id])
+  let a: i32 = LOG_START[id]
+  let b: i32 = LOG_START[id + 1]
+  let line: i32 = 0
+  while (a + line < b && line < 4) {
+    hud_text(1 + line, 12, 28 + line * 12, LOG_LINE[a + line])
+    line = line + 1
+  }
+}
+
+function hideLog() {
+  logShown = 0 - 1
+  hud_text(0, 0, 0 - 40, "")
+  hud_text(1, 0, 0 - 40, "")
+  hud_text(2, 0, 0 - 40, "")
+  hud_text(3, 0, 0 - 40, "")
+  hud_text(4, 0, 0 - 40, "")
+}
+
+
+while (true) {
+  step()
+
+  let px: i32 = entityX(heroId)
+  let py: i32 = entityY(heroId)
+
+  // One call does the lot: refresh the player's chunk, read the shoulders, check for teeth. Four
+  // separate calls cost ~470 ticks of pure dispatch and put this game at 40fps.
+  let ch: i32 = chromaTick(px, py, BOX_W, BOX_H)
+  let switched: i32 = ch & 1
+
+  // Pickups. A lens is granted to chroma rather than tracked here, because chroma owns the cycling
+  // and has to know which lenses L/R may stop on.
+  // Touch test, every FOURTH frame. At 1.9 px/frame the player covers under half a tile in four
+  // frames, so nothing can be missed — and a check that runs at 15Hz instead of 60 costs a quarter
+  // as much. This game sits close enough to the frame deadline that a few hundred ticks decide
+  // whether it holds 60fps or drops to 40.
+  touchTick = touchTick + 1
+  if (touchTick >= 4) { touchTick = 0 }
+  if (touchTick === 0) {
+  let pc: i32 = px / TILE
+  let pr: i32 = py / TILE
+  let pi: i32 = 0
+  while (pi < W_PICKUPS) {
+    if (TAKEN[pi] === 0) {
+      let w: i32 = W_PICKUP[pi]
+      let dc: i32 = (w & 127) - pc
+      let dr: i32 = ((w >> 7) & 127) - pr
+      if (dc >= 0 - 1 && dc <= 1 && dr >= 0 && dr <= 1) {
+        let kind: i32 = (w >> 14) & 7
+        let arg: i32 = (w >> 17) & 31
+        if (kind <= 3) {
+          TAKEN[pi] = 1
+          chromaGrant(kind)
+          chromaLumenAdd(LUMEN_MAX)
+          log("lens " + kind + " owned=" + chromaOwned())
+        }
+        if (kind === 4) { chromaLumenAdd(4) }
+        if (kind === 5) {
+          TAKEN[pi] = 1
+          showLog(arg)
+        }
+        if (kind === 6) {
+          spawnCol = pc
+          spawnRow = pr
+          chromaLumenAdd(8)
+        }
+        if (kind === 7) { log("ESCAPED") }
+      }
+    }
+    pi = pi + 1
+  }
+  }
+
+  if (logFor > 0) {
+    logFor = logFor - 1
+    if (logFor === 0) { hideLog() }
+  }
+
+  // Death: band teeth under the feet, or the bottom of the world.
+  let died: i32 = 0
+  if ((ch & 2) !== 0) { died = 1 }
+  if (py > W_ROWS * TILE + 24) { died = 1 }
+  if (died === 1) {
+    deaths = deaths + 1
+    log("died " + deaths)
+    // Respawn at the last save by MOVING the hero, not reloading the scene: a reload would rebuild
+    // the world and drop every lens the player has found, because ownership lives with the run.
+    set_transform(heroId, spawnCol * TILE, spawnRow * TILE)
+  }
+
+  // Only ask for the lens on the frames it can have changed. `chromaLens()` is a boxed call and
+  // the answer is identical on every other frame.
+  if (switched === 1 && logShown < 0) {
+    hud_text(5, 190, 8, "L" + chromaLens())
+  }
+}

@@ -1,0 +1,92 @@
+// The warforge HUD — a resource bar, a selection/production panel and the objective line.
+//
+// It repaints ONLY when something it displays changes. A HUD rebuilt every frame is the single
+// easiest way to spend a frame on nothing, and `ui_begin` throws the whole canvas away, so the
+// signature test below is the difference between a free HUD and an expensive one. The pattern is
+// jrpg-party's dirty regions, reduced to one region because this panel is small.
+import { ui_begin, ui_rect, ui_text, ui_release_scratch } from 'cargo:tish_agb'
+// The HUD looks the command up itself rather than being handed a pre-built label string. Caching
+// the string in the game and passing it down did not propagate — and this is less machinery
+// besides: one integer crosses instead of an allocation.
+import { C_NAME, C_GOLD, C_WOOD } from './cmd'
+
+let INK: i32 = 0xFFFFFF
+let DIM: i32 = 0x93A7C4
+let BAR: i32 = 0x101A2E
+let WARN: i32 = 0xE8C070
+
+let sig: i32 = 0 - 1
+let paints: i32 = 0
+
+export function hudPaints(): i32 { return paints }
+
+// One packed signature of everything on screen. Cheaper than comparing six fields, and it means a
+// caller cannot forget to add a field to the comparison when it adds one to the display.
+function signature(gold: i32, wood: i32, food: i32, cap: i32, sel: i32, obj: i32): i32 {
+  let s: i32 = gold & 0x3FF
+  s = s | ((wood & 0x3FF) << 10)
+  s = s | ((food & 0x1F) << 20)
+  s = s | ((cap & 0x1F) << 25)
+  s = s ^ (sel * 2654435) ^ (obj << 3)
+  return s
+}
+
+export function hudReset() { sig = 0 - 1 }
+
+// `objText` is the mission's current objective, `trainLeft` the frames remaining on the selected
+// building's production (-1 = nothing training).
+// `card*` describe the command strip: how many entries, which is highlighted, and the two label
+// strings around it. Passing the strings in (rather than the command ids) keeps this file free of
+// any knowledge of what a command IS.
+export function hudDraw(font: i32, gold: i32, wood: i32, food: i32, cap: i32,
+                        selCount: i32, objId: i32, objText, trainLeft: i32,
+                        cardN: i32, cardPick: i32, cardCmd: i32, cardOk: i32, placing: i32, top: i32) {
+  // ⚠️ trainLeft is quantized to SECONDS before it reaches the signature. Feeding the raw
+  // countdown in made the signature change on every refresh, so the panel repainted ~50 times in
+  // 800 frames and the frame budget went from 4,376 to 7,292 — a HUD that costs more than the game.
+  let s: i32 = signature(gold, wood, food, cap, selCount * 31 + (trainLeft / 60), objId)
+  // The card is part of what is on screen, so it is part of the signature — otherwise cycling the
+  // highlight would not repaint.
+  s = s ^ (cardN * 7919) ^ (cardPick * 131) ^ (cardOk * 17) ^ (placing * 4099) ^ (cardCmd * 313) ^ (top * 65521)
+  if (s === sig) { return }
+  sig = s
+  paints = paints + 1
+
+  ui_begin()
+  // Top strip: the economy. Bottom strip: what is selected and what it is doing.
+  ui_rect(0, 0, 240, 12, BAR, 1)
+  ui_text(font, 3, 2, "G" + gold, 0xF2D06B)
+  ui_text(font, 50, 2, "W" + wood, 0x9FD08A)
+  ui_text(font, 97, 2, "F" + food + "/" + cap, INK)
+
+  if (cardN > 0 && cardCmd >= 0) {
+    // `py` is the panel's top edge: 122 (bottom) or 14 (just below the resource strip). Everything
+    // the panel draws is relative to it, so the whole card moves as one when the cursor would
+    // otherwise sit behind it. Both values are 8-ALIGNED — `ui_clear_rect` snaps out to whole 8x8
+    // tiles, so an unaligned panel would clear its neighbours' tiles on every repaint.
+    let py: i32 = 122
+    if (top === 1) { py = 14 }
+    ui_rect(2, py, 236, 36, 0x5A6478, 1)
+    ui_rect(3, py + 1, 234, 34, BAR, 1)
+    if (placing === 1) {
+      ui_text(font, 8, py + 6, "PLACE BUILDING", WARN)
+      ui_text(font, 8, py + 20, "A confirm   B cancel", DIM)
+    } else {
+      let ink: i32 = INK
+      if (cardOk === 0) { ink = 0x8A6A5A }   // dimmed, not hidden: the card teaches the economy
+      ui_text(font, 8, py + 6, C_NAME[cardCmd], ink)
+      if (C_GOLD[cardCmd] > 0 || C_WOOD[cardCmd] > 0) {
+        ui_text(font, 74, py + 6, C_GOLD[cardCmd] + "g " + C_WOOD[cardCmd] + "w", ink)
+      }
+      ui_text(font, 200, py + 6, (cardPick + 1) + "/" + cardN, DIM)
+    }
+  } else {
+    ui_rect(0, 136, 240, 14, BAR, 1)
+    ui_text(font, 3, 139, objText, 0xF2D06B)
+    if (selCount > 0) { ui_text(font, 120, 139, "SEL " + selCount, INK) }
+    if (trainLeft >= 0) { ui_text(font, 196, 139, ((trainLeft / 60) + 1) + "s", WARN) }
+  }
+  // ⚠️ The canvas holds ~48KB of scratch until this is called, and the NEXT scene inherits it as
+  // corruption — a bug that surfaces one mission later than it is caused.
+  ui_release_scratch()
+}

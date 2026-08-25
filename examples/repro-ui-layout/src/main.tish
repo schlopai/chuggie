@@ -1,0 +1,51 @@
+// Native flex solver (crates/tish-agb/src/ui_layout.rs) vs the boxed arithmetic it replaces.
+//
+// Both sides lay out the SAME tree and print the same numbers, so a mismatch is a diff in the log
+// rather than a subtly wrong menu three screens into a game. The boxed side here is a transcription
+// of packages/ui.tish's flat LN pass — deliberately, so this file is the parity contract.
+import { log, vblank, lay_reset, lay_push, lay_set_measured, lay_solve,
+         lay_x, lay_y, lay_w, lay_h, lay_hide, lay_content, lay_view } from 'cargo:tish_agb'
+
+// A row of three fixed boxes in a padded container, then a column scroll container that must cull.
+function buildNative(): i32 {
+  lay_reset()
+  let root: i32 = lay_push(0, 1, 4, 2, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0 - 1)
+  let a: i32 = lay_push(1, 0, 0, 0, 10, 8, 0, 0, 0, 0, 0, root)
+  let b: i32 = lay_push(1, 0, 0, 0, 10, 8, 0, 0, 0, 0, 0, root)
+  let c: i32 = lay_push(1, 0, 0, 0, 10, 8, 1, 0, 0, 0, 0, root)
+  lay_set_measured(a, 10, 8)
+  lay_set_measured(b, 10, 8)
+  lay_set_measured(c, 10, 8)
+  lay_solve(0, 0, 100, 50)
+  return root
+}
+
+function scrollNative(): i32 {
+  lay_reset()
+  let root: i32 = lay_push(0, 0, 0, 0, 0 - 1, 0 - 1, 0, 0, 0, 1, 0, 0 - 1)
+  let i: i32 = 0
+  while (i < 4) {
+    let k: i32 = lay_push(1, 0, 0, 0, 10, 10, 0, 0, 0, 0, 0, root)
+    lay_set_measured(k, 10, 10)
+    i = i + 1
+  }
+  lay_solve(0, 0, 40, 25)
+  return root
+}
+
+log("start")
+let r: i32 = buildNative()
+// Expected, by the same arithmetic packages/ui.tish uses: pad 2, gap 4, one child grows.
+// sumMain = 30, gapsum = 8, mainLen = 100 - 4 = 96, leftover = 58 -> child c gets 10 + 58 = 68.
+log("row  a: x=" + lay_x(1) + " y=" + lay_y(1) + " w=" + lay_w(1) + " h=" + lay_h(1))
+log("row  b: x=" + lay_x(2) + " w=" + lay_w(2))
+log("row  c: x=" + lay_x(3) + " w=" + lay_w(3))
+log("root mw=" + lay_w(r))
+
+let s: i32 = scrollNative()
+log("scroll content=" + lay_content(s) + " view=" + lay_view(s))
+log("scroll hide: " + lay_hide(1) + lay_hide(2) + lay_hide(3) + lay_hide(4))
+
+let f: i32 = 0
+while (f < 30) { vblank() f = f + 1 }
+log("done")

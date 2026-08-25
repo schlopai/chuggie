@@ -1,0 +1,55 @@
+# polyglot — one merchant screen, four languages.
+# A [lang] header opens a section; each following line is one string and its id is its POSITION.
+# Every section must have the same number of lines or the build fails.
+
+[en]
+The Wandering Merchant
+All of it I carried here myself.
+Ask what you like, traveller.
+Iron Sword
+Healing Herb
+Lantern Oil
+Gold
+A  Buy
+B  Leave
+Language
+Saved
+
+[fr]
+Le Marchand Ambulant
+J'ai tout porté ici moi-même.
+Demandez ce qu'il vous plaît.
+Épée de fer
+Herbe curative
+Huile de lanterne
+Or
+A  Acheter
+B  Partir
+Langue
+Enregistré
+
+[de]
+Der Fahrende Händler
+Alles hier habe ich selbst getragen.
+Fragen Sie ruhig, Reisender.
+Eisenschwert
+Heilkraut
+Laternenöl
+Gold
+A  Kaufen
+B  Verlassen
+Sprache
+Gespeichert
+
+[ja]
+たびの商人
+すべて 自分で はこんで きた。
+すきな もの を きいて くれ。
+鉄の剣
+やくそう
+ランプの油
+所持金
+A  かう
+B  でる
+言語
+ほぞんした

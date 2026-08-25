@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GBA</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+      font-family: system-ui, sans-serif;
+    }
+    #wrap {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    canvas {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      width: min(100vw, calc(100vh * 1.5));
+      height: min(100vh, calc(100vw / 1.5));
+      background: #000;
+      outline: none;
+    }
+    #status {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ccc;
+      font-size: 14px;
+      pointer-events: none;
+      text-align: center;
+      padding: 1rem;
+    }
+    #status.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <canvas id="screen" width="240" height="160" tabindex="0"></canvas>
+  </div>
+  <div id="status">Loading…</div>
+  <script type="module" src="./player.js"></script>
+</body>
+</html>

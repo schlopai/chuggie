@@ -1,0 +1,434 @@
+// chroma — a lens over the world: four colours at a time, and what is not in the lens is not there.
+//
+// This is the reusable half of `examples/spectra`. It owns one idea: a level is painted in more
+// colours than the screen shows at once, and the lens decides not only what you SEE but what is
+// SOLID. Turning it rebuilds the level under the player's feet.
+//
+// ── WHY THIS IS NOT A PALETTE SWAP, WHICH IS THE MOST IMPORTANT THING HERE ──────────────────────
+//
+// It should be. On this machine the obvious move is to paint the absent bands the backdrop colour
+// and change the whole level for twelve palette writes — and it WORKS: `terrain_pal_bank` really
+// does rewrite a `scene:` map's live palette bank, at about 1,700 ticks for the lot.
+//
+// It is still unusable, because WHICH PALETTE INDEX HOLDS WHICH COLOUR IS NONDETERMINISTIC ACROSS
+// BUILDS. Same source, two clean builds, the backdrop moved from entry 5 to entry 9: agb's optimiser
+// pushes the per-tile colour sets through a hash-ordered bin-packer, and it assigns per ATLAS, so
+// two rooms built from one tileset disagree with each other as well. Measuring the order and baking
+// a table does not rescue it — the next build invalidates the table. There is no version of
+// "recolour band A" that can be aimed.
+//
+// Rewriting the TILES instead can be aimed, but `scene:` REMAPS gids when it packs its per-map
+// atlas, so the number in the tileset is not the number at runtime — and it costs ~310 ticks a cell
+// besides.
+//
+// What works is neither: EACH BAND IS ITS OWN TILE LAYER. Showing or hiding a band is
+// `stream_visible(band, on)` — one call, against a layer the hardware was already compositing, with
+// no gid and no palette entry anywhere in it. The GBA's four background layers are exactly three
+// bands plus the world, and a hidden layer hands its slot back, so the usual case (one band lit)
+// runs on two.
+//
+// That leaves collision as the only per-cell work, and only for the bands whose state actually
+// changed: DAWN -> DUSK touches band A's cells and band B's, never band C's and never the stone.
+//
+// The one colour a lens does change is `backdrop()`, which writes palette 0 entry 0 explicitly and
+// is the only colour call on this machine that means exactly what it says.
+//
+// ⚠️ THE LAYERS AND THE BACKDROP MUST BE SET AFTER THE SCENE IS STREAMED: `scene_stream` builds the
+// layers and re-derives the backdrop from the atlas as it goes. `chromaEnd` is the hook that gets
+// this order right; call it from the scene builder, after `loadSceneRom`.
+import { stream_visible, backdrop, keys_held } from 'cargo:tish_agb'
+import { grid_set_solid, grid_set_oneway } from 'cargo:tish_gba_game_engine'
+
+// Band ids, as packed into a cell word. 0 is "no band".
+export let BAND_A: i32 = 1
+export let BAND_B: i32 = 2
+export let BAND_C: i32 = 3
+
+// Cell kinds.
+export let K_BLOCK: i32 = 0     // solid while its band is live
+export let K_LEDGE: i32 = 1     // one-way while its band is live
+export let K_HAZARD: i32 = 2    // hurts while its band is live; never solid
+export let K_DOOR: i32 = 3      // solid while its band is NOT live — a door is open in its own lens
+export let K_LOCK: i32 = 4      // not a band cell at all: a lens-lock field, band 0
+
+// Lens ids. 0..2 are the single-band lenses; 3 is WHITE, which is all three at once.
+export let LENS_DAWN: i32 = 0
+export let LENS_DUSK: i32 = 1
+export let LENS_VOID: i32 = 2
+export let LENS_WHITE: i32 = 3
+
+// L and R as BIT POSITIONS in the `keys_held` mask — the bit index is the same number
+// `key_held` takes as an ordinal, so L is 4 and R is 5. One mask read a frame instead of four boxed
+// `key_held` calls: on this chip the call plane is the whole cost and the arithmetic is free.
+let BIT_L: i32 = 16
+let BIT_R: i32 = 32
+
+// ── State ───────────────────────────────────────────────────────────────────────────────────────
+// All `i32` / `i32[]`, without exception. An unannotated scalar in tish is a thread-local `Cell<f64>`
+// and an unannotated array is a boxed `Value::Array` of boxed `Value::Number` — three soft-float
+// operations per element read on a chip with no FPU. `CH_CELL` is walked on every switch.
+let CH_LAYER0: i32 = 0          // scene layer index of band A; B and C follow it
+let CH_LENS: i32 = 0            // the lens L/R cycle through — WHITE is layered over it, not in it
+let CH_LIVE: i32 = 0            // the lens actually on screen, WHITE included
+let CH_MASK: i32 = 0            // bitmask of live bands: bit 0 = A, bit 1 = B, bit 2 = C
+let CH_APPLIED: i32 = 0 - 1     // the mask the world currently reflects; -1 forces a full rebuild
+let CH_LOCK: i32 = 0            // lens-lock field: the lantern will not turn
+let CH_FLASH: i32 = 0           // frames left in the shift flash
+let CH_DENIED: i32 = 0          // frames left in the refused-switch buzz
+let CH_LUMEN: i32 = 0
+let CH_LUMEN_MAX: i32 = 0
+let CH_DRAIN: i32 = 0           // lumens per frame WHITE costs
+
+// Last frame's held mask, so this package can derive its OWN press edges.
+//
+// ⚠️ IT DOES NOT USE `keys_edge()`, AND THAT IS DELIBERATE. The engine's edge flags come from agb's
+// ButtonController, whose "just pressed" survives exactly one `input.update()` — and by the time a
+// game loop has run `step()` and reached here, that window has already closed. Measured on this
+// example: `keys_held()` reported R down on the very frame the button appeared while `keys_edge()`
+// reported nothing, on that frame and on every frame after. The symptom is a lens that never turns,
+// and nothing about it points at input. Latching the mask here costs one store and cannot go stale.
+let CH_PREV: i32 = 0
+
+// One backdrop colour per lens. Handed over scalar-by-scalar rather than as an array because an
+// array parameter arrives across a tish module boundary as a boxed `Value` — `CH_BACK = colours`
+// will not compile against a `Vec<i32>`.
+let CH_BACK: i32[] = [0, 0, 0, 0]
+
+// The room's band cells, COPIED out of the game's generated table rather than referenced into it,
+// because a repaint pad rewrites a cell's band and that edit must not survive a reload of the room.
+// Capacity is fixed: a growing array reallocates, and this is rebuilt on every room load.
+let CAP: i32 = 96
+let CH_CELL: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+let CH_N: i32 = 0
+
+export function chromaInit(bandLayer0: i32, lumenMax: i32, drain: i32) {
+  CH_LAYER0 = bandLayer0
+  CH_LUMEN_MAX = lumenMax
+  CH_LUMEN = lumenMax
+  CH_DRAIN = drain
+}
+
+/// One lens's backdrop colour. Four calls at boot.
+export function chromaSetBackdrop(lens: i32, rgb: i32) {
+  if (lens >= 0 && lens < 4) { CH_BACK[lens] = rgb }
+}
+
+// ── The lens ────────────────────────────────────────────────────────────────────────────────────
+
+/// Which bands are real under a given lens. WHITE is all three; every other lens is exactly one.
+export function chromaMaskOf(lens: i32): i32 {
+  if (lens === LENS_WHITE) { return 7 }
+  if (lens === LENS_DAWN) { return 1 }
+  if (lens === LENS_DUSK) { return 2 }
+  return 4
+}
+
+/// The lens's global colour — the only palette call in the package, and the only one that can be
+/// aimed by name rather than by whatever index an optimiser happened to choose.
+export function chromaPaint(lens: i32) {
+  backdrop(CH_BACK[lens])
+}
+
+/// Push `mask` into the world: which band layers are drawn, and which cells are solid.
+///
+/// ⚠️ THE COLLISION PASS ONLY TOUCHES CELLS WHOSE STATE CHANGES, which is what keeps a switch inside
+/// a frame. Going DAWN -> DUSK flips band A off and band B on and leaves band C, the stone and the
+/// hazards alone, so the cost is proportional to the DIFFERENCE between two lenses rather than to
+/// the size of the room.
+export function chromaApply(mask: i32): i32 {
+  if (mask === CH_APPLIED) { return 0 }
+  let prev: i32 = CH_APPLIED
+  CH_APPLIED = mask
+
+  // The art: three calls, and usually only two of them change anything.
+  let b: i32 = 0
+  while (b < 3) {
+    if ((mask & (1 << b)) !== 0) { stream_visible(CH_LAYER0 + b, 1) }
+    else { stream_visible(CH_LAYER0 + b, 0) }
+    b = b + 1
+  }
+
+  let i: i32 = 0
+  while (i < CH_N) {
+    let w: i32 = CH_CELL[i]
+    let col: i32 = w & 63
+    let row: i32 = (w >> 6) & 63
+    let band: i32 = (w >> 12) & 3
+    let kind: i32 = (w >> 14) & 7
+    // Band 0 is a lens-lock field: no collision, and no band bit. Skipping it here also keeps the
+    // shift below out of `1 << -1`, which is not a shift this chip defines.
+    if (band !== 0) {
+      let bit: i32 = 1 << (band - 1)
+      let live: i32 = mask & bit
+      let was: i32 = prev & bit
+      // `prev` of -1 means nothing is applied yet (a fresh room), so everything gets written.
+      if (live !== was || prev < 0) {
+        if (kind === K_BLOCK) {
+          if (live !== 0) { grid_set_solid(col, row, 1) } else { grid_set_solid(col, row, 0) }
+        }
+        if (kind === K_LEDGE) {
+          if (live !== 0) { grid_set_oneway(col, row, 1) } else { grid_set_oneway(col, row, 0) }
+        }
+        if (kind === K_DOOR) {
+          // A door is the same rule read the other way: a phase block is matter that exists only in
+          // its own light, a chroma door is a shutter that only OPENS in its own light.
+          if (live !== 0) { grid_set_solid(col, row, 0) } else { grid_set_solid(col, row, 1) }
+        }
+      }
+    }
+    i = i + 1
+  }
+  return 1
+}
+
+/// Start a room. Then push its cells with `chromaCell`, and finish with `chromaEnd`.
+///
+/// Three calls instead of one because the room's cell list lives in the game's generated table, and
+/// an array crossing a tish module boundary arrives boxed. A room has a couple of dozen cells, so
+/// pushing them costs a couple of dozen calls once per room load — and buys a flat `i32[]` for the
+/// switch that happens hundreds of times.
+export function chromaBegin() {
+  CH_N = 0
+}
+
+export function chromaCell(w: i32) {
+  if (CH_N < CAP) {
+    CH_CELL[CH_N] = w
+    CH_N = CH_N + 1
+  }
+}
+
+/// Finish a room and light its starting lens. Call AFTER `loadSceneRom`.
+export function chromaEnd(lens: i32): i32 {
+  CH_LENS = lens
+  CH_LIVE = lens
+  CH_MASK = chromaMaskOf(lens)
+  CH_APPLIED = 0 - 1
+  CH_LOCK = 0
+  CH_FLASH = 0
+  CH_DENIED = 0
+  chromaApply(CH_MASK)
+  chromaPaint(lens)
+  return CH_N
+}
+
+// ── The crush rule ──────────────────────────────────────────────────────────────────────────────
+
+/// Would switching to `mask` materialise a block inside the tile rect `c0,r0 .. c1,r1`?
+///
+/// This is what makes the mechanic fair rather than arbitrary. Without it a switch is a coin flip on
+/// whether the level kills you; with it, a refused switch is INFORMATION — it says you are standing
+/// in the answer's way, which several rooms are built entirely around.
+///
+/// Only `K_BLOCK` counts. A ledge is one-way, so appearing under a player lifts them rather than
+/// swallowing them; a hazard is not solid; a door appearing is a shutter closing beside you.
+export function chromaCanShift(mask: i32, c0: i32, r0: i32, c1: i32, r1: i32): i32 {
+  let i: i32 = 0
+  while (i < CH_N) {
+    let w: i32 = CH_CELL[i]
+    if (((w >> 14) & 7) === K_BLOCK) {
+      let band: i32 = (w >> 12) & 3
+      if (band !== 0) {
+        // Only bands being turned ON can crush; one turning off can only free space.
+        if ((mask & (1 << (band - 1))) !== 0) {
+          let col: i32 = w & 63
+          let row: i32 = (w >> 6) & 63
+          if (col >= c0 && col <= c1 && row >= r0 && row <= r1) { return 0 }
+        }
+      }
+    }
+    i = i + 1
+  }
+  return 1
+}
+
+/// Is a LIVE band's hazard under either of the player's feet — columns `c0..c1` of row `row`?
+///
+/// One call for the span rather than one per foot. A boxed call is ~117 ticks and a cell test is
+/// about one, so asking twice costs more than the loop it is asking about; this game had to find
+/// ~900 ticks a frame to hold 60fps and this was the cheapest 117 of them.
+export function chromaHazardSpan(c0: i32, c1: i32, row: i32): i32 {
+  let i: i32 = 0
+  while (i < CH_N) {
+    let w: i32 = CH_CELL[i]
+    if (((w >> 14) & 7) === K_HAZARD) {
+      let col: i32 = w & 63
+      if (col >= c0 && col <= c1) {
+        if (((w >> 6) & 63) === row) {
+          let band: i32 = (w >> 12) & 3
+          if (band !== 0) {
+            if ((CH_MASK & (1 << (band - 1))) !== 0) { return 1 }
+          }
+        }
+      }
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+/// Is (col,row) inside a lens-lock field? Asked of where the player IS rather than remembered as a
+/// state they entered, so there is no way to end up locked in a room that has no field in it.
+export function chromaLockAt(col: i32, row: i32): i32 {
+  let i: i32 = 0
+  while (i < CH_N) {
+    let w: i32 = CH_CELL[i]
+    if (((w >> 14) & 7) === K_LOCK) {
+      if ((w & 63) === col) {
+        if (((w >> 6) & 63) === row) { return 1 }
+      }
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+// ── Per-frame ───────────────────────────────────────────────────────────────────────────────────
+
+/// Read the shoulders and turn the lantern. `c0,r0,c1,r1` is the player's tile footprint, used for
+/// the crush probe. Returns 1 on the frames a switch actually happened, so the caller can play the
+/// shift animation without tracking the lens itself.
+export function chromaUpdate(c0: i32, r0: i32, c1: i32, r1: i32): i32 {
+  // The lock field is resolved HERE rather than by the caller, for the same reason the hazard probe
+  // takes a span: it is one more boxed call on a frame that has none to spare, and this function
+  // already has the cell list open in front of it.
+  CH_LOCK = chromaLockAt(c0, r0)
+  if (CH_FLASH > 0) { CH_FLASH = CH_FLASH - 1 }
+  if (CH_DENIED > 0) { CH_DENIED = CH_DENIED - 1 }
+
+  let held: i32 = keys_held()
+  // (held & ~prev) — the buttons that went down this frame. `0 - 1 - x` is ~x without needing a
+  // bitwise-not operator.
+  let edge: i32 = held & (0 - 1 - CH_PREV)
+  CH_PREV = held
+  let bothHeld: i32 = 0
+  if ((held & BIT_L) !== 0 && (held & BIT_R) !== 0) { bothHeld = 1 }
+
+  // WHITE is a state you HOLD, not one you toggle into, and it is metered. Both shoulders make all
+  // three bands real at once — the only way past some gaps, and the worst possible moment for every
+  // hazard in the room, since they all become real together.
+  if (bothHeld === 1 && CH_LOCK === 0 && CH_LUMEN > 0) {
+    if (CH_LIVE !== LENS_WHITE) {
+      if (chromaCanShift(7, c0, r0, c1, r1) === 0) {
+        CH_DENIED = 8
+      } else {
+        CH_LIVE = LENS_WHITE
+        CH_MASK = 7
+        chromaApply(CH_MASK)
+        chromaPaint(LENS_WHITE)
+        CH_FLASH = 6
+        return 1
+      }
+    }
+    CH_LUMEN = CH_LUMEN - CH_DRAIN
+    if (CH_LUMEN < 0) { CH_LUMEN = 0 }
+    return 0
+  }
+
+  // Falling out of WHITE — the shoulders came up, or the lantern ran dry. Never refused: it only
+  // removes matter, and refusing it would strand the player inside a block.
+  if (CH_LIVE === LENS_WHITE) {
+    CH_LIVE = CH_LENS
+    CH_MASK = chromaMaskOf(CH_LENS)
+    chromaApply(CH_MASK)
+    chromaPaint(CH_LENS)
+    CH_FLASH = 6
+    return 1
+  }
+
+  if (CH_LOCK !== 0) { return 0 }
+
+  // Tap to cycle. Counted, not `%`: the ARM7TDMI has no divide instruction, so a modulo here is a
+  // call into a software division routine for something two comparisons answer.
+  let want: i32 = 0 - 1
+  if ((edge & BIT_R) !== 0) {
+    want = CH_LENS + 1
+    if (want > 2) { want = 0 }
+  }
+  if ((edge & BIT_L) !== 0) {
+    want = CH_LENS - 1
+    if (want < 0) { want = 2 }
+  }
+  if (want < 0) { return 0 }
+
+  let mask: i32 = chromaMaskOf(want)
+  if (chromaCanShift(mask, c0, r0, c1, r1) === 0) {
+    CH_DENIED = 8
+    return 0
+  }
+  CH_LENS = want
+  CH_LIVE = want
+  CH_MASK = mask
+  chromaApply(mask)
+  chromaPaint(want)
+  CH_FLASH = 6
+  return 1
+}
+
+// ── Room furniture ──────────────────────────────────────────────────────────────────────────────
+
+/// Force a lens and hold it there. `chromaLock(0)` hands control back.
+export function chromaForce(lens: i32): i32 {
+  if (CH_LIVE === lens) { return 0 }
+  CH_LENS = lens
+  CH_LIVE = lens
+  CH_MASK = chromaMaskOf(lens)
+  chromaApply(CH_MASK)
+  chromaPaint(lens)
+  CH_FLASH = 6
+  return 1
+}
+
+export function chromaLock(on: i32) { CH_LOCK = on }
+
+/// Move every band cell in a tile rect from one band to another — a repaint pad.
+///
+/// The one thing in the game that edits the LEVEL rather than the lens, which is why it works on the
+/// copy `chromaBegin` took: re-entering the room undoes it, and nothing else does.
+export function chromaRepaint(c0: i32, r0: i32, c1: i32, r1: i32, from: i32, to: i32): i32 {
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < CH_N) {
+    let w: i32 = CH_CELL[i]
+    if (((w >> 12) & 3) === from) {
+      let col: i32 = w & 63
+      let row: i32 = (w >> 6) & 63
+      if (col >= c0 && col <= c1 && row >= r0 && row <= r1) {
+        // 0-12289 is ~(3 << 12): clear the two band bits and nothing else.
+        CH_CELL[i] = (w & (0 - 12289)) | (to << 12)
+        n = n + 1
+      }
+    }
+    i = i + 1
+  }
+  if (n > 0) {
+    // The mask has not changed, but which cells it names has — so force the rebuild the idempotence
+    // check at the top of `chromaApply` would otherwise skip.
+    CH_APPLIED = 0 - 1
+    chromaApply(CH_MASK)
+    CH_FLASH = 6
+  }
+  return n
+}
+
+export function chromaLumenAdd(n: i32): i32 {
+  CH_LUMEN = CH_LUMEN + n
+  if (CH_LUMEN > CH_LUMEN_MAX) { CH_LUMEN = CH_LUMEN_MAX }
+  return CH_LUMEN
+}
+
+// ── Readers ─────────────────────────────────────────────────────────────────────────────────────
+export function chromaLens(): i32 { return CH_LIVE }
+export function chromaBase(): i32 { return CH_LENS }
+export function chromaMask(): i32 { return CH_MASK }
+export function chromaWhite(): i32 { if (CH_LIVE === LENS_WHITE) { return 1 } return 0 }
+export function chromaFlash(): i32 { return CH_FLASH }
+export function chromaDenied(): i32 { return CH_DENIED }
+export function chromaLumens(): i32 { return CH_LUMEN }
+export function chromaLumenMax(): i32 { return CH_LUMEN_MAX }
+export function chromaCells(): i32 { return CH_N }

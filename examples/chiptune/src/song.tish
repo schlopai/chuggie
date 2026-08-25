@@ -1,0 +1,13 @@
+// song — the `chip:` pipeline's calibration ROM.
+//
+// Imports a compiled chiptune song and plays it. `verify.sh` captures the emulated audio and checks
+// every row's pitch, which is what proves the parser, note table, tempo and sequencer agree with
+// each other rather than merely producing something musical.
+import { frame, backdrop, log, chip_play } from 'cargo:tish_agb'
+import { scale } from 'chip:../assets/scale.chip'
+
+backdrop(0x181028)
+log("SONG play")
+chip_play(scale)
+
+while (true) { frame() }

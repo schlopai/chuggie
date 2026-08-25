@@ -1,0 +1,19 @@
+import { log, vblank } from 'cargo:tish_agb'
+import { modeName } from './moda.tish'
+import { slotOf } from './modb.tish'
+
+const WALK: i32 = 7
+
+function check(m) {
+  if (m === WALK) { return "seven" }
+  return "other"
+}
+
+log("WALK=" + WALK)
+log("check(7)=" + check(7))
+log("check(1)=" + check(1))
+log("modeName(1)=" + modeName(1))
+log("slotOf=" + slotOf())
+let f: i32 = 0
+while (f < 60) { vblank() f = f + 1 }
+log("done")

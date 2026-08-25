@@ -1,0 +1,49 @@
+// Platformer Combat — a side-scrolling platformer that exercises the reusable engine systems:
+// run/walk, coyote + buffered + variable-height jumps, one-way platforms, HP + a hearts HUD, and
+// stompable patrol enemies that damage on touch. The camera follows the player across the level.
+//
+// Controls: d-pad move · A jump (hold for higher, tap for a hop) · B run · Down+A drop through a
+// one-way ledge. Land on an enemy to stomp it; touch its side and you take a hit (with i-frames).
+import { tileset } from 'background:../assets/tileset.png'
+import { heroSheet } from 'sheet:../assets/hero.png'
+import { enemySheet } from 'sheet:../assets/enemy.png'
+import { heartSheet } from 'sheet:../assets/heart.png'
+import { sprite_new } from 'cargo:tish_agb'
+import { mount, create, loadStreamMap, setupHearts, step } from '../../../packages/engine'
+import { level } from './maps'
+import * as components from './components'
+import { Player, Enemy } from './components'
+
+mount(components)
+loadStreamMap(level, tileset)
+
+// Player: platformer physics, 6 hp (3 half-heart containers), camera follow.
+let hero = create()
+let spawnX = level.spawnCol * 16
+let spawnY = level.spawnRow * 16
+hero.setPos(spawnX, spawnY)
+hero.setSprite(sprite_new(heroSheet))
+hero.platformer(16, 16)
+hero.setHealth(6)
+hero.behave(Player, { spawnX: spawnX, spawnY: spawnY })
+hero.follow()
+
+// Hearts HUD (top-left), reflecting the player's hp each frame (2 hp per heart).
+setupHearts(heartSheet, 3, 8, 8, 12)
+
+// Patrol enemies from the level's spawn lists. (Loop counter is `ei`, not `i`: a top-level mutable
+// `i` collides with an imported function's parameter in tish codegen — upstream #556.)
+let ei: i32 = 0
+while (ei < level.enemyCols.length) {
+  let e = create()
+  e.setPos(level.enemyCols[ei] * 16, level.enemyRows[ei] * 16)
+  e.setSprite(sprite_new(enemySheet))
+  e.platformer(16, 16)
+  e.animate(2, 12)    // 2-frame wobble, cycled by the native animation system
+  e.setHealth(1)
+  e.patrol(1)         // NATIVE walk + turn at walls/ledges; 1 = mirror the sprite when walking right
+  e.behave(Enemy, {}) // only `onCollide` now — a tish `tick` here is billed per ON-SCREEN enemy
+  ei = ei + 1
+}
+
+while (true) { step() }

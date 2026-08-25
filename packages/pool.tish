@@ -1,0 +1,73 @@
+// pool.tish — names for the engine's entity pools.
+//
+// CONSTANTS ONLY. There is not one function in this file, and that is deliberate: a Tish function
+// costs ~151 bytes of heap whether it is ever called or not, so a package of thin wrappers over
+// `pool_arm` / `pool_get` would cost a ROM more than the natives it wraps. Everything here lowers
+// to an integer literal at the call site.
+//
+// You do not need this file. `pool_arm(WPN, 0, SHOT_RANG, 26)` is a legal call and does the same
+// thing as the version that names its sentinels. It exists because the second one can be read six
+// months later, and because -1 and -2 mean two very different things to `pool_arm`.
+//
+// ── What a pool is for ─────────────────────────────────────────────────────
+//
+// A spawn costs ~1,400 ticks on the frame it happens and reallocates sprite VRAM
+// (`docs/perf-rules.md` §6). A game that spawns an entity per arrow, per puff of smoke or per
+// dropped coin stutters precisely when the player is winning — the topdown RPG port measured a
+// spawn-per-drop at 31% over budget on exactly those frames.
+//
+// So a pool creates its entities ONCE, at boot, behind the fade's black frame, and re-arms them
+// forever after. `pool_arm` is a `reset_entity` plus a few dozen stores; nothing is allocated and
+// nothing is freed for the life of the scene.
+//
+// ── What the engine does for you ───────────────────────────────────────────
+//
+// **Retirement is `life_system`'s job, not yours.** A slot armed with `ttl > 0` gets all four of the
+// engine's existing retirement rules, and there is no second countdown anywhere:
+//
+//   - the ttl reaches 0
+//   - `offscreen` is set and the entity's box leaves the visible area
+//   - a flying hurt box's collider overlaps a solid tile — so a shot stops at a wall
+//   - with a room camera, the entity leaves the player's current room — so a shot fired through an
+//     open door cannot hit something in the next room
+//
+// The last two are why this matters beyond tidiness: every hand-rolled pool in this repo counted
+// its own ttl and never called `set_lifetime`, so `life_system` skipped those entities entirely and
+// their shots flew through walls.
+//
+// **A pooled entity's DEATH is yours to notice.** The engine will not retire a slot because its
+// health hit zero, and that is not an oversight: a caller typically reads the corpse's position on
+// a later frame to place a drop, and a retire clears the transform first.
+//
+// ── What the engine deliberately does NOT do ───────────────────────────────
+//
+// There is no `maxLive`, no cooldown, no per-slot category and no `onRetire` callback.
+//
+// The callback is a cost question — one tish closure per pool is ~151 bytes plus a boxed
+// `value_call` on every retire, which is the overhead a pool exists to remove.
+//
+// The limits are a design question, and the answer is already in your slot numbering. The NES-era action-RPG's rules
+// are "one boomerang in flight, one arrow, two bombs but only one live fuse, the blue candle once
+// per room" — six different rules for six items, enforced structurally by WHICH SLOT each arms:
+//
+//     let e: i32 = pool_arm(WPN, SLOT_RANG, SHOT_RANG, 26)   // one boomerang: the slot IS the limit
+//     if (e < 0) { return 0 }                                // pool_arm REFUSES a live slot
+//
+// That refusal is the whole enforcement API. It is also a behaviour change from every hand-rolled
+// version, which would stomp a live slot and relied on each call site remembering to check first.
+
+// ── pool_arm: the `slot` argument ────────────────────────────────────────────
+// A slot >= 0 means that exact slot, and is refused if the slot is already live.
+export let POOL_ANY: i32 = 0 - 1     // the lowest free slot; refuse if the pool is full
+export let POOL_STEAL: i32 = 0 - 2   // the lowest free slot, else recycle the one closest to retiring
+
+// ── pool_get(p, slot, field) ─────────────────────────────────────────────────
+export let POOL_KIND: i32 = 0        // -1 free; >= 0 live, carrying whatever the caller stored
+export let POOL_TTL: i32 = 1         // frames left before life_system retires it; 0 = no timer
+export let POOL_ENT: i32 = 2         // the engine entity id — stable for the pool's whole life
+export let POOL_SPR: i32 = 3         // the tish-agb sprite handle, or -1 for an entity-only pool
+
+// ── pool_stat(p, field) ──────────────────────────────────────────────────────
+export let POOLS_COUNT: i32 = 0
+export let POOLS_LIVE: i32 = 1
+export let POOLS_HIGH: i32 = 2       // high-water live count, for a verify.sh that sizes the pool

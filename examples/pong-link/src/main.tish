@@ -1,0 +1,679 @@
+// PONG-LINK — two GBAs, one cable, one game.
+//
+// Controls: Up/Down move your paddle · START serves, and restarts a finished match.
+// With no cable it plays the right-hand paddle itself, so the cartridge is not useless alone.
+//
+// ── What this is for ────────────────────────────────────────────────────────────────────────────
+// `examples/link-demo` proves the TRANSPORT: two units enumerate, agree a seed, and mirror each
+// other's buttons. This proves the thing built on top of it — a real simulation running on two
+// consoles at once, where the only thing crossing the cable is a button mask.
+//
+// LOCKSTEP, NOT STATE SYNC. Neither side sends a ball position, ever. Each frame both consoles
+// exchange one 14-bit word of buttons, and then both run the identical simulation on the identical
+// pair of inputs. That works exactly as long as the simulation is deterministic and depends on
+// nothing local — which is why the ball is integer fixed point rather than floating point drift,
+// why the serve direction comes from `packages/rng` seeded with the LINK's agreed seed rather than
+// from anything either console picked for itself, and why nothing here reads a frame counter that
+// the two machines could disagree about.
+//
+// ⚠️ THE ONE RULE: do not advance the simulation on a stall. `linkExchange` returns LINK_STALL when
+// the peer's word for this frame has not arrived, and stepping anyway is how the two consoles end
+// up on different frame numbers — after which every input is applied to a different world and the
+// two games quietly become different games. Everything else in a lockstep game is negotiable; this
+// is not.
+//
+// HOW TO PLAY IT
+//   mGBA:      mgba-qt pong-link.gba, then File > New multiplayer window and load it again there.
+//   Hardware:  the same ROM on two carts and a link cable. Order and timing do not matter.
+//   Alone:     just run it. No peer means the right paddle is played by the CPU.
+import { art } from 'sheet:../assets/pong.png'
+import { body } from 'font:../../../assets/fonts/04b03.ttf@8'
+import {
+  backdrop, frame, key_held, key_pressed, log,
+  sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_hud, sprite_set_visible,
+  ui_begin, ui_rect, text_draw,
+} from 'cargo:tish_agb'
+import {
+  LINK_OFFLINE, LINK_SYNCING, LINK_PLAYING, LINK_LOST, LINK_STALL,
+  linkOpen, linkState, linkExchange, linkSent, linkSeed, linkIsMaster, linkResync,
+} from '../../../packages/link'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+
+let BTN_A: i32 = 0
+let BTN_START: i32 = 3
+let BTN_UP: i32 = 6
+let BTN_DOWN: i32 = 7
+
+// ── The word that crosses the cable ─────────────────────────────────────────────────────────────
+// Three bits of the fourteen available. Keeping START in here rather than acting on it locally is
+// deliberate: both consoles see both players' buttons, so a restart pressed on either unit is a
+// decision BOTH simulations make on the same frame. Acting locally would restart one side only.
+let IN_UP: i32 = 1
+let IN_DOWN: i32 = 2
+let IN_START: i32 = 4
+let IN_FAST: i32 = 8      // A held: the paddle sprints
+let IN_MASK: i32 = 15
+
+// ⚠️ THE ROUND NUMBER IS THE POINT, and it took two failed attempts to earn it.
+//
+// A word carries the buttons AND the round they belong to: bits 0-2 buttons, bits 3-9 a round
+// counter mod 128 — ten of the fourteen bits the transport gives us.
+//
+// The first version sent buttons alone and assumed the answer paired with the buttons being read
+// when it arrived. It does not: `linkExchange` alternates, and the call that returns the peer's word
+// ignores the word passed to it. The second version paired with the word the link had last STAGED,
+// which is closer but still not a guarantee — a stall also happens when the port is busy, and
+// nothing says the peer staged its word for the same transfer. Both produced a game that agreed for
+// hundreds of frames and then quietly did not, which is the worst failure mode available: each
+// screen on its own looks like a perfectly ordinary game of Pong.
+//
+// With a round number the pairing is CHECKED instead of assumed, and the master owns the clock. It
+// stamps each round; the child mirrors the stamp back with its own buttons; both simulate round R
+// with (masterButtons_R, childButtons_R). The child can do that the moment it hears round R, while
+// the master must wait one exchange for the answer — so the master trails by a round on the wall
+// clock and matches exactly in the simulation. That last part is the whole game.
+// ⚠️ The round field sits ABOVE the buttons, so adding a button moves it. Four button bits now (up,
+// down, start, fast), so the round is shifted by 16 rather than 8. Both consoles must agree on this
+// layout exactly; a mismatch reads a round number that is off by a factor of two and nothing ever
+// pairs again.
+let RND_SHIFT: i32 = 16
+let RND_MASK: i32 = 127
+
+// ── The court, in whole pixels ──────────────────────────────────────────────────────────────────
+let TOP: i32 = 22
+let BOTTOM: i32 = 146
+let PAD_H: i32 = 32
+let PAD_W: i32 = 6
+let PAD_L_X: i32 = 10
+let PAD_R_X: i32 = 224
+// Per TICK, and a tick is one display frame's worth of motion. Hold A to sprint.
+let PAD_SPEED: i32 = 2
+let PAD_SPEED_FAST: i32 = 4
+let BALL_SZ: i32 = 6
+let WIN_SCORE: i32 = 7
+
+// Ball motion is 1/64ths of a pixel. Fixed point rather than float — not for speed at this scale,
+// but because the whole design rests on two consoles computing bit-identical results from the same
+// inputs, and integers make that a property of the code rather than a hope about the compiler.
+let FX: i32 = 64
+let SERVE_VX: i32 = 80          // per TICK, i.e. 1.25 px per display frame
+let SPEED_UP: i32 = 8           // added to |vx| on every paddle hit
+let MAX_VX: i32 = 200
+
+// ⚠️ THE TICK IS THE UNIT OF TIME, not the simulated frame. This is the fix for a game that felt
+// slow and laggy, and the mistake it replaces is worth stating.
+//
+// A linked simulated frame lands about every six display frames, because a round of the protocol
+// costs two transfers. The first version sized every speed for that — and then threw the SAME
+// throttle over the one-player game, so a mode with no cable and no reason to wait also ran at 10 Hz.
+// It moved the ball eight pixels at a time and answered the d-pad a sixth of the time, for
+// consistency nobody asked for.
+//
+// Now a step runs `G.ticks` ticks, and a tick is worth one display frame of motion. Solo runs one
+// tick per step at 60 Hz; linked runs six per step at about 10 Hz. Same speed across the court
+// either way, the same integer arithmetic, and collisions are still resolved a tick at a time so a
+// fast ball cannot pass through a six-pixel paddle. `ticks` is a CONSTANT per mode, never a measured
+// elapsed time — both consoles must run the identical number or they are no longer the same game.
+let TICKS_SOLO: i32 = 1
+let TICKS_LINKED: i32 = 6
+let MAX_TICKS: i32 = 8
+let SERVE_HOLD_TICKS: i32 = 70  // just over a second, counted in ticks so both modes match
+
+interface Game {
+  ly: i32, ry: i32,               // paddle tops, whole pixels
+  bx: i32, by: i32,               // ball centre, 1/64ths
+  vx: i32, vy: i32,
+  s0: i32, s1: i32,
+  serving: i32,                   // SIMULATED frames until the ball is released; 0 = live
+  over: i32,
+  // 0 = linked and waiting for player one to start · 1 = playing.
+  //
+  // Both consoles enter phase 0 the moment they seed, and leave it on the same simulated frame,
+  // because the thing that starts the match is player one's START arriving through the normal input
+  // exchange. Starting on a LOCAL keypress would begin the match on one console only.
+  phase: i32,
+  // Where the paddles were when this simulated frame began, so the picture can be drawn part way
+  // between then and now. Presentation only — nothing in the simulation reads them.
+  pl0: i32, pr0: i32,
+  // Ticks per simulated frame: 1 solo, 6 linked. A constant per mode, never measured.
+  ticks: i32,
+  simFrame: i32,                  // frames of SIMULATION, which both consoles must agree on
+  seeded: i32,
+  // ⚠️ A REQUEST, not an action — and the reason is tish codegen, not design.
+  //
+  // A tish function called from inside another function is captured by that function's closure BY
+  // MOVE, so a later call from module level is `E0382: borrow of moved value`. `step` wanted to call
+  // `resetMatch`, which is also called at boot and when the link seeds. Raising a flag here and
+  // acting on it in the main loop keeps every call to `resetMatch` at module level, where nothing
+  // has moved it.
+  //
+  // Still deterministic: both consoles run the identical `step` on the identical inputs, so both
+  // raise the flag on the same simulated frame and both reset before the next one.
+  restart: i32
+}
+let G: Game = {
+  ly: 64, ry: 64, bx: 120 * FX, by: 88 * FX, vx: 0, vy: 0, s0: 0, s1: 0,
+  serving: 70, over: 0, phase: 1, pl0: 64, pr0: 64, ticks: TICKS_SOLO, simFrame: 0, seeded: 0, restart: 0
+}
+
+interface Net {
+  state: i32, shown: i32, mine: i32, reported: i32, waited: i32,
+  gap: i32,        // display frames since the last simulated frame
+  est: i32,        // …and how many there usually are, so the picture can interpolate
+  round: i32,      // master: the round in flight · child: the last round it has handled
+  btn: i32,        // master: the buttons stamped for `round`
+  outWord: i32,    // the word to stage until this round is answered
+  primed: i32,
+  // ⚠️ SOLO IS A WAITING ROOM, NOT A MODE, and getting that wrong made the cartridge un-linkable.
+  //
+  // The first version treated "play the CPU" as a decision: START set `online = 0` and nothing ever
+  // looked at the port again. But the screen invites you to press START, and on two mGBA windows the
+  // handshake takes a moment — so the natural thing to do dropped you into a one-player game that
+  // could never become a two-player one, on the console you pressed it on. It looked exactly like
+  // the link being broken.
+  //
+  // Now the port is pumped on every frame that is not already in lockstep, whether a CPU game is
+  // running or not, and reaching PLAYING takes over. Pressing START costs nothing.
+  solo: i32
+}
+let N: Net = {
+  state: -1, shown: -1, mine: 0, reported: 0, waited: 0, gap: 0, est: 6,
+  round: 0, btn: 0, outWord: 0, primed: 0, solo: 0
+}
+
+// ⚠️ THE BALL'S PATH THROUGH A SIMULATED FRAME, not just where it ended up.
+//
+// The simulation runs at about 10 Hz, so drawing its state directly gives a ball that jumps eight
+// pixels at a time — which is what "chunky" is, and it is a PRESENTATION problem, not a physics one.
+// The fix is to draw between simulated frames rather than on them.
+//
+// Linear interpolation from where the ball started to where it ended would cut every corner: a
+// bounce inside the step would be drawn as a straight line through the wall. So the four collision
+// ticks each record their position, and the picture walks that polyline. Five samples per simulated
+// frame, interpolated between, is a smooth 60 Hz path that follows the real one including bounces.
+//
+// None of this is visible to the simulation. Both consoles still step identically; they just draw
+// more often than they think.
+let PATHX: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+let PATHY: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+// ── Sprites: two paddles of two segments each, and the ball. Created once. ───────────────────────
+let BALL: i32 = sprite_new(art)
+let LP0: i32 = sprite_new(art)
+let LP1: i32 = sprite_new(art)
+let RP0: i32 = sprite_new(art)
+let RP1: i32 = sprite_new(art)
+
+function initSprites() {
+  sprite_set_hud(BALL, 1)
+  sprite_set_frame(BALL, 0)
+  sprite_set_visible(BALL, 1)
+  let pads: i32[] = [LP0, LP1, RP0, RP1]
+  let i: i32 = 0
+  while (i < 4) {
+    sprite_set_hud(pads[i], 1)
+    sprite_set_frame(pads[i], 1)
+    sprite_set_visible(pads[i], 1)
+    i = i + 1
+  }
+}
+
+// ── Simulation. Nothing in here may read input, the clock, or anything else local. ───────────────
+
+/// Park the ball in the middle and hold it, then release it toward `toRight` (1 = right, 0 = left).
+///
+/// The serve goes to whoever just CONCEDED, which is the convention that keeps a rout from feeling
+/// like being pinned: losing a point hands you the next attack rather than another return.
+///
+/// ⚠️ The angle comes from the shared seeded stream, in the same order on both consoles. Anything
+/// local here — a frame counter, an unseeded RNG — and the two would disagree from the first serve,
+/// which is the single easiest way to desync a lockstep game.
+function serve(toRight: i32) {
+  G.bx = 120 * FX
+  G.by = 88 * FX
+  G.serving = SERVE_HOLD_TICKS
+  // Never dead flat: a purely horizontal serve makes the first exchange a formality.
+  let spread: i32 = rngBelow(0, 5) - 2
+  if (spread === 0) { spread = 1 }
+  G.vy = spread * 26
+  G.vx = SERVE_VX
+  if (toRight === 0) { G.vx = -SERVE_VX }
+}
+
+/// A fresh match, ready to play. Scores zeroed, paddles centred, ball on the serve.
+///
+/// Called at boot, when the link seeds, and for a rematch — and always from MODULE level, never from
+/// inside another function (see `Game.restart`).
+function resetMatch() {
+  G.s0 = 0
+  G.s1 = 0
+  G.ly = 64
+  G.ry = 64
+  G.over = 0
+  G.phase = 1
+  serve(1)
+}
+
+function movePaddle(y: i32, bits: i32): i32 {
+  let ny: i32 = y
+  let sp: i32 = PAD_SPEED
+  if ((bits & IN_FAST) !== 0) { sp = PAD_SPEED_FAST }
+  if ((bits & IN_UP) !== 0) { ny = ny - sp }
+  if ((bits & IN_DOWN) !== 0) { ny = ny + sp }
+  if (ny < TOP) { ny = TOP }
+  if (ny + PAD_H > BOTTOM) { ny = BOTTOM - PAD_H }
+  return ny
+}
+
+/// One TICK of ball motion and its collisions. Four of these make a simulated frame; see the
+/// note beside TICKS_SOLO for why a tick and a simulated frame are not the same thing.
+function ballTick() {
+  // ⚠️ The match can end, or a point can be conceded, PART WAY THROUGH a step — there are four ticks
+  // to a simulated frame. Without these two guards the remaining ticks keep running: after match
+  // point they score again (a first-to-seven finishing 8-2), and after a concession they drag the
+  // freshly-served ball out of the centre before the hold has even begun.
+  if (G.over === 1) { return }
+  if (G.serving > 0) { return }
+  G.bx = G.bx + G.vx
+  G.by = G.by + G.vy
+
+  // Walls.
+  let top: i32 = TOP * FX
+  let bot: i32 = (BOTTOM - BALL_SZ) * FX
+  if (G.by < top) { G.by = top; G.vy = -G.vy }
+  if (G.by > bot) { G.by = bot; G.vy = -G.vy }
+
+  let px: i32 = Math.floor(G.bx / FX)
+  let py: i32 = Math.floor(G.by / FX)
+
+  // Paddles. The bounce angle comes from WHERE on the paddle it landed, which is the one bit of
+  // Pong that makes it a game rather than a demo: the edges of your own paddle are how you aim.
+  if (G.vx < 0 && px <= PAD_L_X + PAD_W && px + BALL_SZ >= PAD_L_X) {
+    if (py + BALL_SZ >= G.ly && py <= G.ly + PAD_H) {
+      G.bx = (PAD_L_X + PAD_W) * FX
+      let off: i32 = (py + BALL_SZ / 2) - (G.ly + PAD_H / 2)
+      G.vx = -G.vx + SPEED_UP
+      if (G.vx > MAX_VX) { G.vx = MAX_VX }
+      G.vy = G.vy + off * 4
+    }
+  }
+  if (G.vx > 0 && px + BALL_SZ >= PAD_R_X && px <= PAD_R_X + PAD_W) {
+    if (py + BALL_SZ >= G.ry && py <= G.ry + PAD_H) {
+      G.bx = (PAD_R_X - BALL_SZ) * FX
+      let off: i32 = (py + BALL_SZ / 2) - (G.ry + PAD_H / 2)
+      G.vx = -G.vx - SPEED_UP
+      if (G.vx < -MAX_VX) { G.vx = -MAX_VX }
+      G.vy = G.vy + off * 4
+    }
+  }
+
+  // Out. Tested per TICK rather than per step, so a ball that has already left the court does not
+  // keep travelling for the rest of the step and score from somewhere impossible.
+  if (px < -8) {
+    G.s1 = G.s1 + 1
+    if (G.s1 >= WIN_SCORE) { G.over = 1 } else { serve(0) }
+  }
+  if (px > 248) {
+    G.s0 = G.s0 + 1
+    if (G.s0 >= WIN_SCORE) { G.over = 1 } else { serve(1) }
+  }
+}
+
+/// One frame of the game, given BOTH players' buttons. This is the function that has to produce
+/// identical output on two consoles; everything else is presentation.
+function step(in0: i32, in1: i32) {
+  G.simFrame = G.simFrame + 1
+
+  // Snapshot for the interpolator. Flat to begin with, so a frame that returns early — waiting for
+  // player one, serving, finished — draws a stationary ball rather than replaying an old path.
+  G.pl0 = G.ly
+  G.pr0 = G.ry
+  let k: i32 = 0
+  while (k <= G.ticks) {
+    PATHX[k] = G.bx
+    PATHY[k] = G.by
+    k = k + 1
+  }
+
+  // ── Waiting for player one ──
+  // Only in0 counts, and in0 is the MASTER, which is the left-hand paddle by definition. It arrives
+  // through the same input exchange as everything else, so both consoles leave this phase on the
+  // same simulated frame.
+  if (G.phase === 0) {
+    if ((in0 & IN_START) !== 0) {
+      G.phase = 1
+      serve(1)
+    }
+    return
+  }
+
+  if (G.over === 1) {
+    if ((in0 & IN_START) !== 0) { G.restart = 1 }
+    return
+  }
+
+  if (G.serving > 0) {
+    // Counted in ticks, so the hold is the same wall-clock length in both modes. The paddles still
+    // answer while the ball is held; only the ball is waiting.
+    G.serving = G.serving - G.ticks
+    if (G.serving < 0) { G.serving = 0 }
+    let sv: i32 = 0
+    while (sv < G.ticks) {
+      G.ly = movePaddle(G.ly, in0)
+      G.ry = movePaddle(G.ry, in1)
+      sv = sv + 1
+    }
+    return
+  }
+
+  // Paddles move a tick's worth per tick, exactly like the ball, so both modes feel the same.
+  let t: i32 = 0
+  while (t < G.ticks) {
+    G.ly = movePaddle(G.ly, in0)
+    G.ry = movePaddle(G.ry, in1)
+    ballTick()
+    PATHX[t + 1] = G.bx
+    PATHY[t + 1] = G.by
+    t = t + 1
+  }
+}
+
+/// The stand-in opponent when there is no cable. Deliberately imperfect — it eases toward the ball
+/// rather than tracking it, so a solo player can still win.
+function cpuBits(): i32 {
+  if (G.serving > 0) { return 0 }
+  let py: i32 = Math.floor(G.by / FX)
+  let mid: i32 = G.ry + PAD_H / 2
+  if (py + BALL_SZ / 2 < mid - 5) { return IN_UP }
+  if (py + BALL_SZ / 2 > mid + 5) { return IN_DOWN }
+  return 0
+}
+
+function localBits(): i32 {
+  let b: i32 = 0
+  if (key_held(BTN_UP) > 0) { b = b | IN_UP }
+  if (key_held(BTN_DOWN) > 0) { b = b | IN_DOWN }
+  // ⚠️ HELD, not the edge. Only about one frame in six is actually staged onto the wire — the link
+  // exchanges a word every other display frame and a round takes two exchanges — so a single-frame
+  // `key_pressed` edge is usually never transmitted at all. The match simply would not start, which
+  // is exactly how it failed. Repeats are harmless: the phase and the game-over check both move on
+  // first sight, so holding the button does nothing extra.
+  if (key_held(BTN_START) > 0) { b = b | IN_START }
+  if (key_held(BTN_A) > 0) { b = b | IN_FAST }
+  return b
+}
+
+// ── Presentation ────────────────────────────────────────────────────────────────────────────────
+
+function drawCourt() {
+  // Painted ONCE. The net never changes, and a UI canvas repaint is background tile traffic — the
+  // sort of per-frame work that is invisible here and ruinous in a game with a scrolling layer.
+  ui_begin()
+  let y: i32 = TOP
+  while (y < BOTTOM) {
+    ui_rect(118, y, 4, 6, 0x50506A, 1)
+    y = y + 12
+  }
+  ui_rect(0, TOP - 2, 240, 1, 0x50506A, 1)
+  ui_rect(0, BOTTOM + 1, 240, 1, 0x50506A, 1)
+}
+
+/// Draw BETWEEN simulated frames.
+///
+/// `N.gap` is how many display frames have passed since the last one and `N.est` is how many there
+/// usually are, measured rather than assumed — the rate depends on the peer, and it is different
+/// again when playing the CPU. The ratio is clamped at 1, so if the next simulated frame is late the
+/// picture settles on the true state and waits there instead of extrapolating into a wall.
+function drawSprites() {
+  let f: i32 = 256
+  if (N.est > 0) { f = Math.floor(N.gap * 256 / N.est) }
+  if (f > 256) { f = 256 }
+  if (f < 0) { f = 0 }
+
+  // Paddles move once per simulated frame, so a straight line between the two is exact.
+  let ly: i32 = G.pl0 + Math.floor((G.ly - G.pl0) * f / 256)
+  let ry: i32 = G.pr0 + Math.floor((G.ry - G.pr0) * f / 256)
+
+  // The ball walks its recorded polyline, so a bounce inside the frame is drawn as a bounce.
+  let ft: i32 = f * G.ticks
+  let i: i32 = Math.floor(ft / 256)
+  if (i >= G.ticks) { i = G.ticks - 1 }
+  if (i < 0) { i = 0 }
+  let sub: i32 = ft - i * 256
+  let bx: i32 = PATHX[i] + Math.floor((PATHX[i + 1] - PATHX[i]) * sub / 256)
+  let by: i32 = PATHY[i] + Math.floor((PATHY[i + 1] - PATHY[i]) * sub / 256)
+
+  sprite_set_pos(BALL, Math.floor(bx / FX) - 5, Math.floor(by / FX) - 5)
+  sprite_set_pos(LP0, PAD_L_X - 5, ly)
+  sprite_set_pos(LP1, PAD_L_X - 5, ly + 16)
+  sprite_set_pos(RP0, PAD_R_X - 5, ry)
+  sprite_set_pos(RP1, PAD_R_X - 5, ry + 16)
+  sprite_set_visible(BALL, 1)
+}
+
+/// Called immediately after every `step`. Learns how many display frames a simulated one takes, so
+/// the interpolator does not have to be told.
+function afterStep() {
+  if (N.gap > 0) {
+    let e: i32 = Math.floor((N.est * 3 + N.gap) / 4)
+    if (e < 2) { e = 2 }
+    if (e > 16) { e = 16 }
+    N.est = e
+  }
+  N.gap = 0
+}
+
+function drawHud() {
+  // Score centred at the top, everything else along the bottom edge — the court is the middle of
+  // the screen and a Pong ball spends its whole life crossing it.
+  text_draw(body, 0, 110, 6, "" + G.s0 + "   " + G.s1, 0xF0ECFF)
+  // The bottom line always says what the LINK is doing, not just what the game is. A one-player
+  // match that is still listening for a peer has to look different from one that has given up,
+  // or the player has no way to tell whether plugging in the cable will do anything.
+  let who: string = "linking…"
+  if (N.waited > 180) { who = "no peer  ·  START for 1P" }
+  // A + up/down sprints; worth saying, because at this simulation rate the difference decides
+  // whether a long diagonal is reachable.
+  if (N.solo === 1) { who = "1P  ·  CPU right  ·  still listening" }
+  if (G.seeded === 1) {
+    if (N.mine === 0) { who = "LINKED  ·  you are LEFT" } else { who = "LINKED  ·  you are RIGHT" }
+  }
+  text_draw(body, 2, 6, 150, who, 0x8880B0)
+
+  if (G.over === 1) {
+    let win: string = "LEFT WINS"
+    if (G.s1 >= WIN_SCORE) { win = "RIGHT WINS" }
+    text_draw(body, 1, 70, 78, win + "  —  P1: START", 0xF7C836)
+  } else if (G.phase === 0) {
+    text_draw(body, 1, 62, 78, "READY  —  P1: PRESS START", 0xF7C836)
+  } else {
+    text_draw(body, 1, 0, 0, "")
+  }
+}
+
+function drawStatus(state: i32) {
+  // ⚠️ A unit with no peer waits INDEFINITELY — that is the transport's deliberate behaviour, and
+  // the right one, because on hardware one console is routinely switched on a minute before the
+  // other. But it means "no cable" never becomes a state a game can branch on, so a one-player
+  // match needs an explicit way in rather than a fallback that fires on its own.
+  let s: string = "linking…"
+  if (N.waited > 180) { s = "no peer found  ·  START for 1P" }
+  if (state === LINK_LOST) { s = "peer lost  ·  START to retry" }
+  text_draw(body, 1, 40, 78, s, 0xF05050)
+}
+
+/// Both consoles print the same line for the same SIMULATION round, and `verify.sh` asserts the two
+/// agree.
+///
+/// ⚠️ This is the only instrument that can see a desync. A lockstep game that has drifted still looks
+/// completely normal on either screen taken alone — each side is a plausible game of Pong — so the
+/// question "are these the same game?" cannot be answered from one console. Two screenshots side by
+/// side is how this one was caught.
+function syncLog() {
+  if (G.simFrame - Math.floor(G.simFrame / 5) * 5 === 0) {
+    log("SYNC f=" + G.simFrame + " bx=" + Math.floor(G.bx / FX) + " by=" + Math.floor(G.by / FX)
+      + " ly=" + G.ly + " ry=" + G.ry + " s0=" + G.s0 + " s1=" + G.s1)
+  }
+  if (G.over === 1 && N.reported === 0) {
+    N.reported = 1
+    log("RESULT s0=" + G.s0 + " s1=" + G.s1 + " f=" + G.simFrame + " linked=" + G.seeded)
+  }
+  if (G.over === 0) { N.reported = 0 }
+}
+
+// ── Boot ────────────────────────────────────────────────────────────────────────────────────────
+backdrop(0x101018)
+initSprites()
+drawCourt()
+rngSeed(0, 7717)          // replaced by the link's agreed seed the moment a peer is found
+resetMatch()
+
+// Open the port and then never think about it again: the loop below asks `linkState()` every frame
+// rather than latching a decision, which is the whole reason a one-player game can turn into a
+// two-player one when the other console shows up.
+linkOpen()
+
+while (true) {
+  N.gap = N.gap + 1
+  let bits: i32 = localBits()
+  let state: i32 = linkState()
+
+  if (state !== LINK_PLAYING) {
+    // ── Not in lockstep: pump the port, and meanwhile maybe play the CPU ──
+    //
+    // The port is turned EVERY frame we are not already playing, whether or not a one-player game is
+    // running. That is what lets a solo match become a linked one the moment the other console
+    // finishes handshaking, instead of the cartridge committing to being alone.
+    linkExchange(bits)
+    let now: i32 = linkState()
+    if (now !== N.shown) {
+      N.shown = now
+      log("PONG link state " + now)
+      if (N.solo === 0) { drawStatus(now) }
+    }
+    if (now === LINK_LOST) {
+      // A lost peer means the next match is a fresh negotiation, so let it re-seed.
+      G.seeded = 0
+      if ((bits & IN_START) !== 0) { linkResync() }
+    }
+
+    // START gives you a game while you wait. It is no longer a decision to abandon the link.
+    N.waited = N.waited + 1
+    // ⚠️ THREE SECONDS, not two thirds of one. A handshake takes about twenty frames, so a short
+    // wait meant START — the button the screen tells you to press — landed on the one-player game
+    // before the peer had finished linking, and the answer to "why is it only doing CPU games" was
+    // "because you pressed START faster than the cable". Long enough that a peer always wins the
+    // race, short enough that a genuinely lone cartridge is not left staring at nothing.
+    if (N.solo === 0 && N.waited > 180 && (bits & IN_START) !== 0) {
+      N.solo = 1
+      G.ticks = TICKS_SOLO
+      text_draw(body, 1, 0, 0, "")
+      resetMatch()
+      log("PONG solo")
+    }
+
+    if (N.solo === 1) {
+      // The linked game advances one step per exchanged round, about every sixth display frame.
+      // Solo matches that cadence so the ball and paddles move at the same speed either way.
+      // Every display frame. There is no peer to wait for, so there is nothing to throttle to.
+      if (N.solo === 1) {
+        step(bits, cpuBits())
+        if (G.restart === 1) { G.restart = 0; resetMatch() }
+        afterStep()
+        syncLog()
+      }
+    }
+
+    drawSprites()
+    drawHud()
+    frame()
+    continue
+  }
+
+  if (state === LINK_PLAYING) {
+    // The seed is the master's and both ends hold it by the time PLAYING is reached, so seeding
+    // once here puts both consoles' serve angles on the same stream. Seeding at boot would use a
+    // local number and the two would disagree on the very first serve.
+    if (G.seeded === 0) {
+      G.seeded = 1
+      // A peer arrived. Whatever was on screen — a waiting message, or a one-player match in
+      // progress — the linked game takes over from a clean start on both consoles.
+      N.solo = 0
+      G.ticks = TICKS_LINKED
+      N.mine = 1 - linkIsMaster()
+      rngSeed(0, linkSeed())
+      resetMatch()
+      // Linked, but not yet playing: the match begins when player one presses START, and that press
+      // travels through the normal input exchange so both consoles begin on the same frame.
+      G.phase = 0
+      text_draw(body, 1, 0, 0, "")
+      log("PONG playing seed=" + linkSeed() + " side=" + N.mine)
+      if (linkIsMaster() === 1) {
+        N.round = 0
+        N.btn = bits
+        N.outWord = N.btn | N.round * RND_SHIFT
+      } else {
+        N.round = -1        // no round handled yet, so round 0 is new
+        N.outWord = 0
+      }
+      N.primed = 1
+    }
+
+    let peer: i32 = linkExchange(N.outWord)
+    if (peer === LINK_STALL) {
+      drawSprites()
+      drawHud()
+      frame()
+      continue
+    }
+
+    // ⚠️ Split, and each step explicitly i32. A bitwise operator applied straight to a `Math.floor`
+    // result operates on a NUMBER, not the integer it looks like — the same trap that made a shift
+    // throw in packages/rhythm.
+    let prRaw: i32 = Math.floor(peer / RND_SHIFT)
+    let pr: i32 = prRaw & RND_MASK
+    let pb: i32 = peer & IN_MASK
+
+    // ⚠️ THE MASTER OWNS THE CLOCK. Symmetric stepping does not work here.
+    //
+    // The tempting version is "both sides step when the peer's round equals mine", which is one
+    // step per transfer and looks obviously correct. It is not: the two consoles stage their words
+    // on their own frame cadence, so a round-R word from one does not travel in the same transfer
+    // as the round-R word from the other. It ran for twenty or forty rounds, drifted by one, and
+    // then neither side ever matched again — a deadlock that looks exactly like the game freezing.
+    //
+    // So: the master stamps a round and simulates it only when the child's answer FOR THAT ROUND
+    // comes back; the child simulates a round the moment it hears it, and echoes the stamp with the
+    // buttons it used. Both simulate round R with (masterButtons_R, childButtons_R). Anything else
+    // arriving is a stale echo and is ignored, which leaves the staged word in place so the peer
+    // hears the round again — idempotent on both sides, and that is what makes it recover instead
+    // of deadlock.
+    if (linkIsMaster() === 1) {
+      if (pr === N.round) {
+        step(N.btn, pb)
+        if (G.restart === 1) { G.restart = 0; resetMatch() }
+        afterStep()
+        N.round = (N.round + 1) & RND_MASK
+        N.btn = bits
+        N.outWord = N.btn | N.round * RND_SHIFT
+      }
+    } else {
+      if (pr !== N.round) {
+        let cb: i32 = bits
+        step(pb, cb)
+        if (G.restart === 1) { G.restart = 0; resetMatch() }
+        afterStep()
+        N.round = pr
+        N.outWord = cb | pr * RND_SHIFT
+      }
+    }
+
+    drawSprites()
+    drawHud()
+    syncLog()
+    frame()
+    continue
+  }
+
+  frame()
+}

@@ -1,0 +1,191 @@
+// Metroidvania components — the hero, the three ability pickups that gate the castle, and the
+// enemies that patrol it.
+//
+// ⚠️ THE ABILITY GATES ARE `packages/platformer.tish` CONFIG FLAGS, not new physics. `platformerInit`
+// already takes `doubleJump` / `wallSlide` / `slide`, and they are read from `data` every frame — so
+// starting them at 0 and writing 1 when the player touches a pickup IS the metroidvania. The moves
+// were always implemented; what the game hands out is permission to use them. That is also why the
+// castle can be one map: a locked route is a wall you can already see through.
+import { log, input_x, input_y, key_pressed, sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_visible } from 'cargo:tish_agb'
+import { updateHearts, hudText } from '../../../packages/engine'
+import { flagOn, flagSet, flagsSave } from '../../../packages/flags'
+import { swing } from 'cargo:tish_gba_game_engine'
+import {
+  platformerInit, platformerDrive, platformerAnimate, platformerBusy, platformerHurt,
+  PF_IDLE, PF_WALLSLIDE
+} from '../../../packages/platformer'
+import { fxSheet } from 'sheet32:../assets/fx.png'
+
+// A jump · B attack · R run (and R + Down is the slide, once unlocked). Run is on the shoulder so
+// the sword can have a face button — an action-platformer with no attack button is a walking simulator.
+let BTN_JUMP: i32 = 0
+let BTN_ATTACK: i32 = 1
+let BTN_RUN: i32 = 5
+
+export let TAG_PLAYER: i32 = 1
+export let TAG_ENEMY: i32 = 3
+
+// How long the swing animation holds the sprite, and the hurt box it throws. `swing` spawns a
+// short-lived hurt box `reach` px in FRONT of the attacker — in front is the platformer's sticky
+// `face`, which the engine only learned to read for side-scrollers as part of this example.
+let ATK_HOLD: i32 = 15
+let ATK_REACH: i32 = 8
+let ATK_SIZE: i32 = 16
+let ATK_TTL: i32 = 6
+let atkT: i32 = 0
+
+// hero.png, 32x32 cells: idle 0-3 · run 4-9 · jump 10 · fall 11 · wallslide 12 · crouch 13 ·
+// attack 14-16 · hurt 17 · dead 18. `platformerAnimate` looks these names up and falls back along a
+// chain, so an omitted clip degrades rather than crashing.
+export const CLIPS = {
+  idle:      [0, 4, 10, 1],
+  walk:      [4, 6, 6, 1],
+  run:       [4, 6, 4, 1],
+  jump:      [10, 1, 6, 0],
+  fall:      [11, 1, 6, 0],
+  wallslide: [12, 1, 6, 0],
+  crouch:    [13, 1, 6, 0],
+  slide:     [13, 1, 6, 0],
+  hurt:      [17, 1, 8, 0],
+  dead:      [18, 1, 8, 0]
+}
+
+// ── the three abilities ───────────────────────────────────────────────────────
+// Kind indices match `pickupKinds` in maps.tish: 0 = double jump, 1 = wall jump, 2 = slide.
+export let ABL_DOUBLE: i32 = 0
+export let ABL_WALL: i32 = 1
+export let ABL_SLIDE: i32 = 2
+
+// ⚠️ THE ABILITIES ARE NOT MODULE SCALARS ANY MORE. They were three private `let`s, which meant
+// the castle forgot every unlock the moment the GBA was switched off — the one thing a
+// metroidvania must not do. They are now `flags.tish` ids, so they live in the same versioned,
+// checksummed SRAM table as anything else this game ever needs to remember, and a power cycle
+// brings them back. The ability index IS the flag id, which is why `ABL_*` above starts at 0.
+export function abilityOwned(k: i32): i32 { return flagOn(k) }
+
+// ⚠️ THE COUNT IS CACHED, and it has to be. The HUD row reads it EVERY FRAME to decide whether it
+// changed, and the honest version — `flagOn(0) + flagOn(1) + flagOn(2)` — measured **239 ticks per
+// frame**, 5.4% of the 4,389-tick frame budget, to answer a question whose answer changes three
+// times in a playthrough. Three tish calls at ~42 ticks + ~28/arg is what that costs
+// (docs/perf-rules.md); the flags are still the source of truth, this is just the read path.
+let ablCount: i32 = 0
+export function abilityCount(): i32 { return ablCount }
+function ablRecount() { ablCount = flagOn(ABL_DOUBLE) + flagOn(ABL_WALL) + flagOn(ABL_SLIDE) }
+
+// The player entity, kept as a module scalar rather than looked up: there is exactly one, and a
+// pickup's collision handler has to reach it to turn the ability on. (A singleton in `this.data`
+// costs two boxed property reads per touch — see docs/perf-rules.md §2.)
+let heroData = null
+
+let pLastHp: i32 = 0 - 1
+let pLastAbl: i32 = 0 - 1
+
+// ⚠️ DECLARED ABOVE THE COMPONENT THAT CAPTURES IT, and it has to stay there. tish does not hoist
+// a module `let` any more than it hoists a function: `onDeath` below reads spawnX, and with the
+// declaration underneath, codegen emitted the closure before the binding and rustc rejected the
+// generated file with `cannot find value spawnX__m4 in this scope`.
+let spawnX: i32 = 0
+let spawnY: i32 = 0
+export function setSpawn(x: i32, y: i32) { spawnX = x spawnY = y }
+
+// Turn an ability on for the hero. Called from the pickup when it is collected, and from boot for
+// every ability the save already holds — the SAME function both times, so a restored ability cannot
+// drift from a freshly-collected one.
+export function applyAbility(k: i32) {
+  if (heroData === null) { return }
+  if (k === ABL_DOUBLE) { heroData.pfDouble = 1 }
+  else if (k === ABL_WALL) { heroData.pfWall = 1 }
+  else { heroData.pfCanSlide = 1 }
+}
+
+export const Player = {
+  start: ({ this }) => {
+    this.setTag(TAG_PLAYER)
+    heroData = this.data
+    platformerInit(this, this.data, {
+      boxW: 12, boxH: 26,
+      spriteOX: 0 - 10, spriteOY: 0 - 6,   // 32x32 art over a 12x26 box
+      crouchH: 14,
+      jumpBtn: BTN_JUMP,
+      runBtn: BTN_RUN,
+      // ⚠️ ALL THREE START OFF. This is the whole design: the moves exist from frame one and the
+      // castle is built so you meet each wall before its key. Turning one on is a single write.
+      doubleJump: 0,
+      wallSlide: 0,
+      slide: 0,
+      ledges: 0,
+      ladders: 0,
+      runSpeed: 4
+    })
+
+    // Restore every ability the save already holds. This is the ONLY place it can happen —
+    // `heroData` does not exist until this line has run, and doing it from main.tish's boot ran
+    // first, hit applyAbility's null guard, and silently left the castle locked.
+    let k: i32 = 0
+    while (k < 3) {
+      if (flagOn(k) === 1) { applyAbility(k)  log("MV restored ability " + k) }
+      k = k + 1
+    }
+    ablRecount()
+  },
+  update: ({ this }) => {
+    let d = this.data
+    platformerDrive(this, d, input_x(), input_y(), platformerBusy(d))
+    // The swing owns the sprite while it plays, so `platformerAnimate` does not stomp the attack
+    // clip back to idle on the next frame.
+    if (atkT > 0) {
+      atkT = atkT - 1
+    } else if (key_pressed(BTN_ATTACK) > 0 && platformerBusy(d) === 0) {
+      atkT = ATK_HOLD
+      this.play(14, 3, 5, false)
+      swing(this.id, TAG_ENEMY, 1, ATK_REACH, ATK_SIZE, ATK_TTL)
+    } else {
+      platformerAnimate(this, d, CLIPS)
+    }
+
+    // Both HUD rows are gated on change — they are boxed calls, and a row that changes a handful of
+    // times a life has no business being redrawn 60 times a second.
+    let hp = this.hp()
+    if (pLastHp !== hp) { pLastHp = hp updateHearts(hp, 2) }
+    let n = abilityCount()
+    if (pLastAbl !== n) { pLastAbl = n hudText(0, 176, 8, "ABL " + n + "/3") }
+  },
+  onDeath: ({ this }) => {
+    this.setPos(spawnX, spawnY)
+    this.heal(this.maxHp())
+  }
+}
+
+
+// ── pickups ───────────────────────────────────────────────────────────────────
+// Touch one and the corresponding platformer flag flips on for good. `data.kind` is the ability.
+export const Pickup = {
+  onCollide: ({ this, other }) => {
+    if (other.tag() !== TAG_PLAYER) { return }
+    let k: i32 = this.data.kind | 0
+    flagSet(k, 1)
+    applyAbility(k)
+    ablRecount()
+    log("MV got ability " + k + ", owned=" + abilityCount())
+    // Saved on pickup rather than at a save point: this game has no save points, and an unlock the
+    // player watched happen must not be undone by the power switch.
+    flagsSave()
+    this.despawn()
+  }
+}
+
+// ── enemies ───────────────────────────────────────────────────────────────────
+// No `tick` hook anywhere: the skeleton and hell-gato walk on the NATIVE patrol (`e.patrol(…)`), and
+// the ghost floats on a native mover. A per-entity tish tick is charged per ON-SCREEN entity and is
+// the single most expensive thing a room full of enemies can do — see docs/perf-rules.md §7.
+export const Enemy = {
+  onCollide: ({ this, other }) => {
+    if (other.tag() !== TAG_PLAYER) { return }
+    if (other.y + 8 < this.y) {
+      this.hurt(99)
+      other.bounce(5)
+    } else {
+      other.hurt(1)
+    }
+  }
+}

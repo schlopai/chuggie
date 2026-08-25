@@ -1,0 +1,491 @@
+// tower-def — a fixed-track tower defence on the engine's flow fields.
+//
+// Creeps walk a single route from the left edge to the right; you spend gold putting towers beside
+// it; the towers acquire and shoot on their own. Ten waves, twenty lives.
+//
+// ── WHAT IT IS THE ACCEPTANCE TEST FOR ────────────────────────────────────────────────────────
+//
+// **`flow_goal` + `set_seek` as a crowd**, rather than as the one scout `examples/rts-fog` walks
+// around a maze. Every creep alive shares ONE field: the field is computed from the goal outwards,
+// so twenty creeps cost the same to route as one, and none of them runs a tish tick. That is the
+// property a tower defence needs and a per-unit A* cannot give — `docs/MEMORY.md` prices a
+// callback-free entity at ~60 ticks and a `tick` hook at far more.
+//
+// **`set_soldier` as a turret.** A tower is a soldier that cannot move: it has no `set_topdown` and
+// no `set_seek`, so it stands where it is built, acquires the nearest creep of the other team inside
+// its range, and fires on its own cooldown. The whole combat loop is four native calls at build
+// time and nothing per frame.
+//
+// ── THE MAP IS ONE SCREEN, ON PURPOSE ─────────────────────────────────────────────────────────
+//
+// 15x10 cells of 16px is exactly 240x160. No camera, no scrolling, no wrap arithmetic — a tower
+// defence is a game you read at a glance, because the decision is *where to build against a route
+// you can see all of*. `examples/rts-fog` needs a camera and `fog_blit`'s wrap trick because its map
+// is 30x20; this one deliberately does not.
+//
+// ⚠️ EVERYTHING OFF THE TRACK IS SOLID, which is what makes the route a route: a flow field walks
+// around solids, so if the grass were walkable the creeps would cut straight across it. Towers are
+// entities rather than tiles, so building on a solid cell is fine.
+
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { track } from 'scene:../assets/track.tmj'
+import { units } from 'sheet:../assets/units.png'
+import {
+  sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_hud, sprite_set_visible,
+  scene_stream, ui_begin, ui_text, ui_rect, ui_clear_rect, ui_reserve_tiles,
+  key_pressed, frame, log, ticks
+} from 'cargo:tish_agb'
+import {
+  grid_from_map, spawn, despawn, set_transform, attach_sprite, set_collider,
+  set_topdown, topdown_speed, set_health, set_seek, seek_arrived, set_soldier, set_dir_anim,
+  entity_alive, entity_x, entity_y, flow_goal, world_step
+} from 'cargo:tish_gba_game_engine'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+import { chipCoin, chipHit, chipCancel, chipChime, chipPop } from '../../../packages/chipsfx'
+
+// ── art frames — the order is scripts/gen_towerdef.py's CREEPS + TOWERS + cursor ─────────────
+let ART_SLIME: i32 = 0
+let ART_BAT: i32 = 1
+let ART_ARROW: i32 = 2
+let ART_MAGE: i32 = 3
+let ART_CURSOR: i32 = 4
+
+let COLS: i32 = 15
+let ROWS: i32 = 10
+let FIELD: i32 = 0
+let STRIDE: i32 = 4
+
+// The track's ends, in cells. These are TRACK[0] and TRACK[-1] in the generator; keep them in step.
+let ENTRY_C: i32 = 0
+let ENTRY_R: i32 = 4
+let EXIT_C: i32 = 14
+let EXIT_R: i32 = 3
+
+let TEAM_CREEP: i32 = 0
+let TEAM_TOWER: i32 = 1
+
+// ── tower kinds ──────────────────────────────────────────────────────────────────────────────
+// Flat parallel tables: cost, range in PIXELS, damage, cooldown in frames, art frame.
+// The arrow tower is cheap, short and fast; the mage is the opposite. Two kinds is enough for the
+// choice to be real and few enough that the HUD can show both prices at once.
+// ⚠️ TUNED AGAINST THE TIME A CREEP SPENDS IN RANGE, not by eye. A creep at speed 1 crosses a
+// 40px radius in roughly 80 frames, so an arrow tower at one shot per 18 frames gets four shots at
+// it — and four times five is exactly a slime. Undertuned, the whole game dies quietly: the first
+// build was 3 damage every 26 frames, which is two hits per pass, so NOTHING died, no bounty came
+// in, no further tower could be afforded, and a 6,000-frame soak reported `killed=0` with the
+// towers working perfectly. A tower defence balance bug does not look like a bug.
+let TW_COST: i32[] = [20, 55]
+let TW_RANGE: i32[] = [40, 64]
+let TW_DMG: i32[] = [5, 12]
+let TW_CD: i32[] = [18, 40]
+let TW_ART: i32[] = [2, 3]
+let TW_KINDS: i32 = 2
+
+// ── creep kinds ──────────────────────────────────────────────────────────────────────────────
+// hp, speed, bounty, art. The bat is faster and worth more; from wave 4 on they are mixed.
+let CR_HP: i32[] = [12, 9]
+let CR_SPD: i32[] = [1, 2]
+let CR_GOLD: i32[] = [6, 9]
+let CR_ART: i32[] = [0, 1]
+
+// ── live tables ──────────────────────────────────────────────────────────────────────────────
+// Parallel typed columns indexed by slot — the roster shape every game in this repo uses
+// (`examples/warsong/src/units.tish`). No structs, no boxed objects, no per-unit tish tick.
+let MAX_CREEP: i32 = 12
+let cEnt: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+let cGold: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+let cLive: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+// ⚠️ ONE SPRITE PER SLOT, ALLOCATED ONCE — never one per spawn. Ten waves is over 140 creeps, and a
+// `sprite_new` each would ask the sprite arena for 140 handles it never gets back; the ROM went
+// quiet after about 5,000 frames doing exactly that. Pooling is the standing rule here
+// (`docs/MEMORY.md`, "transient effects MUST be pooled") and a creep is as transient as it gets.
+let cSpr: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+let MAX_TOWER: i32 = 10
+let tEnt: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+let tCell: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+// Pooled for the same reason the creeps are: the game restarts when it ends, and a fresh
+// `sprite_new` per tower per run leaks a handle per tower per run.
+let tSpr: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+let tCount: i32 = 0
+
+// Per-frame scalars in one typed array — a mutable module scalar lowers to a boxed VmRef.
+//   0 gold 1 lives 2 wave 3 left-to-spawn 4 spawn timer 5 curCol 6 curRow 7 kind
+//   8 hudSig 9 t 10 state 11 human 12 killed
+let V: i32[] = [120, 20, 0, 0, 0, 5, 6, 0, 0 - 1, 0, 0, 0, 0]
+let G_GOLD: i32 = 0
+let G_LIVES: i32 = 1
+let G_WAVE: i32 = 2
+let G_LEFT: i32 = 3
+let G_TIMER: i32 = 4
+let G_CC: i32 = 5
+let G_CR: i32 = 6
+let G_KIND: i32 = 7
+let G_SIG: i32 = 8
+let G_T: i32 = 9
+let G_STATE: i32 = 10
+let G_HUMAN: i32 = 11
+let G_KILLED: i32 = 12
+
+let ST_BUILD: i32 = 0     // between waves: build, then press START
+let ST_WAVE: i32 = 1
+let ST_OVER: i32 = 2
+
+let WAVES: i32 = 10
+let HUD_Y: i32 = 0
+let HUD_H: i32 = 8
+
+// ── the track, for the "can I build here" test ───────────────────────────────────────────────
+// A cell is buildable when it is NOT on the route. The route is derived from the same waypoint list
+// the generator carves, rather than read back from the map: `map_solid_at` answers in world pixels
+// and would need the same cell arithmetic anyway, and duplicating eight waypoints is cheaper to read
+// than a native call per cursor move.
+let WP_C: i32[] = [0, 3, 3, 7, 7, 10, 10, 14]
+let WP_R: i32[] = [4, 4, 1, 1, 7, 7, 3, 3]
+let WP_N: i32 = 8
+
+function onTrack(c: i32, r: i32): i32 {
+  let i: i32 = 0
+  while (i < WP_N - 1) {
+    let c0: i32 = WP_C[i]
+    let r0: i32 = WP_R[i]
+    let c1: i32 = WP_C[i + 1]
+    let r1: i32 = WP_R[i + 1]
+    if (c0 === c1 && c === c0) {
+      let lo: i32 = r0
+      let hi: i32 = r1
+      if (lo > hi) { lo = r1  hi = r0 }
+      if (r >= lo && r <= hi) { return 1 }
+    }
+    if (r0 === r1 && r === r0) {
+      let lo2: i32 = c0
+      let hi2: i32 = c1
+      if (lo2 > hi2) { lo2 = c1  hi2 = c0 }
+      if (c >= lo2 && c <= hi2) { return 1 }
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+function occupied(c: i32, r: i32): i32 {
+  let cell: i32 = r * COLS + c
+  let i: i32 = 0
+  while (i < tCount) {
+    if (tCell[i] === cell) { return 1 }
+    i = i + 1
+  }
+  return 0
+}
+
+// ── boot ─────────────────────────────────────────────────────────────────────────────────────
+scene_stream(track)
+grid_from_map()
+// ONE field, shared by every creep alive. It is computed outward from the goal, so the twentieth
+// creep costs nothing more to route than the first — which is the whole reason this is a flow field
+// and not a path per unit.
+flow_goal(FIELD, EXIT_C, EXIT_R)
+
+ui_reserve_tiles(200)
+ui_begin()
+
+let curSpr: i32 = sprite_new(units)
+sprite_set_hud(curSpr, 1)
+sprite_set_frame(curSpr, ART_CURSOR)
+
+// ⚠️ HIDE THE POOL. `sprite_new` returns a sprite that is VISIBLE and parked at a default position,
+// so twenty-two unattached pooled sprites sat in a heap in the middle of the board — a slime
+// apparently standing on the grass before wave 1 had even been called.
+let si: i32 = 0
+while (si < MAX_CREEP) {
+  cSpr[si] = sprite_new(units)
+  sprite_set_visible(cSpr[si], 0)
+  si = si + 1
+}
+let ti: i32 = 0
+while (ti < MAX_TOWER) {
+  tSpr[ti] = sprite_new(units)
+  sprite_set_visible(tSpr[ti], 0)
+  ti = ti + 1
+}
+
+rngSeed(6, 20260814)
+log("TD boot")
+
+// ── spawning ─────────────────────────────────────────────────────────────────────────────────
+function spawnCreep(kind: i32) {
+  let s: i32 = 0
+  while (s < MAX_CREEP) {
+    if (cLive[s] === 0) {
+      let e: i32 = spawn()
+      set_transform(e, ENTRY_C * 16 + 3, ENTRY_R * 16 + 3)
+      attach_sprite(e, cSpr[s])
+      // ⚠️ PIN THE FRAME WITH `set_dir_anim`, NOT `sprite_set_frame`. Every unit here shares ONE
+      // sheet (one palette bank), so each needs a different cell of it — and a one-off
+      // `sprite_set_frame` does not survive: the engine drives the frame for anything with a
+      // topdown body, so the creeps walked through the whole strip and spent part of every second
+      // drawn as the build cursor. `frames = 1, speed = 0` is a one-frame animation, which is the
+      // supported way to say "this entity is this cell and stays there".
+      set_dir_anim(e, CR_ART[kind], 0, 1, 0)
+      set_collider(e, 10, 10)
+      set_topdown(e)
+      topdown_speed(e, CR_SPD[kind])
+      set_health(e, CR_HP[kind], 0)
+      // A creep is a soldier with NO reach and NO damage. It has to be one so that the towers'
+      // acquisition — which finds soldiers of the other team — can see it at all; giving it a real
+      // range would make the creeps shoot back, which is a different game.
+      set_soldier(e, TEAM_CREEP, 0, 0, 240)
+      set_seek(e, FIELD, 8, STRIDE, 6)
+      cEnt[s] = e
+      cGold[s] = CR_GOLD[kind]
+      cLive[s] = 1
+      return
+    }
+    s = s + 1
+  }
+}
+
+function buildTower(kind: i32, c: i32, r: i32) {
+  let e: i32 = spawn()
+  set_transform(e, c * 16 + 3, r * 16 + 3)
+  // ⚠️ A TOWER TAKES ITS FRAME THE OTHER WAY ROUND FROM A CREEP, and the asymmetry is the engine's:
+  // `diranim_system` only runs for entities that have C_TOPDOWN, so `set_dir_anim` does nothing at
+  // all for something that cannot move — a tower set that way stayed on frame 0 and the whole board
+  // filled up with slimes. A stationary entity's frame is never overwritten, so it can simply be
+  // set on the sprite once.
+  sprite_set_frame(tSpr[tCount], TW_ART[kind])
+  attach_sprite(e, tSpr[tCount])
+  set_collider(e, 10, 10)
+  set_health(e, 100, 0)
+  // No `set_topdown` and no `set_seek`: a tower is a soldier that cannot move. It acquires the
+  // nearest creep inside its range and fires on its own cooldown, with nothing per frame from here.
+  set_soldier(e, TEAM_TOWER, TW_RANGE[kind], TW_DMG[kind], TW_CD[kind])
+  tEnt[tCount] = e
+  tCell[tCount] = r * COLS + c
+  tCount = tCount + 1
+}
+
+/// Is this cell next to the route? A tower two cells away from anything hits nothing, so the
+/// attract player only builds where a tower would actually fire — otherwise it spends its gold
+/// decorating the corners and every wave walks through untouched.
+// Where the attract player builds, in order. A FIXED list, not a random search: the random one
+// placed well enough to clear ten waves on its first run and badly enough to lose on its second,
+// which makes the demo a coin flip and any screenshot of it unrepresentative. These are the cells
+// beside the six corners, where a tower covers two legs of the route at once.
+let BUILD_C: i32[] = [2, 4, 6, 8, 6, 8, 11, 12, 2, 13]
+let BUILD_R: i32[] = [3, 2, 2, 2, 6, 6, 6, 2, 5, 5]
+let BUILD_N: i32 = 10
+
+function nearTrack(c: i32, r: i32): i32 {
+  if (onTrack(c - 1, r) === 1) { return 1 }
+  if (onTrack(c + 1, r) === 1) { return 1 }
+  if (onTrack(c, r - 1) === 1) { return 1 }
+  if (onTrack(c, r + 1) === 1) { return 1 }
+  return 0
+}
+
+function startWave() {
+  V[G_WAVE] = V[G_WAVE] + 1
+  // Six creeps on wave 1, two more each wave. Ten waves is 42 spawns against 12 slots, so the
+  // spawn timer is what keeps the field inside the entity budget rather than a cap that would
+  // silently drop a wave.
+  V[G_LEFT] = 4 + V[G_WAVE] * 2
+  V[G_TIMER] = 20
+  V[G_STATE] = ST_WAVE
+}
+
+function resetGame() {
+  let s: i32 = 0
+  while (s < MAX_CREEP) {
+    if (cLive[s] === 1) {
+      despawn(cEnt[s])
+      cLive[s] = 0
+    }
+    s = s + 1
+  }
+  let i: i32 = 0
+  while (i < tCount) {
+    despawn(tEnt[i])
+    i = i + 1
+  }
+  tCount = 0
+  V[G_GOLD] = 120
+  V[G_LIVES] = 20
+  V[G_WAVE] = 0
+  V[G_LEFT] = 0
+  V[G_KILLED] = 0
+  V[G_STATE] = ST_BUILD
+}
+
+// ── HUD ──────────────────────────────────────────────────────────────────────────────────────
+let NUMS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+function numStr(n: i32) {
+  if (n <= 0) { return "0" }
+  let s = ""
+  let v: i32 = n
+  while (v > 0) {
+    s = NUMS[v % 10] + s
+    v = (v / 10) | 0
+  }
+  return s
+}
+
+function paintHud() {
+  ui_clear_rect(0, HUD_Y, 240, HUD_H)
+  ui_rect(0, HUD_Y, 240, HUD_H, 0x101828, 1)
+  ui_text(small, 2, HUD_Y + 1, "G" + numStr(V[G_GOLD]), 0xFFD060)
+  ui_text(small, 40, HUD_Y + 1, "LIFE" + numStr(V[G_LIVES]), 0x70E090)
+  ui_text(small, 88, HUD_Y + 1, "WAVE" + numStr(V[G_WAVE]) + "/" + numStr(WAVES), 0xC0D0F0)
+  if (V[G_STATE] === ST_BUILD) {
+    let nm = "ARROW 20"
+    if (V[G_KIND] === 1) { nm = "MAGE 55" }
+    ui_text(small, 146, HUD_Y + 1, nm + " START>", 0xE8ECF8)
+  } else if (V[G_STATE] === ST_OVER) {
+    ui_text(small, 150, HUD_Y + 1, "GAME OVER", 0xF07070)
+  } else {
+    ui_text(small, 150, HUD_Y + 1, "LEFT " + numStr(V[G_LEFT]), 0xE8ECF8)
+  }
+}
+paintHud()
+
+// ── the loop ─────────────────────────────────────────────────────────────────────────────────
+while (true) {
+  V[G_T] = V[G_T] + 1
+
+  // Input. `key_pressed` indices: 0 A, 1 B, 3 START, 6 up, 7 down, 8 left, 9 right.
+  let a: i32 = key_pressed(0)
+  let b: i32 = key_pressed(1)
+  let st: i32 = key_pressed(3)
+  if (a + b + st + key_pressed(6) + key_pressed(7) + key_pressed(8) + key_pressed(9) > 0) {
+    V[G_HUMAN] = 1
+  }
+
+  if (key_pressed(6) === 1 && V[G_CR] > 0) { V[G_CR] = V[G_CR] - 1 }
+  if (key_pressed(7) === 1 && V[G_CR] < ROWS - 1) { V[G_CR] = V[G_CR] + 1 }
+  if (key_pressed(8) === 1 && V[G_CC] > 0) { V[G_CC] = V[G_CC] - 1 }
+  if (key_pressed(9) === 1 && V[G_CC] < COLS - 1) { V[G_CC] = V[G_CC] + 1 }
+  if (b === 1) { V[G_KIND] = (V[G_KIND] + 1) % TW_KINDS }
+
+  // ── the attract player ────────────────────────────────────────────────────────────────────
+  // It presses the same buttons a human does. Left alone the ROM plays a full ten waves, which is
+  // what makes a headless run worth anything: a screenshot of a build phase proves nothing.
+  if (V[G_HUMAN] === 0) {
+    if ((V[G_T] % 10) === 0) {
+      if (V[G_STATE] === ST_BUILD) {
+        // Build beside a corner if it can afford to, then start the wave.
+        let placed: i32 = 0
+        if (V[G_GOLD] >= TW_COST[0] && tCount < MAX_TOWER) {
+          let bi: i32 = 0
+          while (bi < BUILD_N && placed === 0) {
+            let c: i32 = BUILD_C[bi]
+            let r: i32 = BUILD_R[bi]
+            if (onTrack(c, r) === 0 && occupied(c, r) === 0) {
+              // A mage where it can afford one — every third slot, so the field is mixed rather
+              // than ten of the cheap kind.
+              let k: i32 = 0
+              if (V[G_GOLD] >= TW_COST[1] && (bi % 3) === 2) { k = 1 }
+              V[G_GOLD] = V[G_GOLD] - TW_COST[k]
+              buildTower(k, c, r)
+              chipCoin()
+              placed = 1
+            }
+            bi = bi + 1
+          }
+        }
+        if (placed === 0) { startWave() }
+      }
+    }
+  } else {
+    if (V[G_STATE] === ST_BUILD) {
+      if (a === 1) {
+        let c: i32 = V[G_CC]
+        let r: i32 = V[G_CR]
+        let k: i32 = V[G_KIND]
+        if (onTrack(c, r) === 1 || occupied(c, r) === 1 || V[G_GOLD] < TW_COST[k]) {
+          chipCancel()
+        } else {
+          V[G_GOLD] = V[G_GOLD] - TW_COST[k]
+          buildTower(k, c, r)
+          chipCoin()
+        }
+      }
+      if (st === 1) { startWave() }
+    }
+  }
+
+  // ── wave running ──────────────────────────────────────────────────────────────────────────
+  if (V[G_STATE] === ST_WAVE) {
+    if (V[G_LEFT] > 0) {
+      V[G_TIMER] = V[G_TIMER] - 1
+      if (V[G_TIMER] <= 0) {
+        // From wave 4 the bats mix in. A wave of one kind is a wave with one answer.
+        let kind: i32 = 0
+        if (V[G_WAVE] >= 4 && rngBelow(6, 3) === 0) { kind = 1 }
+        spawnCreep(kind)
+        V[G_LEFT] = V[G_LEFT] - 1
+        V[G_TIMER] = 34
+      }
+    }
+  }
+
+  world_step()
+
+  // ── reap ──────────────────────────────────────────────────────────────────────────────────
+  // One pass over the creep slots: an arrival costs a life, a death pays a bounty. Both despawn.
+  let alive: i32 = 0
+  let s: i32 = 0
+  while (s < MAX_CREEP) {
+    if (cLive[s] === 1) {
+      let e: i32 = cEnt[s]
+      if (entity_alive(e) === 0) {
+        V[G_GOLD] = V[G_GOLD] + cGold[s]
+        V[G_KILLED] = V[G_KILLED] + 1
+        cLive[s] = 0
+        chipPop()
+      } else if (seek_arrived(e) === 1) {
+        V[G_LIVES] = V[G_LIVES] - 1
+        despawn(e)
+        cLive[s] = 0
+        chipHit()
+      } else {
+        alive = alive + 1
+      }
+    }
+    s = s + 1
+  }
+
+  if (V[G_STATE] === ST_WAVE && V[G_LEFT] === 0 && alive === 0) {
+    if (V[G_WAVE] >= WAVES) {
+      V[G_STATE] = ST_OVER
+      log("TD CLEARED gold=" + V[G_GOLD] + " lives=" + V[G_LIVES] + " killed=" + V[G_KILLED])
+    } else {
+      V[G_STATE] = ST_BUILD
+      chipChime()
+    }
+  }
+  if (V[G_LIVES] <= 0 && V[G_STATE] !== ST_OVER) {
+    V[G_STATE] = ST_OVER
+    log("TD LOST wave=" + V[G_WAVE] + " killed=" + V[G_KILLED])
+  }
+  if (V[G_STATE] === ST_OVER && (V[G_T] % 600) === 0) {
+    log("TD restart")
+    resetGame()
+  }
+
+  // ── present ───────────────────────────────────────────────────────────────────────────────
+  if (V[G_STATE] === ST_BUILD) {
+    sprite_set_visible(curSpr, 1)
+    sprite_set_pos(curSpr, V[G_CC] * 16, V[G_CR] * 16)
+  } else {
+    sprite_set_visible(curSpr, 0)
+  }
+
+  let sig: i32 = V[G_GOLD] * 131 + V[G_LIVES] * 17 + V[G_WAVE] * 7 + V[G_LEFT] * 3
+    + V[G_STATE] + V[G_KIND] * 1021
+  if (V[G_SIG] !== sig) {
+    V[G_SIG] = sig
+    paintHud()
+  }
+
+  frame()
+}

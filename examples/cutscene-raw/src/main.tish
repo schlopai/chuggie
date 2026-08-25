@@ -1,0 +1,207 @@
+// cutscene-raw — a staged scene in a game that CANNOT link the game-engine crate.
+//
+// ── what this proves ──────────────────────────────────────────────────────────────────────────
+//
+// This ROM's `package.json` lists **`tish_agb` only**. There is no `tish_gba_game_engine`, no
+// entities, no `world_step`, and no `packages/dialog`. Everything on screen is a raw sprite drawn
+// with `sprite_set_pos`, exactly like the three card RPGs in `card-gba`.
+//
+// Until `packages/cutscene-core.tish` existed, such a game could not stage anything
+// (schlopai/chuggie-engine#63, #66). `packages/cutscene.tish` documented three hooks so that "a game that
+// draws with raw sprites and presents its own frames can use every verb here" — and then imported
+// five game-engine natives at module top for the defaults behind those hooks. tish's native merge
+// links whole modules, so the escape hatch never reached: supplying all three hooks still linked the
+// engine, and a game that could not link it could not use the package at all.
+//
+// The measured cost of that, from #66: `card-gba` ships three card RPGs with 33 Tiled towns between
+// them, and grepping all three for `cutSay` / `cutMove` / `camera_set` returns **zero**. Every story
+// beat in every game is a talking head triggered by walking into a stationary sprite. Nothing has
+// ever moved on its own; no camera has ever panned; nothing has happened TO the player.
+//
+// So this scene is deliberately the three beats #66 names as currently impossible:
+//
+//   1. someone WALKS INTO FRAME and sits down opposite you    -> cutWalkFrom, through cutSetMover
+//   2. the CAMERA PANS to what you are meant to look at        -> cutPan
+//   3. a machine POWERS UP while you watch                     -> cutWalkFrom + cutFace + cutWait
+//
+// ── what the game supplies ────────────────────────────────────────────────────────────────────
+//
+// Four small callbacks, and that is the entire contract:
+//
+//   cutSetMover   put actor `e` at (x, y)      -> sprite_set_pos
+//   cutSetAnim    face actor `e`               -> sprite_set_frame
+//   cutSetStep    present one frame            -> frame()
+//   cutSetDialog  say / update / active / result -> the ~30-line box at the bottom of this file
+//
+// The dialogue box is written HERE rather than imported, and that is the other half of the point:
+// `packages/dialog` links `packages/chipsfx`, and tish runs every linked module's initialiser at
+// boot whether a keeper ever speaks or not (#64). A game with its own talk layer — `card-gba` has
+// `card-talk.tish` for exactly this reason — must not pay for a second one to get a sequencer.
+
+import { room } from 'background:../assets/room.png'
+import { actors16 } from 'sheet:../assets/actors16.png'
+import {
+  frame, log, backdrop, hud_text, key_pressed, heap_free,
+  sprite_new, sprite_set_frame, sprite_set_pos, bg_new, camera_set, camera_x, camera_y
+} from 'cargo:tish_agb'
+import {
+  cutSetAnim, cutSetMover, cutSetStep, cutSetDialog,
+  cutWait, cutSay, cutChoose, cutWalkFrom, cutFace, cutPan, cutFadeOut, cutFadeIn,
+  cutSetFlag, cutFlag
+} from '../../../packages/cutscene-core'
+
+// ── actors: raw sprites, no entities ─────────────────────────────────────────
+// An "actor id" here is just an index into these arrays. `cutscene-core` never inspects it — it
+// only hands it back to the hooks — which is precisely what makes it work without an entity system.
+let A_YOU: i32 = 0
+let A_NENE: i32 = 1
+let SPR: i32[] = [0, 0]
+let AX: i32[] = [0, 0]
+let AY: i32[] = [0, 0]
+
+let FACE_DOWN: i32 = 0
+let FACE_UP: i32 = 1
+let FACE_LEFT: i32 = 2
+let FACE_RIGHT: i32 = 3
+
+// Camera, so the hooks can draw in screen space.
+function drawActor(i: i32) {
+  sprite_set_pos(SPR[i], AX[i] - camera_x(), AY[i] - camera_y())
+}
+
+// ── the four hooks ───────────────────────────────────────────────────────────
+
+/// `cutSetMover`. The sequencer calls this to place an actor; it never reads one back, which is why
+/// `cutWalkFrom` takes an explicit start and `cutWalk` (which does read back) stayed in the
+/// entity-only package.
+function moveActor(e, x, y) {
+  AX[e] = x
+  AY[e] = y
+  drawActor(e)
+}
+
+/// `cutSetAnim`. This sheet is 4 frames per actor (one per facing) rather than the 5-frame walk
+/// layout `packages/cutscene` defaults to — which is the whole reason the driver is a hook.
+function faceActor(e, face, moving) {
+  sprite_set_frame(SPR[e], e * 4 + face)
+}
+
+/// `cutSetStep`. A bare frame: there is no engine pipeline to step.
+function presentFrame() {
+  frame()
+  drawActor(A_YOU)
+  drawActor(A_NENE)
+}
+
+// ── a ~30-line dialogue box, injected ────────────────────────────────────────
+// hud_text is SPRITES, so this writes only when the line changes. It is deliberately minimal: the
+// point is that the sequencer works with WHATEVER the game already has, not that this box is good.
+let BOX = { open: 0, result: 0, choices: null, sel: 0, text: "" }
+
+function boxSay(text, opts) {
+  BOX.open = 1
+  BOX.sel = 0
+  BOX.result = 0 - 1
+  BOX.choices = null
+  if (opts !== null) {
+    if (opts.choices !== null) { BOX.choices = opts.choices }
+  }
+  let who = ""
+  if (opts !== null) { if (opts.speaker !== null) { who = opts.speaker + ": " } }
+  BOX.text = who + text
+  hud_text(0, 8, 130, BOX.text)
+  if (BOX.choices !== null) { hud_text(1, 8, 144, "> " + BOX.choices[0]) }
+}
+
+function boxUpdate() {
+  if (BOX.choices !== null) {
+    if (key_pressed(6) === 1 || key_pressed(7) === 1) {
+      BOX.sel = 1 - BOX.sel
+      hud_text(1, 8, 144, "> " + BOX.choices[BOX.sel])
+    }
+  }
+  if (key_pressed(0) === 1) {
+    BOX.result = BOX.sel
+    BOX.open = 0
+    hud_text(0, 0, 0, "")
+    hud_text(1, 0, 0, "")
+  }
+}
+
+function boxActive(): i32 { return BOX.open }
+function boxResult(): i32 { return BOX.result }
+
+// ── boot ─────────────────────────────────────────────────────────────────────
+
+backdrop(0)
+bg_new(room)
+
+SPR[A_YOU] = sprite_new(actors16)
+SPR[A_NENE] = sprite_new(actors16)
+
+cutSetMover(moveActor)
+cutSetAnim(faceActor)
+cutSetStep(presentFrame)
+cutSetDialog({ say: boxSay, update: boxUpdate, active: boxActive, result: boxResult })
+
+// You are already at the table. Nene is off-screen to the right.
+moveActor(A_YOU, 96, 96)
+faceActor(A_YOU, FACE_RIGHT, 0)
+moveActor(A_NENE, 260, 96)
+faceActor(A_NENE, FACE_LEFT, 0)
+camera_set(0, 0)
+
+log("CUT BOOT heap=" + heap_free())
+log("CUT POS you=" + AX[A_YOU] + "," + AY[A_YOU] + " nene=" + AX[A_NENE] + "," + AY[A_NENE])
+
+// ── the scene ────────────────────────────────────────────────────────────────
+
+cutFadeIn(24)
+cutWait(20)
+
+// BEAT 1 — she walks into frame and sits down opposite you. #66: "you walk into a stationary
+// sprite instead". Not any more.
+log("CUT BEAT1 start nene=" + AX[A_NENE])
+cutWalkFrom(A_NENE, 260, 96, 128, 96, 60, FACE_LEFT)
+cutFace(A_NENE, FACE_LEFT)
+log("CUT BEAT1 end nene=" + AX[A_NENE])
+
+cutSay("You came. Sit.", "Nene", null)
+
+// BEAT 2 — the camera pans to what the player is meant to look at, then comes back. #66: "no camera
+// pans to what the player is meant to look at".
+log("CUT BEAT2 start cam=" + camera_x() + "," + camera_y())
+cutPan(64, 0, 45)
+log("CUT BEAT2 mid cam=" + camera_x() + "," + camera_y())
+cutWait(20)
+cutPan(0, 0, 45)
+log("CUT BEAT2 end cam=" + camera_x() + "," + camera_y())
+
+// BEAT 3 — a branch that reads normally at the call site, which is what `cutChoose` returning the
+// index is for.
+let pick: i32 = cutChoose("Do you accept the match?", "Nene", { choices: ["Accept", "Refuse"] })
+log("CUT CHOICE " + pick)
+if (pick === 0) {
+  cutSetFlag("accepted", 1)
+  cutSay("Good. Deal them.", "Nene", null)
+} else {
+  cutSetFlag("accepted", 0)
+  cutSay("Then why are you here?", "Nene", null)
+}
+log("CUT FLAG accepted=" + cutFlag("accepted"))
+
+// BEAT 4 — something happens TO the player: the machine powers up and advances on its own.
+log("CUT BEAT4 start")
+cutWalkFrom(A_YOU, 96, 96, 96, 60, 40, FACE_UP)
+cutFace(A_YOU, FACE_UP)
+cutWait(20)
+log("CUT BEAT4 end you=" + AX[A_YOU] + "," + AY[A_YOU])
+
+cutFadeOut(30)
+// ...and back up. A ROM that ends on a black screen is indistinguishable from a ROM that crashed —
+// which is exactly how it read to the verifier, whose last-frame paint check failed on a scene that
+// had in fact run perfectly to the end.
+cutFadeIn(30)
+log("CUT DONE heap=" + heap_free())
+
+while (true) { frame() }

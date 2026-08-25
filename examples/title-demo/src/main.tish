@@ -1,0 +1,29 @@
+// title-demo — the reusable RPG TITLE SCREEN (packages/title.tish).
+//
+// A night-sky background, a big Alagard title, a cursor menu, and a copyright line — the screen every
+// RPG opens with. Navigate with Up/Down, confirm with A or Start. Each menu item carries its own
+// `onSelect` handler; the component owns the input + selection and drives its own loop via `run()`.
+import { sky } from 'background:../assets/title-bg.png'
+import { titleScreen } from '../../../packages/title'
+import { text_draw, frame } from 'cargo:tish_agb'
+
+// A real game's handlers would load a scene / save / options screen. Here they just show the choice
+// (the title screen has already blanked its own text and left the backdrop up).
+function begin(label) {
+  text_draw(-1, 0, 78, 74, "> " + label, 0xFFE06A)
+  text_draw(-1, 1, 60, 92, "the adventure begins...", 0xE8E8F0)
+}
+
+titleScreen({
+  background: sky,
+  title: "Aetheria",                 // drawn in Alagard by default
+  menu: [
+    { label: "New Game", onSelect: () => { begin("New Game") } },
+    { label: "Continue", onSelect: () => { begin("Continue") } },
+    { label: "Options",  onSelect: () => { begin("Options") } },
+  ],
+  copyright: "(c) 2026 tish games",
+}).run()                             // owns vsync until a choice, then fires that item's onSelect
+
+// run() returns after the handler fired; keep the frame pumping to show the result.
+while (true) { frame() }

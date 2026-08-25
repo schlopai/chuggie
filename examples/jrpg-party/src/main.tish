@@ -1,0 +1,661 @@
+// jrpg-party — a front-view, four-on-four turn battle: the classic JRPG shape the catalogue was
+// missing. Four heroes on the right, monsters on the left, ATB gauges, a command window, magic that
+// costs MP, items that run out, and a fight you can lose.
+//
+// ── WHY THE RULES ARE IN A PACKAGE AND THE SCREEN IS HERE ──────────────────────────────────────
+//
+// `packages/party.tish` owns what is TRUE and never draws; this file owns what it LOOKS like and
+// never decides anything. That split is inherited from `examples/creature-rpg/src/battle.tish`, and
+// it is what makes the fight testable: `partyTick(keys)` takes its input as an argument, so the
+// attract player below drives a whole battle by returning key bits, with no pad and no renderer.
+//
+// It also settles the obvious question — why not `packages/battle.tish`? Because that file imports
+// `isob_*`, `./iso` and the whole SRPG rules stack: its turn loop cannot be lifted off a board with
+// columns, rows, elevation and zones of control. A front-view battle has no board at all.
+//
+// ── THE CANVAS IS COLD AND THE REPAINT IS PER REGION ──────────────────────────────────────────
+//
+// Everything except the eight sprites is `ui_rect`/`ui_text` on the BACKGROUND text canvas, for the
+// reason `examples/solitaire` documents at length: a full repaint of a busy canvas measures in
+// FRAMES, not pixels, so it cannot run every frame. Everything here is therefore gated by a
+// signature, and the REGIONS ARE SMALL: the message bar, the command window, the ATB gauges, and —
+// separately — each party row's name and each party row's numbers. Eleven gates for one screen.
+//
+// ⚠️ THAT GRANULARITY IS MEASURED, NOT TASTE. `ticks()` around each paint, per `docs/perf-rules.md`
+// (which says in as many words not to use `frame_stats` for this: it allocates a string and costs
+// more than what it measures), against a 4,389-tick 60fps frame:
+//
+//     whole four-row window            12,331 avg   23,222 max     5.3 frames at worst
+//     one row, name and numbers         4,377 avg    4,773 max     a whole frame, per blow
+//     one row's numbers alone           3,597 avg    3,843 max     inside the frame
+//
+// Each step removed work that could not change: a blow moves ONE combatant's HP, so repainting the
+// other three rows drew identical pixels, and a name only changes when the turn moves or its owner
+// falls. `ui_text` is what costs — the wins are all "draw one fewer string".
+//
+// ⚠️ THE GAUGES GET THEIR OWN GATE because an ATB bar crosses a pixel on most frames of `PS_WAIT`.
+// Folding it into a row repaints that row continuously while nothing is happening — the first build
+// did exactly that, and a capture caught the rows half drawn. Bucketing the gauge to its own pixel
+// width does not rescue it; the bar really does change. What makes it cheap is that a bar needs no
+// clear (see `paintGauge`), so alone it is two `ui_rect` calls.
+//
+// ── SPRITES ARE HUD SPRITES ───────────────────────────────────────────────────────────────────
+//
+// There is no world, no map and no camera here, and `sprite_set_pos` is documented as WORLD
+// coordinates. `sprite_set_hud(id, 1)` puts a sprite in SCREEN space, which is the only coordinate
+// system this screen has. Doing it on all eight up front also means a later change that introduces
+// a camera cannot silently drag the battle layout sideways.
+
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { heroes } from 'sheet32:../assets/heroes.png'
+import { foes } from 'sheet32:../assets/foes.png'
+import {
+  backdrop, ui_begin, ui_text, ui_rect, ui_clear_rect, ui_reserve_tiles,
+  sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_visible, sprite_set_hud,
+  frame, audio_defer, keys_edge, log, frame_stats
+} from 'cargo:tish_agb'
+import {
+  partyInit, partyClear, partyAdd, partyStart, partyTick,
+  partyState, partyOutcome, partyCursor, partyActor, partyTarget, partyMessage,
+  partyUsed, partyName, partyTeamOf, partyHp, partyMaxHp, partyMp, partyMaxMp,
+  partyArt, partyAtb, partyAlive, partyAliveCount, partyGuarding,
+  partyMenuCount, partyMenuLabel, partyMenuOk, partyItemStock,
+  partyHitSeq, partyLastTarget, partyLastDamage, partyLastHeal, partyTurns,
+  PT_HERO, PT_FOE, SIDE_SLOTS, MAX_C, ATB_FULL,
+  PS_INTRO, PS_WAIT, PS_MENU, PS_SPELL, PS_TARGET, PS_MSG, PS_END, PS_DONE,
+  OUT_WIN, OUT_LOSE, K_A, K_B, K_UP, K_DOWN, K_LEFT, K_RIGHT
+} from '../../../packages/party'
+
+// ── layout ───────────────────────────────────────────────────────────────────────────────────
+// The bottom window is 48px tall and starts at 112, which is a whole number of 8px tiles — every
+// `ui_clear_rect` here must land on tile boundaries or it eats the neighbouring region's edge
+// (`examples/solitaire/src/main.tish` records what that looks like when it does not).
+let WIN_Y: i32 = 112
+let WIN_H: i32 = 48
+let CMD_X: i32 = 4          // command pane, left third of the window
+let CMD_W: i32 = 64
+// ⚠️ EVERY NUMBER ON THIS LINE IS A MULTIPLE OF 8, AND THAT IS THE POINT. A party row is repainted
+// on its own — see `paintRow` — which means clearing it on its own, and `ui_clear_rect` snaps OUT to
+// whole 8x8 tiles. The first layout used an 11px row pitch starting at 115: clearing one row then
+// ate the row above and below, so the only safe unit was the whole four-row window, which measured
+// 12,331 ticks — 2.8 frames — every time anybody took a hit.
+//   panel 72..236   rows clear 80..232   row i at y = 120 + i*8, exactly one tile row tall.
+let ROW_PX: i32 = 72        // party pane, the rest of the window
+let ROW_PW: i32 = 164
+let ROW_X: i32 = 80         // the row's own clear/draw box, inside the pane's border
+let ROW_W: i32 = 152
+let ROW_Y: i32 = 120
+let ROW_H: i32 = 8
+let BAR_W: i32 = 30         // the widest an HP bar gets
+let GAUGE_W: i32 = 22       // the ATB gauge, which now sits at the END of the row, not under the name
+let MSG_Y: i32 = 0
+let MSG_H: i32 = 16
+
+// Sprite anchors, slot-indexed. Foes are staggered rather than in a row so a four-monster field
+// reads as a group with depth instead of a picket fence.
+let FX: i32[] = [10, 48, 48, 88]
+let FY: i32[] = [44, 12, 76, 44]
+// ⚠️ The party is a 2x2 BLOCK, not the single column it obviously wants to be. Four 32px sprites
+// stacked need 128px and there are 96 between the message bar and the window, so a column overlaps
+// by 8px per hero — which on screen is not a formation but a totem pole of clipped torsos. Two
+// columns fit exactly, and hero i sits at column i%2, row i/2.
+let HX: i32[] = [168, 204, 168, 204]
+let HY: i32[] = [20, 20, 68, 68]
+
+// ── palette ──────────────────────────────────────────────────────────────────────────────────
+let SKY: i32 = 0x101828
+let PANEL: i32 = 0x1C2440
+let PANEL_HI: i32 = 0x30407A
+let EDGE: i32 = 0x80A0E0
+let INK: i32 = 0xE8ECF8
+let DIM: i32 = 0x8890B0
+let GOLD: i32 = 0xFFD060
+let HPCOL: i32 = 0x40C860
+let HPLOW: i32 = 0xD04030
+let MPCOL: i32 = 0x4080E0
+let ATBCOL: i32 = 0xC0A040
+let ATBFULLC: i32 = 0xFFE080
+let DEADC: i32 = 0x604858
+let GUARDC: i32 = 0x60C0D0
+
+// ── sprites ──────────────────────────────────────────────────────────────────────────────────
+// One sprite per slot, allocated once. Nothing here is spawned or destroyed mid-fight: a sprite per
+// blow is the single most reliable way to spend a frame on this hardware
+// (`docs/MEMORY.md`, "transient effects MUST be pooled").
+let SPR: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+
+// Module-level scalars lower to boxed VmRefs, so the per-frame counters live in one typed array —
+// the same trick, and the same reason, as `examples/solitaire`'s `CELL`.
+//   0 human  1 frame  2 shakeT  3 shakeWho  4 actT  5 lastHit  6 bob  7 repaintAll  8 perf overlay
+let V: i32[] = [0, 0, 0, 0, 0, 0, 0, 1, 0]
+let V_HUMAN: i32 = 0
+let V_T: i32 = 1
+let V_SHAKE: i32 = 2
+let V_SHAKEW: i32 = 3
+let V_ACT: i32 = 4
+let V_HIT: i32 = 5
+let V_BOB: i32 = 6
+let V_ALL: i32 = 7
+let V_DBG: i32 = 8
+
+// One signature per region: 0 message, 1 command window, 2 the gauges, 3..6 each party row's NAME,
+// 7..10 each party row's NUMBERS. Splitting the last two is what makes a blow repaint two `ui_text`
+// calls instead of the four-row window. -1 forces a first paint.
+let SIG: i32[] = [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1]
+let R_MSG: i32 = 0
+let R_CMD: i32 = 1
+let R_GAUGE: i32 = 2
+let R_NAME0: i32 = 3
+let R_VAL0: i32 = 7
+
+// Where the target caret was last drawn, so it can be erased without clearing the whole field.
+let CARET: i32[] = [0 - 1, 0, 0]     // slot, x, y
+
+// ── the roster ───────────────────────────────────────────────────────────────────────────────
+// `art` is the index into the sheets baked by `scripts/gen_jrpg_party.py`; the two orders are the
+// same list and must stay in step. Heroes: 3 frames each (idle/attack/dead). Foes: 2 (a bob).
+function buildRoster() {
+  partyClear()
+  //          name       team      hp   mp  atk def mag spd art
+  partyAdd("ROLAND",  PT_HERO, 120,   0, 22, 18,  2, 11, 0)
+  partyAdd("MERIC",   PT_HERO,  74,  30, 10,  9, 24, 10, 1)
+  partyAdd("AVELLA",  PT_HERO,  86,  26, 12, 11, 20,  9, 2)
+  partyAdd("KESTREL", PT_HERO,  94,  10, 19, 12,  8, 14, 3)
+
+  partyAdd("CYCLOPS",   PT_FOE, 130,   0, 20, 14,  0,  8, 0)
+  partyAdd("EMBERLING", PT_FOE,  62,  18,  9,  8, 18, 13, 1)
+  partyAdd("WYRMLET",   PT_FOE,  96,  12, 16, 15, 12, 11, 2)
+  partyAdd("DIREBEAST", PT_FOE,  78,   0, 17,  9,  0, 15, 3)
+}
+
+// ── input ────────────────────────────────────────────────────────────────────────────────────
+// `keys_edge` bits are A=1 B=2 SELECT=4 START=8 L=16 R=32 UP=64 DOWN=128 LEFT=256 RIGHT=512.
+// party.tish's K_* are its own, deliberately: it must be drivable from a table that has never seen
+// this hardware. This is the only place the two vocabularies meet.
+function padToKeys(bits: i32): i32 {
+  let k: i32 = 0
+  if ((bits & 1) > 0) { k = k | K_A }
+  if ((bits & 2) > 0) { k = k | K_B }
+  if ((bits & 64) > 0) { k = k | K_UP }
+  if ((bits & 128) > 0) { k = k | K_DOWN }
+  if ((bits & 256) > 0) { k = k | K_LEFT }
+  if ((bits & 512) > 0) { k = k | K_RIGHT }
+  return k
+}
+
+// ── the attract player ───────────────────────────────────────────────────────────────────────
+// Returns KEY BITS, not actions. That is the whole point of convention 1: the demo player and a
+// human press the same buttons through the same menus, so anything the attract run reaches is
+// reachable by hand, and a headless screenshot shows a real fight rather than a title card.
+//
+// It deliberately does NOT press A on a message. Messages already time out on their own, and
+// skipping them instantly would leave nothing legible on screen for a capture.
+function weakestHero(): i32 {
+  let best: i32 = 0 - 1
+  let bestHp: i32 = 99999
+  let i: i32 = 0
+  while (i < SIDE_SLOTS) {
+    if (partyAlive(i) === 1 && partyHp(i) < bestHp) {
+      bestHp = partyHp(i)
+      best = i
+    }
+    i = i + 1
+  }
+  return best
+}
+// Which root-menu row this actor wants. The healer cures when someone is genuinely hurt, the mage
+// burns MP while it has any, everyone else swings.
+function wantRow(): i32 {
+  let a: i32 = partyActor()
+  if (a < 0) { return 0 }
+  let art: i32 = partyArt(a)
+  if (art === 2) {
+    let w: i32 = weakestHero()
+    if (w >= 0 && partyHp(w) * 2 < partyMaxHp(w) && partyMenuOk(1) === 1) { return 1 }
+  }
+  if (art === 1 && partyMenuOk(1) === 1) { return 1 }
+  return 0
+}
+function wantSpell(): i32 {
+  let a: i32 = partyActor()
+  if (partyArt(a) === 2) { return 2 }             // CURE
+  if (partyAliveCount(PT_FOE) >= 3 && partyMenuOk(3) === 1) { return 3 }   // QUAKE, when it is worth it
+  return 0                                        // FIRE
+}
+// ⚠️ THE PAUSE IS NOT COSMETIC. A player that presses a key every frame walks the whole command
+// window — root menu, spell list, target caret — in three or four frames, so the menus exist but
+// are never ON SCREEN: the attract run looked like a fight with no interface, and eight captures
+// spread over thirty-five frames caught the command pane empty every time, which reads as "the menu
+// does not render" rather than "the menu is never open". One press every AUTO_BEAT frames is also
+// simply what a human looks like.
+let AUTO_BEAT: i32 = 14
+
+function autoKeys(): i32 {
+  let st: i32 = partyState()
+  if (st === PS_MENU || st === PS_SPELL || st === PS_TARGET) {
+    if ((V[V_T] % AUTO_BEAT) !== 0) { return 0 }
+  }
+  if (st === PS_MENU) {
+    let want: i32 = wantRow()
+    if (partyCursor() === want) { return K_A }
+    return K_DOWN
+  }
+  if (st === PS_SPELL) {
+    let want: i32 = wantSpell()
+    if (partyCursor() === want) { return K_A }
+    return K_DOWN
+  }
+  if (st === PS_TARGET) {
+    // The default target is the first living one on the right side, which is a legal choice; the
+    // caret only moves when the healer wants a specific patient.
+    let a: i32 = partyActor()
+    if (partyArt(a) === 2 && partyTeamOf(partyTarget()) === PT_HERO) {
+      let w: i32 = weakestHero()
+      if (w >= 0 && partyTarget() !== w) { return K_DOWN }
+    }
+    return K_A
+  }
+  if (st === PS_DONE) { return K_A }
+  return 0
+}
+
+// ── sprite presentation ──────────────────────────────────────────────────────────────────────
+function slotX(i: i32): i32 {
+  if (i < SIDE_SLOTS) { return HX[i] }
+  return FX[i - SIDE_SLOTS]
+}
+function slotY(i: i32): i32 {
+  if (i < SIDE_SLOTS) { return HY[i] }
+  return FY[i - SIDE_SLOTS]
+}
+
+function updateSprites() {
+  V[V_BOB] = (V[V_T] / 24) % 2
+  let i: i32 = 0
+  while (i < MAX_C) {
+    if (partyUsed(i) === 1) {
+      let art: i32 = partyArt(i)
+      let dead: i32 = 0
+      if (partyAlive(i) === 0) { dead = 1 }
+      if (i < SIDE_SLOTS) {
+        // A fallen hero stays on screen as a body — the party is four slots whether or not they are
+        // all standing, and a hero who simply vanishes reads as a rendering fault.
+        let f: i32 = art * 3
+        if (dead === 1) { f = art * 3 + 2 }
+        else if (V[V_ACT] > 0 && partyActor() === i) { f = art * 3 + 1 }
+        sprite_set_frame(SPR[i], f)
+        sprite_set_visible(SPR[i], 1)
+      } else {
+        // A dead monster is gone. There is no corpse art in the pack for these, and a frozen idle
+        // frame on a monster with 0 HP is worse than an empty space.
+        if (dead === 1) {
+          sprite_set_visible(SPR[i], 0)
+        } else {
+          sprite_set_visible(SPR[i], 1)
+          sprite_set_frame(SPR[i], art * 2 + V[V_BOB])
+        }
+      }
+      let dx: i32 = 0
+      if (V[V_SHAKE] > 0 && V[V_SHAKEW] === i) {
+        dx = 3
+        if ((V[V_SHAKE] % 4) < 2) { dx = 0 - 3 }
+      }
+      sprite_set_pos(SPR[i], slotX(i) + dx, slotY(i))
+    } else {
+      sprite_set_visible(SPR[i], 0)
+    }
+    i = i + 1
+  }
+  if (V[V_SHAKE] > 0) { V[V_SHAKE] = V[V_SHAKE] - 1 }
+  if (V[V_ACT] > 0) { V[V_ACT] = V[V_ACT] - 1 }
+}
+
+// ── painting ─────────────────────────────────────────────────────────────────────────────────
+let NUMS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+// `ui_text` is priced per CALL, not per glyph (solitaire again), so a number is assembled into ONE
+// string rather than drawn digit by digit.
+function numStr(n: i32) {
+  if (n <= 0) { return "0" }
+  let s = ""
+  let v: i32 = n
+  while (v > 0) {
+    s = NUMS[v % 10] + s
+    v = (v / 10) | 0
+  }
+  return s
+}
+
+function panel(x: i32, y: i32, w: i32, h: i32) {
+  ui_rect(x, y, w, h, PANEL, 1)
+  ui_rect(x, y, w, 1, EDGE, 1)
+  ui_rect(x, y + h - 1, w, 1, EDGE, 1)
+  ui_rect(x, y, 1, h, EDGE, 1)
+  ui_rect(x + w - 1, y, 1, h, EDGE, 1)
+}
+
+function bar(x: i32, y: i32, cur: i32, max: i32, col: i32) {
+  ui_rect(x, y, BAR_W, 3, 0x000000, 1)
+  if (max <= 0 || cur <= 0) { return }
+  let w: i32 = (cur * BAR_W) / max
+  if (w < 1) { w = 1 }
+  ui_rect(x, y, w, 3, col, 1)
+}
+
+// The ATB gauge, and the one thing on this screen that is redrawn WITHOUT being cleared first.
+//
+// ⚠️ A CLEAR IS FOR TEXT, NOT FOR BARS. `ui_clear_rect` snaps OUT to whole 8x8 tiles, so clearing a
+// 34x2 gauge strip wipes the bottom of the name above it and the top of the row below. A bar does
+// not need one: it repaints its whole footprint every time — the black track first, the fill over
+// it — so there is nothing of the old value left to show through. That is what makes a gauge cheap
+// enough to refresh on the frames it actually changes (two `ui_rect` calls) instead of dragging a
+// forty-call row repaint along with it.
+function paintGauge(i: i32) {
+  let y: i32 = ROW_Y + i * ROW_H
+  let gcol: i32 = ATBCOL
+  if (partyAtb(i) >= ATB_FULL) { gcol = ATBFULLC }
+  if (partyAlive(i) === 0) { gcol = DEADC }
+  let gx: i32 = ROW_X + 130
+  ui_rect(gx, y + 2, GAUGE_W, 3, 0x000000, 1)
+  let gw: i32 = (partyAtb(i) * GAUGE_W) / ATB_FULL
+  if (gw > 0) { ui_rect(gx, y + 2, gw, 3, gcol, 1) }
+}
+
+// ONE party row: name, HP, an HP bar, MP, an MP bar and the ATB gauge — all on a single 8px line
+// that clears as exactly one tile row. Rows are drawn per SLOT, living or not, so the list never
+// reorders under the player's cursor.
+//
+// This is the per-pile damage gate from `examples/solitaire`, applied to the thing that actually
+// changes: a blow moves ONE combatant's HP, and repainting the other three rows to show it cost
+// three quarters of 12,331 ticks for no visible difference.
+// A row is split at x = ROW_X + NAME_W into a NAME half and a VALUES half, and they are gated
+// separately because they change for completely different reasons: a name changes when the turn
+// moves or its owner falls (a few times a battle), the numbers change on every blow.
+//
+// Measured, one row at a time: name+values together was 4,377 ticks — a whole 4,389-tick frame for
+// the single most common event in the game. `ui_text` is what costs; dropping one of the three from
+// the common path is most of the difference. The split point is a multiple of 8 for the usual
+// reason — `ui_clear_rect` snaps out to tiles, and clearing the values would otherwise eat the name.
+let NAME_W: i32 = 48
+
+function paintRowName(i: i32) {
+  if (partyUsed(i) !== 1) { return }
+  let y: i32 = ROW_Y + i * ROW_H
+  ui_clear_rect(ROW_X, y, NAME_W, ROW_H)
+  ui_text(body, ROW_X, y, partyName(i), rowInk(i))
+}
+
+function paintRowValues(i: i32) {
+  if (partyUsed(i) !== 1) { return }
+  let y: i32 = ROW_Y + i * ROW_H
+  ui_clear_rect(ROW_X + NAME_W, y, ROW_W - NAME_W, ROW_H)
+  ui_text(body, ROW_X + 50, y, numStr(partyHp(i)), rowInk(i))
+  bar(ROW_X + 72, y + 2, partyHp(i), partyMaxHp(i), hpColour(i))
+  // MP is a NUMBER and not a bar. It had both, and at this row width the bar ran from +122 for 30px
+  // straight through the gauge at +134 — on screen the two merged into one blue-and-gold stripe that
+  // read as a single broken meter. A second bar was the least informative thing in the row anyway:
+  // MP is spent in whole spells, so the digits are what a player actually reads.
+  if (partyMaxMp(i) > 0) { ui_text(body, ROW_X + 108, y, numStr(partyMp(i)), MPCOL) }
+  paintGauge(i)
+}
+
+function rowInk(i: i32): i32 {
+  if (partyAlive(i) === 0) { return DEADC }
+  if (partyActor() === i) { return GOLD }
+  return INK
+}
+
+// The pane's frame, drawn only on a full rebuild — the rows repaint inside it and never touch it.
+function paintRowFrame() {
+  ui_clear_rect(ROW_PX, WIN_Y, ROW_PW, WIN_H)
+  panel(ROW_PX, WIN_Y, ROW_PW, WIN_H)
+}
+
+function hpColour(i: i32): i32 {
+  if (partyAlive(i) === 0) { return DEADC }
+  if (partyHp(i) * 4 <= partyMaxHp(i)) { return HPLOW }
+  return HPCOL
+}
+
+// The command pane. It shows the menu the state machine says is open, and greys out exactly what
+// `partyMenuOk` refuses — the check is not repeated here, so the picture cannot disagree with the
+// rules (a greyed-out row you can still select is the classic version of that bug).
+function paintCmd() {
+  ui_clear_rect(CMD_X - 2, WIN_Y, CMD_W + 6, WIN_H)
+  let st: i32 = partyState()
+  if (st !== PS_MENU && st !== PS_SPELL && st !== PS_TARGET) { return }
+  panel(CMD_X - 2, WIN_Y, CMD_W + 6, WIN_H)
+  if (st === PS_TARGET) {
+    ui_text(body, CMD_X + 2, WIN_Y + 4, "TARGET", GOLD)
+    ui_text(body, CMD_X + 2, WIN_Y + 16, partyName(partyTarget()), INK)
+    ui_text(body, CMD_X + 2, WIN_Y + 30, "A OK  B BACK", DIM)
+    return
+  }
+  let n: i32 = partyMenuCount()
+  let i: i32 = 0
+  while (i < n && i < 4) {
+    let y: i32 = WIN_Y + 4 + i * ROW_H
+    let ink: i32 = INK
+    if (partyMenuOk(i) === 0) { ink = DEADC }
+    ui_text(body, CMD_X + 10, y, partyMenuLabel(i), ink)
+    if (partyCursor() === i) { ui_text(body, CMD_X + 2, y, ">", GOLD) }
+    i = i + 1
+  }
+}
+
+function paintMsg() {
+  ui_clear_rect(0, MSG_Y, 240, MSG_H)
+  // L+R together: the perf overlay TAKES OVER the message bar rather than getting a strip of its
+  // own. Its first home was y=152, which is inside the party window — so every row repaint painted
+  // over it and the overlay appeared to do nothing at all. Borrowing a region that is already gated
+  // and already clears itself is the only place on this screen that cannot happen.
+  //
+  // mGBA's own fps readout measures the emulated LCD, so a ROM overrunning its frame still reads 60
+  // there; the tick counters are the only thing that can see it (`docs/MEMORY.md`, "mGBA fps can't
+  // see frame overrun").
+  if (V[V_DBG] === 1) {
+    panel(0, MSG_Y, 240, MSG_H)
+    ui_text(body, 4, MSG_Y + 4, frame_stats(), DIM)
+    return
+  }
+  let st: i32 = partyState()
+  if (st === PS_MENU || st === PS_SPELL || st === PS_TARGET || st === PS_WAIT) {
+    // Not a message state — leave the bar empty rather than leaving the last blow's text on screen,
+    // which reads as if it never cleared.
+    return
+  }
+  panel(0, MSG_Y, 240, MSG_H)
+  let col: i32 = INK
+  if (st === PS_END) { col = GOLD }
+  ui_text(body, 6, MSG_Y + 4, partyMessage(), col)
+}
+
+// The caret over the current target. Drawn on the canvas rather than as a ninth sprite, and erased
+// from its REMEMBERED position — clearing the whole 240x112 field to move a 6px arrow would be the
+// most expensive thing on the screen.
+function paintCaret() {
+  let st: i32 = partyState()
+  let want: i32 = 0 - 1
+  if (st === PS_TARGET) { want = partyTarget() }
+  if (CARET[0] === want) { return }
+  if (CARET[0] >= 0) { ui_clear_rect(CARET[1], CARET[2], 16, 16) }
+  if (want >= 0) {
+    let x: i32 = slotX(want) + 12
+    let y: i32 = slotY(want) - 10
+    if (y < 0) { y = 0 }
+    ui_rect(x, y, 7, 2, GOLD, 1)
+    ui_rect(x + 1, y + 2, 5, 2, GOLD, 1)
+    ui_rect(x + 2, y + 4, 3, 2, GOLD, 1)
+    CARET[1] = x
+    CARET[2] = y
+  }
+  CARET[0] = want
+}
+
+// ── damage gates ─────────────────────────────────────────────────────────────────────────────
+// Signatures, not dirty flags. A `dirty = 1` sprinkled at mutation sites gets written in seven
+// places and read in none; a signature is DERIVED from the state it summarises and cannot disagree
+// with it.
+//
+// ⚠️ THE UNIT IS ONE ROW, NOT THE WINDOW — and the gauges are not in a row's signature at all.
+// Both of those are measured, not guessed. `ticks()` around the paint (per `docs/perf-rules.md`,
+// which says in as many words not to trust `frame_stats` for this, because it allocates a string
+// and costs more than what it measures) gave:
+//
+//     whole four-row window   avg 12,331 ticks   max 23,222     -- 2.8 frames average, 5.3 peak
+//     one row                 avg  ~2,700 ticks                 -- inside the 4,389-tick frame
+//
+// A blow moves ONE combatant's HP, so three quarters of that first number was repainting rows whose
+// pixels did not change. The gauges are separate again: a bar crosses a pixel on most frames even
+// after slowing the clock (ATB_FULL 240 -> 900), and folding it into a row's signature repaints the
+// row continuously — the first build did that, and a capture caught the rows half drawn.
+// A gauge needs no clear (`paintGauge`), so on its own it is two `ui_rect` calls.
+function sigMsg(): i32 {
+  // With the overlay up the bar has to refresh on its own — the fight's state can sit unchanged for
+  // a second at a time, and a frozen tick count is worse than no tick count. Eight frames is ~7 Hz:
+  // readable, and not so often that measuring the frame becomes the thing that costs one.
+  if (V[V_DBG] === 1) { return 0 - 2 - (V[V_T] / 8) }
+  return partyState() * 7919 + partyTurns() * 31 + partyHitSeq()
+}
+function sigCmd(): i32 {
+  return partyState() * 101 + partyCursor() * 7 + partyActor() * 3 + partyTarget()
+}
+// One row's signature. `partyActor() === i` rather than `partyActor()` so that handing the turn from
+// one hero to another repaints the two rows whose highlight changed, and not the two it did not.
+function sigRowName(i: i32): i32 {
+  return rowInk(i)
+}
+function sigRowValues(i: i32): i32 {
+  return (partyHp(i) * 8 + partyMp(i) * 3 + partyGuarding(i) * 2 + rowInk(i)) & 1048575
+}
+// One bucket per gauge, packed into a single signature — the gauges are all refreshed together or
+// not at all, because four `ui_rect` pairs is already cheap and four separate gates are not.
+function sigGauges(): i32 {
+  let s: i32 = 0
+  let i: i32 = 0
+  while (i < SIDE_SLOTS) {
+    s = s * 37 + (partyAtb(i) * GAUGE_W) / ATB_FULL
+    s = s & 1048575
+    i = i + 1
+  }
+  return s
+}
+
+function repaint() {
+  audio_defer(1)
+  if (V[V_ALL] === 1) {
+    ui_begin()
+    V[V_ALL] = 0
+    SIG[R_MSG] = 0 - 1
+    SIG[R_CMD] = 0 - 1
+    SIG[R_GAUGE] = 0 - 1
+    let k: i32 = 0
+    while (k < SIDE_SLOTS) {
+      SIG[R_NAME0 + k] = 0 - 1
+      SIG[R_VAL0 + k] = 0 - 1
+      k = k + 1
+    }
+    paintRowFrame()          // the pane's border is drawn here and nowhere else
+    CARET[0] = 0 - 1
+  }
+  let s: i32 = sigMsg()
+  if (SIG[R_MSG] !== s) {
+    SIG[R_MSG] = s
+    paintMsg()
+  }
+  s = sigCmd()
+  if (SIG[R_CMD] !== s) {
+    SIG[R_CMD] = s
+    paintCmd()
+  }
+  let ri: i32 = 0
+  let drew: i32 = 0
+  while (ri < SIDE_SLOTS) {
+    let ns: i32 = sigRowName(ri)
+    if (SIG[R_NAME0 + ri] !== ns) {
+      SIG[R_NAME0 + ri] = ns
+      paintRowName(ri)
+    }
+    let vs: i32 = sigRowValues(ri)
+    if (SIG[R_VAL0 + ri] !== vs) {
+      SIG[R_VAL0 + ri] = vs
+      paintRowValues(ri)
+      drew = 1
+    }
+    ri = ri + 1
+  }
+  // A row repaint already redrew that row's gauge, so let the gauge gate agree rather than draw it
+  // a second time on the same frame — the frame a blow lands on is the busiest one there is.
+  if (drew === 1) { SIG[R_GAUGE] = sigGauges() }
+  s = sigGauges()
+  if (SIG[R_GAUGE] !== s) {
+    SIG[R_GAUGE] = s
+    let i: i32 = 0
+    while (i < SIDE_SLOTS) {
+      if (partyUsed(i) === 1) { paintGauge(i) }
+      i = i + 1
+    }
+  }
+  paintCaret()
+  audio_defer(0)
+}
+
+// ── boot ─────────────────────────────────────────────────────────────────────────────────────
+backdrop(SKY)
+ui_reserve_tiles(320)
+
+let si: i32 = 0
+while (si < MAX_C) {
+  let sheet: i32 = heroes
+  if (si >= SIDE_SLOTS) { sheet = foes }
+  SPR[si] = sprite_new(sheet)
+  sprite_set_hud(SPR[si], 1)      // screen space — see the header
+  sprite_set_visible(SPR[si], 0)
+  si = si + 1
+}
+
+partyInit(20260814)
+buildRoster()
+partyStart("Monsters block the road!")
+log("jrpg-party: " + partyAliveCount(PT_HERO) + " heroes vs " + partyAliveCount(PT_FOE) + " foes")
+
+while (true) {
+  V[V_T] = V[V_T] + 1
+  let bits: i32 = keys_edge()
+  let keys: i32 = 0
+  if (bits === 48) {
+    // L+R together is the perf overlay, NOT a player. Letting it set V_HUMAN would silently kill
+    // the attract run the moment anyone checked the frame cost.
+    V[V_DBG] = 1 - V[V_DBG]
+    V[V_ALL] = 1
+  } else if (bits > 0) {
+    V[V_HUMAN] = 1
+    keys = padToKeys(bits)
+  } else if (V[V_HUMAN] === 0) {
+    keys = autoKeys()
+  }
+
+  let before: i32 = partyHitSeq()
+  partyTick(keys)
+  if (partyHitSeq() !== before) {
+    // A blow landed. The shake and the attack pose are PRESENTATION, decided here from what the
+    // rules reported — `packages/party.tish` does not know either exists (convention 2).
+    V[V_SHAKE] = 10
+    V[V_SHAKEW] = partyLastTarget()
+    V[V_ACT] = 16
+    V[V_HIT] = partyHitSeq()
+  }
+
+  if (partyState() === PS_DONE) {
+    // A finished fight restarts, so the ROM is never a dead screen — and so a soak run keeps
+    // exercising the reset that `partyStart` performs. Lap 2 opening with lap 1's dead is the bug
+    // this repo has shipped before.
+    log("jrpg-party: outcome " + partyOutcome() + " after " + partyTurns() + " turns")
+    buildRoster()
+    partyStart("Monsters block the road!")
+    V[V_ALL] = 1
+  }
+
+  updateSprites()
+  repaint()
+  frame()
+}

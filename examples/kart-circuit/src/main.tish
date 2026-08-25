@@ -1,0 +1,398 @@
+// KART CIRCUIT — a kart racer on a real 3D ground plane.
+//
+// Controls: A accelerate · B brake/reverse · Left/Right steer · R hold to drift · START begins.
+//
+// ── What is actually 3D here ────────────────────────────────────────────────────────────────────
+// The track is a PLANE BEING PROJECTED, not a picture of perspective: `packages/mode7` gives every
+// scanline its own affine transform, so the ground scales with distance and the camera is genuinely
+// somewhere, pointing somewhere. The karts are BILLBOARDS — flat sprites placed by projecting their
+// ground coordinates — which is the same trick the classic SNES kart racers used and for the same reason: this
+// hardware will not rotate or scale a sprite, so a kart's heading is a baked frame and its distance
+// picks between two baked sizes.
+//
+// ── One source of truth for the course ──────────────────────────────────────────────────────────
+// `assets/track.png` and `src/track.tish` both come out of `scripts/gen_kart_circuit.py`, from a
+// single centre-line spline. The art you drive on, the surface the physics reads, the line the AI
+// follows and the gates that validate a lap cannot disagree, because none of them is authored
+// separately. Run `npm run assets` after changing the circuit.
+//
+// ── Where the frame goes ────────────────────────────────────────────────────────────────────────
+// `kartStep` and `kartPresent` are one native call each and do every racer between them. That is
+// deliberate: four karts' worth of physics written in tish would be several hundred software float
+// operations a frame on a CPU with no FPU, which is how this repo has twice lost half its frame
+// rate. See the note at the top of crates/tish-agb/src/kart.rs.
+import { trackTex } from 'affine:../assets/track.png'
+import { kartsNear } from 'sheet32:../assets/karts32.png'
+import { kartsFar } from 'sheet:../assets/karts16.png'
+import { itemArt } from 'sheet:../assets/items.png'
+import { raceTheme } from 'deck:../assets/race.deck'
+import { big } from 'font:../../../assets/fonts/kenney-high-square.ttf@16'
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  backdrop, frame, key_held, key_pressed, sprite_new, sprite_set_visible, sprite_set_frame,
+  sprite_set_pos, sprite_set_hud,
+  hud_text, hud_text_shadow, text_draw, log,
+} from 'cargo:tish_agb'
+import { deckPlay, deckSetIntensity } from '../../../packages/deck'
+import { sceneStart, sceneStep, sceneGoto } from '../../../packages/scene'
+import * as m7 from '../../../packages/mode7'
+import * as kart from '../../../packages/kart'
+import { buildShow } from '../../../packages/buildid'
+import { BUILD_ID } from './buildid'
+import {
+  SURF, WPX, WPZ, CPX, CPZ, GRIDX, GRIDZ, BOXX, BOXZ, CELLS, CELL_PX,
+  START_X, START_Z, START_YAW,
+} from './track'
+
+let BTN_A: i32 = 0
+let BTN_B: i32 = 1
+let BTN_SELECT: i32 = 2
+let BTN_START: i32 = 3
+let BTN_L: i32 = 4
+let BTN_R: i32 = 5
+let BTN_LEFT: i32 = 8
+let BTN_RIGHT: i32 = 9
+
+// ── The shot ─────────────────────────────────────────────────────────────────────────────────────
+// HORIZON is the scanline the ground converges to; everything above it is sky.
+// ⚠️ CAM_H and HORIZON must not change per frame. The renderer caches a per-scanline depth column
+// keyed on exactly those two, so a camera that bobs with speed rebuilds 160 fixed-point divisions
+// every frame it moves — a speed-sensitive camera is the one effect this renderer cannot afford.
+let HORIZON: i32 = 64
+const FOCAL = 150.0
+// Scanlines below the horizon handed back to the sky. The far field of a Mode 7 plane aliases badly
+// — one screen pixel there covers several texels, and there is no mipmapping — and this track's
+// red/white kerbs are exactly the high-contrast detail that turns into speckle. Six rows costs
+// almost no draw distance. (The other half of that fix is in the generator: the grass check is 16px
+// rather than 8, so it does not beat against the sampling grid.)
+let HAZE: i32 = 6
+let CAM_BACK: i32 = 46
+const CAM_H = 27.0
+let SKY: i32 = 0x242840          // must match SKY in scripts/gen_kart_circuit.py
+
+let RACERS: i32 = 4
+let LAPS: i32 = 3
+let GATE_R: i32 = 34             // how close counts as passing a checkpoint, world px
+let COUNTDOWN: i32 = 150         // frames of "3 · 2 · 1 · GO"
+
+// Opponent character. `skill` is line accuracy and corner confidence; `rubber` is how hard the field
+// is pulled back toward the player. Spread across the three so the race has a shape rather than
+// being a train, and so the order can change when you make a mistake.
+let AI_SKILL: i32[] = [0, 88, 76, 64]
+let AI_RUBBER: i32[] = [0, 40, 55, 68]
+
+// HUD text slots.
+let SL_LAP: i32 = 0
+let SL_POS: i32 = 1
+let SL_TIME: i32 = 2
+let SL_MSG: i32 = 3
+let SL_BUILD: i32 = 4
+let SL_T1: i32 = 5
+let SL_T2: i32 = 6
+let SL_T3: i32 = 7
+
+let ORD: string[] = ["", "1st", "2nd", "3rd", "4th"]
+
+// ── World, built once ────────────────────────────────────────────────────────────────────────────
+let bg: i32 = m7.m7Ground(trackTex, 64, 64)
+m7.m7Lens(HORIZON, FOCAL)
+m7.m7Haze(HAZE)
+backdrop(SKY)
+
+kart.kartTrack(SURF, CELLS, CELL_PX)
+kart.kartWaypoints(WPX, WPZ)
+kart.kartCheckpoints(CPX, CPZ, GATE_R, LAPS)
+kart.kartItemBoxes(BOXX, BOXZ)
+kart.kartArt(kartsNear, kartsFar, 32, 16, 150)
+
+// Played ONCE, at boot. The arrangement is intensity stems over a single playhead, so every scene
+// change below is a mute gate rather than a restart — the music lifts into the final lap instead of
+// starting again. `deckPlay` resets the intensity to 0, which is why it is not inside a scene.
+deckPlay(raceTheme)
+deckSetIntensity(1)
+
+// ⚠️ Sprites are created ONCE at the top level and never inside a scene closure. A boxed extern
+// result captured by an escaping closure reads back wrong (tish#561), so every handle lives in
+// module state and is only ever touched from a top-level function.
+let SPR: i32[] = []
+let i0: i32 = 0
+while (i0 < RACERS) {
+  SPR.push(sprite_new(kartsNear))
+  i0 = i0 + 1
+}
+// One sprite per item box, plus a pool for shells and bananas in flight. Registered AFTER the
+// racers, because the native drawing walks billboard indices positionally.
+let ITEM_SPR: i32[] = []
+let i1: i32 = 0
+while (i1 < BOXX.length + kart.kartHazardSlots()) {
+  ITEM_SPR.push(sprite_new(itemArt))
+  i1 = i1 + 1
+}
+// The held-item icon, a plain HUD sprite rather than a billboard.
+let HELD: i32 = sprite_new(itemArt)
+sprite_set_hud(HELD, 1)
+sprite_set_visible(HELD, 0)
+sprite_set_pos(HELD, 112, 20)
+
+interface State {
+  timer: i32,        // frames since the lights went out
+  count: i32,        // countdown frames remaining
+  lap: i32,          // last lap number drawn
+  pos: i32,          // last position drawn
+  best: i32,         // best lap this race, in frames (-1 = none yet)
+  lapStart: i32,
+  item: i32,         // last item icon drawn, so the HUD only changes when it does
+  picks: i32,        // boxes collected this race
+  hits: i32,         // times spun out this race
+  msg: i32,          // frames the banner stays up
+  done: i32,
+  reported: i32,
+  demo: i32          // attract mode: the player's kart drives itself
+}
+let V: State = {
+  timer: 0, count: 0, lap: -1, pos: -1, best: -1, lapStart: 0, item: -1, picks: 0, hits: 0,
+  msg: 0, done: 0, reported: 0, demo: 0
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────────────────────────
+
+/// Frames as SS.hh — a racing clock, not a wall clock.
+function clock(f: i32): string {
+  let secs: i32 = Math.floor(f / 60)
+  let hund: i32 = Math.floor((f - secs * 60) * 100 / 60)
+  let h: string = "" + hund
+  if (hund < 10) { h = "0" + hund }
+  return "" + secs + "." + h
+}
+
+function clearHud() {
+  hud_text(SL_LAP, 0, 0, "")
+  hud_text(SL_POS, 0, 0, "")
+  hud_text(SL_TIME, 0, 0, "")
+  hud_text(SL_MSG, 0, 0, "")
+  text_draw(small, SL_T1, 0, 0, "")
+  text_draw(big, SL_T2, 0, 0, "")
+  text_draw(small, SL_T3, 0, 0, "")
+}
+
+/// Put the field back on the grid. Every race starts from here, so a rematch is identical to a first
+/// run — which is also what makes the verify suite reproducible.
+function gridUp() {
+  kart.kartClear()
+  let r: i32 = 0
+  while (r < RACERS) {
+    sprite_set_visible(SPR[r], 1)
+    kart.kartAddRacer(SPR[r], GRIDX[r], GRIDZ[r], START_YAW)
+    if (r > 0) { kart.kartSetAi(r, AI_SKILL[r], AI_RUBBER[r]) }
+    r = r + 1
+  }
+  // Attract mode hands racer 0 to the same driver the opponents use. It is a real feature — a demo
+  // race off the title screen — and it is also the only way the test suite can exercise a COMPLETE
+  // race, because a fixed button sequence cannot steer a circuit it gets no feedback from.
+  if (V.demo === 1) { kart.kartSetAi(0, 80, 0) }
+  V.timer = 0
+  V.count = COUNTDOWN
+  V.lap = -1
+  V.pos = -1
+  V.best = -1
+  V.lapStart = 0
+  V.item = -1
+  V.picks = 0
+  V.hits = 0
+  sprite_set_visible(HELD, 0)
+  V.msg = 0
+  V.done = 0
+  V.reported = 0
+}
+
+function banner(text: string, frames: i32) {
+  hud_text_shadow(SL_MSG, 100, 58, text, 0x101018)
+  V.msg = frames
+}
+
+// ── Title ────────────────────────────────────────────────────────────────────────────────────────
+// The camera orbits the start line, so the title screen is the renderer demonstrating itself.
+function titleEnter() {
+  deckSetIntensity(1)
+  clearHud()
+  gridUp()
+  buildShow(SL_BUILD, small, BUILD_ID)
+  text_draw(big, SL_T2, 42, 20, "KART CIRCUIT", 0xffd166, 0x2a1810)
+  text_draw(small, SL_T1, 56, 42, "three laps. three rivals.", 0xd8d8f0)
+  text_draw(small, SL_T3, 50, 140, "START to race    SELECT to watch", 0xffe6a0, 0x2a1810)
+}
+
+function titleUpdate() {
+  V.timer = V.timer + 1
+  m7.m7Orbit(START_X, START_Z, 150.0, Math.floor(V.timer / 3))
+  m7.m7Height(46.0)
+  m7.m7Commit()
+  m7.m7DrawBillboards()
+  if (key_pressed(BTN_START) > 0) { V.demo = 0; sceneGoto(1) }
+  if (key_pressed(BTN_SELECT) > 0) { V.demo = 1; sceneGoto(1) }
+}
+
+function titleLeave() { clearHud() }
+
+// ── Race ─────────────────────────────────────────────────────────────────────────────────────────
+function raceEnter() {
+  deckSetIntensity(2)
+  clearHud()
+  gridUp()
+  buildShow(SL_BUILD, small, BUILD_ID)
+  hud_text(SL_LAP, 6, 4, "LAP 1/" + LAPS)
+  hud_text(SL_POS, 200, 4, "4th")
+}
+
+function raceUpdate() {
+  // ── The lights ──
+  if (V.count > 0) {
+    V.count = V.count - 1
+    if (V.count === 120) { banner("3", 30) }
+    if (V.count === 90) { banner("2", 30) }
+    if (V.count === 60) { banner("1", 30) }
+    if (V.count === 30) { banner("GO!", 40); kart.kartGo(1) }
+  } else if (V.done === 0) {
+    V.timer = V.timer + 1
+  }
+
+  let throttle: i32 = 0
+  if (key_held(BTN_A) > 0) { throttle = 1 }
+  if (key_held(BTN_B) > 0) { throttle = -1 }
+  let steer: i32 = 0
+  if (key_held(BTN_LEFT) > 0) { steer = -1 }
+  if (key_held(BTN_RIGHT) > 0) { steer = 1 }
+  let drift: i32 = 0
+  if (key_held(BTN_R) > 0) { drift = 1 }
+  if (key_pressed(BTN_L) > 0) { kart.kartUse(0) }
+
+  kart.kartDrive(0, throttle, steer, drift)
+  let fin: i32 = kart.kartStep()
+  kart.kartPresent(bg, CAM_BACK, CAM_H)
+
+  // ── What just happened to the player ──
+  let ev: i32 = kart.kartEvents(0)
+  if ((ev & kart.EV_PICKUP) !== 0) { banner("ITEM!", 30); V.picks = V.picks + 1 }
+  if ((ev & kart.EV_HIT) !== 0) { banner("SPUN OUT", 45); V.hits = V.hits + 1 }
+  if ((ev & kart.EV_MINI_TURBO) !== 0) {
+    banner("TURBO!", 40)
+    log("TURBO t=" + V.timer)
+  }
+  if ((ev & kart.EV_LAP) !== 0) {
+    let lapTime: i32 = V.timer - V.lapStart
+    V.lapStart = V.timer
+    if (V.best < 0 || lapTime < V.best) { V.best = lapTime }
+    let n: i32 = kart.kartLap(0)
+    if (n === LAPS - 1) {
+      banner("FINAL LAP", 60)
+      deckSetIntensity(3)
+    } else if (n < LAPS) {
+      banner("LAP " + (n + 1), 45)
+    }
+  }
+  if ((ev & kart.EV_FINISH) !== 0 && V.done === 0) {
+    V.done = 1
+    sceneGoto(2)
+  }
+  // Lapped out: once everyone else is home there is no race left to run, and the player is last by
+  // definition. Without this a run that never finishes just drives forever, which is also the shape
+  // of a lap counter that has stopped working — so ending here makes that visible.
+  if (V.done === 0 && fin >= RACERS - 1 && V.count <= 0) {
+    V.done = 1
+    sceneGoto(2)
+  }
+
+  // Telemetry, one line a second while racing. Cheap, invisible on hardware (log() goes to the
+  // emulator's debug channel), and it is what lets the test suite assert that grass actually slows
+  // you down rather than merely that the game did not crash.
+  if (V.count <= 0 && V.timer - Math.floor(V.timer / 60) * 60 === 0) {
+    log("TEL t=" + V.timer + " spd=" + kart.kartSpeed(0) + " surf=" + kart.kartSurface(0)
+      + " lap=" + kart.kartLap(0) + " pos=" + kart.kartRank(0) + " haz=" + kart.kartHazards())
+  }
+
+  // ── HUD. Each field is gated on its own value changing, so a frame where nothing happened costs
+  // nothing. The clock is the exception and rebuilds every frame — which used to corrupt the top of
+  // a Mode 7 floor, and no longer does; see the note in packages/mode7.tish. ──
+  let lap: i32 = kart.kartLap(0)
+  if (lap !== V.lap) {
+    V.lap = lap
+    let shown: i32 = lap + 1
+    if (shown > LAPS) { shown = LAPS }
+    hud_text(SL_LAP, 6, 4, "LAP " + shown + "/" + LAPS)
+  }
+  let pos: i32 = kart.kartRank(0)
+  if (pos !== V.pos) {
+    V.pos = pos
+    hud_text(SL_POS, 200, 4, ORD[pos])
+  }
+  hud_text(SL_TIME, 96, 4, clock(V.timer))
+  // The held item, as an icon. Frame order matches items.png: box, banana, shell — so a boost has
+  // no icon of its own and borrows the box, which reads well enough as "something good".
+  let held: i32 = kart.kartItem(0)
+  if (held !== V.item) {
+    V.item = held
+    if (held === kart.ITEM_NONE) {
+      sprite_set_visible(HELD, 0)
+    } else {
+      let f: i32 = 0
+      if (held === kart.ITEM_BANANA) { f = 1 }
+      if (held === kart.ITEM_SHELL) { f = 2 }
+      sprite_set_frame(HELD, f)
+      sprite_set_visible(HELD, 1)
+    }
+  }
+
+  if (V.msg > 0) {
+    V.msg = V.msg - 1
+    if (V.msg === 0) { hud_text(SL_MSG, 0, 0, "") }
+  }
+}
+
+function raceLeave() { clearHud() }
+
+// ── Results ──────────────────────────────────────────────────────────────────────────────────────
+function resultsEnter() {
+  deckSetIntensity(1)
+  clearHud()
+  buildShow(SL_BUILD, small, BUILD_ID)
+  let pos: i32 = kart.kartRank(0)
+  text_draw(big, SL_T2, 92, 22, ORD[pos], 0xffd166, 0x2a1810)
+  text_draw(small, SL_T1, 50, 48, "total " + clock(V.timer) + "    best lap " + clock(V.best),
+    0xd8d8f0)
+  text_draw(small, SL_T3, 68, 140, "START to race again", 0xffe6a0, 0x2a1810)
+
+  // The one line the verify suite reads. Everything a run can be judged on.
+  if (V.reported === 0) {
+    V.reported = 1
+    log("RESULT pos=" + pos + " laps=" + kart.kartLap(0) + " time=" + V.timer
+      + " best=" + V.best + " fin=" + kart.kartFinished(0) + " demo=" + V.demo
+      + " picks=" + V.picks + " hits=" + V.hits)
+  }
+}
+
+function resultsUpdate() {
+  // The field keeps racing behind the results — nicer to look at, and a standing check that nothing
+  // about finishing stops the simulation.
+  kart.kartStep()
+  kart.kartPresent(bg, CAM_BACK, CAM_H)
+  if (key_pressed(BTN_START) > 0) { sceneGoto(0) }
+}
+
+function resultsLeave() { clearHud() }
+
+// ⚠️ ORDER MATTERS. Billboard indices are handed out in registration order and the native drawing
+// walks them positionally, so the racers must claim theirs before the items do. `gridUp` registers
+// on its first call only, which is why it is invoked here rather than left to the title scene.
+gridUp()
+kart.kartItemArt(ITEM_SPR, 16)
+
+sceneStart([
+  { enter: titleEnter, update: titleUpdate, leave: titleLeave },
+  { enter: raceEnter, update: raceUpdate, leave: raceLeave },
+  { enter: resultsEnter, update: resultsUpdate, leave: resultsLeave }
+], 0)
+
+while (true) {
+  sceneStep()
+  frame()
+}

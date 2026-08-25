@@ -1,0 +1,304 @@
+// hud.tish — Warsong UI via packages/ui (select tree + match bars).
+// Select: full uiRender. Match: one uiRender for chrome, then makeBar.set / uiSetText.
+
+import { skills16 } from 'sheet:../assets/skills16.png'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_hud, sprite_set_visible, ui_clear
+} from 'cargo:tish_agb'
+import { entity_hp } from 'cargo:tish_gba_game_engine'
+import {
+  uiInit, uiRender, uiSetText, uiReframeIcon, uiHideIcons, uiResetPool, makeBar, makePanel
+} from '../../../packages/ui'
+import { SCORE_A, SCORE_H, SCORE_MAX } from './flag'
+import { PLAYER, U_ENT, U_ALIVE, U_POWER, targetId, indexOfEnt, posX, posY } from './units'
+import { className, specName } from './names'
+import { classSkillIcon, skillKey, skillName } from './skill_kit'
+
+let MAX_HP: i32 = 40
+let MAX_MP: i32 = 100
+
+let lastSel: i32 = 0 - 1
+let previewSpr: i32 = 0 - 1
+let retSpr: i32 = 0 - 1
+
+let hpBar = null
+let mpBar = null
+let tgtBar = null
+let scoreNode = null
+let classNode = null
+let hintNode = null
+let tgtLabel = null
+
+// Select-screen leaf nodes, kept so a cursor move is an in-place text/icon update
+// instead of a full uiRender (ui_begin rebuilds the whole 240x160 canvas).
+let selClassNode = null
+let selSpecNode = null
+let selIconNodes = []
+let selNameNodes = []
+
+let lastScoreKey: i32 = 0 - 1
+let lastBank: i32 = 0 - 1
+let lastHp: i32 = 0 - 1
+let lastMp: i32 = 0 - 1
+let lastTgtHp: i32 = 0 - 1
+
+function skillRow(cls: i32, spec: i32, slot: i32) {
+  let iconNode = { icon: classSkillIcon(cls, spec, slot), size: 16 }
+  // _lw seeds uiSetText's tail-clear box: uiRender does not record it, so without this the
+  // first in-place update leaves the tail of a longer previous name on screen.
+  let nameNode = { text: skillName(cls, spec, slot), color: "text", _lw: 60 }
+  selIconNodes[slot] = iconNode
+  selNameNodes[slot] = nameNode
+  return {
+    dir: "row", gap: 3, align: "center",
+    children: [
+      iconNode,
+      { text: skillKey(slot), color: "accent", w: 18 },
+      nameNode
+    ]
+  }
+}
+
+function skillGrid(cls: i32, spec: i32) {
+  return {
+    dir: "row", gap: 8, grow: 1,
+    children: [
+      {
+        dir: "col", gap: 2, grow: 1,
+        children: [
+          skillRow(cls, spec, 0), skillRow(cls, spec, 1),
+          skillRow(cls, spec, 2), skillRow(cls, spec, 3)
+        ]
+      },
+      {
+        dir: "col", gap: 2, grow: 1,
+        children: [
+          skillRow(cls, spec, 4), skillRow(cls, spec, 5),
+          skillRow(cls, spec, 6), skillRow(cls, spec, 7)
+        ]
+      }
+    ]
+  }
+}
+
+export function hudBoot(actorSheet: i32) {
+  uiInit({
+    font: body, tinyFont: body, sheet: skills16,
+    icons: 20, iconSize: 16, lineH: 9, tileReserve: 320
+  })
+  previewSpr = sprite_new(actorSheet)
+  sprite_set_hud(previewSpr, 1)
+  sprite_set_frame(previewSpr, 0)
+  sprite_set_pos(previewSpr, 4, 22)
+  sprite_set_visible(previewSpr, 0)
+  retSpr = 0 - 1
+  lastSel = 0 - 1
+}
+
+/// Build the select screen ONCE. Every later cursor move goes through hudPaintSelect,
+/// which only rewrites the leaf nodes this call stashes away.
+export function hudPaintSelectOpen(cls: i32, spec: i32) {
+  lastSel = cls * 10 + spec
+
+  sprite_set_frame(previewSpr, cls)
+  sprite_set_visible(previewSpr, 1)
+  sprite_set_pos(previewSpr, 4, 22)
+
+  selIconNodes = [null, null, null, null, null, null, null, null]
+  selNameNodes = [null, null, null, null, null, null, null, null]
+  // Fixed w on the class label: uiSetText does not re-layout, so the spec label's x
+  // must not depend on the measured width of the current class name.
+  selClassNode = { text: className(cls), color: "accent", w: 56, _lw: 56 }
+  selSpecNode = { text: specName(cls, spec), color: "label", _lw: 76 }
+
+  uiRender(makePanel({
+    title: "WARSONG", titleColor: "title", titleAlign: "left",
+    border: "border", fill: "panel", pad: 4, gap: 3, w: 240, h: 160,
+    children: [
+      {
+        dir: "row", gap: 8, align: "center",
+        children: [
+          { w: 20, h: 16, children: [] },
+          selClassNode,
+          selSpecNode
+        ]
+      },
+      { text: "A/B cast  L+ wheel", color: "dim" },
+      skillGrid(cls, spec),
+      { text: "L/R class  U/D spec", color: "dim" },
+      { text: "A or START to queue", color: "text" }
+    ]
+  }))
+}
+
+export function hudPaintSelect(cls: i32, spec: i32) {
+  let key: i32 = cls * 10 + spec
+  if (key === lastSel) { return }
+  if (selClassNode === null) { hudPaintSelectOpen(cls, spec); return }
+  lastSel = key
+
+  sprite_set_frame(previewSpr, cls)
+
+  uiSetText(selClassNode, className(cls), "accent")
+  uiSetText(selSpecNode, specName(cls, spec), "label")
+
+  let slot: i32 = 0
+  while (slot < 8) {
+    uiSetText(selNameNodes[slot], skillName(cls, spec, slot), "text")
+    uiReframeIcon(selIconNodes[slot], classSkillIcon(cls, spec, slot))
+    slot = slot + 1
+  }
+}
+
+export function hudLeaveSelect() {
+  lastSel = 0 - 1
+  selClassNode = null
+  selSpecNode = null
+  selIconNodes = []
+  selNameNodes = []
+  sprite_set_visible(previewSpr, 0)
+  uiHideIcons()
+}
+
+/// Clear select canvas this frame; call hudMatchOpen on the NEXT frame.
+export function hudLeaveSelectClear() {
+  hudLeaveSelect()
+  uiResetPool()
+  ui_clear()
+}
+
+export function hudMatchOpen(actorSheet: i32, cls: i32, spec: i32) {
+  hpBar = makeBar({ value: MAX_HP, max: MAX_HP, w: 72, h: 6, fill: "good" })
+  mpBar = makeBar({ value: 40, max: MAX_MP, w: 72, h: 6, fill: "accent" })
+  tgtBar = makeBar({ value: 0, max: MAX_HP, w: 72, h: 6, fill: "bad" })
+
+  scoreNode = { text: "A0-H0/" + SCORE_MAX, color: "title" }
+  classNode = { text: className(cls) + " " + specName(cls, spec), color: "label" }
+  hintNode = { text: "R tgt  A/B skill", color: "dim" }
+  tgtLabel = { text: "TGT --", color: "dim" }
+
+  lastScoreKey = 0 - 1
+  lastBank = 0 - 1
+  lastHp = 0 - 1
+  lastMp = 0 - 1
+  lastTgtHp = 0 - 1
+
+  uiRender({
+    dir: "col", pad: 2, gap: 2,
+    children: [
+      {
+        dir: "row", justify: "between", align: "center",
+        children: [scoreNode, classNode]
+      },
+      {
+        dir: "row", gap: 6, align: "center",
+        children: [
+          { text: "HP", color: "dim", w: 14 },
+          hpBar.view(),
+          { text: "MP", color: "dim", w: 14 },
+          mpBar.view()
+        ]
+      },
+      {
+        dir: "row", gap: 6, align: "center",
+        children: [tgtLabel, tgtBar.view()]
+      },
+      hintNode
+    ]
+  })
+
+  retSpr = sprite_new(actorSheet)
+  sprite_set_frame(retSpr, 20)
+  sprite_set_hud(retSpr, 0)
+  sprite_set_visible(retSpr, 0)
+}
+
+export function hudMatchTick(bank: i32) {
+  let sk: i32 = SCORE_A * 10 + SCORE_H
+  if (sk !== lastScoreKey) {
+    lastScoreKey = sk
+    uiSetText(scoreNode, "A" + SCORE_A + "-H" + SCORE_H + "/" + SCORE_MAX, "title")
+  }
+  if (bank !== lastBank) {
+    lastBank = bank
+    if (bank === 1) { uiSetText(hintNode, "L wheel UDLR/A/B/Sel", "accent") }
+    else { uiSetText(hintNode, "R tgt  A/B skill", "dim") }
+  }
+
+  let hp: i32 = 0
+  let mp: i32 = 0
+  if (U_ALIVE[PLAYER] !== 0) {
+    hp = entity_hp(U_ENT[PLAYER])
+    mp = U_POWER[PLAYER]
+  }
+  if (hp !== lastHp) { lastHp = hp; hpBar.set(hp) }
+  if (mp !== lastMp) { lastMp = mp; mpBar.set(mp) }
+
+  if (targetId >= 0) {
+    let tu: i32 = indexOfEnt(targetId)
+    if (tu >= 0 && U_ALIVE[tu] !== 0) {
+      let th: i32 = entity_hp(U_ENT[tu])
+      sprite_set_visible(retSpr, 1)
+      sprite_set_pos(retSpr, posX(U_ENT[tu]) - 8, posY(U_ENT[tu]) - 8)
+      if (th !== lastTgtHp) {
+        // bar only — uiSetText re-renders into the bg text canvas (~700-1,000 ticks) and this
+        // fires on every single hit.
+        lastTgtHp = th
+        tgtBar.set(th)
+      }
+    } else {
+      sprite_set_visible(retSpr, 0)
+      if (lastTgtHp !== 0) {
+        lastTgtHp = 0
+        tgtBar.set(0)
+      }
+    }
+  } else {
+    sprite_set_visible(retSpr, 0)
+    if (lastTgtHp !== 0) {
+      lastTgtHp = 0
+      tgtBar.set(0)
+      uiSetText(tgtLabel, "TGT --", "dim")
+    }
+  }
+}
+
+export function hudVictory(alliance: i32) {
+  if (alliance !== 0) {
+    uiRender({
+      dir: "col", pad: 20, gap: 8, align: "center", fill: "panel", border: "selected",
+      children: [
+        { text: "ALLIANCE WINS", color: "title", align: "center" },
+        { text: "START for select", color: "dim", align: "center" }
+      ]
+    })
+  } else {
+    uiRender({
+      dir: "col", pad: 20, gap: 8, align: "center", fill: "panel", border: "selected",
+      children: [
+        { text: "HORDE WINS", color: "title", align: "center" },
+        { text: "START for select", color: "dim", align: "center" }
+      ]
+    })
+  }
+  sprite_set_visible(retSpr, 0)
+}
+
+export function hudResetSelect() {
+  lastSel = 0 - 1
+  selClassNode = null
+  selSpecNode = null
+  selIconNodes = []
+  selNameNodes = []
+  if (hpBar !== null) { hpBar.clear(); hpBar = null }
+  if (mpBar !== null) { mpBar.clear(); mpBar = null }
+  if (tgtBar !== null) { tgtBar.clear(); tgtBar = null }
+  scoreNode = null
+  classNode = null
+  hintNode = null
+  tgtLabel = null
+  uiResetPool()
+  // Do NOT ui_clear here — caller may uiRender select the same frame.
+  sprite_set_visible(previewSpr, 1)
+}

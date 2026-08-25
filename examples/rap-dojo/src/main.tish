@@ -1,0 +1,514 @@
+// RAP DOJO — a call-and-response rhythm game. The master raps a bar; you rap it back.
+//
+// Controls: A · B · d-pad, in whatever order the master just used them. START begins, and START
+// again from the results screen runs the lesson back.
+//
+// ── The Parappa trick ────────────────────────────────────────────────────────────────────────────
+// Flat paper characters standing in a scene with real depth, seen from an angle, with the camera
+// orbiting. The characters are the easy half — they are sprites, and being flat is the style rather
+// than a limitation. The scene is the interesting half, and it is genuinely 3D: `packages/mode7`
+// gives every scanline its own affine transform, so the floor is a plane being PROJECTED rather than
+// a picture of perspective, and the pupil and master are BILLBOARDS placed by projecting their
+// ground coordinates.
+//
+// The difference is not subtle and it is not stylistic: a drawn perspective is fixed to one
+// viewpoint, so the moment the camera moves it stops being right. This one has a camera.
+//
+// The floor texture is therefore drawn TOP-DOWN (see scripts/gen_rap_dojo.py) — the camera supplies
+// the perspective, and a texture that already receded would have it applied twice. The wall is a
+// 256px panorama on an ordinary background behind the floor, scrolled one lap per camera
+// revolution: a cylindrical backdrop.
+//
+// ── Where the beat comes from ───────────────────────────────────────────────────────────────────
+// Nothing here counts frames to find the beat. `packages/rhythm` reads the deck sequencer's own
+// playhead, so the chart and the music are the same clock rather than two clocks that agree at the
+// start. The song and the chart are themselves generated together by scripts/gen_rap_dojo_music.py.
+import { floorTex } from 'affine:../assets/floor.png'
+import { pupilArt } from 'sheet32:../assets/student.png'
+import { masterArt } from 'sheet64:../assets/master.png'
+import { iconArt } from 'sheet:../assets/icons.png'
+import { song } from 'deck:../assets/battle.deck'
+import { big } from 'font:../../../assets/fonts/kenney-high-square.ttf@16'
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  backdrop, frame, keys_edge, key_pressed,
+  sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_visible, sprite_set_hud,
+  hud_text, hud_bar, text_draw, log, audio_defer,
+} from 'cargo:tish_agb'
+import { deckPlay, deckStop } from '../../../packages/deck'
+import { sceneStart, sceneStep, sceneGoto } from '../../../packages/scene'
+import * as rhythm from '../../../packages/rhythm'
+import * as m7 from '../../../packages/mode7'
+import {
+  FEEL_MAX, FB_CALLOUT, FS_KIND, FS_Y, FS_BASEY,
+  FE_PLACE, FE_DESTROY, FE_BUFF, FE_DEBUFF,
+  feelPlay, feelTick, feelSlot, feelCalloutDraw, feelCalloutHide,
+  feelPalette, feelCalloutShadow, feelCalloutAnchor,
+} from '../../../packages/feel'
+import { CHART_BPM, buildChart } from './chart'
+import { BUILD_ID } from './buildid'
+import { buildShow } from '../../../packages/buildid'
+
+// ── Layout ───────────────────────────────────────────────────────────────────────────────────────
+let HIT_X: i32 = 44          // the lane's "now" line: a cue is due when it reaches this column
+// Lane pixels per beat. The floor of this is set by the icons, not by taste: prompts are 16px wide
+// and the chart's tightest gap is an eighth note, so anything under about 36 draws them overlapping
+// — which at 34 was a row of half-covered arrows nobody could read in the second they were on screen.
+let BEAT_PX: i32 = 44
+let CALL_Y: i32 = 5          // the master's line, on top …
+let RESP_Y: i32 = 24         // … and yours under it, so the shape of the phrase is visible at a glance
+let POOL: i32 = 12           // icon sprites; the lane shows ~4.5 beats and a bar peaks at 6 cues
+let LIT: i32 = 10            // icons.png: frame index == button code, and code + 10 is the lit twin
+let MARKER: i32 = 20         // icons.png: the open bracket a cue slides into on the beat
+
+let BTN_START: i32 = 3
+
+// ── Judgment call-outs, via packages/feel ────────────────────────────────────────────────────────
+// The rising, colour-shifting word is feel's call-out, the same one the card and drop games use.
+// Worth knowing WHY it works here: feel's call-out path goes through `text_draw`, i.e. SPRITES, so
+// it needs no UI canvas — and it must not need one, because an 8bpp affine background owns all 256
+// entries of the shared BG palette and there is none left for a canvas to have. `feelBurstDraw`
+// (ui_rect) IS canvas-based and cannot run over a Mode 7 floor as written.
+//
+// `feelBump` used to be named alongside it, back when it shook the screen through `ui_scroll`. It
+// no longer belongs there: the spring moved into the engine (`fx_bump`), which offsets the camera
+// and the HUD sprites as well as the canvas, so a bump works here — and on any scrolling map, which
+// is precisely where a canvas-only shake was invisible.
+//
+// Indexed by judgment: J_NONE, J_COOL, J_GOOD, J_BAD, J_MISS.
+let SLOT_JUDGE: i32 = 3
+// The word sits ABOVE both characters, in the dark band over the horizon — the one part of this
+// screen that is never busy, so a call-out there needs no help to be read.
+let CALLOUT_Y: i32 = 62
+// feel's own lift is tuned for the card games' layout and overshoots here, carrying the word off the
+// top of a scene whose action sits much lower. Halving it keeps feel's timing and colour ramp and
+// just shortens the travel.
+let CALLOUT_LIFT: i32 = 2
+let JWORD: string[] = ["", "COOL!", "GOOD", "BAD", "MISS"]
+let JPRESET: i32[] = [0, FE_BUFF, FE_PLACE, FE_DEBUFF, FE_DESTROY]
+// The word opens in its judgment colour, passes through white, and fades to grey.
+//
+// ⚠️ The middle of the animation does NOT interpolate hot→dim: `feelColour` returns `FPAL[slot]`,
+// a four-entry palette, and feel ships the card game's — which is why a red MISS turned GREEN
+// halfway through. `feelPalette` is the hook, and every slot is set to the same near-white so a
+// call-out reads as "flash, then fade" whatever preset fired it.
+let JHOT: i32[] = [0, 0x7ee8ff, 0x9ce87e, 0xffc44e, 0xff8a8a]
+let JDIM: i32[] = [0, 0x8a8a9a, 0x8a8a9a, 0x8a8a9a, 0x8a8a9a]
+
+// ── The scene, in world coordinates ──────────────────────────────────────────────────────────────
+// The dojo mat is drawn at the middle of the 256px floor texture, so the lesson happens there and
+// the camera orbits it. These are texture pixels, not screen pixels — the whole point is that they
+// do not depend on where the camera is.
+// The centre of the 512x512 world. The mat is drawn around the texture's origin and the texture
+// tiles every 256px, so every multiple of 256 is a mat centre — 256 is both a mat AND the middle of
+// the world, which keeps the whole orbit as far from the edges as the map allows.
+const STAGE_X = 256.0
+const STAGE_Z = 256.0
+let HORIZON: i32 = 74          // scanline the floor converges to; the wall panorama sits above it
+const ORBIT_R = 96.0        // how far back the camera stands
+const CAM_H = 30.0
+
+// Master and pupil face each other across the mat.
+let CAST_X: f64[] = [STAGE_X - 30.0, STAGE_X + 26.0]
+let CAST_Z: f64[] = [STAGE_Z + 6.0, STAGE_Z - 6.0]
+
+// button code → pupil pose frame in student.png (see gen_rap_dojo.py for the strip's order)
+let POSE: i32[] = [1, 2, 0, 0, 0, 0, 3, 4, 5, 6]
+// button code → MIDI pitch. Must match PITCH in scripts/gen_rap_dojo_music.py: a correct answer is
+// supposed to sound like the phrase the master just played, and it only does if these agree.
+let NOTE: i32[] = [72, 75, 0, 0, 0, 0, 82, 67, 70, 77]
+
+// The chart lives inside `rhythm` — it judges against it and draws the prompt lane from it, both of
+// which have to walk the whole cue table, and it is typed in there.
+buildChart()
+let FPB: i32 = rhythm.framesPerBeat(CHART_BPM)
+
+// ── Sprites, created once and shared by every scene ──
+// Handles live in module state and are only ever touched by top-level functions. tish#561: a boxed
+// extern result (`sprite_new`) captured by an ESCAPING closure reads back wrong, and a scene table
+// of closures is exactly that — so the scenes below are named functions, not inline lambdas.
+interface Cast { master: i32, pupil: i32 }
+let CAST: Cast = { master: -1, pupil: -1 }
+let ICON: i32[] = []
+
+// Per-frame display state. Typed so the hot path is native field loads.
+interface View {
+  mHold: i32,       // frames left on the master's gesture
+  mPose: i32,
+  pHold: i32,       // frames left on the pupil's pose
+  pPose: i32,
+  gesture: i32,     // alternates so a repeated button still looks performed
+  banner: i32,      // which judgment the call-out is showing (0 = none)
+  bhold: i32,       // frames left on the fallback word
+  drift: i32,       // the camera pan that makes the floor stream
+  score: i32,       // last values pushed to the HUD, so text only redraws on change
+  combo: i32,
+  meter: i32,
+  turn: i32
+}
+let V: View = {
+  mHold: 0, mPose: 0, pHold: 0, pPose: 0, gesture: 0,
+  banner: 0, bhold: 0, drift: 0, score: -1, combo: -1, meter: -1, turn: -1
+}
+
+// ── Stage ────────────────────────────────────────────────────────────────────────────────────────
+// ⚠️ ONE background, and it is the floor.
+//
+// An affine background is 8bpp, and 8bpp means it uses all 256 entries of the GBA's single shared
+// background palette. A 4bpp regular layer draws its colours from that same memory in banks of 16,
+// so a wall backdrop next to a Mode 7 floor does not merely clash — whichever uploads its palette
+// last wins and the other renders as rubble. (It did: the first version of this had a banner wall at
+// priority 3 and it came out as black wreckage.) Sharing is possible, but only by baking both images
+// against ONE 256-colour palette; until then the sky is a backdrop colour and the scene is carried
+// by the floor and the sprites, which have palettes of their own.
+// 64x64 tiles = a 512px world, two laps of the 256px texture.
+//
+// ⚠️ The size is bounded by VRAM, not by taste. A 128x128 affine map needs 16KB of screenblock and
+// does not fit — it builds and then panics on boot. That matters because the floor is NoWrap, so
+// where the ground runs out the backdrop shows through, and the rows just under the horizon look
+// furthest and fall off the edge first. At this size that leaves a thin permanent dark band right at
+// the horizon: not a glitch, the actual end of the world. Removing it needs a WRAPPING floor, which
+// in turn needs the above-horizon rows parked on a transparent texel instead of off-map.
+m7.m7Ground(floorTex, 64, 64)
+m7.m7Lens(HORIZON, 132.0)
+let pi: i32 = 0
+while (pi < 4) { feelPalette(pi, 0xf4f4fa); pi = pi + 1 }
+// MISS is red over a red mat; without this it is nearly invisible however well it animates.
+feelCalloutShadow(0x1a0e14)
+// Our layout, not feel's: the word starts above both characters and travels half as far.
+feelCalloutAnchor(CALLOUT_Y, CALLOUT_LIFT)
+
+// The build id, bottom right. See packages/buildid — it is here so "is this the build I just made"
+// is never again something anyone has to guess at.
+let SLOT_BUILD: i32 = 9
+// After `bg_new`, never before: creating a background forces palette 0 entry 0 to black, which
+// silently eats a backdrop colour set earlier.
+backdrop(0x241a26)
+
+CAST.master = sprite_new(masterArt)
+CAST.pupil = sprite_new(pupilArt)
+// Screen-space, so the camera drift moves the HALL and not the cast. Without this the two of them
+// would slide off the left edge in about eight seconds.
+sprite_set_hud(CAST.master, 1)
+sprite_set_hud(CAST.pupil, 1)
+// Positions come from `m7PlaceAll` every frame now — there is no fixed screen position for a thing
+// that lives in the world.
+
+let i: i32 = 0
+while (i < POOL) {
+  let s: i32 = sprite_new(iconArt)
+  sprite_set_hud(s, 1)
+  sprite_set_visible(s, 0)
+  ICON.push(s)
+  i = i + 1
+}
+
+// The hit markers: one bracket per row, parked on the "now" column. A scrolling lane is unreadable
+// without them — the prompts tell you WHAT to press and nothing tells you WHEN, or which of the two
+// rows is even yours. Created after the icon pool so the HUD draw order (earlier = in front) leaves
+// them behind the cues that slide into them.
+let MARK: i32[] = []
+let mi: i32 = 0
+while (mi < 2) {
+  let s: i32 = sprite_new(iconArt)
+  sprite_set_hud(s, 1)
+  sprite_set_frame(s, MARKER)
+  sprite_set_visible(s, 0)
+  MARK.push(s)
+  mi = mi + 1
+}
+sprite_set_pos(MARK[0], HIT_X, CALL_Y)
+sprite_set_pos(MARK[1], HIT_X, RESP_Y)
+
+// ── Helpers ──────────────────────────────────────────────────────────────────────────────────────
+
+// 1 on the first half of each beat — the pulse both characters bob to.
+function onBeat(now: i32): i32 {
+  let phase = now - Math.floor(now / FPB) * FPB
+  if (phase < FPB / 2) { return 1 }
+  return 0
+}
+
+// ⚠️ NO hit sound, deliberately — see examples/repro-psg-sfx, which measures why.
+//
+// `chip_borrow` does not SHARE a channel, it SILENCES whatever the music has there until that
+// voice's next note-on, so the damage scales with how long the music's notes are: borrowing the
+// pad's channel destroyed 74% of it, and borrowing the LEAD put the effect note in the melody
+// register — audible as a second tune playing over the first.
+//
+// The noise channel looked like the safe one, because a drum has nothing to sustain. It is not safe
+// HERE: this song's drums are on it, so every confirmation tick punched a hole in the beat the
+// player is trying to keep time against. In a call-and-response game the song IS the instructions,
+// so anything interrupting it costs more than the feedback is worth — and that feedback is already
+// carried by the callout, the pose and the lit icon, none of which touch the mixer.
+
+function hideLane() {
+  let k: i32 = 0
+  while (k < POOL) { sprite_set_visible(ICON[k], 0); k = k + 1 }
+  sprite_set_visible(MARK[0], 0)
+  sprite_set_visible(MARK[1], 0)
+}
+
+// Which row belongs to whom, said plainly and drawn once.
+function showLane() {
+  sprite_set_visible(MARK[0], 1)
+  sprite_set_visible(MARK[1], 1)
+  text_draw(small, 7, 3, 8, "MC", 0x9a8fa8)
+  text_draw(small, 8, 3, 27, "YOU", 0xffe6a0, 0x2a1810)
+}
+
+function stampBuild() {
+  buildShow(SLOT_BUILD, small, BUILD_ID)
+}
+
+function clearText() {
+  hud_text(0, 0, 0, "")
+  hud_text(1, 0, 0, "")
+  hud_text(2, 0, 0, "")
+  feelCalloutHide(3)
+  text_draw(big, 4, 0, 0, "")
+  text_draw(small, 5, 0, 0, "")
+  text_draw(small, 6, 0, 0, "")
+  text_draw(small, 7, 0, 0, "")
+  text_draw(small, 8, 0, 0, "")
+  hud_bar(0, 0, 0, 0, 0, 0, 0, 0)
+}
+
+// The camera orbits the mat, slowly. One number moves the whole shot — yaw is both where the camera
+// stands on the circle and which way it looks — and because it is a real camera, the floor, the
+// backdrop and the two characters all agree about it without being told separately.
+//
+function sway() {
+  V.drift = V.drift + 1
+  let yaw = Math.floor(V.drift / 3)
+  m7.m7Orbit(STAGE_X, STAGE_Z, ORBIT_R, yaw)
+  m7.m7Height(CAM_H)
+  m7.m7Commit()
+}
+
+// Both characters in ONE call. Per-frame calls from a game into a package are the scarce resource on
+// a Mode 7 frame: going over budget does not drop a frame, it arms the scanline DMA late and tears
+// the floor. `m7PlaceAll` exists for exactly this.
+// Registered ONCE as billboards; the projection then happens natively, and drawing the whole cast
+// costs one call. Doing it tish-side cost about ten software-float operations per character per
+// frame — the GBA has no FPU — which on its own was the difference between 60fps and 31.
+m7.m7BillboardAt(m7.m7Billboard(CAST.master, 64, 64), CAST_X[0], CAST_Z[0])
+m7.m7BillboardAt(m7.m7Billboard(CAST.pupil, 32, 32), CAST_X[1], CAST_Z[1])
+
+function placeCast() {
+  m7.m7DrawBillboards()
+}
+
+// ── Title ────────────────────────────────────────────────────────────────────────────────────────
+function titleEnter() {
+  clearText()
+  stampBuild()
+  hideLane()
+  sprite_set_frame(CAST.master, 0)
+  sprite_set_frame(CAST.pupil, 0)
+  text_draw(big, 4, 62, 6, "RAP DOJO", 0xffd166, 0x2a1810)
+  text_draw(small, 5, 58, 28, "the master raps. you rap back.", 0xc8c8e0)
+  text_draw(small, 6, 88, 145, "PRESS START", 0xffe6a0, 0x2a1810)
+}
+
+function titleUpdate() {
+  sway()
+  placeCast()
+  // Nothing is playing, so there is no playhead to bob to — use the drift as a metronome instead.
+  let t = Math.floor(V.drift / 24)
+  sprite_set_frame(CAST.master, t - Math.floor(t / 2) * 2)
+  if (key_pressed(BTN_START) > 0) { sceneGoto(1) }
+}
+
+function titleLeave() { clearText() }
+
+// ── The lesson ───────────────────────────────────────────────────────────────────────────────────
+function playEnter() {
+  clearText()
+  // Arms the chart and clears every cue, so a replay is a fresh run and not last run's scoreboard.
+  rhythm.rhythmInit(CHART_BPM)
+  V.mHold = 0
+  V.pHold = 0
+  V.banner = 0
+  V.bhold = 0
+  V.score = -1
+  V.combo = -1
+  V.meter = -1
+  V.turn = -1
+  sprite_set_frame(CAST.master, 0)
+  sprite_set_frame(CAST.pupil, 0)
+  showLane()
+  // ⚠️ Stop the UI natives feeding the sequencer MID-FRAME.
+  //
+  // `hud_text`/`text_draw`/`hud_bar` each pump audio as a side effect, so a HUD update partway down
+  // the screen steps the deck partway down the screen. `frame()` still advances it once per frame,
+  // so the music is unaffected — but the work no longer lands while the beam is drawing.
+  audio_defer(1)
+  deckPlay(song)
+}
+
+function playUpdate() {
+  sway()
+  placeCast()
+
+  let j = rhythm.rhythmStep(keys_edge())
+  let now = rhythm.rhythmNow()
+
+  // The master performs his call: a gesture per syllable, alternating so a repeated button still
+  // reads as a performance rather than a stuck frame.
+  let call = rhythm.rhythmCallBtn()
+  if (call >= 0) {
+    V.gesture = V.gesture + 1
+    V.mPose = 2 + (V.gesture - Math.floor(V.gesture / 4) * 4)
+    V.mHold = 10
+  }
+
+  // The pupil answers.
+  if (j !== rhythm.J_NONE) {
+    V.banner = 30
+    let b = rhythm.rhythmLastBtn()
+    if (j === rhythm.J_COOL || j === rhythm.J_GOOD) {
+      V.pPose = POSE[b]
+    } else {
+      V.pPose = 7
+    }
+    V.pHold = 12
+  }
+
+  let myTurn = rhythm.rhythmMyTurn()
+
+  if (V.mHold > 0) {
+    V.mHold = V.mHold - 1
+    sprite_set_frame(CAST.master, V.mPose)
+  } else if (myTurn === 1) {
+    sprite_set_frame(CAST.master, 8)          // listening, while the pupil is answering
+  } else {
+    sprite_set_frame(CAST.master, onBeat(now))
+  }
+
+  if (V.pHold > 0) {
+    V.pHold = V.pHold - 1
+    sprite_set_frame(CAST.pupil, V.pPose)
+  } else {
+    sprite_set_frame(CAST.pupil, 0)
+  }
+
+  // The prompt bar. `LIT` is the offset from a button's plain frame to its lit twin in icons.png —
+  // the only thing the judge needs to know about this game's art.
+  rhythm.rhythmLane(ICON, HIT_X, BEAT_PX, CALL_Y, RESP_Y, LIT)
+
+  // ── HUD. Boxed calls, so each is gated on its value actually changing. ──
+  let sc = rhythm.rhythmScore()
+  if (sc !== V.score) { hud_text(0, 6, 146, "SCORE " + sc); V.score = sc }
+  let cb = rhythm.rhythmCombo()
+  if (cb !== V.combo) {
+    if (cb > 1) { hud_text(1, 196, 146, "x" + cb) } else { hud_text(1, 0, 0, "") }
+    V.combo = cb
+  }
+  let mt = rhythm.rhythmMeter()
+  if (mt !== V.meter) {
+    let fg = 0x6ee36e
+    if (mt < 25) { fg = 0xe34e4e } else if (mt < 50) { fg = 0xe3a24e } else if (mt < 75) { fg = 0xe3e34e }
+    hud_bar(0, 88, 136, 64, 7, mt / 100, fg, 0x2a1a14)
+    V.meter = mt
+  }
+  if (myTurn !== V.turn) {
+    if (myTurn === 1) { hud_text(2, 94, 124, "YOUR TURN") } else { hud_text(2, 0, 0, "") }
+    V.turn = myTurn
+  }
+
+  // Fire the call-out, then let feel animate it. `feelTick` returns a bitmask of the slots that
+  // crossed into a new keyframe this frame — only those need redrawing, which is why a rising word
+  // costs almost nothing per frame.
+  if (j !== rhythm.J_NONE) {
+    V.banner = j
+    V.bhold = 30
+    feelPlay(JPRESET[j], 120, 100, 8)
+  }
+  if (V.bhold > 0) {
+    V.bhold = V.bhold - 1
+    if (V.bhold === 0) { feelCalloutHide(SLOT_JUDGE) }
+  }
+  let mask = feelTick()
+  if (mask !== 0 && V.banner > 0) {
+    let k = 0
+    while (k < FEEL_MAX) {
+      if ((mask & (1 << k)) !== 0 && feelSlot(k, FS_KIND) === FB_CALLOUT) {
+        feelCalloutDraw(k, big, SLOT_JUDGE, JWORD[V.banner], JHOT[V.banner], JDIM[V.banner])
+      }
+      k = k + 1
+    }
+  }
+
+  // The song loops forever (deckpack bakes every song with loop_frame 0), so the run ends when the
+  // chart is spent — not when the music does.
+  if (rhythm.rhythmDone() === 1) { sceneGoto(2) }
+}
+
+function playLeave() {
+  deckStop()
+  hideLane()
+  clearText()
+}
+
+// ── Results ──────────────────────────────────────────────────────────────────────────────────────
+function resultsEnter() {
+  clearText()
+  stampBuild()
+  hideLane()
+  let rank = rhythm.rhythmRank()
+  let word = "AWFUL"
+  let tint = 0xe86e6e
+  let face = 7                                  // the master flushes red
+  if (rank === rhythm.RANK_COOL) {
+    word = "COOL"
+    tint = 0x7ee8ff
+    face = 6
+  } else if (rank === rhythm.RANK_GOOD) {
+    word = "GOOD"
+    tint = 0x9ce87e
+    face = 6
+  } else if (rank === rhythm.RANK_BAD) {
+    word = "BAD"
+    tint = 0xe8b04e
+    face = 0
+  }
+  sprite_set_frame(CAST.master, face)
+  sprite_set_frame(CAST.pupil, 8)               // celebrating regardless; he tried his best
+
+  text_draw(big, 4, 40, 4, "U RAPPIN " + word, tint, 0x201018)
+  text_draw(small, 5, 28, 26,
+    "COOL " + rhythm.rhythmCools() + "   GOOD " + rhythm.rhythmGoods() +
+    "   BAD " + rhythm.rhythmBads() + "   MISS " + rhythm.rhythmMisses(), 0xe8e8f0)
+  hud_text(0, 28, 36, "SCORE " + rhythm.rhythmScore())
+  hud_text(1, 140, 36, "BEST x" + rhythm.rhythmBestCombo())
+  text_draw(small, 6, 60, 145, "PRESS START TO TRY AGAIN", 0xffe6a0, 0x2a1810)
+
+  // One line, once per run, so verify.sh can assert what actually happened instead of trying to
+  // read it back out of a screenshot. A rhythm game's whole behaviour is a number nobody can see —
+  // "did the right button at the right frame score" is invisible to a pixel diff, and a run where
+  // input is silently ignored looks exactly like a run the player fluffed.
+  log("RESULT rank=" + rank + " cool=" + rhythm.rhythmCools() + " good=" + rhythm.rhythmGoods() +
+      " bad=" + rhythm.rhythmBads() + " miss=" + rhythm.rhythmMisses() +
+      " score=" + rhythm.rhythmScore() + " best=" + rhythm.rhythmBestCombo())
+}
+
+function resultsUpdate() {
+  sway()
+  placeCast()
+  if (key_pressed(BTN_START) > 0) { sceneGoto(1) }
+}
+
+function resultsLeave() { clearText() }
+
+// ── Go ───────────────────────────────────────────────────────────────────────────────────────────
+sceneStart([
+  { enter: titleEnter, update: titleUpdate, leave: titleLeave },
+  { enter: playEnter, update: playUpdate, leave: playLeave },
+  { enter: resultsEnter, update: resultsUpdate, leave: resultsLeave },
+], 0)
+
+while (true) {
+  sceneStep()
+  frame()
+}

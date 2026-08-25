@@ -1,0 +1,24 @@
+// UI sheet frame indices into faces32.png (see scripts/gen_akari.py).
+// Portraits + choice cursor + gamepad prompts + Theme Wood button chrome.
+export let FACE_ELDER: i32 = 0
+export let FACE_WOMAN: i32 = 1
+export let FACE_MERCHANT: i32 = 2
+export let FACE_SENSEI: i32 = 3
+export let FACE_AKARI: i32 = 4
+export let FACE_CURSOR: i32 = 5
+
+export let PROMPT_A: i32 = 6
+export let PROMPT_B: i32 = 7
+export let PROMPT_L: i32 = 8
+export let PROMPT_R: i32 = 9
+export let PROMPT_UP: i32 = 10
+export let PROMPT_DOWN: i32 = 11
+export let PROMPT_LEFT: i32 = 12
+export let PROMPT_RIGHT: i32 = 13
+export let PROMPT_DPAD: i32 = 14
+export let PROMPT_START: i32 = 15
+export let PROMPT_SELECT: i32 = 16
+
+export let BTN_NORMAL: i32 = 17
+export let BTN_HOVER: i32 = 18
+export let BTN_PRESSED: i32 = 19

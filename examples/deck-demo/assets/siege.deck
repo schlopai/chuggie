@@ -1,0 +1,407 @@
+# Siege — crossfading-stem-style intensifier (16 bars).
+# L/R in tpl-demo raises intensity 0..3; stems share one playhead.
+#   0 bed   — wave bass + soft pulse pad
+#   1 heat  — pulse lead/arp
+#   2 drums — noise hats + PCM kick
+#   3 peak  — PCM stab hits
+deck 1
+bpm 132
+
+track Pad id pad gen gameBoyDmg layer 0 * 16
+  gen type pulse duty 25 env_mode constant vol 5
+  gen vib_rate 3 vib_amt 8
+  # A — open air
+  note 55 0 4 v 70
+  note 58 4 4 v 65
+  note 60 8 4 v 75
+  note 58 12 4 v 70
+  # B — darker
+  note 53 16 4 v 70
+  note 55 20 4 v 65
+  note 58 24 4 v 80
+  note 55 28 4 v 70
+  # C — climb
+  note 55 32 2 v 75
+  note 58 34 2 v 80
+  note 60 36 2 v 85
+  note 63 38 2 v 90
+  note 60 40 4 v 85
+  note 58 44 4 v 80
+  # D — hold / resolve
+  note 55 48 4 v 85
+  note 53 52 4 v 75
+  note 55 56 4 v 80
+  note 58 60 4 v 85
+
+track Bass id bass gen gameBoyDmg layer 0 * 16
+  gen type wave wave_shape saw vol 14
+  # A pedal
+  note 36 0 1 v 120
+  note 36 1 1 v 85
+  note 36 2 1 v 110
+  note 36 3 1 v 80
+  note 34 4 1 v 115
+  note 34 5 1 v 80
+  note 34 6 1 v 105
+  note 36 7 1 v 90
+  note 36 8 1 v 120
+  note 36 9 0.5 v 90
+  note 38 9.5 0.5 v 100
+  note 36 10 1 v 110
+  note 34 11 1 v 95
+  note 36 12 1 v 120
+  note 33 13 1 v 100
+  note 31 14 1 v 110
+  note 36 15 1 v 115
+  # B walk
+  note 34 16 0.5 v 120
+  note 34 16.5 0.5 v 85
+  note 34 17 0.5 v 105
+  note 36 17.5 0.5 v 95
+  note 34 18 1 v 115
+  note 31 19 1 v 100
+  note 33 20 1 v 120
+  note 33 21 0.5 v 90
+  note 34 21.5 0.5 v 100
+  note 36 22 1 v 115
+  note 38 23 1 v 105
+  note 36 24 0.5 v 120
+  note 36 24.5 0.5 v 85
+  note 34 25 0.5 v 110
+  note 36 25.5 0.5 v 95
+  note 38 26 1 v 120
+  note 36 27 1 v 100
+  note 34 28 1 v 115
+  note 31 29 1 v 100
+  note 33 30 1 v 110
+  note 36 31 1 v 120
+  # C drive
+  note 36 32 0.5 v 127
+  note 36 32.5 0.5 v 90
+  note 36 33 0.5 v 115
+  note 38 33.5 0.5 v 100
+  note 36 34 0.5 v 120
+  note 34 34.5 0.5 v 95
+  note 36 35 0.5 v 115
+  note 38 35.5 0.5 v 105
+  note 40 36 0.5 v 127
+  note 40 36.5 0.5 v 95
+  note 38 37 0.5 v 115
+  note 36 37.5 0.5 v 100
+  note 34 38 0.5 v 120
+  note 36 38.5 0.5 v 100
+  note 38 39 0.5 v 115
+  note 40 39.5 0.5 v 110
+  note 36 40 0.5 v 127
+  note 36 40.5 0.5 v 90
+  note 38 41 0.5 v 115
+  note 36 41.5 0.5 v 100
+  note 34 42 1 v 120
+  note 31 43 1 v 105
+  note 33 44 0.5 v 120
+  note 34 44.5 0.5 v 100
+  note 36 45 1 v 125
+  note 38 46 1 v 110
+  note 36 47 1 v 120
+  # D resolve
+  note 36 48 1 v 127
+  note 36 49 1 v 95
+  note 34 50 1 v 115
+  note 36 51 1 v 100
+  note 33 52 1 v 120
+  note 31 53 1 v 100
+  note 34 54 1 v 115
+  note 36 55 1 v 120
+  note 36 56 0.5 v 127
+  note 38 56.5 0.5 v 105
+  note 36 57 1 v 115
+  note 34 58 1 v 110
+  note 36 59 1 v 120
+  note 31 60 1 v 110
+  note 33 61 1 v 100
+  note 34 62 1 v 115
+  note 36 63 1 v 127
+
+track Lead id lead gen gameBoyDmg layer 1 * 16
+  gen type pulse duty 50 env_mode constant vol 12
+  gen arp_rate 8 arp_semis 7
+  gen vib_rate 4 vib_amt 10
+  # enters with sparse calls, then denser
+  note 67 0 0.5 v 100
+  note 65 2 0.5 v 90
+  note 67 4 0.75 v 110
+  note 70 5 0.25 v 95
+  note 67 6 1 v 105
+  note 63 8 0.5 v 100
+  note 65 9 0.5 v 105
+  note 67 10 0.5 v 115
+  note 70 11 0.5 v 110
+  note 72 12 1 v 120
+  note 70 14 0.5 v 100
+  note 67 15 1 v 110
+  # B — more motion
+  note 65 16 0.25 v 115
+  note 67 16.5 0.25 v 110
+  note 70 17 0.5 v 120
+  note 67 18 0.25 v 105
+  note 65 18.5 0.25 v 100
+  note 63 19 0.5 v 110
+  note 67 20 0.25 v 120
+  note 70 20.5 0.25 v 115
+  note 72 21 0.5 v 125
+  note 70 22 0.25 v 110
+  note 67 22.5 0.25 v 105
+  note 65 23 0.5 v 115
+  note 63 24 0.5 v 110
+  note 65 25 0.5 v 115
+  note 67 26 0.5 v 120
+  note 70 27 0.5 v 125
+  note 72 28 1 v 127
+  note 70 30 0.5 v 110
+  note 67 31 1 v 115
+  # C — peak phrases
+  note 67 32 0.25 v 127
+  note 70 32.5 0.25 v 120
+  note 72 33 0.25 v 125
+  note 75 33.5 0.25 v 127
+  note 72 34 0.5 v 120
+  note 70 35 0.5 v 115
+  note 67 36 0.25 v 125
+  note 65 36.5 0.25 v 115
+  note 67 37 0.25 v 120
+  note 70 37.5 0.25 v 125
+  note 72 38 0.5 v 127
+  note 75 39 0.5 v 120
+  note 77 40 0.5 v 127
+  note 75 41 0.5 v 120
+  note 72 42 0.5 v 125
+  note 70 43 0.5 v 115
+  note 67 44 0.25 v 120
+  note 70 44.5 0.25 v 125
+  note 72 45 0.5 v 127
+  note 70 46 0.5 v 115
+  note 67 47 1 v 120
+  # D
+  note 72 48 0.5 v 125
+  note 70 49 0.5 v 115
+  note 67 50 0.5 v 120
+  note 65 51 0.5 v 110
+  note 63 52 1 v 115
+  note 65 54 0.5 v 110
+  note 67 55 0.5 v 120
+  note 70 56 1 v 125
+  note 67 58 1 v 115
+  note 65 60 1 v 110
+  note 67 62 2 v 120
+
+track Hats id hats gen gameBoyDmg layer 2 * 16
+  gen type noise noise_mode short vol 6 env_mode step env_step 2
+  # sparse then denser
+  note 60 0 0.1 v 70
+  note 60 1 0.1 v 55
+  note 60 2 0.1 v 70
+  note 60 3 0.1 v 55
+  note 60 4 0.08 v 75
+  note 60 4.5 0.08 v 50
+  note 60 5 0.08 v 70
+  note 60 5.5 0.08 v 50
+  note 60 6 0.08 v 75
+  note 60 7 0.08 v 60
+  note 60 8 0.08 v 80
+  note 60 8.5 0.08 v 55
+  note 60 9 0.08 v 70
+  note 60 9.5 0.08 v 55
+  note 60 10 0.08 v 80
+  note 60 11 0.08 v 65
+  note 60 12 0.08 v 85
+  note 60 12.5 0.08 v 60
+  note 60 13 0.08 v 75
+  note 60 13.5 0.08 v 60
+  note 60 14 0.08 v 85
+  note 60 15 0.08 v 70
+  # B 8ths
+  note 60 16 0.08 v 90
+  note 60 16.5 0.08 v 60
+  note 60 17 0.08 v 80
+  note 60 17.5 0.08 v 60
+  note 60 18 0.08 v 90
+  note 60 18.5 0.08 v 65
+  note 60 19 0.08 v 80
+  note 60 19.5 0.08 v 65
+  note 60 20 0.08 v 95
+  note 60 20.5 0.08 v 65
+  note 60 21 0.08 v 85
+  note 60 21.5 0.08 v 65
+  note 60 22 0.08 v 95
+  note 60 22.5 0.08 v 70
+  note 60 23 0.08 v 85
+  note 60 23.5 0.08 v 70
+  note 60 24 0.08 v 100
+  note 60 24.5 0.08 v 70
+  note 60 25 0.08 v 90
+  note 60 25.5 0.08 v 70
+  note 60 26 0.08 v 100
+  note 60 26.5 0.08 v 75
+  note 60 27 0.08 v 90
+  note 60 27.5 0.08 v 75
+  note 60 28 0.08 v 105
+  note 60 28.5 0.08 v 75
+  note 60 29 0.08 v 95
+  note 60 29.5 0.08 v 75
+  note 60 30 0.08 v 105
+  note 60 30.5 0.08 v 80
+  note 60 31 0.08 v 95
+  note 60 31.5 0.08 v 80
+  # C 16ths-ish
+  note 60 32 0.06 v 110
+  note 60 32.25 0.06 v 70
+  note 60 32.5 0.06 v 95
+  note 60 32.75 0.06 v 70
+  note 60 33 0.06 v 110
+  note 60 33.25 0.06 v 70
+  note 60 33.5 0.06 v 95
+  note 60 33.75 0.06 v 70
+  note 60 34 0.06 v 115
+  note 60 34.25 0.06 v 75
+  note 60 34.5 0.06 v 100
+  note 60 34.75 0.06 v 75
+  note 60 35 0.06 v 115
+  note 60 35.5 0.06 v 100
+  note 60 36 0.06 v 120
+  note 60 36.25 0.06 v 80
+  note 60 36.5 0.06 v 105
+  note 60 36.75 0.06 v 80
+  note 60 37 0.06 v 120
+  note 60 37.5 0.06 v 105
+  note 60 38 0.06 v 120
+  note 60 38.25 0.06 v 85
+  note 60 38.5 0.06 v 110
+  note 60 38.75 0.06 v 85
+  note 60 39 0.06 v 120
+  note 60 39.5 0.06 v 110
+  note 60 40 0.06 v 127
+  note 60 40.25 0.06 v 90
+  note 60 40.5 0.06 v 115
+  note 60 40.75 0.06 v 90
+  note 60 41 0.06 v 127
+  note 60 41.5 0.06 v 115
+  note 60 42 0.06 v 127
+  note 60 42.25 0.06 v 95
+  note 60 42.5 0.06 v 120
+  note 60 42.75 0.06 v 95
+  note 60 43 0.06 v 127
+  note 60 43.5 0.06 v 120
+  note 60 44 0.06 v 127
+  note 60 44.5 0.06 v 110
+  note 60 45 0.06 v 120
+  note 60 45.5 0.06 v 110
+  note 60 46 0.06 v 127
+  note 60 46.5 0.06 v 115
+  note 60 47 0.06 v 120
+  note 60 47.5 0.06 v 115
+  # D settle to 8ths
+  note 60 48 0.08 v 110
+  note 60 48.5 0.08 v 80
+  note 60 49 0.08 v 100
+  note 60 49.5 0.08 v 80
+  note 60 50 0.08 v 110
+  note 60 51 0.08 v 95
+  note 60 52 0.08 v 105
+  note 60 52.5 0.08 v 75
+  note 60 53 0.08 v 95
+  note 60 53.5 0.08 v 75
+  note 60 54 0.08 v 105
+  note 60 55 0.08 v 90
+  note 60 56 0.08 v 100
+  note 60 57 0.08 v 85
+  note 60 58 0.08 v 100
+  note 60 59 0.08 v 85
+  note 60 60 0.08 v 95
+  note 60 61 0.08 v 80
+  note 60 62 0.08 v 95
+  note 60 63 0.08 v 90
+
+track Kick id kick gen gbaDirectSound layer 2 * 16
+  gen waveform pulse duty 50 vol 14 bitcrush true pitch_drop -12 pitch_dec 0.06
+  adsr a 0 d 0.1 s 0 r 0.03
+  note 34 0 0.12 v 120
+  note 34 2 0.12 v 110
+  note 34 4 0.12 v 120
+  note 34 6 0.12 v 110
+  note 34 8 0.12 v 125
+  note 34 9.5 0.1 v 90
+  note 34 10 0.12 v 115
+  note 34 12 0.12 v 125
+  note 34 14 0.12 v 115
+  note 34 16 0.12 v 127
+  note 34 17 0.1 v 85
+  note 34 18 0.12 v 120
+  note 34 20 0.12 v 127
+  note 34 21.5 0.1 v 90
+  note 34 22 0.12 v 120
+  note 34 24 0.12 v 127
+  note 34 25 0.1 v 90
+  note 34 26 0.12 v 125
+  note 34 27.5 0.1 v 95
+  note 34 28 0.12 v 127
+  note 34 30 0.12 v 120
+  note 34 32 0.12 v 127
+  note 34 32.5 0.1 v 95
+  note 34 33 0.12 v 110
+  note 34 34 0.12 v 127
+  note 34 35 0.1 v 100
+  note 34 36 0.12 v 127
+  note 34 36.5 0.1 v 100
+  note 34 37 0.12 v 115
+  note 34 38 0.12 v 127
+  note 34 39 0.1 v 105
+  note 34 40 0.12 v 127
+  note 34 40.5 0.1 v 105
+  note 34 41 0.12 v 120
+  note 34 42 0.12 v 127
+  note 34 43 0.1 v 110
+  note 34 44 0.12 v 127
+  note 34 45 0.12 v 120
+  note 34 46 0.12 v 127
+  note 34 47 0.12 v 115
+  note 34 48 0.12 v 127
+  note 34 50 0.12 v 120
+  note 34 52 0.12 v 125
+  note 34 54 0.12 v 115
+  note 34 56 0.12 v 127
+  note 34 58 0.12 v 120
+  note 34 60 0.12 v 125
+  note 34 62 0.12 v 120
+  note 34 63 0.12 v 127
+
+track Stab id stab gen gbaDirectSound layer 3 * 16
+  gen waveform sawtooth vol 11 bitcrush true
+  adsr a 0 d 0.08 s 0 r 0.05
+  note 48 8 0.15 v 100
+  note 48 12 0.15 v 110
+  note 48 15 0.2 v 120
+  note 46 20 0.15 v 115
+  note 48 24 0.15 v 120
+  note 51 27 0.15 v 125
+  note 48 28 0.2 v 127
+  note 48 32 0.12 v 127
+  note 48 33 0.12 v 110
+  note 51 34 0.12 v 125
+  note 48 35 0.12 v 115
+  note 53 36 0.15 v 127
+  note 51 37 0.12 v 120
+  note 48 38 0.12 v 125
+  note 46 39 0.15 v 115
+  note 48 40 0.12 v 127
+  note 51 41 0.12 v 120
+  note 53 42 0.15 v 127
+  note 55 43 0.15 v 120
+  note 53 44 0.12 v 125
+  note 51 45 0.12 v 115
+  note 48 46 0.15 v 127
+  note 46 47 0.2 v 120
+  note 48 48 0.2 v 127
+  note 51 52 0.15 v 120
+  note 48 56 0.2 v 125
+  note 46 60 0.15 v 115
+  note 48 62 0.25 v 127

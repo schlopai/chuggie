@@ -1,0 +1,105 @@
+// scene_hooks.tish — scene-load bookkeeping shared by engine / ui / dialog.
+//
+// Kept tiny on purpose: packages/engine used to `import` uiResetPool / dialogReset from
+// `./ui` and `./dialog`, and native merge pulls WHOLE modules. That dragged ~8k lines of
+// ui.tish Rust into every engine game even when they only use
+// cargo:tish_agb dialogue_show. Engine imports THIS file instead; ui/dialog import the
+// shared state and keep their reset exports as thin wrappers for existing call sites.
+
+export let POOL = { sprites: [], n: 0, used: 0 }
+export let PTRS = { list: [] }
+// Choice-cursor handle for packages/dialog (null | makePointer state).
+export let DIALOG_CPTR = { v: null }
+
+export function uiResetPool() {
+  POOL.sprites = []
+  POOL.used = 0
+}
+
+export function uiResetPointers() {
+  let n = 0
+  while (n < PTRS.list.length) {
+    PTRS.list[n].sp = 0 - 1
+    n = n + 1
+  }
+}
+
+export function dialogReset() {
+  // Deliberately does NOT drop the cursor object any more — only its sprite needed invalidating, and
+  // `uiResetPointers` above already did that (every makePointer state is registered in PTRS).
+  //
+  // Nulling it here leaked: `ensureChoiceCursor` would build a NEW makePointer on the next choice
+  // box, and makePointer PUSHES into PTRS. So a warping game gained one dead registry entry per
+  // scene-load-plus-dialog, forever — each holding a stale handle, and each walked by
+  // uiResetPointers on every later load. Reusing the object costs nothing: it re-takes its sprite
+  // lazily on the next paint.
+}
+
+// Extra invalidations to run after `sprite_clear` / `loadScene`.
+//
+// Any component that caches a RAW sprite handle across screens has to hand it back here, because
+// `sprite_clear` does not merely kill those handles — it empties the arena AND restarts handle
+// numbering, so a stale handle is immediately reissued to whatever the next scene spawns first. The
+// component then quietly drives that entity's sprite: moving it, reframing it, hiding it. It has
+// already happened twice (the shop's cursor, the party menu's icons) and it does not look like a
+// handle bug from the outside, so the registration is the fix, not vigilance.
+//
+// Registered here rather than imported by `packages/engine` on purpose: native merge pulls WHOLE
+// modules, and engine must not drag ui/dialog/party into every game that only wants entities.
+export let RESETS = { list: [] }
+
+export function onSceneReset(fn) {
+  RESETS.list.push(fn)
+}
+
+// What each component is currently HOLDING, for `packages/memdebug`.
+//
+// Registered the same way as the resets, and for the same reason: the debugger must be able to ask
+// every menu what it retains without importing any of them (native merge pulls whole modules, and a
+// game that only spawns entities must not link the shop). A component registers a function that
+// returns one short line; nothing is called unless a game asks for a snapshot.
+export let REPORTS = { list: [] }
+
+export function onMemReport(fn) {
+  REPORTS.list.push(fn)
+}
+
+// Automatic tracing of every screen boundary. OFF by default and free when off: `memMark` is one
+// struct-field compare, so the marks can live permanently in the shared components.
+//
+// The point is coverage. A leak is only visible if you happened to instrument the screen that leaks,
+// and by hand you instrument the screen you already suspect — which is never the one. With every
+// scene load and every menu open/close marked at the source, one call (`memTrace()`) turns the whole
+// session into a log and the growing number names itself.
+let TRACE = { on: 0, sink: null }   // `sink`, not `fn` — `fn` is a reserved word and cannot be a key
+
+// memTraceOn(fn) — fn(tag) is called at every marked boundary. `packages/memdebug`'s memTrace()
+// installs memSnapshot here; a game can install its own.
+export function memTraceOn(sink) {
+  TRACE.on = 1
+  TRACE.sink = sink
+}
+
+export function memTraceOff() {
+  TRACE.on = 0
+  TRACE.sink = null
+}
+
+// memMark(tag) — a screen boundary. Called BY the shared components; games don't need to.
+export function memMark(tag) {
+  if (TRACE.on === 0) { return }
+  if (TRACE.sink === null) { return }
+  TRACE.sink(tag)
+}
+
+// After sprite_clear / loadScene: drop icon-pool + menu-cursor + dialog-cursor handles.
+export function runSceneHooks() {
+  uiResetPool()
+  uiResetPointers()
+  dialogReset()
+  let i = 0
+  while (i < RESETS.list.length) {
+    RESETS.list[i]()
+    i = i + 1
+  }
+}

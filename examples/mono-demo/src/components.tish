@@ -1,0 +1,12 @@
+// Components are plain object literals. Each lifecycle hook takes ONE context object
+// and destructures only what it needs — `({ this })`, `({ me, other })`, `({ dt })`, ...
+// `mount()` registers each export under its name.
+import { input_x, input_y } from 'cargo:tish_agb'
+
+export const Player = {
+  update: ({ this }) => { this.setVel(input_x() * 1.5, input_y() * 1.5) }
+}
+
+export const Coin = {
+  onCollide: ({ this }) => { this.despawn() }
+}

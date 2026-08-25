@@ -1,0 +1,15 @@
+{
+ "columns": 24,
+ "image": "../Backgrounds/Tilesets/TilesetTowers.png",
+ "imagewidth": 384,
+ "imageheight": 96,
+ "margin": 0,
+ "spacing": 0,
+ "name": "TilesetTowers",
+ "tilecount": 144,
+ "tiledversion": "1.11.0",
+ "tilewidth": 16,
+ "tileheight": 16,
+ "type": "tileset",
+ "version": "1.10"
+}

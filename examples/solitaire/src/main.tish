@@ -1,0 +1,1175 @@
+// solitaire — Klondike, drawn entirely from `ui_rect` and `ui_text`.
+//
+// WHY THERE IS NO ART. The obvious build is a 52-frame sprite sheet. It does not survive contact
+// with the hardware: a Klondike table shows twenty-odd cards at once, which is twenty-odd OAM
+// entries and their tile VRAM, on top of a layout that has to fan piles down the whole screen. And
+// a card at this scale is a white rectangle with a rim and two glyphs — the sheet would be 52
+// near-identical rectangles. So every card here is `ui_rect` + `ui_text` on the BACKGROUND text
+// canvas: no OAM, no sprite VRAM, no palette banks, and the sheet that would have to be authored,
+// regenerated and kept in sync simply does not exist. The sibling card-gba repo reached the same
+// conclusion for the same reason and ships three card games with zero card assets.
+//
+// ── THE SCREEN IS COLD, AND THE REPAINT IS PER PILE ────────────────────────────────────────────
+//
+// Nothing here animates. The table is identical between one keypress and the next, so the first
+// build gated a WHOLE-TABLE repaint on a signature compare. That is the right gate and the wrong
+// unit: a full table is ~150 `ui_text`/`ui_rect` calls and it measured **~20 frames** — a third of
+// a second of lag on every cursor press, and the attract player ran at 9fps.
+//
+// The symptom that led here is worth recording, because it looks like a rendering bug and is not.
+// A screenshot at frame 60 showed the top row drawn and the ENTIRE TABLEAU missing. Nothing had
+// failed: the repaint was still in flight. mGBA renders scanlines continuously, so a capture taken
+// during a paint that spans twenty frames shows however much of the canvas has been written so far.
+// The first theory — that `ui_clear_rect` was exhausting the dynamic-tile table — was wrong, and
+// the source says so out loud: "Reuse — never allocate here."
+//
+// So the damage gate is per pile. Each of the thirteen piles carries its own signature, covering
+// its cards, their face-up flags, and whether the cursor or the selection is on it. A repaint
+// clears that pile's tile column with `ui_clear_rect` and redraws only it. A cursor move touches
+// two piles instead of thirteen, and `ui_begin` — which throws the whole canvas away — is reserved
+// for a new deal.
+//
+// Three things make that possible:
+//
+//   1. A SIGNATURE COMPARE, not a dirty flag. A `dirty = 1` sprinkled at mutation sites gets
+//      written in seven places and read in none; a signature is derived from the state it
+//      summarises and cannot disagree with it.
+//   2. PILES ARE TILE-ALIGNED. A pile sits at x ≡ 1 (mod 8) and is 30 wide, so the card, its 1px
+//      cursor outline and nothing else occupy exactly four 8x8 tiles. `ui_clear_rect` snaps OUT to
+//      whole tiles, so without that alignment clearing one column would eat the neighbour's edge.
+//      The pitch is 32 — not the 34 that packs seven columns most tightly — for this reason alone.
+//   3. `audio_defer` around the repaint. Every `ui_*` native opens by catching the mixer up to wall
+//      clock, which is right for a menu drawing three things and ruinous for a repaint made of
+//      hundreds. Deferring pays that cost once instead of per call.
+//
+// A card's rank and suit are ONE `ui_text`, from a 52-entry label table built at boot. Two calls —
+// "A" then "S" — is the obvious way to write it and doubles the cost of the most expensive native
+// on the screen; `ui_text` is priced per CALL, not per glyph.
+//
+// So an idle frame issues no `ui_*` calls at all.
+//
+// ── ONLY THE TOP NINE PIXELS OF A COVERED CARD EXIST ───────────────────────────────────────────
+//
+// In a fanned pile every card but the last is covered. Drawing a full face and then painting over
+// 3/4 of it is wasted calls, so a covered card is a body, a rim and the CORNER INDEX — rank and
+// suit letter — and nothing else. Full faces are drawn only for the thirteen cards that are the
+// top of a pile.
+//
+// The first build drew that index in `3x3-mono.ttf@4`, on the reasoning that a 5px sliver wants a
+// 3px face. It is unreadable at that size: every digit came out as the same three-pixel blob, and a
+// card you cannot identify is not a card. One font, tinypixel@7, for everything — the glyph clips
+// against the card below it when the fan is compressed, which is what a real fanned pile looks like
+// anyway.
+//
+// ── THE FAN STEP IS COMPUTED, NOT A CONSTANT ───────────────────────────────────────────────────
+//
+// A worst-case tableau column is 6 face-down plus 13 face-up. At a fixed 9px step that column is
+// 148px tall in 119px of room, and the card you need to see — the bottom one — is the one off the
+// bottom of the screen. `upStep` solves the step per column so the last card always lands fully on
+// screen, floored at 2px. It is the one piece of layout that cannot be a constant.
+//
+// CONTROLS  Left/Right pick a pile · Up/Down walk the grab depth in a fan (Up at the top of the run
+//           jumps to the row above) · A draw / pick up / drop · B cancel · R send the top card to a
+//           foundation · Select auto-finish everything that can go up · L undo · Start new deal.
+//
+// ATTRACT. Touch nothing and it deals and plays itself to a win, then deals again. Touch anything
+// and it never plays itself again. That is what lets a headless run cover whole games with no key
+// schedule — the only practical way to prove a rules engine.
+
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  backdrop, ui_begin, ui_text, ui_text_box, ui_rect, ui_clear_rect, ui_reserve_tiles, frame,
+  audio_defer, audio_pump, keys_edge, log, frame_stats
+} from 'cargo:tish_agb'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+import { chipBlip, chipPluck, chipAccept, chipCancel, chipChime } from '../../../packages/chipsfx'
+
+// ── deck encoding ───────────────────────────────────────────────────────────────────────────────
+// id 0..51 · rank = id % 13 (0=A .. 12=K) · suit = (id / 13) | 0 · 0 spade 1 heart 2 diamond 3 club.
+// Hearts and diamonds are the red pair, which is `suit === 1 || suit === 2` — the one place the
+// suit order matters, and the reason it is not alphabetical.
+
+// Deliberately UNTYPED. Value::String is an ArcStr, so an index read is a refcount bump; a
+// `: string[]` annotation lowers to Vec<String> and deep-copies on every read. Same reason the
+// number table below is untyped.
+let RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+let SUITS = ["S", "H", "D", "C"]
+
+// One string per card, built once at boot. `ui_text` costs the same whether it draws one glyph or
+// six, so "10D" as a single call is half the price of "10" then "D" — and this table is the whole
+// text budget of the screen. Untyped for the same reason as RANKS: an ArcStr index read is a
+// refcount bump.
+let LABEL = []
+
+let NUMS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "96", "97", "98", "99"]
+
+// `"" + n` renders NOTHING on device — an empty prefix produces a correctly-sized blank. Every
+// number on screen goes through here, and no branch below ever concatenates onto an empty string.
+function pad2(v: i32) {
+  if (v < 10) { return "0" + NUMS[v] }
+  return NUMS[v]
+}
+
+function numStr(n: i32) {
+  if (n >= 0 && n < 100) { return NUMS[n] }
+  if (n < 0) { return "-" + numStr(0 - n) }
+  let lo: i32 = n % 100
+  if (n < 10000) { return NUMS[(n / 100) | 0] + pad2(lo) }
+  return NUMS[(n / 10000) | 0] + pad2(((n / 100) | 0) % 100) + pad2(lo)
+}
+
+// ── piles ───────────────────────────────────────────────────────────────────────────────────────
+// 0 stock · 1 waste · 2..5 foundations (spade heart diamond club) · 6..12 tableau 1..7.
+//
+// One flat array with a POWER-OF-TWO stride, indexed `(p << 5) | s`. `examples/bench-grid` measured
+// `arr[(a << 5) + b]` at 20,318 ticks/1000 against 1,494 for `|`: `+` is not a ToInt32 context so
+// the chain leaves the integer domain, while the shift has already cleared the low bits and `|` is
+// exactly equivalent. 32 slots is the smallest power of two that holds the longest possible pile
+// (19 in a tableau, 24 in the waste).
+let STRIDE: i32 = 32
+let NPILE: i32 = 13
+let TAB0: i32 = 6
+let FND0: i32 = 2
+
+let P: i32[] = []      // card id per slot, -1 empty
+let UP: i32[] = []     // face-up flag per slot
+let PN: i32[] = []     // cards per pile
+let DECK: i32[] = []   // shuffle scratch
+
+// The undo journal: 8-word records (power of two again), depth 64.
+//   0 from · 1 to · 2 count · 3 flipped-source-top · 4 score delta
+let UNDO: i32[] = []
+let UDEPTH: i32 = 64
+
+// ── layout ──────────────────────────────────────────────────────────────────────────────────────
+// PITCH is 32 and the first column starts at 9 so that every pile — card plus its 1px outline —
+// lands on exactly four 8x8 tiles and no pile shares a tile with its neighbour. That is what makes
+// a per-pile `ui_clear_rect` safe. 7 columns at 32 span 8..231, with an 8px margin either side.
+let CARD_W: i32 = 30
+let CARD_H: i32 = 34
+let PITCH: i32 = 32
+let COL0: i32 = 9
+let TOP_Y: i32 = 2
+let TAB_Y: i32 = 40
+let AVAIL: i32 = 119    // 160 - TAB_Y - 1
+let DSTEP: i32 = 3      // face-down fan step: fixed, at most 6 of them
+let USTEP: i32 = 9      // face-up fan step: the NOMINAL value, shrunk per column by upStep()
+let WFAN: i32 = 8       // waste fan step
+let HUD_X: i32 = 88     // the 16px gap the waste fan and the foundations leave, tiles 11-12
+
+// ── palette — HARD CEILING FIFTEEN ──────────────────────────────────────────────────────────────
+// The UI canvas shares ONE background palette bank (UI_PAL_SLOT = 15 in crates/tish-agb). Each
+// distinct colour takes an index 1..15; the sixteenth and every colour after it paint as whatever
+// was registered fifteenth, permanently and silently. Twelve are used here. Anything added has to
+// displace something, and `ui_mem_report()` reports the overflow count if it ever does.
+let FELT: i32 = 0x1A5C34
+let WHITE: i32 = 0xF0ECE0
+let RIM: i32 = 0x2A2A32
+let BACK_A: i32 = 0x2E4C9A
+let BACK_B: i32 = 0x1E3470
+let RED: i32 = 0xC02020
+let BLACK: i32 = 0x202028
+let DIM: i32 = 0x2A7A4A
+let CURSOR: i32 = 0xFFE06A
+let SELCOL: i32 = 0xFF9020
+let HUD: i32 = 0xC8D0C0
+let WINCOL: i32 = 0xFFD84A
+
+// ── game state ──────────────────────────────────────────────────────────────────────────────────
+// A single typed struct. `let g: Game = G` would COPY it and every write would land on the copy —
+// all mutation goes through `G.field` directly.
+interface Game {
+  cur: i32,      // cursor pile 0..12
+  depth: i32,    // grab depth into the current tableau's face-up run (0 = just the top card)
+  sel: i32,      // selected source pile, -1 for none
+  selN: i32,     // cards held
+  score: i32,
+  moves: i32,
+  passes: i32,   // stock recycles this deal
+  shuf: i32,     // non-productive attract moves spent this deal
+  won: i32,
+  human: i32,    // 1 once anything is pressed; attract never runs again
+  dbg: i32,
+  t: i32,
+  wait: i32,
+  deals: i32,
+  wins: i32
+}
+let G: Game = {
+  cur: 0, depth: 0, sel: -1, selN: 0, score: 0, moves: 0, passes: 0, shuf: 0,
+  won: 0, human: 0, dbg: 0, t: 0, wait: 0, deals: 0, wins: 0
+}
+
+// Counters a closure-free module still cannot hold in a bare `let`: a mutable module-level scalar
+// lowers to a boxed VmRef. 0 = undo count, 1 = last painted HUD value, 2 = force-repaint flag.
+let CELL: i32[] = []
+
+// One signature per pile — the per-pile damage gate. -1 forces a first paint.
+let PSIG: i32[] = []
+
+// Where the previous paint of each pile ended, so a shrinking pile's tail can be erased without
+// clearing the part that is about to be drawn over anyway.
+let PBOT: i32[] = []
+let PRGT: i32[] = []
+
+let DRAW: i32 = 3      // cards turned per stock draw. Set to 1 for draw-one Klondike.
+let MAXPASS: i32 = 3   // stock recycles allowed before the deal is called dead (attract only)
+let SHUF_MAX: i32 = 12 // attract-only: non-productive moves per deal, the bound on its cycles
+
+// ── card queries ────────────────────────────────────────────────────────────────────────────────
+function rankOf(c: i32): i32 { return c % 13 }
+function suitOf(c: i32): i32 { return (c / 13) | 0 }
+function isRed(c: i32): i32 {
+  let s: i32 = suitOf(c)
+  if (s === 1 || s === 2) { return 1 }
+  return 0
+}
+function topOf(p: i32): i32 {
+  let n: i32 = PN[p]
+  if (n <= 0) { return -1 }
+  return P[(p << 5) | (n - 1)]
+}
+function topUp(p: i32): i32 {
+  let n: i32 = PN[p]
+  if (n <= 0) { return 0 }
+  return UP[(p << 5) | (n - 1)]
+}
+
+// ── setup ───────────────────────────────────────────────────────────────────────────────────────
+function initArrays() {
+  let i: i32 = 0
+  while (i < NPILE * STRIDE) { P.push(-1); UP.push(0); i = i + 1 }
+  i = 0
+  while (i < NPILE) { PN.push(0); i = i + 1 }
+  i = 0
+  while (i < 52) { DECK.push(i); i = i + 1 }
+  i = 0
+  while (i < UDEPTH * 8) { UNDO.push(0); i = i + 1 }
+  i = 0
+  while (i < 52) { LABEL.push(RANKS[i % 13] + SUITS[(i / 13) | 0]); i = i + 1 }
+  i = 0
+  while (i < NPILE) { PSIG.push(-1); PBOT.push(0); PRGT.push(0); i = i + 1 }
+  CELL.push(0); CELL.push(0); CELL.push(1)
+}
+
+function push(p: i32, card: i32, faceUp: i32) {
+  let n: i32 = PN[p]
+  P[(p << 5) | n] = card
+  UP[(p << 5) | n] = faceUp
+  PN[p] = n + 1
+}
+
+function deal() {
+  let i: i32 = 0
+  while (i < NPILE) { PN[i] = 0; i = i + 1 }
+  i = 0
+  while (i < 52) { DECK[i] = i; i = i + 1 }
+
+  // Fisher-Yates, downward — the upward variant with `rngBelow(0, 52)` is not a uniform shuffle.
+  i = 51
+  while (i > 0) {
+    let j: i32 = rngBelow(0, i + 1)
+    let t: i32 = DECK[i]
+    DECK[i] = DECK[j]
+    DECK[j] = t
+    i = i - 1
+  }
+
+  let d: i32 = 0
+  let col: i32 = 0
+  while (col < 7) {
+    let k: i32 = 0
+    while (k <= col) {
+      let faceUp: i32 = 0
+      if (k === col) { faceUp = 1 }
+      push(TAB0 + col, DECK[d], faceUp)
+      d = d + 1
+      k = k + 1
+    }
+    col = col + 1
+  }
+  while (d < 52) { push(0, DECK[d], 0); d = d + 1 }
+
+  G.cur = 0
+  G.depth = 0
+  G.sel = -1
+  G.selN = 0
+  G.score = 0
+  G.moves = 0
+  G.passes = 0
+  G.shuf = 0
+  G.won = 0
+  G.wait = 0
+  G.deals = G.deals + 1
+  CELL[0] = 0
+  CELL[2] = 1
+  log("DEAL " + G.deals + " moves " + G.moves)
+}
+
+// ── rules ───────────────────────────────────────────────────────────────────────────────────────
+// `card` is the card that would land on `dst`; `n` is how many travel with it. Foundations take one
+// card at a time, tableaux take a run.
+function canDrop(dst: i32, card: i32, n: i32): i32 {
+  if (card < 0) { return 0 }
+  if (dst < FND0) { return 0 }
+  if (dst < TAB0) {
+    if (n !== 1) { return 0 }
+    if (suitOf(card) !== dst - FND0) { return 0 }
+    let t: i32 = topOf(dst)
+    if (t < 0) { if (rankOf(card) === 0) { return 1 } return 0 }
+    if (rankOf(card) === rankOf(t) + 1) { return 1 }
+    return 0
+  }
+  let tt: i32 = topOf(dst)
+  if (tt < 0) {
+    if (rankOf(card) === 12) { return 1 }   // an empty column takes a King and nothing else
+    return 0
+  }
+  if (topUp(dst) === 0) { return 0 }
+  if (rankOf(card) !== rankOf(tt) - 1) { return 0 }
+  if (isRed(card) === isRed(tt)) { return 0 }
+  return 1
+}
+
+// How many cards a pick-up at `depth` would take, 0 if that pick-up is illegal.
+function grabCount(p: i32, depth: i32): i32 {
+  let n: i32 = PN[p]
+  if (n <= 0) { return 0 }
+  if (p === 0) { return 0 }
+  if (p < TAB0) { return 1 }               // waste and foundations give up their top card only
+  if (depth + 1 > n) { return 0 }
+  let start: i32 = n - 1 - depth
+  if (UP[(p << 5) | start] === 0) { return 0 }
+  return depth + 1
+}
+
+// The longest legal grab in a tableau: its whole face-up run.
+function faceUpRun(p: i32): i32 {
+  let n: i32 = PN[p]
+  let k: i32 = 0
+  while (k < n) {
+    if (UP[(p << 5) | (n - 1 - k)] === 0) { return k }
+    k = k + 1
+  }
+  return n
+}
+
+function scoreFor(src: i32, dst: i32): i32 {
+  if (dst >= FND0 && dst < TAB0) { return 10 }
+  if (src >= FND0 && src < TAB0 && dst >= TAB0) { return 0 - 15 }
+  if (src === 1 && dst >= TAB0) { return 5 }
+  return 0
+}
+
+function pushUndo(from: i32, to: i32, count: i32, flip: i32, delta: i32) {
+  let c: i32 = CELL[0]
+  if (c >= UDEPTH) {
+    // Drop the oldest record rather than growing without bound. 64 moves of undo is deep enough
+    // that no human reaches the end of it, and a bounded journal cannot leak.
+    let i: i32 = 0
+    while (i < (UDEPTH - 1) * 8) { UNDO[i] = UNDO[i + 8]; i = i + 1 }
+    c = UDEPTH - 1
+  }
+  let b: i32 = c << 3
+  UNDO[b] = from
+  UNDO[b | 1] = to
+  UNDO[b | 2] = count
+  UNDO[b | 3] = flip
+  UNDO[b | 4] = delta
+  CELL[0] = c + 1
+}
+
+// The single mutation point for every move in the game, including the stock draw and the recycle.
+// Everything else — input, auto-finish, the attract player, undo — goes through here, so there is
+// exactly one place that can get pile counts, face-up flags, the journal and the score wrong.
+function applyMove(src: i32, dst: i32, n: i32) {
+  let sn: i32 = PN[src]
+  let base: i32 = sn - n
+  let i: i32 = 0
+  while (i < n) {
+    let c: i32 = P[(src << 5) | (base + i)]
+    let up: i32 = 1
+    if (dst === 0) { up = 0 }           // only the recycle sends cards back face-down
+    push(dst, c, up)
+    i = i + 1
+  }
+  PN[src] = base
+
+  let flip: i32 = 0
+  if (src >= TAB0 && base > 0) {
+    if (UP[(src << 5) | (base - 1)] === 0) {
+      UP[(src << 5) | (base - 1)] = 1
+      flip = 1
+    }
+  }
+  let delta: i32 = scoreFor(src, dst)
+  if (flip === 1) { delta = delta + 5 }
+  G.score = G.score + delta
+  if (G.score < 0) { G.score = 0 }
+  G.moves = G.moves + 1
+  pushUndo(src, dst, n, flip, delta)
+}
+
+function reversePile(p: i32, n: i32) {
+  let i: i32 = 0
+  let j: i32 = n - 1
+  while (i < j) {
+    let t: i32 = P[(p << 5) | i]
+    P[(p << 5) | i] = P[(p << 5) | j]
+    P[(p << 5) | j] = t
+    i = i + 1
+    j = j - 1
+  }
+}
+
+function markLastUndo(v: i32) {
+  let c: i32 = CELL[0]
+  if (c > 0) { UNDO[((c - 1) << 3) | 3] = v }
+}
+
+function undo() {
+  let c: i32 = CELL[0]
+  if (c <= 0) { chipCancel(); return }
+  c = c - 1
+  let b: i32 = c << 3
+  let from: i32 = UNDO[b]
+  let to: i32 = UNDO[b | 1]
+  let n: i32 = UNDO[b | 2]
+  let flip: i32 = UNDO[b | 3]
+  let delta: i32 = UNDO[b | 4]
+
+  // Un-flip BEFORE moving the cards back: the card that got turned over is about to be covered
+  // again, and after the move it is no longer the top of the pile that can be found.
+  if (flip === 1) {
+    let sn: i32 = PN[from]
+    if (sn > 0) { UP[(from << 5) | (sn - 1)] = 0 }
+  }
+  let tn: i32 = PN[to]
+  let base: i32 = tn - n
+  let i: i32 = 0
+  while (i < n) {
+    let card: i32 = P[(to << 5) | (base + i)]
+    let up: i32 = 1
+    if (from === 0) { up = 0 }
+    push(from, card, up)
+    i = i + 1
+  }
+  PN[to] = base
+  if (flip === 2) { reversePile(from, PN[from]) }
+  G.score = G.score - delta
+  if (G.score < 0) { G.score = 0 }
+  G.moves = G.moves + 1
+  CELL[0] = c
+  G.sel = -1
+  G.selN = 0
+  chipBlip()
+}
+
+function drawStock() {
+  if (PN[0] > 0) {
+    let n: i32 = DRAW
+    if (n > PN[0]) { n = PN[0] }
+    applyMove(0, 1, n)
+    chipPluck()
+    return
+  }
+  if (PN[1] > 0) {
+    // Recycle. The waste is turned over as a BLOCK: its top card becomes the bottom of the stock,
+    // so the stock's slot order is the reverse of the waste's. applyMove copies in slot order, so
+    // the reversal is a separate step — and undo has to know to reverse it back, which is what the
+    // flip field is overloaded to 2 for. Without that, undoing a recycle silently reorders the deck
+    // and the same deal stops being the same deal.
+    let n: i32 = PN[1]
+    applyMove(1, 0, n)
+    reversePile(0, n)
+    markLastUndo(2)
+    G.passes = G.passes + 1
+    chipBlip()
+    return
+  }
+  chipCancel()
+}
+
+function checkWin(): i32 {
+  let f: i32 = FND0
+  while (f < TAB0) {
+    if (PN[f] !== 13) { return 0 }
+    f = f + 1
+  }
+  return 1
+}
+
+// One card to a foundation from anywhere it is legal. Returns 1 if it moved something.
+function autoOne(): i32 {
+  let srcs: i32 = 1
+  while (srcs < NPILE) {
+    if (srcs >= FND0 && srcs < TAB0) { srcs = TAB0 - 1 }   // never pull off a foundation
+    else {
+      let c: i32 = topOf(srcs)
+      if (c >= 0 && topUp(srcs) === 1) {
+        let f: i32 = FND0 + suitOf(c)
+        if (canDrop(f, c, 1) === 1) { applyMove(srcs, f, 1); return 1 }
+      }
+    }
+    srcs = srcs + 1
+  }
+  return 0
+}
+
+function autoFinish() {
+  let guard: i32 = 0
+  let did: i32 = 0
+  while (guard < 60) {
+    if (autoOne() === 0) { guard = 60 }
+    else { did = 1 }
+    guard = guard + 1
+  }
+  if (did === 1) { chipAccept() } else { chipCancel() }
+}
+
+// ── layout maths ────────────────────────────────────────────────────────────────────────────────
+function pileX(p: i32): i32 {
+  if (p === 0) { return COL0 }
+  if (p === 1) { return COL0 + PITCH }
+  if (p < TAB0) { return 105 + (p - FND0) * PITCH }
+  return COL0 + (p - TAB0) * PITCH
+}
+
+function pileY(p: i32): i32 {
+  if (p < TAB0) { return TOP_Y }
+  return TAB_Y
+}
+
+// The face-up fan step for one tableau column, solved so the LAST card lands fully on screen. This
+// is the piece that cannot be a constant: 6 down + 13 up at the nominal 9px is 148px of column in
+// 119px of room, and the card that falls off the bottom is the one the player needs to see.
+function upStep(p: i32): i32 {
+  let n: i32 = PN[p]
+  if (n < 2) { return USTEP }
+  let downs: i32 = 0
+  let i: i32 = 0
+  while (i < n) {
+    if (UP[(p << 5) | i] === 0) { downs = downs + 1 }
+    i = i + 1
+  }
+  let ups: i32 = n - downs
+  if (ups < 2) { return USTEP }
+  let room: i32 = AVAIL - CARD_H - downs * DSTEP
+  let max: i32 = (room / (ups - 1)) | 0
+  if (max >= USTEP) { return USTEP }
+  if (max < 2) { return 2 }
+  return max
+}
+
+function slotY(p: i32, k: i32): i32 {
+  if (p < TAB0) { return TOP_Y }
+  let us: i32 = upStep(p)
+  let y: i32 = TAB_Y
+  let i: i32 = 0
+  while (i < k) {
+    if (UP[(p << 5) | i] === 0) { y = y + DSTEP } else { y = y + us }
+    i = i + 1
+  }
+  return y
+}
+
+function slotX(p: i32, k: i32): i32 {
+  if (p === 1) {
+    // The waste shows its last DRAW cards fanned right; everything under them is a single stack.
+    let n: i32 = PN[1]
+    let first: i32 = n - DRAW
+    if (first < 0) { first = 0 }
+    if (k <= first) { return pileX(1) }
+    return pileX(1) + (k - first) * WFAN
+  }
+  return pileX(p)
+}
+
+// ── painting ────────────────────────────────────────────────────────────────────────────────────
+// Nothing here clears before it draws. Cards are opaque and a pile is drawn top-down, so redrawing
+// a pile covers its own previous state — the only thing that needs erasing is the TAIL a shrunken
+// pile leaves behind, and that gets erased with FELT rects, below the new content, after it.
+//
+// The first build cleared the pile's whole tile column with `ui_clear_rect` and then drew. Both
+// halves are visible to the player: a repaint is not instantaneous, the beam passes over the
+// cleared column before the cards land in it, and every selection and cursor move FLICKERED. An
+// opaque overdraw has no such window.
+
+// FELT rects, not `ui_clear_rect`: a clear snaps OUT to whole 8x8 tiles and would eat the bottom of
+// the card immediately above the tail. Chunked at 40px because `ui_rect` switches to a tile-snapped
+// shared-tile path above h=48 and stops being pixel-exact.
+function feltFill(x: i32, y: i32, w: i32, h: i32) {
+  let top: i32 = y
+  let left: i32 = h
+  while (left > 0) {
+    let seg: i32 = left
+    if (seg > 40) { seg = 40 }
+    ui_rect(x, top, w, seg, FELT, 1)
+    top = top + seg
+    left = left - seg
+  }
+}
+
+function cardBody(x: i32, y: i32, h: i32, fill: i32, rim: i32) {
+  ui_rect(x, y, CARD_W, h, fill, 1)
+  ui_rect(x + 1, y, CARD_W - 2, 1, rim, 1)
+  ui_rect(x, y + 1, 1, h - 1, rim, 1)
+  ui_rect(x + CARD_W - 1, y + 1, 1, h - 1, rim, 1)
+}
+
+// ── suit pips ───────────────────────────────────────────────────────────────────────────────────
+// Colour alone does not name a suit: it splits four into two pairs. The letters S/H/D/C the first
+// build used are worse than pips at every size, and pips cost four or five `ui_rect` calls — which
+// is affordable precisely because the repaint is per pile.
+//
+// Each shape is a stack of horizontal bars, widest where the silhouette is widest. Within a colour
+// only one distinction has to survive 5 pixels: heart's twin bumps against diamond's single point,
+// and spade's solid triangle against club's three separated lobes. That is what these bars are cut
+// to preserve.
+function pip5(x: i32, y: i32, suit: i32, col: i32) {
+  if (suit === 2) {                                    // diamond — a point at top and bottom
+    ui_rect(x + 2, y, 1, 1, col, 1)
+    ui_rect(x + 1, y + 1, 3, 1, col, 1)
+    ui_rect(x, y + 2, 5, 1, col, 1)
+    ui_rect(x + 1, y + 3, 3, 1, col, 1)
+    ui_rect(x + 2, y + 4, 1, 1, col, 1)
+    return
+  }
+  if (suit === 1) {                                    // heart — two bumps, then a taper
+    ui_rect(x, y, 2, 2, col, 1)
+    ui_rect(x + 3, y, 2, 2, col, 1)
+    ui_rect(x, y + 1, 5, 2, col, 1)
+    ui_rect(x + 1, y + 3, 3, 1, col, 1)
+    ui_rect(x + 2, y + 4, 1, 1, col, 1)
+    return
+  }
+  if (suit === 0) {                                    // spade — solid triangle over a stem
+    ui_rect(x + 2, y, 1, 1, col, 1)
+    ui_rect(x + 1, y + 1, 3, 1, col, 1)
+    ui_rect(x, y + 2, 5, 2, col, 1)
+    ui_rect(x + 2, y + 4, 1, 1, col, 1)
+    return
+  }
+  ui_rect(x + 1, y, 3, 2, col, 1)                      // club — three lobes with gaps, plus a stem
+  ui_rect(x, y + 2, 2, 2, col, 1)
+  ui_rect(x + 3, y + 2, 2, 2, col, 1)
+  ui_rect(x + 2, y + 2, 1, 3, col, 1)
+}
+
+function pip10(x: i32, y: i32, suit: i32, col: i32) {
+  if (suit === 2) {                                    // diamond
+    ui_rect(x + 4, y, 2, 1, col, 1)
+    ui_rect(x + 3, y + 1, 4, 1, col, 1)
+    ui_rect(x + 1, y + 2, 8, 2, col, 1)
+    ui_rect(x, y + 4, 10, 2, col, 1)
+    ui_rect(x + 1, y + 6, 8, 2, col, 1)
+    ui_rect(x + 3, y + 8, 4, 1, col, 1)
+    ui_rect(x + 4, y + 9, 2, 1, col, 1)
+    return
+  }
+  if (suit === 1) {
+    ui_rect(x, y, 4, 4, col, 1)
+    ui_rect(x + 6, y, 4, 4, col, 1)
+    ui_rect(x, y + 2, 10, 4, col, 1)
+    ui_rect(x + 2, y + 6, 6, 2, col, 1)
+    ui_rect(x + 4, y + 8, 2, 2, col, 1)
+    return
+  }
+  if (suit === 0) {                                    // spade — point, full width, waist, flared base
+    ui_rect(x + 4, y, 2, 1, col, 1)
+    ui_rect(x + 3, y + 1, 4, 1, col, 1)
+    ui_rect(x + 1, y + 2, 8, 2, col, 1)
+    ui_rect(x, y + 4, 10, 3, col, 1)
+    ui_rect(x + 4, y + 7, 2, 1, col, 1)
+    ui_rect(x + 2, y + 8, 6, 2, col, 1)
+    return
+  }
+  ui_rect(x + 3, y, 4, 4, col, 1)
+  ui_rect(x, y + 3, 4, 4, col, 1)
+  ui_rect(x + 6, y + 3, 4, 4, col, 1)
+  ui_rect(x + 4, y + 7, 2, 3, col, 1)
+}
+
+function inkOf(c: i32): i32 {
+  if (isRed(c) === 1) { return RED }
+  return BLACK
+}
+
+// The corner index — rank and pip — inside the 5-9px sliver that is all a covered card ever shows.
+// It sits at the card's own top-left, so the card below overdraws the part that is not visible.
+function drawIndex(x: i32, y: i32, c: i32) {
+  let ink: i32 = inkOf(c)
+  ui_text(body, x + 3, y + 2, RANKS[rankOf(c)], ink)
+  pip5(x + 22, y + 2, suitOf(c), ink)
+}
+
+function drawFace(x: i32, y: i32, c: i32, rim: i32) {
+  cardBody(x, y, CARD_H, WHITE, rim)
+  drawIndex(x, y, c)
+  let ink: i32 = inkOf(c)
+  ui_text(body, x + 5, y + 18, RANKS[rankOf(c)], ink)
+  pip10(x + 16, y + 17, suitOf(c), ink)
+}
+
+function drawSliver(x: i32, y: i32, h: i32, c: i32, rim: i32) {
+  cardBody(x, y, h, WHITE, rim)
+  drawIndex(x, y, c)
+}
+
+function drawBack(x: i32, y: i32, h: i32, rim: i32) {
+  cardBody(x, y, h, BACK_A, rim)
+  if (h > 10) {
+    ui_rect(x + 4, y + 5, CARD_W - 8, 3, BACK_B, 1)
+    if (h > 22) { ui_rect(x + 4, y + 15, CARD_W - 8, 3, BACK_B, 1) }
+    if (h > 30) { ui_rect(x + 4, y + 25, CARD_W - 8, 3, BACK_B, 1) }
+  }
+}
+
+function drawEmpty(p: i32, rim: i32) {
+  let x: i32 = pileX(p)
+  let y: i32 = pileY(p)
+  ui_rect(x + 1, y, CARD_W - 2, 1, rim, 1)
+  ui_rect(x + 1, y + CARD_H - 1, CARD_W - 2, 1, rim, 1)
+  ui_rect(x, y + 1, 1, CARD_H - 2, rim, 1)
+  ui_rect(x + CARD_W - 1, y + 1, 1, CARD_H - 2, rim, 1)
+  if (p >= FND0 && p < TAB0) { pip10(x + 10, y + 12, p - FND0, DIM) }
+}
+
+// The highlight IS the card's rim — there is no outline drawn outside the card. An outline in the
+// gutter has to be erased when it moves, and erasing a 1px ring means clearing tiles that belong to
+// the card, which is the flicker again. A rim is overdrawn by the next paint for free, and a
+// selected RUN reads correctly: every card that would travel carries the orange edge.
+function rimFor(p: i32, k: i32, n: i32): i32 {
+  if (G.sel === p && k >= n - G.selN) { return SELCOL }
+  if (G.cur === p) {
+    if (p >= TAB0) { if (k >= n - 1 - G.depth) { return CURSOR } }
+    else { if (k === n - 1) { return CURSOR } }
+  }
+  return RIM
+}
+
+// Where this pile's drawing ends. Computed before painting so the tail left by a shrinking pile can
+// be erased with one FELT rect below the new content, instead of clearing first and drawing into
+// the hole.
+function pileBottom(p: i32): i32 {
+  let n: i32 = PN[p]
+  if (n === 0) { return pileY(p) }
+  if (p < TAB0) { return TOP_Y + CARD_H }
+  return slotY(p, n - 1) + CARD_H
+}
+
+function paintPile(p: i32) {
+  let n: i32 = PN[p]
+  let x: i32 = pileX(p)
+  let bottom: i32 = pileBottom(p)
+
+  // The tail: whatever the previous paint of this pile reached past where this one will.
+  if (PBOT[p] > bottom) { feltFill(x, bottom, CARD_W, PBOT[p] - bottom) }
+  PBOT[p] = bottom
+
+  if (n === 0) {
+    let rim: i32 = DIM
+    if (G.cur === p) { rim = CURSOR }
+    drawEmpty(p, rim)
+    return
+  }
+
+  if (p === 0) {
+    // The stock is one back plus a count — fanning two dozen identical backs buys nothing.
+    let rim: i32 = RIM
+    if (G.cur === p) { rim = CURSOR }
+    drawBack(x, TOP_Y, CARD_H, rim)
+    ui_text(body, x + 10, TOP_Y + CARD_H - 9, numStr(n), WHITE)
+    return
+  }
+
+  if (p === 1) {
+    let first: i32 = n - DRAW
+    if (first < 0) { first = 0 }
+    let right: i32 = x + (n - 1 - first) * WFAN + CARD_W
+    if (PRGT[1] > right) { ui_rect(right, TOP_Y, PRGT[1] - right, CARD_H, FELT, 1) }
+    PRGT[1] = right
+    if (first > 0) { drawSliver(x, TOP_Y, CARD_H, P[(1 << 5) | (first - 1)], RIM) }
+    let k: i32 = first
+    while (k < n) {
+      let cx: i32 = slotX(1, k)
+      // No index on the covered waste cards: an 8px fan step cuts a rank and its pip in half, and
+      // half an index reads as a rendering fault rather than as a covered card.
+      if (k === n - 1) { drawFace(cx, TOP_Y, P[(1 << 5) | k], rimFor(1, k, n)) }
+      else { cardBody(cx, TOP_Y, CARD_H, WHITE, RIM) }
+      k = k + 1
+    }
+    return
+  }
+
+  if (p < TAB0) {
+    drawFace(x, TOP_Y, P[(p << 5) | (n - 1)], rimFor(p, n - 1, n))
+    return
+  }
+
+  let us: i32 = upStep(p)
+  let y: i32 = TAB_Y
+  let k: i32 = 0
+  while (k < n) {
+    let c: i32 = P[(p << 5) | k]
+    let up: i32 = UP[(p << 5) | k]
+    let rim: i32 = rimFor(p, k, n)
+    if (k === n - 1) {
+      if (up === 1) { drawFace(x, y, c, rim) } else { drawBack(x, y, CARD_H, rim) }
+    } else {
+      let step: i32 = DSTEP
+      if (up === 1) {
+        step = us
+        drawSliver(x, y, step, c, rim)
+      } else {
+        drawBack(x, y, step, rim)
+      }
+      y = y + step
+    }
+    k = k + 1
+  }
+}
+
+// ── damage gate ─────────────────────────────────────────────────────────────────────────────────
+// A signature per pile, over exactly what its repaint draws: its cards, their face-up flags, and
+// whether the cursor or the selection is sitting on it. Not a `dirty` flag — a flag has to be set
+// at every mutation site and the one that gets missed is invisible, while a signature is derived
+// from the state it summarises and cannot disagree with it.
+function pileSig(p: i32): i32 {
+  let n: i32 = PN[p]
+  let s: i32 = n * 7 + 1
+  let k: i32 = 0
+  while (k < n) {
+    s = ((s * 33) + P[(p << 5) | k] + UP[(p << 5) | k] * 97) | 0
+    k = k + 1
+  }
+  if (G.cur === p) { s = (s * 33 + 1013 + G.depth) | 0 }
+  if (G.sel === p) { s = (s * 33 + 2027 + G.selN) | 0 }
+  return s & 0x7FFFFFFF
+}
+
+// The HUD lives in the 16px gap between the waste fan and the first foundation — two tile columns,
+// four short rows. Keep every row INSIDE the cleared box: a value at TOP_Y+27 extends past it and
+// renders with its bottom rows missing, which looks like a broken font and is a rectangle that is
+// one row too short.
+function paintHud() {
+  ui_clear_rect(HUD_X, TOP_Y - 1, 16, CARD_H + 4)
+  ui_text(body, HUD_X + 1, TOP_Y + 1, "SC", HUD)
+  ui_text(body, HUD_X + 1, TOP_Y + 9, numStr(G.score), HUD)
+  ui_text(body, HUD_X + 1, TOP_Y + 17, "MV", HUD)
+  ui_text(body, HUD_X + 1, TOP_Y + 25, numStr(G.moves), HUD)
+}
+
+function paintTable() {
+  // One defer window around the repaint. Every ui_* native otherwise catches the mixer up to wall
+  // clock, and across a repaint made of dozens of calls that catch-up, not the pixels, is the cost.
+  // It must be closed before frame() — the pump has to land in the same logical frame.
+  audio_defer(1)
+
+  // CELL[2] is the full-repaint request: boot, a new deal, the win banner. `ui_begin` throws the
+  // whole canvas away and is the ONLY legal way to reset it — but it costs the whole table, so it
+  // is never on the path of an ordinary move.
+  let full: i32 = CELL[2]
+  if (full === 1) {
+    ui_begin()
+    CELL[2] = 0
+    let q: i32 = 0
+    while (q < NPILE) { PBOT[q] = 0; q = q + 1 }
+    PRGT[1] = 0
+  }
+
+  let p: i32 = 0
+  while (p < NPILE) {
+    let sig: i32 = pileSig(p)
+    if (full === 1 || sig !== PSIG[p]) {
+      PSIG[p] = sig
+      paintPile(p)
+    }
+    p = p + 1
+  }
+
+  if (full === 1 || CELL[1] !== G.score * 4096 + G.moves) {
+    CELL[1] = G.score * 4096 + G.moves
+    paintHud()
+  }
+
+  if (G.won === 1) {
+    ui_rect(52, 62, 136, 34, BLACK, 1)
+    ui_text_box(body, 52, 68, "YOU WIN", WINCOL, 136, 0, 0, "center", BLACK)
+    ui_text_box(body, 52, 84, "START DEALS AGAIN", HUD, 136, 0, 0, "center", BLACK)
+  }
+  if (G.dbg === 1) {
+    ui_clear_rect(0, 150, 240, 10)
+    ui_text(body, 2, 151, frame_stats(), HUD)
+  }
+  audio_defer(0)
+  audio_pump()
+}
+
+// True when anything on screen has moved. Cheap: thirteen short hashes and two counters, no
+// drawing, and on an idle frame it is the only work the loop does.
+function needPaint(): i32 {
+  if (CELL[2] === 1) { return 1 }
+  if (CELL[1] !== G.score * 4096 + G.moves) { return 1 }
+  let p: i32 = 0
+  while (p < NPILE) {
+    if (pileSig(p) !== PSIG[p]) { return 1 }
+    p = p + 1
+  }
+  return 0
+}
+
+// ── input ───────────────────────────────────────────────────────────────────────────────────────
+// Codes: 0 A · 1 B · 2 Select · 3 Start · 4 L · 5 R · 6 Up · 7 Down · 8 Left · 9 Right.
+function bit(bits: i32, code: i32): i32 { return (bits >> code) & 1 }
+
+// Up from a tableau column lands on the pile above it. Columns 0..5 sit under stock, waste and the
+// four foundations; column 6 has nothing above it, so it shares the last foundation.
+function aboveOf(col: i32): i32 {
+  if (col >= 5) { return 5 }
+  return col
+}
+
+function clampDepth() {
+  if (G.cur < TAB0) { G.depth = 0; return }
+  let run: i32 = faceUpRun(G.cur)
+  if (run <= 0) { G.depth = 0; return }
+  if (G.depth > run - 1) { G.depth = run - 1 }
+  if (G.depth < 0) { G.depth = 0 }
+}
+
+function moveCursor(d: i32) {
+  if (G.cur < TAB0) {
+    let i: i32 = G.cur + d
+    if (i < 0) { i = 0 }
+    if (i > 5) { i = 5 }
+    G.cur = i
+  } else {
+    let c: i32 = G.cur - TAB0 + d
+    if (c < 0) { c = 0 }
+    if (c > 6) { c = 6 }
+    G.cur = TAB0 + c
+  }
+  G.depth = 0
+  clampDepth()
+}
+
+function tryDrop() {
+  let src: i32 = G.sel
+  let dst: i32 = G.cur
+  let n: i32 = G.selN
+  let card: i32 = P[(src << 5) | (PN[src] - n)]
+  if (canDrop(dst, card, n) === 1) {
+    applyMove(src, dst, n)
+    G.sel = -1
+    G.selN = 0
+    G.depth = 0
+    chipAccept()
+    return
+  }
+  chipCancel()
+}
+
+function pressA() {
+  if (G.won === 1) { return }
+  if (G.cur === 0 && G.sel < 0) { drawStock(); return }
+  if (G.sel < 0) {
+    let n: i32 = grabCount(G.cur, G.depth)
+    if (n <= 0) { chipCancel(); return }
+    G.sel = G.cur
+    G.selN = n
+    chipPluck()
+    return
+  }
+  if (G.cur === G.sel) { G.sel = -1; G.selN = 0; chipBlip(); return }
+  tryDrop()
+}
+
+// R: send the current pile's top card up, without the two presses a pick-up-and-drop needs. The
+// single most-used action in a real game of Klondike, and the reason Select's bulk auto-finish is
+// not enough on its own.
+function pressR() {
+  let c: i32 = topOf(G.cur)
+  if (c < 0 || topUp(G.cur) === 0 || G.cur === 0) { chipCancel(); return }
+  let f: i32 = FND0 + suitOf(c)
+  if (canDrop(f, c, 1) === 1) { applyMove(G.cur, f, 1); chipAccept(); return }
+  chipCancel()
+}
+
+function handleKeys(bits: i32) {
+  if (bit(bits, 3) === 1) {
+    if (G.won === 1 || G.human === 1) { deal(); chipChime(); return }
+  }
+  if (bit(bits, 8) === 1) { moveCursor(-1) }
+  if (bit(bits, 9) === 1) { moveCursor(1) }
+  if (bit(bits, 6) === 1) {
+    if (G.cur >= TAB0) {
+      let run: i32 = faceUpRun(G.cur)
+      if (G.depth + 1 < run) { G.depth = G.depth + 1 }
+      else { G.cur = aboveOf(G.cur - TAB0); G.depth = 0 }
+    }
+  }
+  if (bit(bits, 7) === 1) {
+    if (G.cur >= TAB0) {
+      if (G.depth > 0) { G.depth = G.depth - 1 }
+    } else {
+      let col: i32 = G.cur
+      if (col > 6) { col = 6 }
+      G.cur = TAB0 + col
+      G.depth = 0
+      clampDepth()
+    }
+  }
+  if (bit(bits, 0) === 1) { pressA() }
+  if (bit(bits, 1) === 1) {
+    if (G.sel >= 0) { G.sel = -1; G.selN = 0; chipBlip() } else { chipCancel() }
+  }
+  if (bit(bits, 5) === 1) { pressR() }
+  if (bit(bits, 2) === 1) { autoFinish() }
+  if (bit(bits, 4) === 1) { undo() }
+  clampDepth()
+}
+
+// ── attract ─────────────────────────────────────────────────────────────────────────────────────
+// Returns 1 for a real move, 0 for a stock turn, -1 for a dead deal. It is not a solver: it is the
+// standard greedy line — foundations first, then the tableau moves that expose something, then the
+// waste, then turn the stock. A dead deal re-deals, which is what makes a long headless run cover
+// many games instead of parking on one unwinnable layout.
+// One tableau move, or 0 if there is none of the kind asked for.
+//
+// `productive` splits the move space in two, and the split is what keeps this terminating.
+//   1 — the move turns a face-down card over. The face-down count strictly decreases, so no
+//       sequence of these can cycle. Also the only moves that make progress.
+//   0 — a SHUFFLE: a run moved onto another run, exposing nothing. These are needed (a King only
+//       reaches an empty column once the cards above it have somewhere to go) and they are exactly
+//       what cycles: with a red 7 and two black 8s on the table, a generator that takes any legal
+//       move ping-pongs the 7 between the 8s for ever. A build that did shows it plainly — 40,000
+//       frames produced ONE deal, no stall and no win. So they are rationed per deal instead.
+//
+// The first attempt at splits looked like it worked and did nothing at all: it required the exposed
+// card to be face-down, and since face-up cards are a contiguous run at the top of a pile, that
+// condition is only ever true for the WHOLE run. Every partial split was silently rejected and the
+// loop was decoration. Kings stayed put, which is how it was noticed.
+function tableauMove(productive: i32): i32 {
+  let src: i32 = TAB0
+  while (src < NPILE) {
+    let n: i32 = PN[src]
+    let run: i32 = faceUpRun(src)
+    let take: i32 = run
+    while (take > 0) {
+      let start: i32 = n - take
+      // Something must stay behind: emptying a column to fill another one relocates and reveals
+      // nothing, and the mirror move undoes it.
+      if (start > 0) {
+        let flips: i32 = 0
+        if (UP[(src << 5) | (start - 1)] === 0) { flips = 1 }
+        if (flips === productive) {
+          let card: i32 = P[(src << 5) | start]
+          let dst: i32 = TAB0
+          while (dst < NPILE) {
+            if (dst !== src && canDrop(dst, card, take) === 1) {
+              applyMove(src, dst, take)
+              return 1
+            }
+            dst = dst + 1
+          }
+        }
+      }
+      take = take - 1
+    }
+    src = src + 1
+  }
+  return 0
+}
+
+function attractMove(): i32 {
+  if (autoOne() === 1) { G.passes = 0; return 1 }
+  if (tableauMove(1) === 1) { G.passes = 0; return 1 }
+
+  let wc: i32 = topOf(1)
+  if (wc >= 0) {
+    let dst2: i32 = TAB0
+    while (dst2 < NPILE) {
+      if (canDrop(dst2, wc, 1) === 1) { applyMove(1, dst2, 1); G.passes = 0; return 1 }
+      dst2 = dst2 + 1
+    }
+  }
+
+  if (PN[0] > 0) { drawStock(); return 0 }
+  if (PN[1] > 0 && G.passes < MAXPASS) { drawStock(); return 0 }
+
+  // Out of productive moves and out of stock: spend a shuffle to open the position up, and let the
+  // stock come round again. The budget is what bounds the cycle these can otherwise form.
+  // NOT `G.passes = 0`. Letting a shuffle refresh the recycle allowance made every deal run to the
+  // 400-move backstop: 24 shuffles times three fresh passes through the stock is a very long way to
+  // go nowhere. Only a productive move — one that turns a card over — earns the stock again.
+  if (G.shuf < SHUF_MAX && tableauMove(0) === 1) {
+    G.shuf = G.shuf + 1
+    return 1
+  }
+  return -1
+}
+
+// ── boot ────────────────────────────────────────────────────────────────────────────────────────
+initArrays()
+backdrop(FELT)
+// Pay agb's dynamic-tile bookkeeping at boot, on an empty heap. A full card table lights most of
+// the 30x20 canvas, which is exactly where agb re-allocates its live-tile map — reached mid-game
+// that request finds a fragmented heap and takes the game down inside an innocent `ui_text`.
+ui_reserve_tiles(320)
+frame()
+rngSeed(0, 20250810)
+deal()
+
+while (true) {
+  G.t = G.t + 1
+
+  let bits: i32 = keys_edge()
+  if (bits !== 0) {
+    // The instant anything is pressed this stops being a demo, for good.
+    if (G.human === 0) {
+      // The attract deal is seeded from a constant so a headless run is reproducible. A human's
+      // first press is the only entropy this machine has — there is no clock — so it reseeds from
+      // the frame they pressed on, and their deals vary.
+      G.human = 1
+      rngSeed(0, 20250810 + G.t)
+      deal()
+    }
+    else {
+      if (bits === 48) { G.dbg = 1 - G.dbg }   // L+R together: the perf overlay
+      else { handleKeys(bits) }
+    }
+  }
+
+  if (G.won === 0 && checkWin() === 1) {
+    G.won = 1
+    G.wins = G.wins + 1
+    G.wait = 0
+    log("WIN deal " + G.deals + " moves " + G.moves + " score " + G.score)
+    chipChime()
+  }
+
+  if (G.human === 0) {
+    if (G.won === 1) {
+      G.wait = G.wait + 1
+      if (G.wait > 120) { deal() }
+    } else if ((G.t % 4) === 0) {
+      // A backstop, not a rule: no legal Klondike line needs 400 moves, so anything past it is a
+      // cycle in the generator and the run should say so rather than hang.
+      if (G.moves > 400) {
+        log("STALL deal " + G.deals + " moves " + G.moves + " score " + G.score + " CAP")
+        deal()
+      }
+      // One move every four frames: fast enough to finish a game in a headless run, slow enough
+      // that a human watching the attract screen can follow what it is doing.
+      let r: i32 = attractMove()
+      if (r < 0) {
+        log("STALL deal " + G.deals + " moves " + G.moves + " score " + G.score)
+        deal()
+      }
+    }
+  }
+
+  if (needPaint() === 1) { paintTable() }
+  frame()
+}

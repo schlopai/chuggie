@@ -1,0 +1,54 @@
+// items.tish — the ITEM DATABASE for the rpg-menu example.
+//
+// Pure data: a flat table of item definitions plus tiny accessors. This is the
+// kind of content a real game would author; the reusable INVENTORY / EQUIPMENT
+// logic (see rpg.tish) reads items through `item(id)` and never hard-codes any
+// of it. Icon indices match scripts/gen_rpg_menu.py's frame layout exactly.
+//
+// NOTE: the tables live as top-level `const` arrays with scalar/object accessors.
+// This layout was originally a workaround for a tish #553 claim ("GBA codegen hangs
+// on a function that returns an array") that examples/probe-arrayret later RETIRED —
+// array returns work on device. The layout stays because it is also the cheap one
+// (no per-call array allocation), not because the compiler requires it.
+
+// Equip slots. 0 = not equippable (a consumable / material).
+export let SLOT_NONE: i32 = 0
+export let SLOT_WEAPON: i32 = 1
+export let SLOT_ARMOR: i32 = 2
+export let SLOT_HELMET: i32 = 3
+export let SLOT_ACC: i32 = 4
+
+// Icon frame per item == item id for 0..11 (see the sheet32 frame map).
+// Each item: id, name, icon, slot, atk, def, spd, hp (max-hp bonus), heal
+// (consumable HP restore), price (buy cost; sell = half), desc.
+export const ITEMS = [
+  { id: 0,  name: "Kunai",      icon: 0,  slot: 1, atk: 2, def: 0, spd: 0, hp: 0, heal: 0,  price: 15, desc: "A balanced throwing blade." },
+  { id: 1,  name: "Shuriken",   icon: 1,  slot: 1, atk: 3, def: 0, spd: 1, hp: 0, heal: 0,  price: 40, desc: "A light star. Strikes fast." },
+  { id: 2,  name: "Kusarigama", icon: 2,  slot: 1, atk: 5, def: 0, spd: -1, hp: 0, heal: 0, price: 70, desc: "Chain-scythe. Slow, brutal." },
+  { id: 3,  name: "Yumi Bow",   icon: 3,  slot: 1, atk: 4, def: 0, spd: 0, hp: 0, heal: 0,  price: 50, desc: "Strikes foes from afar." },
+  { id: 4,  name: "Iron Armor", icon: 4,  slot: 2, atk: 0, def: 4, spd: -1, hp: 0, heal: 0, price: 55, desc: "Heavy iron plating." },
+  { id: 5,  name: "Iron Helm",  icon: 5,  slot: 3, atk: 0, def: 2, spd: 0, hp: 0, heal: 0,  price: 30, desc: "Guards the head." },
+  { id: 6,  name: "Swift Tabi", icon: 6,  slot: 4, atk: 0, def: 0, spd: 3, hp: 0, heal: 0,  price: 40, desc: "Fleet-footed ninja boots." },
+  { id: 7,  name: "Jade Ring",  icon: 7,  slot: 4, atk: 0, def: 0, spd: 0, hp: 8, heal: 0,  price: 50, desc: "Wards the wearer. +Vitality." },
+  { id: 8,  name: "Ki Amulet",  icon: 8,  slot: 4, atk: 1, def: 1, spd: 0, hp: 0, heal: 0,  price: 45, desc: "A charm of balance." },
+  { id: 9,  name: "Bracer",     icon: 9,  slot: 4, atk: 0, def: 1, spd: 1, hp: 0, heal: 0,  price: 25, desc: "A sturdy forearm guard." },
+  { id: 10, name: "Potion",     icon: 10, slot: 0, atk: 0, def: 0, spd: 0, hp: 0, heal: 20, price: 10, desc: "Restores 20 HP." },
+  { id: 11, name: "Scroll",     icon: 11, slot: 0, atk: 0, def: 0, spd: 0, hp: 0, heal: 0,  price: 12, desc: "A secret art. Sells well." }
+]
+
+// What the shop stocks (item ids). Buy-only; the player sells from the bag.
+export let SHOP_IDS: i32[] = [1, 2, 3, 4, 6, 7, 8, 10]
+
+export function itemCount() { return ITEMS.length }
+export function item(id) { return ITEMS[id] }          // one object — safe
+export function shopCount() { return SHOP_IDS.length }
+export function shopId(i) { return SHOP_IDS[i] }        // one scalar — safe
+
+// Slot display name (for the equipment panel headers).
+export function slotName(slot) {
+  if (slot === 1) { return "Weapon" }
+  if (slot === 2) { return "Armor" }
+  if (slot === 3) { return "Helmet" }
+  if (slot === 4) { return "Charm" }
+  return "-"
+}

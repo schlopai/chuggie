@@ -1,0 +1,10 @@
+// Minimal pure-tish-agb game: proves the `cargo:tish_agb` binding on GBA.
+import { log, vblank } from 'cargo:tish_agb'
+
+let count: i32 = 0
+while (count < 3) {
+  log("tish-agb frame " + count)
+  vblank()
+  count = count + 1
+}
+log("done")

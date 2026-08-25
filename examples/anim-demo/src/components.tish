@@ -1,0 +1,7 @@
+import { input_x, input_y } from 'cargo:tish_agb'
+
+// A walker: move with the d-pad and play its 4-frame walk animation.
+export const Walker = {
+  start: ({ this }) => { this.animate(4, 8) },     // 4 frames, advance every 8 frames
+  update: ({ this }) => { this.setVel(input_x() * 1.0, input_y() * 1.0) }
+}

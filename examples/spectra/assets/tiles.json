@@ -1,0 +1,38 @@
+{
+ "names": [
+  "air",
+  "air_star",
+  "stone",
+  "stone_top",
+  "spike",
+  "prism",
+  "lock",
+  "goal",
+  "a_block",
+  "a_ledge",
+  "a_spike",
+  "a_door",
+  "b_block",
+  "b_ledge",
+  "b_spike",
+  "b_door",
+  "c_block",
+  "c_ledge",
+  "c_spike",
+  "c_door"
+ ],
+ "palette": [
+  "#141a24",
+  "#6b7a8f",
+  "#3a4658",
+  "#9fb0c4",
+  "#e0603a",
+  "#8f3320",
+  "#4f8fd0",
+  "#26507f",
+  "#57b26a",
+  "#2b6b3c",
+  "#f0d060",
+  "#ffffff"
+ ]
+}

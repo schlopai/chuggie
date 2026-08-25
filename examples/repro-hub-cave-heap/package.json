@@ -1,0 +1,26 @@
+{
+  "name": "repro-hub-cave-heap",
+  "private": true,
+  "scripts": {
+    "build": "TISH_FAST_NATIVE_BUILD=1 tish build src/main.tish --target gba -o repro-hub-cave-heap.gba",
+    "start": "npm run build && (mgba-qt repro-hub-cave-heap.gba || mgba repro-hub-cave-heap.gba)",
+    "clean": "rm -rf .tish repro-hub-cave-heap.gba"
+  },
+  "devDependencies": {
+    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_game_engine": {
+        "path": "../../crates/tish-gba-game-engine"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
+    }
+  },
+  "description": "A bug reproduction or regression test case."
+}

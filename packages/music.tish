@@ -1,0 +1,61 @@
+// music.tish — names for the engine's adaptive-music controls.
+//
+// CONSTANTS ONLY. Not one function, deliberately: a Tish function costs ~151 bytes of heap whether
+// it is ever called or not, so a package of thin wrappers over `deck_pause` / `audio_duck` would
+// cost a ROM more than the natives it wraps. Everything here lowers to an integer literal.
+//
+// You do not need this file. `audio_duck(40, 8, 0, 24)` is a legal call and does the same thing as
+// `audio_duck(DUCK_DIALOG, DUCK_FAST, DUCK_HOLD_OPEN, DUCK_SLOW)`. It exists because the second one
+// can be read six months later.
+//
+// ── The two things the engine does that a game kept getting wrong ─────────
+//
+// **1. Hushing the music is `deck_pause(1)`, not stop-then-play.**
+//
+// The discipline this replaces was `deck_stop()` followed by `deck_play()` around anything that
+// rebuilds the UI canvas — a real rule, for a real crash, written by hand in two different games
+// that disagreed about it. But that pair throws away the playhead AND resets the intensity to 0, so
+// a game that hushed for a menu came back at the top of the song at the wrong threat level.
+//
+// `deck_pause` freezes the playhead and keeps the song, the voices and the intensity. Unpausing
+// re-arms the wavetable, which is the part that actually mattered: a wavetable write landing at an
+// arbitrary point inside a frame is what froze a game on a cave entrance, and it took eleven wrong
+// theories to find.
+//
+//     deck_pause(1)
+//     ui_begin(...)          // rebuild the canvas
+//     deck_pause(0)
+//
+// **2. Ducking is a MASTER attenuation, not per-voice scaling.**
+//
+// `audio_duck` moves the PSG's master volume, so every voice comes down together and the duck
+// cannot desync from the notes. Scaling each voice instead means a note that started before the
+// duck stays loud until it ends.
+//
+// ⚠️ A voice in step-envelope mode has its level owned by the HARDWARE envelope, so it takes the
+// duck on its next attack rather than mid-note — roughly nine frames at 152 BPM sixteenths. That is
+// what the hardware permits, not a workaround, and it is why a stem you want to FADE smoothly
+// should be authored ADSR or PCM.
+
+// ── audio_duck(depth, attack, hold, release) ─────────────────────────────────
+// `depth` is attenuation out of 64: 64 would be silence, 0 no change.
+export let DUCK_DIALOG: i32 = 40      // ~60% down — a line of dialogue sits on top
+export let DUCK_STINGER: i32 = 52     // a fanfare or a death sting
+export let DUCK_LIGHT: i32 = 20       // a menu blip, barely there
+
+// `attack` / `release` are frames to reach and leave the depth.
+export let DUCK_FAST: i32 = 6
+export let DUCK_SLOW: i32 = 24
+
+// `hold` is frames at depth before releasing. 0 holds until the next call, which is what a dialogue
+// box wants — it does not know how long the player will take to read it.
+export let DUCK_HOLD_OPEN: i32 = 0
+
+// ── deck intensity ───────────────────────────────────────────────────────────
+// A `.deck` track tagged `layer N` is silent until the intensity reaches N. All stems share one
+// playhead, so raising the level adds instruments to the bar already playing rather than starting
+// anything.
+export let MI_CALM: i32 = 0
+export let MI_ALERT: i32 = 1
+export let MI_FIGHT: i32 = 2
+export let MI_PEAK: i32 = 3

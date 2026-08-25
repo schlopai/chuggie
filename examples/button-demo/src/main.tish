@@ -1,0 +1,114 @@
+// button-demo — makeButton / makeButtonGroup / makePrompt showcase.
+// Selection, flash-free repaints, and status text updates live in packages/ui.
+import { uiSheet } from 'sheet:../assets/prompts.png'
+import { uif } from 'font:../../../assets/fonts/ark-pixel-10px.ttf@10'
+import { titleFont } from 'font:../../../assets/fonts/alagard.ttf@16'
+import { backdrop, frame, key_pressed } from 'cargo:tish_agb'
+import {
+  uiInit, uiRender, uiSetText, makePrompt, makePromptBar,
+  makeButton, makeButtonGroup,
+} from '../../../packages/ui'
+import {
+  PROMPT_A, PROMPT_B, PROMPT_L, PROMPT_R,
+  PROMPT_UP, PROMPT_DOWN, PROMPT_LEFT, PROMPT_RIGHT,
+  PROMPT_DPAD, PROMPT_START, PROMPT_SELECT,
+} from './frames'
+
+let BTN_B: i32 = 1
+let BTN_START: i32 = 3
+
+let STATUS = ["", "Ready to play.", "Not wired yet.", "Bye!"]
+let S = { gallery: 0, dirty: 1 }
+let MSG = { text: "Pick a button.", color: "dim" }
+
+let menu = makeButtonGroup([
+  { label: "Continue", icon: PROMPT_A },
+  { label: "Options", icon: PROMPT_START },
+  { label: "Quit", icon: PROMPT_B },
+])
+let locked = makeButton("Locked", { icon: PROMPT_SELECT, disabled: 1 })
+
+backdrop(0x0E0C16)
+uiInit({ font: uif, sheet: uiSheet, icons: 12, iconSize: 16 })  // sheet: is 16×16 — matches iconSize
+
+function paintMenu() {
+  uiRender({
+    dir: "col",
+    pad: 4,
+    gap: 3,
+    align: "center",
+    children: [
+      { text: "BUTTONS", font: titleFont, color: "title" },
+      MSG,
+      menu.view([locked]),
+      makePromptBar([
+        { frame: PROMPT_A, label: "Select" },
+        { frame: PROMPT_B, label: "Clear" },
+        { frame: PROMPT_START, label: "Gallery" },
+      ], { size: 16, color: "dim", barGap: 6 }),
+    ],
+  })
+}
+
+function paintGallery() {
+  uiRender({
+    dir: "col",
+    pad: 6,
+    gap: 4,
+    children: [
+      { text: "PROMPTS", font: titleFont, color: "title" },
+      { text: "Gamepad icons", color: "dim" },
+      {
+        dir: "row", gap: 6, children: [
+          makePrompt(PROMPT_A, "A"),
+          makePrompt(PROMPT_B, "B"),
+          makePrompt(PROMPT_L, "L"),
+          makePrompt(PROMPT_R, "R"),
+        ]
+      },
+      {
+        dir: "row", gap: 6, children: [
+          makePrompt(PROMPT_UP, "U"),
+          makePrompt(PROMPT_DOWN, "D"),
+          makePrompt(PROMPT_LEFT, "L"),
+          makePrompt(PROMPT_RIGHT, "R"),
+        ]
+      },
+      {
+        dir: "row", gap: 8, children: [
+          makePrompt(PROMPT_DPAD, "D-pad"),
+          makePrompt(PROMPT_START, "Start"),
+          makePrompt(PROMPT_SELECT, "Select"),
+        ]
+      },
+      makeButton({
+        children: [
+          { icon: PROMPT_B },
+          { text: "Back to menu" },
+        ],
+      }),
+    ],
+  })
+}
+
+function paint() {
+  if (S.gallery > 0) { paintGallery() } else { paintMenu() }
+  S.dirty = 0
+}
+
+paint()
+
+while (true) {
+  if (S.gallery > 0) {
+    if (key_pressed(BTN_B) > 0) { S.gallery = 0; S.dirty = 1 }
+    if (key_pressed(BTN_START) > 0) { S.gallery = 0; S.dirty = 1 }
+  } else {
+    menu.nav()
+    let a = menu.act()
+    if (a === 1) { uiSetText(MSG, STATUS[menu.index() + 1], "dim") }
+    if (a === 2) { uiSetText(MSG, "Pick a button.", "dim") }
+    if (key_pressed(BTN_START) > 0) { S.gallery = 1; S.dirty = 1 }
+  }
+  if (S.dirty > 0) { paint() }
+  frame()
+}

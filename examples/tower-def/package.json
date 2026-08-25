@@ -1,0 +1,28 @@
+{
+  "name": "tower-def",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
+    "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png 240",
+    "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\""
+  },
+  "devDependencies": {
+    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      },
+      "tish_gba_game_engine": {
+        "path": "../../crates/tish-gba-game-engine"
+      }
+    }
+  },
+  "description": "A fixed-track tower defence: creeps share one flow field, towers are soldiers that cannot move."
+}

@@ -1,0 +1,601 @@
+// worldgen.tish — the Sunnyside island generator, shared by the sunnyside-*
+// family (imported relatively, the packages/dungeon pattern: every big array
+// stays inside this module — an exported typed array is boxed, and passing
+// one to a native costs ~54 ticks per element besides, tishlang/tish#663).
+//
+// ── THE DRAW-ORDER CONTRACT ────────────────────────────────────────────────
+// scripts/procgen/sunnyside.py is this generator's twin; verify.sh diffs the
+// two over a seed sweep.  The ORDER AND COUNT of rngBelow draws is therefore
+// a contract.  Phases, in order, all on stream SS_RNG:
+//   1. island border noise: one below(100) per border-ring cell, row-major
+//   2. river: below(W-24) once for the mouth, then per step below(4)
+//   3. buildings: for each of shop,house,house2 in that order, up to 20
+//      placement attempts of below(w-…) + below(h-…); the barn is fixed
+//   4. paths: NO draws (both L elbows are carved, bulldozing trees and
+//      bridging water)
+//   5. trees: exactly TREE_ATTEMPTS draws of below(w)+below(h)
+// The farm plot draws nothing.  Change any phase and you MUST touch the twin
+// in the same commit.
+//
+// Painting (ssgenUpload) draws nothing from the stream — it is pure lookup
+// into the baked lip tables (see scripts/gen_sunnyside_pack.py), inline, no
+// helper calls (a call touching module state is boxed; the paint loop pays
+// it 5,120 times).
+import { tilemap_stream } from 'cargo:tish_agb'
+import { grid_from_gids } from 'cargo:tish_gba_game_engine'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+import {
+  ATLAS_COLS, GID_SEA, GID_GRASS, GID_PATH, GID_SOIL, GID_BRIDGE,
+  GRASS_MASK_GID, PATH_MASK_GID, BEACH_MASK_GID,
+  SHOP_W, SHOP_H, SHOP_BASE, BARN_W, BARN_H, BARN_BASE,
+  HOUSE_W, HOUSE_H, HOUSE_BASE, HOUSE2_W, HOUSE2_H, HOUSE2_BASE,
+  SHOP_INS_L, SHOP_INS_T, SHOP_INS_R, SHOP_INS_B,
+  HOUSE_INS_L, HOUSE_INS_T, HOUSE_INS_R, HOUSE_INS_B,
+  HOUSE2_INS_L, HOUSE2_INS_T, HOUSE2_INS_R, HOUSE2_INS_B,
+  BARN_INS_L, BARN_INS_T, BARN_INS_R, BARN_INS_B,
+  TREE0_W, TREE0_H, TREE0_BASE, TREE1_W, TREE1_H, TREE1_BASE,
+} from './data_world.tish'
+
+let W: i32 = 64
+let H: i32 = 48
+let SS_RNG: i32 = 0
+let TREE_ATTEMPTS: i32 = 110
+
+// terrain ids (the working grid; solidity is a separate plane)
+let T_SEA: i32 = 0
+let T_GRASS: i32 = 1
+let T_PATH: i32 = 2
+let T_SOIL: i32 = 3
+let T_BRIDGE: i32 = 4
+
+// ONE persistent plane.  Solidity lives as flag 16 ON the terrain cell
+// (only grass and sea ever carry it, so `& 15` recovers the terrain id
+// everywhere).  The paint/collision buffer is a LOCAL of ssgenUpload: both
+// tilemap_stream and grid_from_gids copy what they are handed, so keeping
+// a module-level upload plane parked 12KB of EWRAM for the whole game —
+// which was the difference between the shop opening and the shop OOMing.
+let F_SOLID: i32 = 16
+let TERR: i32[] = []
+let zf: i32 = 0
+while (zf < 3072) { TERR.push(0); zf = zf + 1 }
+
+// local copies of the cross-module tables (16 + 4 diagonal keys each)
+let GRASS_G: i32[] = []
+let PATH_G: i32[] = []
+let cpy: i32 = 0
+while (cpy < 20) {
+  GRASS_G.push(GRASS_MASK_GID[cpy])
+  PATH_G.push(PATH_MASK_GID[cpy])
+  cpy = cpy + 1
+}
+let BEACH_G: i32[] = []
+cpy = 0
+while (cpy < 16) {
+  BEACH_G.push(BEACH_MASK_GID[cpy])
+  cpy = cpy + 1
+}
+let ONESG: i32[] = []
+ONESG.push(1)
+
+// building placements (col,row of stamp top-left; door = bottom-centre)
+// order: 0=shop 1=house 2=house2 3=barn
+let BLD_X: i32[] = [0, 0, 0, 0]
+let BLD_Y: i32[] = [0, 0, 0, 0]
+let BLD_W: i32[] = [0, 0, 0, 0]
+let BLD_H: i32[] = [0, 0, 0, 0]
+let treeCount: i32 = 0
+
+// farm plot (fixed relative to the barn)
+let FARM_X: i32 = 0
+let FARM_Y: i32 = 0
+let FARM_W: i32 = 12
+let FARM_H: i32 = 8
+
+export function ssgenW(): i32 { return W }
+export function ssgenH(): i32 { return H }
+export function ssgenFarmX(): i32 { return FARM_X }
+export function ssgenFarmY(): i32 { return FARM_Y }
+export function ssgenFarmW(): i32 { return FARM_W }
+export function ssgenFarmH(): i32 { return FARM_H }
+export function ssgenTrees(): i32 { return treeCount }
+export function ssgenBldX(i: i32): i32 { return BLD_X[i] }
+export function ssgenBldY(i: i32): i32 { return BLD_Y[i] }
+// >> 1, not / 2: tish / is float division and an odd width leaked 17.5
+// through the i32 return — desyncing the path carve from the Python twin
+export function ssgenDoorX(i: i32): i32 { return BLD_X[i] + (BLD_W[i] >> 1) }
+export function ssgenDoorY(i: i32): i32 { return BLD_Y[i] + BLD_H[i] }
+/// Is this cell part of a tree stamp? (solid grass that isn't a building)
+export function ssgenIsTree(x: i32, y: i32): i32 {
+  if (x < 0 || x >= W || y < 0 || y >= H) { return 0 }
+  if (TERR[y * W + x] !== T_GRASS + F_SOLID) { return 0 }
+  if (insideBuilding(x, y) > 0) { return 0 }
+  return 1
+}
+
+/// Fell the tree containing (x,y): clear the solid flag on its whole 2-wide
+/// block so the walk grid AND future paints agree.  The caller repaints the
+/// cells and clears the engine grid (grid_set_solid) — the arrays here can't
+/// reach the streamed layer.  Returns how many cells were cleared.
+export function ssgenClearTree(x: i32, y: i32): i32 {
+  if (ssgenIsTree(x, y) === 0) { return 0 }
+  // walk to the block's top-left (stamps are 2 wide, 2 or 3 tall)
+  let tx: i32 = x
+  let ty: i32 = y
+  while (ssgenIsTree(tx - 1, ty) > 0) { tx = tx - 1 }
+  while (ssgenIsTree(tx, ty - 1) > 0) { ty = ty - 1 }
+  let n: i32 = 0
+  let dy: i32 = 0
+  while (dy < 3) {
+    let dx: i32 = 0
+    while (dx < 2) {
+      if (ssgenIsTree(tx + dx, ty + dy) > 0) {
+        TERR[(ty + dy) * W + tx + dx] = T_GRASS
+        n = n + 1
+      }
+      dx = dx + 1
+    }
+    dy = dy + 1
+  }
+  return n
+}
+
+export function ssgenTreeTopX(x: i32, y: i32): i32 {
+  let tx: i32 = x
+  while (ssgenIsTree(tx - 1, y) > 0) { tx = tx - 1 }
+  return tx
+}
+export function ssgenTreeTopY(x: i32, y: i32): i32 {
+  let ty: i32 = y
+  while (ssgenIsTree(x, ty - 1) > 0) { ty = ty - 1 }
+  return ty
+}
+
+export function ssgenSolidAt(x: i32, y: i32): i32 {
+  if (x < 0 || x >= W || y < 0 || y >= H) { return 1 }
+  // NOT `TERR / 16`: tish `/` is float division and 17/16 = 1.0625 leaks
+  // through the i32 return — a `=== 0` caller then never matches
+  if (TERR[y * W + x] >= F_SOLID) { return 1 }
+  return 0
+}
+export function ssgenTerrAt(x: i32, y: i32): i32 {
+  if (x < 0 || x >= W || y < 0 || y >= H) { return 0 }
+  return TERR[y * W + x] & 15
+}
+
+/// Count land cells — the cheap oracle summary.
+export function ssgenLand(): i32 {
+  let n: i32 = 0
+  let i: i32 = 0
+  let cells: i32 = W * H
+  while (i < cells) {
+    if ((TERR[i] & 15) > 0) { n = n + 1 }
+    i = i + 1
+  }
+  return n
+}
+
+/// 20-bit rolling hash over terrain + solidity — what the twin diffs.
+export function ssgenHash(): i32 {
+  let h: i32 = 7
+  let i: i32 = 0
+  let cells: i32 = W * H
+  while (i < cells) {
+    h = ((h << 5) - h + (TERR[i] & 15) + (TERR[i] & 15) + TERR[i] / 16) & 1048575
+    i = i + 1
+  }
+  return h
+}
+
+/// Can a wxh rect sit on pure grass with a 1-cell margin of non-solid land?
+function rectFree(x0: i32, y0: i32, w: i32, h: i32): i32 {
+  if (x0 < 1 || y0 < 1 || x0 + w >= W - 1 || y0 + h >= H - 1) { return 0 }
+  let y: i32 = y0 - 1
+  while (y <= y0 + h) {
+    let x: i32 = x0 - 1
+    while (x <= x0 + w) {
+      let i: i32 = y * W + x
+      if (TERR[i] !== T_GRASS) { return 0 }
+      x = x + 1
+    }
+    y = y + 1
+  }
+  return 1
+}
+
+function markSolidInset(b: i32, px: i32, py: i32) {
+  if (b === 0) {
+    markSolidRect(px + SHOP_INS_L, py + SHOP_INS_T,
+      SHOP_W - SHOP_INS_L - SHOP_INS_R, SHOP_H - SHOP_INS_T - SHOP_INS_B)
+  }
+  if (b === 1) {
+    markSolidRect(px + HOUSE_INS_L, py + HOUSE_INS_T,
+      HOUSE_W - HOUSE_INS_L - HOUSE_INS_R, HOUSE_H - HOUSE_INS_T - HOUSE_INS_B)
+  }
+  if (b === 2) {
+    markSolidRect(px + HOUSE2_INS_L, py + HOUSE2_INS_T,
+      HOUSE2_W - HOUSE2_INS_L - HOUSE2_INS_R, HOUSE2_H - HOUSE2_INS_T - HOUSE2_INS_B)
+  }
+}
+
+function markSolidRect(x0: i32, y0: i32, w: i32, h: i32) {
+  let y: i32 = y0
+  while (y < y0 + h) {
+    let x: i32 = x0
+    while (x < x0 + w) {
+      let i: i32 = y * W + x
+      if (TERR[i] < F_SOLID) { TERR[i] = TERR[i] + F_SOLID }
+      x = x + 1
+    }
+    y = y + 1
+  }
+}
+
+/// An L-path between two points — BOTH corner variants, two cells wide.
+/// Draws nothing from the stream.  pathCell bulldozes: trees are cleared,
+/// water becomes a plank bridge; only buildings and farm soil are skipped
+/// (soil is walkable anyway, so the corridor stays connected).  Carving
+/// both elbows guarantees a walkable route even when one elbow crosses a
+/// building — the lesson of a farm pocket sealed between the barn, the
+/// river and the coast.
+function carvePath(x0: i32, y0: i32, x1: i32, y1: i32) {
+  carveL(x0, y0, x1, y1, 0)
+  carveL(x0, y0, x1, y1, 1)
+}
+
+function carveL(x0: i32, y0: i32, x1: i32, y1: i32, corner: i32) {
+  let cx: i32 = x1
+  let cy: i32 = y0
+  if (corner === 1) { cx = x0; cy = y1 }
+  // segment A: (x0,y0) -> (cx,cy); segment B: (cx,cy) -> (x1,y1)
+  let sx: i32 = x0
+  while (sx !== cx) {
+    pathCell(sx, y0)
+    pathCell(sx, y0 + 1)
+    if (sx < cx) { sx = sx + 1 } else { sx = sx - 1 }
+  }
+  let sy: i32 = y0
+  while (sy !== cy) {
+    pathCell(x0, sy)
+    pathCell(x0 + 1, sy)
+    if (sy < cy) { sy = sy + 1 } else { sy = sy - 1 }
+  }
+  sx = cx
+  while (sx !== x1) {
+    pathCell(sx, cy)
+    pathCell(sx, cy + 1)
+    if (sx < x1) { sx = sx + 1 } else { sx = sx - 1 }
+  }
+  sy = cy
+  while (sy !== y1) {
+    pathCell(cx, sy)
+    pathCell(cx + 1, sy)
+    if (sy < y1) { sy = sy + 1 } else { sy = sy - 1 }
+  }
+  pathCell(x1, y1)
+}
+
+function pathCell(x: i32, y: i32) {
+  if (x < 0 || x >= W || y < 0 || y >= H) { return }
+  let i: i32 = y * W + x
+  if (TERR[i] === T_GRASS) { TERR[i] = T_PATH }
+  // water becomes a plank bridge — a river must never strand the town
+  // (this runs before the sea-solid pass, so bridge cells stay walkable)
+  if (TERR[i] === T_SEA) { TERR[i] = T_BRIDGE }
+  // trees are felled for the road; buildings are not
+  if (TERR[i] === T_GRASS + F_SOLID && insideBuilding(x, y) === 0) { TERR[i] = T_PATH }
+}
+
+export function ssgenGenerate(seed: i32) {
+  rngSeed(SS_RNG, seed)
+  let CAV: i32[] = []
+  let cvf: i32 = 0
+  while (cvf < 3072) { CAV.push(0); cvf = cvf + 1 }
+  let i: i32 = 0
+  let cells: i32 = W * H
+  while (i < cells) { TERR[i] = T_SEA; i = i + 1 }
+
+  // 1. the island: solid grass core, one noise draw per border-ring cell
+  let y: i32 = 3
+  while (y < H - 3) {
+    let x: i32 = 3
+    while (x < W - 3) {
+      let edge: i32 = 0
+      if (x === 3 || x === W - 4 || y === 3 || y === H - 4) { edge = 1 }
+      if (edge === 1) {
+        if (rngBelow(SS_RNG, 100) < 55) { TERR[y * W + x] = T_GRASS }
+      } else {
+        TERR[y * W + x] = T_GRASS
+      }
+      x = x + 1
+    }
+    y = y + 1
+  }
+
+  // 1b. one cellular-automata smoothing pass over the border band (draws
+  // NOTHING from the stream — the twin mirrors it as a pure function).  The
+  // raw noise leaves single-cell spikes and notches the beach ring cannot
+  // dress; after one majority vote the coast is made of runs and rounded
+  // corners, which is exactly the blob's vocabulary.
+  y = 2
+  while (y < H - 2) {
+    let x: i32 = 2
+    while (x < W - 2) {
+      if (x <= 5 || x >= W - 6 || y <= 5 || y >= H - 6) {
+        let i: i32 = y * W + x
+        let nb: i32 = 0
+        if (TERR[i - W - 1] > 0) { nb = nb + 1 }
+        if (TERR[i - W] > 0) { nb = nb + 1 }
+        if (TERR[i - W + 1] > 0) { nb = nb + 1 }
+        if (TERR[i - 1] > 0) { nb = nb + 1 }
+        if (TERR[i + 1] > 0) { nb = nb + 1 }
+        if (TERR[i + W - 1] > 0) { nb = nb + 1 }
+        if (TERR[i + W] > 0) { nb = nb + 1 }
+        if (TERR[i + W + 1] > 0) { nb = nb + 1 }
+        // a CA needs the OLD grid — stage verdicts in the local scratch
+        CAV[i] = 0
+        if (nb >= 5) { CAV[i] = 1 }
+        if (nb <= 3) { CAV[i] = 2 }
+      }
+      x = x + 1
+    }
+    y = y + 1
+  }
+  y = 2
+  while (y < H - 2) {
+    let x: i32 = 2
+    while (x < W - 2) {
+      if (x <= 5 || x >= W - 6 || y <= 5 || y >= H - 6) {
+        let i: i32 = y * W + x
+        if (CAV[i] === 1) { TERR[i] = T_GRASS }
+        if (CAV[i] === 2) { TERR[i] = T_SEA }
+      }
+      x = x + 1
+    }
+    y = y + 1
+  }
+
+  // 2. the river: enters at the top, wanders down to the sea
+  let rx: i32 = 12 + rngBelow(SS_RNG, W - 24)
+  let ry: i32 = 3
+  while (ry < H - 3) {
+    TERR[ry * W + rx] = T_SEA
+    TERR[ry * W + rx + 1] = T_SEA
+    let d: i32 = rngBelow(SS_RNG, 4)
+    if (d === 0 && rx > 8) { rx = rx - 1 }
+    if (d === 1 && rx < W - 10) { rx = rx + 1 }
+    ry = ry + 1
+  }
+
+  // 3. buildings.  The barn (the player's farmhouse) is FIXED in the south-
+  // west; shop/house/house2 jitter inside their zones with bounded retries.
+  BLD_W[0] = SHOP_W; BLD_H[0] = SHOP_H
+  BLD_W[1] = HOUSE_W; BLD_H[1] = HOUSE_H
+  BLD_W[2] = HOUSE2_W; BLD_H[2] = HOUSE2_H
+  BLD_W[3] = BARN_W; BLD_H[3] = BARN_H
+  BLD_X[3] = 6
+  BLD_Y[3] = H - 18
+  // solid = the building body only; the crop's grass margins and porch
+  // rows stay walkable (insets from the baker)
+  markSolidRect(BLD_X[3] + BARN_INS_L, BLD_Y[3] + BARN_INS_T,
+    BARN_W - BARN_INS_L - BARN_INS_R, BARN_H - BARN_INS_T - BARN_INS_B)
+
+  let b: i32 = 0
+  while (b < 3) {
+    // zones: shop mid-north, house east, house2 mid-west
+    // zones end by row 27: rows 28-29 stay a clear street band between
+    // the town and the farm belt (the barn is fixed at row 30)
+    let zx: i32 = 26
+    let zy: i32 = 6
+    let zw: i32 = 26
+    let zh: i32 = 10
+    if (b === 1) { zx = 44; zy = 14; zw = 18; zh = 12 }
+    if (b === 2) { zx = 5; zy = 8; zw = 18; zh = 12 }
+    let tries: i32 = 0
+    let placed: i32 = 0
+    while (tries < 20 && placed === 0) {
+      let px: i32 = zx + rngBelow(SS_RNG, zw - BLD_W[b])
+      let py: i32 = zy + rngBelow(SS_RNG, zh - BLD_H[b])
+      if (rectFree(px, py, BLD_W[b], BLD_H[b]) > 0) {
+        BLD_X[b] = px
+        BLD_Y[b] = py
+        markSolidInset(b, px, py)
+        placed = 1
+      }
+      tries = tries + 1
+    }
+    if (placed === 0) {
+      // deterministic fallback: the zone corner (kept clear of the river by
+      // zone choice in practice; the twin mirrors this exactly)
+      BLD_X[b] = zx
+      BLD_Y[b] = zy
+      markSolidInset(b, zx, zy)
+    }
+    b = b + 1
+  }
+
+  // 4. paths: barn door -> shop door -> house door; house2 -> shop
+  carvePath(ssgenDoorX(3), ssgenDoorY(3), ssgenDoorX(0), ssgenDoorY(0))
+  carvePath(ssgenDoorX(0), ssgenDoorY(0), ssgenDoorX(1), ssgenDoorY(1))
+  carvePath(ssgenDoorX(2), ssgenDoorY(2), ssgenDoorX(0), ssgenDoorY(0))
+
+  // 5. the farm plot: fixed east of the barn, soil cells, draws nothing
+  FARM_X = BLD_X[3] + BARN_W + 2
+  FARM_Y = BLD_Y[3] + 2
+  y = FARM_Y
+  while (y < FARM_Y + FARM_H) {
+    let x: i32 = FARM_X
+    while (x < FARM_X + FARM_W) {
+      let fi: i32 = y * W + x
+      if (TERR[fi] === T_GRASS) { TERR[fi] = T_SOIL }
+      x = x + 1
+    }
+    y = y + 1
+  }
+
+  // 6. trees: a fixed number of placement draws, 2x3 stamps on pure grass
+  treeCount = 0
+  let t: i32 = 0
+  while (t < TREE_ATTEMPTS) {
+    let tx: i32 = rngBelow(SS_RNG, W)
+    let ty: i32 = rngBelow(SS_RNG, H)
+    if (rectFree(tx, ty, 2, 3) > 0) {
+      markSolidRect(tx, ty, 2, 3)
+      // remember which tree by parity without another draw
+      treeCount = treeCount + 1
+    }
+    t = t + 1
+  }
+
+  // sea is solid
+  i = 0
+  while (i < cells) {
+    if (TERR[i] === T_SEA) { TERR[i] = T_SEA + F_SOLID }
+    i = i + 1
+  }
+}
+
+/// Paint TERR into UPLOAD (lip model, inline) then stamp the buildings and
+/// trees over it, and hand the engine the SOLID plane in one call.
+export function ssgenUpload(tileset: i32, priority: i32) {
+  // local: freed when this returns — see the plane note at the top
+  let UPLOAD: i32[] = []
+  let upf: i32 = 0
+  while (upf < 3072) { UPLOAD.push(0); upf = upf + 1 }
+  let y: i32 = 0
+  while (y < H) {
+    let x: i32 = 0
+    while (x < W) {
+      let i: i32 = y * W + x
+      let t: i32 = TERR[i] & 15
+      let g: i32 = GID_SEA
+      // which orthogonal neighbours are water (off-map counts as water)
+      let wm: i32 = 0
+      if (t > 0) {
+        if (y === 0 || (TERR[i - W] & 15) === T_SEA) { wm = wm + 1 }
+        if (y === H - 1 || (TERR[i + W] & 15) === T_SEA) { wm = wm + 2 }
+        if (x === 0 || (TERR[i - 1] & 15) === T_SEA) { wm = wm + 4 }
+        if (x === W - 1 || (TERR[i + 1] & 15) === T_SEA) { wm = wm + 8 }
+      }
+      if (t === T_GRASS && wm > 0) {
+        // the beach ring: a border GRASS cell paints sand + waterline,
+        // oriented by where the water is — the coast the pack intends.
+        // Path/soil/bridge cells keep their own look at the water's edge.
+        g = BEACH_G[wm]
+      } else if (t === T_BRIDGE) {
+        g = GID_BRIDGE
+      } else if (t === T_PATH) {
+        g = GID_PATH
+      } else if (t === T_SOIL) {
+        g = GID_SOIL
+      } else if (t === T_SEA) {
+        // plain water: the shoreline lives on the land side now (beach ring)
+        g = GID_SEA
+      } else {
+        let m: i32 = 0
+        if (y > 0 && (TERR[i - W] & 15) === T_PATH) { m = m + 1 }
+        if (y < H - 1 && (TERR[i + W] & 15) === T_PATH) { m = m + 2 }
+        if (x > 0 && (TERR[i - 1] & 15) === T_PATH) { m = m + 4 }
+        if (x < W - 1 && (TERR[i + 1] & 15) === T_PATH) { m = m + 8 }
+        if (m === 0) {
+          if (x > 0 && y > 0 && (TERR[i - W - 1] & 15) === T_PATH) { m = 16 }
+          else if (x < W - 1 && y > 0 && (TERR[i - W + 1] & 15) === T_PATH) { m = 17 }
+          else if (x > 0 && y < H - 1 && (TERR[i + W - 1] & 15) === T_PATH) { m = 18 }
+          else if (x < W - 1 && y < H - 1 && (TERR[i + W + 1] & 15) === T_PATH) { m = 19 }
+        }
+        if (m > 0) { g = PATH_G[m] } else { g = GID_GRASS }
+      }
+      UPLOAD[i] = g
+      x = x + 1
+    }
+    y = y + 1
+  }
+
+  // ── stamps: pure arithmetic ─────────────────────────────────────────────
+  // A stamp's tiles occupy CONTIGUOUS atlas slots (see the baker), so the
+  // paint is gid = BASE + row*w + col — constants and a counter, nothing
+  // else.  The previous design passed gid arrays through function params
+  // and the town came out scrambled; arrays never cross a boundary now.
+  // Local copies of the bases: one boxed import read each, then typed math.
+  let stW: i32 = 0
+  let stH: i32 = 0
+  let stB: i32 = 0
+  let b: i32 = 0
+  while (b < 4) {
+    if (b === 0) { stW = SHOP_W; stH = SHOP_H; stB = SHOP_BASE }
+    if (b === 1) { stW = HOUSE_W; stH = HOUSE_H; stB = HOUSE_BASE }
+    if (b === 2) { stW = HOUSE2_W; stH = HOUSE2_H; stB = HOUSE2_BASE }
+    if (b === 3) { stW = BARN_W; stH = BARN_H; stB = BARN_BASE }
+    let bx: i32 = 0
+    let by: i32 = 0
+    if (b === 0) { bx = BLD_X[0]; by = BLD_Y[0] }
+    if (b === 1) { bx = BLD_X[1]; by = BLD_Y[1] }
+    if (b === 2) { bx = BLD_X[2]; by = BLD_Y[2] }
+    if (b === 3) { bx = BLD_X[3]; by = BLD_Y[3] }
+    let sy: i32 = 0
+    while (sy < stH) {
+      let sx: i32 = 0
+      while (sx < stW) {
+        UPLOAD[(by + sy) * W + bx + sx] = stB + sy * stW + sx
+        sx = sx + 1
+      }
+      sy = sy + 1
+    }
+    b = b + 1
+  }
+
+  // trees: same arithmetic; find each block's top-left, alternate the two
+  // stamps by position parity
+  y = 0
+  while (y < H) {
+    let x: i32 = 0
+    while (x < W) {
+      let ti: i32 = y * W + x
+      if (TERR[ti] === T_GRASS + F_SOLID && insideBuilding(x, y) === 0) {
+        let up: i32 = 0
+        let left: i32 = 0
+        if (y > 0 && TERR[ti - W] === T_GRASS + F_SOLID && insideBuilding(x, y - 1) === 0) { up = 1 }
+        if (x > 0 && TERR[ti - 1] === T_GRASS + F_SOLID && insideBuilding(x - 1, y) === 0) { left = 1 }
+        if (up === 0 && left === 0) {
+          let tw: i32 = TREE0_W
+          let th: i32 = TREE0_H
+          let tb: i32 = TREE0_BASE
+          if (((x + y) & 1) === 1) { tw = TREE1_W; th = TREE1_H; tb = TREE1_BASE }
+          let ty: i32 = 0
+          while (ty < th) {
+            let tx: i32 = 0
+            while (tx < tw) {
+              if (y + ty < H && x + tx < W) {
+                UPLOAD[(y + ty) * W + x + tx] = tb + ty * tw + tx
+              }
+              tx = tx + 1
+            }
+            ty = ty + 1
+          }
+        }
+      }
+      x = x + 1
+    }
+    y = y + 1
+  }
+
+  tilemap_stream(tileset, ATLAS_COLS, W, H, UPLOAD, priority)
+  // the stream keeps its own i16 copy, so UPLOAD is free to become the
+  // collision plane: 1 where the solid flag is set, 0 elsewhere
+  let ci: i32 = 0
+  let cn: i32 = W * H
+  while (ci < cn) {
+    UPLOAD[ci] = 0
+    if (TERR[ci] >= F_SOLID) { UPLOAD[ci] = 1 }
+    ci = ci + 1
+  }
+  grid_from_gids(W, H, UPLOAD, ONESG)
+}
+
+function insideBuilding(x: i32, y: i32): i32 {
+  let b: i32 = 0
+  while (b < 4) {
+    if (x >= BLD_X[b] && x < BLD_X[b] + BLD_W[b] && y >= BLD_Y[b] && y < BLD_Y[b] + BLD_H[b]) { return 1 }
+    b = b + 1
+  }
+  return 0
+}

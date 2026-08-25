@@ -1,0 +1,69 @@
+# Headless GBA screenshot in CI — proves a ROM boots and RENDERS, not just that it links.
+# Uses libmgba in-process (no display / Xvfb / screen-recording needed), so it runs on a plain
+# Linux runner. Builds a real example ROM (needs the tish compiler from the sibling repo) and
+# uploads the PNG as an artifact; a golden-image compare can be layered on top for visual regression.
+name: GBA screenshot
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "examples/overworld-demo/**"
+      - "tools/gba-shot.c"
+      - "scripts/screenshot.sh"
+      - ".github/workflows/screenshot.yml"
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      # Lay the repos out to mirror the local checkout layout (see ci.yml's header note):
+      #   $GITHUB_WORKSPACE/chuggie/chuggie-engine + $GITHUB_WORKSPACE/chuggie/agb + $GITHUB_WORKSPACE/tish/tish
+      - name: Checkout chuggie-engine
+        uses: actions/checkout@v4
+        with:
+          path: chuggie/chuggie-engine
+      - name: Checkout tish compiler
+        uses: actions/checkout@v4
+        with:
+          repository: tishlang/tish
+          path: tish/tish
+      - name: Checkout the agb fork (patched in .cargo/config.toml)
+        uses: actions/checkout@v4
+        with:
+          repository: spacedevin/agb
+          ref: chuggie
+          path: chuggie/agb
+
+      - name: Install libmgba (headless renderer) + a PNG converter
+        run: sudo apt-get update && sudo apt-get install -y libmgba-dev imagemagick python3-pil libfreetype6-dev pkg-config
+
+      - name: Rust nightly + rust-src (GBA build-std target)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            tish/tish
+      - name: Install agb-gbafix (ELF -> .gba)
+        run: cargo install --locked agb-gbafix
+
+      - name: Build the tish compiler
+        working-directory: tish/tish
+        run: cargo build --release -p tishlang
+
+      - name: Build the overworld-demo ROM and capture a headless screenshot
+        working-directory: chuggie/chuggie-engine
+        env:
+          TISH: ${{ github.workspace }}/tish/tish/target/release/tish
+        run: ./scripts/screenshot.sh examples/overworld-demo/src/main.tish screenshot.png 200
+
+      - name: Upload screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: overworld-demo-screenshot
+          path: chuggie/chuggie-engine/screenshot.png
+          if-no-files-found: error

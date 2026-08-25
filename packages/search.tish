@@ -1,0 +1,232 @@
+// search.tish — a frame-budgeted incremental best-move search.
+//
+// The generic shape behind any tile-game AI: enumerate candidate moves, score each, keep the best,
+// and spread the work across frames so a decision never blows a frame budget. Magical Drop's CPU is
+// one instance (24 pickup orders x 7 target columns, ~130 simulated moves per decision); a match-3
+// dropper is another; an SRPG unit picking a tile is a third.
+//
+// ── THE INVERSION, and why it is the whole design ──────────────────────────────────────────────
+//
+// A framework that took a scoring CALLBACK would cost several hundred ticks per candidate on the
+// boxed path, against a budget of roughly six such calls per frame
+// (`examples/shmup/README.md:53-56`) — so a 130-candidate decision would take 20+ frames of pure
+// call overhead before scoring anything. There is no native call ABI for user tish functions on
+// GBA at all (`docs/memory-perf-review-2026-07.md:314-321`).
+//
+// So the search does not call the game. **The game calls the search**, in its own module, where the
+// call is direct:
+//
+//     let p: i32 = searchStep(AI, 0)
+//     while (p >= 0) {
+//       let score: i32 = myEvalMove(p >> 8, p & 255)   // a DIRECT call, same module
+//       p = searchStep(AI, score)
+//     }
+//
+// One framework call per candidate PAIR, not per cell, and the game's evaluator stays where the
+// compiler can see it. Candidate *enumeration* stays game-side too — the search only ever knows
+// how many there are.
+//
+// ── BUDGET IS TICKS, NOT A COUNT ───────────────────────────────────────────────────────────────
+//
+// The Rust this generalises spends a fixed number of candidate pairs per frame
+// (`schlop/drop-gba/archive/crates/tish-gba-drop/src/game.rs:663-687`). That is the wrong knob: pairs are not equal cost —
+// one that reaches a clear runs a whole cascade, most do not — so a fixed count overruns exactly
+// when the position is interesting. A tick budget cannot overrun. `searchStep` reads `timer_read()`
+// (~7 ticks) and returns -1 the moment the budget is spent, so the caller's loop simply ends and
+// the search resumes next frame where it stopped.
+//
+// `timer_read()` is 16 bit and wraps every ~65536 ticks — about fifteen frames. `(now - start) &
+// 65535` is exact for any span shorter than one wrap, and a per-frame budget is at most 4,389, so
+// the arithmetic is always inside it. Two rounds of A/B in this repo pointed at the wrong subsystem
+// because an accumulator was carried across a wrap (`packages/drop.tish:33-35`); this never
+// accumulates across frames.
+//
+// ── TWO TIERS ──────────────────────────────────────────────────────────────────────────────────
+//
+// The Rust has this in embryo: a cheap "can this even reach three in a row" probe that skips the
+// expensive resolve for most candidates, and whose absence cost 39,000 ticks of a 4,389-tick frame
+// (`game.rs:774-786`). Generalised here: score everything cheaply, `searchShortlist` the few worth a
+// real simulation, and the shortlist is drained one entry per `searchStep` so two expensive
+// evaluations can never land in the same frame.
+
+import { timer_read } from 'cargo:tish_agb'
+
+export let SEARCH_SLOTS: i32 = 2
+let SHORTLIST_MAX: i32 = 8
+
+// Per-slot state, stride 16.
+let S: i32[] = []
+let F_CI: i32 = 0
+let F_TI: i32 = 1
+let F_NCAND: i32 = 2
+let F_NTARG: i32 = 3
+let F_BEST: i32 = 4
+let F_SCORE: i32 = 5
+let F_PHASE: i32 = 6
+let F_START: i32 = 7
+let F_BUDGET: i32 = 8
+let F_SLN: i32 = 9
+let F_SLI: i32 = 10
+let F_DONE: i32 = 11
+let F_SPENT: i32 = 12
+let STRIDE: i32 = 16
+
+// The deferred queue, stride SHORTLIST_MAX per slot.
+let SL: i32[] = []
+
+// phases
+let PH_IDLE: i32 = 0
+let PH_SWEEP: i32 = 1
+let PH_DEEP: i32 = 2
+let PH_DONE: i32 = 3
+
+let si: i32 = 0
+while (si < SEARCH_SLOTS * STRIDE) {
+  S.push(0)
+  si = si + 1
+}
+let sj: i32 = 0
+while (sj < SEARCH_SLOTS * SHORTLIST_MAX) {
+  SL.push(0)
+  sj = sj + 1
+}
+
+/// Start a decision. `nCand` x `nTargets` is the space; `budgetTicks` is the most this may spend in
+/// any single frame. Nothing is evaluated here — the first `searchStep` does that.
+export function searchBegin(slot: i32, nCand: i32, nTargets: i32, budgetTicks: i32) {
+  let b: i32 = slot * STRIDE
+  S[b | F_CI] = 0
+  S[b | F_TI] = 0
+  S[b | F_NCAND] = nCand
+  S[b | F_NTARG] = nTargets
+  S[b | F_BEST] = -1
+  // Deliberately not `0 - 2147483648`: tish numbers are f64 and the extreme is awkward to compare
+  // against. Any real score is far inside this.
+  S[b | F_SCORE] = 0 - 1000000000
+  S[b | F_PHASE] = PH_SWEEP
+  S[b | F_SLN] = 0
+  S[b | F_SLI] = 0
+  S[b | F_DONE] = 0
+  S[b | F_BUDGET] = budgetTicks
+  S[b | F_SPENT] = 0
+}
+
+/// Feed the previous pair's score and get the next pair to evaluate.
+///
+/// Returns a packed `(candidate << 8) | target`, or:
+///   -1  the frame's budget is spent — stop, call again next frame
+///   -2  the decision is finished; `searchBest` holds the answer
+///
+/// The first call of a decision must pass any value; there is no previous pair yet.
+export function searchStep(slot: i32, prevScore: i32): i32 {
+  let b: i32 = slot * STRIDE
+  let phase: i32 = S[b | F_PHASE]
+  if (phase === PH_IDLE) { return 0 - 2 }
+
+  // Bank the score the caller just produced, for whichever pair was handed out last.
+  if (S[b | F_DONE] === 1) {
+    if (prevScore > S[b | F_SCORE]) {
+      S[b | F_SCORE] = prevScore
+      S[b | F_BEST] = S[b | F_CI] * 256 + S[b | F_TI]
+    }
+    S[b | F_DONE] = 0
+    // Advance the cursor past the pair just scored.
+    if (phase === PH_SWEEP) {
+      let ti: i32 = S[b | F_TI] + 1
+      if (ti >= S[b | F_NTARG]) {
+        ti = 0
+        S[b | F_CI] = S[b | F_CI] + 1
+      }
+      S[b | F_TI] = ti
+    } else {
+      S[b | F_SLI] = S[b | F_SLI] + 1
+    }
+  }
+
+  // Budget. Read once per handout, not per inner op — a `timer_read` is ~7 ticks and this is the
+  // only place the search spends anything of its own.
+  let now: i32 = timer_read()
+  if (S[b | F_SPENT] === 0) {
+    S[b | F_START] = now
+    S[b | F_SPENT] = 1
+  }
+  let used: i32 = (now - S[b | F_START]) & 65535
+  if (used >= S[b | F_BUDGET]) {
+    S[b | F_SPENT] = 0
+    return 0 - 1
+  }
+
+  if (S[b | F_PHASE] === PH_SWEEP) {
+    if (S[b | F_CI] >= S[b | F_NCAND]) {
+      // Cheap sweep finished. If anything was shortlisted, drain it; otherwise the best from the
+      // sweep stands.
+      if (S[b | F_SLN] > 0) {
+        S[b | F_PHASE] = PH_DEEP
+        S[b | F_SLI] = 0
+      } else {
+        S[b | F_PHASE] = PH_DONE
+        S[b | F_SPENT] = 0
+        return 0 - 2
+      }
+    } else {
+      S[b | F_DONE] = 1
+      return S[b | F_CI] * 256 + S[b | F_TI]
+    }
+  }
+
+  if (S[b | F_PHASE] === PH_DEEP) {
+    if (S[b | F_SLI] >= S[b | F_SLN]) {
+      S[b | F_PHASE] = PH_DONE
+      S[b | F_SPENT] = 0
+      return 0 - 2
+    }
+    let pair: i32 = SL[slot * SHORTLIST_MAX + S[b | F_SLI]]
+    S[b | F_CI] = (pair / 256) | 0
+    S[b | F_TI] = pair & 255
+    S[b | F_DONE] = 1
+    // ONE deferred entry per call, always. Returning several would let two full simulations land in
+    // the same frame, which is the spike the budget exists to prevent.
+    return pair
+  }
+
+  S[b | F_SPENT] = 0
+  return 0 - 2
+}
+
+/// Mark the pair just handed out as worth a real evaluation later. Called from inside the caller's
+/// scoring code, during the cheap sweep.
+export function searchShortlist(slot: i32) {
+  let b: i32 = slot * STRIDE
+  let n: i32 = S[b | F_SLN]
+  if (n >= SHORTLIST_MAX) { return }
+  SL[slot * SHORTLIST_MAX + n] = S[b | F_CI] * 256 + S[b | F_TI]
+  S[b | F_SLN] = n + 1
+}
+
+/// The winning pair, packed `(candidate << 8) | target`, or -1 if nothing scored.
+export function searchBest(slot: i32): i32 { return S[(slot * STRIDE) | F_BEST] }
+export function searchBestScore(slot: i32): i32 { return S[(slot * STRIDE) | F_SCORE] }
+export function searchCand(slot: i32): i32 {
+  let p: i32 = S[(slot * STRIDE) | F_BEST]
+  if (p < 0) { return 0 - 1 }
+  return (p / 256) | 0
+}
+export function searchTarget(slot: i32): i32 {
+  let p: i32 = S[(slot * STRIDE) | F_BEST]
+  if (p < 0) { return 0 - 1 }
+  return p & 255
+}
+
+/// 1 once the decision is complete.
+export function searchDone(slot: i32): i32 {
+  if (S[(slot * STRIDE) | F_PHASE] === PH_DONE) { return 1 }
+  return 0
+}
+
+export function searchReset(slot: i32) {
+  let b: i32 = slot * STRIDE
+  S[b | F_PHASE] = PH_IDLE
+  S[b | F_BEST] = -1
+  S[b | F_SLN] = 0
+  S[b | F_SPENT] = 0
+}

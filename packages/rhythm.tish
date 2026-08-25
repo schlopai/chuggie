@@ -1,0 +1,429 @@
+// rhythm.tish — a CALL-AND-RESPONSE rhythm judge, keyed to the deck sequencer's own playhead.
+//
+// The genre kit for a Parappa-style game: a teacher raps a phrase, the player repeats it, and every
+// press is judged against the beat it was supposed to land on. It handles the clock, the hit
+// windows, misses, stray presses, combo, score and the "U Rappin'" meter. It does NOT draw anything
+// and does not own the music — the game starts a `deck:` song and draws its own icon bar.
+//
+//     import { deckPlay } from '../../../packages/deck'
+//     import * as rhythm from '../../../packages/rhythm'
+//
+//     rhythm.chartPhrase(120, 0, 16, [0, 4, 8, 12], [BTN_A, BTN_A, BTN_B, BTN_A])  // steps = 16ths
+//     rhythm.rhythmInit(120)
+//     deckPlay(song)
+//     while (true) {
+//       let j = rhythm.rhythmStep(keys_edge())
+//       rhythm.rhythmLane(icons, 44, 34, 4, 22, 10)
+//       frame()
+//     }
+//
+// ── Why the chart lives here, and the lane is drawn here too ─────────────────────────────────────
+// The cue table is the module's own state rather than something the game hands in. That is partly
+// tish: a typed `i32[]` PARAMETER arrives boxed, so a module cannot take one and store it in a
+// typed field — the assignment is an E0308 at the Rust stage.
+//
+// It also settles where the icon bar belongs. A lane redraws every cue in the visible window every
+// frame, and reading those back through accessors would cost a boxed call per cue per field — a
+// dozen visible cues times four fields is far past the per-frame budget. So the one thing that must
+// touch the whole chart every frame lives where the chart is typed, and `rhythmLane` takes the
+// layout as arguments so the package still owns no art and no opinion about where the bar sits.
+//
+// ── Why the clock is the deck playhead ────────────────────────────────────────────────────────────
+// Time here is "which sequencer frame is the song on", read from `deck_frame()`. It is deliberately
+// NOT a counter the game increments once per `frame()`. tish-agb advances the sequencer once per
+// ELAPSED DISPLAY FRAME (see `music_catchup`), so a frame the game misses moves the music forward
+// and leaves a hand-rolled counter behind it — the chart would slide off the song a frame at a time,
+// gradually, in exactly the way that is hard to see in a screenshot and obvious to a player. Reading
+// the playhead means there is only one clock, so drift is not a bug to be fixed but a state that
+// cannot be represented.
+import {
+  deck_frame, sprite_set_pos, sprite_set_frame, sprite_set_visible,
+} from 'cargo:tish_agb'
+
+// ── Judgments ────────────────────────────────────────────────────────────────────────────────────
+export let J_NONE: i32 = 0
+export let J_COOL: i32 = 1
+export let J_GOOD: i32 = 2
+export let J_BAD: i32 = 3
+export let J_MISS: i32 = 4
+
+// Meter zones, in the order a results screen ranks them.
+export let RANK_AWFUL: i32 = 0
+export let RANK_BAD: i32 = 1
+export let RANK_GOOD: i32 = 2
+export let RANK_COOL: i32 = 3
+
+// ── The chart (see the header note on why it lives here). ──
+let CF: i32[] = []   // cue frame, on the sequencer's clock
+let CB: i32[] = []   // cue button code
+let CR: i32[] = []   // 0 = the teacher's call, 1 = the player's response
+let CS: i32[] = []   // 0 pending, then J_COOL / J_GOOD / J_BAD / J_MISS (calls: 1 once played)
+
+// Response spans: the stretch of song during which the player is expected to be answering. Stray
+// presses are only punished inside one, so mashing along with the teacher's call is free — which is
+// how the genre works; the player is meant to feel the beat before repeating it.
+let PS: i32[] = []
+let PE: i32[] = []
+
+// Everything scalar the judge tracks. A typed struct so every read in the per-frame path is a native
+// field load rather than a hashmap lookup.
+interface Judge {
+  bpm: i32,
+  // Hit windows, in frames either side of the cue. A GBA frame is ~16.7ms, so COOL is ±50ms —
+  // tight enough to feel earned, loose enough that a 60Hz-sampled d-pad can land in it.
+  //
+  // These live in the struct rather than as module-level `let`s because tish lowers a mutable
+  // module binding to a `VmRef` cell, and a function assigning a plain i32 into one is an E0308 at
+  // the Rust stage. A typed struct field is both writable and a native load.
+  //
+  // ⚠️ A field used but NOT DECLARED HERE is not an error in tish. `JD.fpb` read back `null`, the
+  // initializer's value for it was discarded, and the arithmetic downstream quietly became NaN.
+  // Nothing warned at any stage. Declare the field.
+  fpb: i32,      // frames per beat, cached: recomputing it is a float divide every frame
+  prev: i32,     // playhead at the previous step — see the press-time estimate in rhythmStep
+  wCool: i32,
+  wGood: i32,
+  wBad: i32,
+  n: i32,        // cue count
+  fire: i32,     // cursor: cues whose moment has arrived (drives the teacher's performance)
+  jud: i32,      // cursor: cues whose window has closed (drives misses)
+  span: i32,     // cursor into the response spans
+  now: i32,      // last playhead read
+  score: i32,
+  combo: i32,
+  best: i32,
+  meter: i32,    // 0..100, the "U Rappin'" bar
+  last: i32,     // the judgment rhythmStep returned most recently (sticky, for HUD flashes)
+  callBtn: i32,  // button the teacher just demonstrated, or -1
+  cools: i32,
+  goods: i32,
+  bads: i32,
+  misses: i32,
+  turn: i32,     // 1 while the player is inside a response span
+  wrapped: i32,  // 1 once the song has looped back past the chart (see rhythmStep)
+  lastBtn: i32,  // which button the last judgment was about, or -1
+  lane: i32      // cursor: leftmost cue still worth drawing
+}
+let JD: Judge = {
+  bpm: 120, fpb: 30, prev: -1, wCool: 5, wGood: 9, wBad: 13, n: 0, fire: 0, jud: 0, span: 0, now: -1,
+  score: 0, combo: 0, best: 0, meter: 60, last: 0, callBtn: -1,
+  cools: 0, goods: 0, bads: 0, misses: 0, turn: 0, wrapped: 0, lastBtn: -1, lane: 0
+}
+
+// ── Tempo ────────────────────────────────────────────────────────────────────────────────────────
+
+/// Convert a position in STEPS to a sequencer frame. A step is a SIXTEENTH NOTE — a quarter of a
+/// beat, four to the beat, sixteen to a 4/4 bar.
+///
+/// ⚠️ Read that unit twice before changing anything. The first version of this function called its
+/// argument `beat16` and divided by 16, i.e. treated a step as a sixteenth of a BEAT, while the
+/// generator writing the song treated the identical numbers as sixteenth NOTES and divided by 4.
+/// Nothing errored: the chart simply ran four times faster than the music it was supposed to be
+/// transcribing, so the prompts had no relationship to what the player could hear. Both halves have
+/// to name the same unit, and the name has to be one that cannot be read two ways.
+///
+/// ⚠️ The frame conversion must also stay identical to `beat_to_frames` in
+/// `crates/tish-gba-scenepack/src/deckpack.rs`, which places the song's notes: 59.7275Hz, not 60,
+/// and each position rounded on its own rather than stepped by a constant.
+export function frameOfStep(step: i32, bpm: i32): i32 {
+  return Math.floor((step / 4.0) * 60.0 * 59.7275 / bpm + 0.5)
+}
+
+/// Frames per beat at `bpm`, rounded — for laying out an icon bar, not for placing cues.
+export function framesPerBeat(bpm: i32): i32 {
+  return Math.floor(60.0 * 59.7275 / bpm + 0.5)
+}
+
+// ── Building a chart ─────────────────────────────────────────────────────────────────────────────
+
+/// Append one call-and-response phrase to the game's cue arrays.
+///
+/// `startStep` is where the teacher's call begins, in STEPS (sixteenth notes — see `frameOfStep`).
+/// `offs`/`btns` are the pattern: step offsets from the start of the call, and the button for each.
+/// The player's response is the same pattern `lenStep` later, which is what makes it
+/// call-and-response — one pattern,
+/// stated then echoed, so the chart cannot disagree with itself about what was asked.
+///
+/// Call this once per phrase at scene load. It is not cheap and it is not meant to be.
+export function chartPhrase(
+  bpm: i32, startStep: i32, lenStep: i32, offs: i32[], btns: i32[]
+) {
+  // The call: the teacher's line. Role 0 — played for the player, never judged.
+  let i = 0
+  while (i < offs.length) {
+    CF.push(frameOfStep(startStep + offs[i], bpm))
+    CB.push(btns[i])
+    CR.push(0)
+    CS.push(0)
+    i = i + 1
+  }
+  // The response: the same pattern, one phrase later. Role 1 — this is what gets judged.
+  let respStart = startStep + lenStep
+  i = 0
+  while (i < offs.length) {
+    CF.push(frameOfStep(respStart + offs[i], bpm))
+    CB.push(btns[i])
+    CR.push(1)
+    CS.push(0)
+    i = i + 1
+  }
+  // Record the answering window so stray presses can be told apart from freestyle. It runs from a
+  // beat before the first expected press to a beat after the last, so the edges are forgiving.
+  PS.push(frameOfStep(respStart + offs[0] - 4, bpm))
+  PE.push(frameOfStep(respStart + offs[offs.length - 1] + 4, bpm))
+}
+
+/// Arm the finished chart and reset the run. Call after the last `chartPhrase`, before the song —
+/// and again before a replay, which clears every cue back to pending.
+export function rhythmInit(bpm: i32) {
+  let k = 0
+  while (k < CS.length) { CS[k] = 0; k = k + 1 }
+  JD.bpm = bpm
+  JD.fpb = framesPerBeat(bpm)
+  JD.n = CF.length
+  JD.fire = 0
+  JD.jud = 0
+  JD.span = 0
+  JD.now = -1
+  JD.score = 0
+  JD.combo = 0
+  JD.best = 0
+  JD.meter = 60
+  JD.last = 0
+  JD.callBtn = -1
+  JD.cools = 0
+  JD.goods = 0
+  JD.bads = 0
+  JD.misses = 0
+  JD.turn = 0
+  JD.wrapped = 0
+  JD.lastBtn = -1
+  JD.lane = 0
+}
+
+/// Widen or tighten the hit windows (frames either side). Defaults are 3 / 6 / 10.
+export function rhythmWindows(cool: i32, good: i32, bad: i32) {
+  JD.wCool = cool
+  JD.wGood = good
+  JD.wBad = bad
+}
+
+// ── The per-frame judge ──────────────────────────────────────────────────────────────────────────
+
+// Fold one judgment into score, combo and meter. The meter moves further down on a miss than a
+// mistimed press: in this genre being lost is worse than being loose.
+function apply(j: i32) {
+  if (j === J_COOL) {
+    JD.combo = JD.combo + 1
+    JD.score = JD.score + 100 + JD.combo * 10
+    JD.meter = Math.min(100, JD.meter + 2)
+    JD.cools = JD.cools + 1
+  } else if (j === J_GOOD) {
+    JD.combo = JD.combo + 1
+    JD.score = JD.score + 50 + JD.combo * 5
+    JD.meter = Math.min(100, JD.meter + 1)
+    JD.goods = JD.goods + 1
+  } else if (j === J_BAD) {
+    JD.combo = 0
+    JD.meter = Math.max(0, JD.meter - 3)
+    JD.bads = JD.bads + 1
+  } else if (j === J_MISS) {
+    JD.combo = 0
+    JD.meter = Math.max(0, JD.meter - 5)
+    JD.misses = JD.misses + 1
+  }
+  if (JD.combo > JD.best) { JD.best = JD.combo }
+  JD.last = j
+}
+
+/// Advance one frame and judge `edge` — the mask from `keys_edge()`.
+///
+/// Returns the judgment made this frame (`J_NONE` when nothing was decided). This is the ONLY call
+/// the game needs per frame; everything else is a cheap accessor read on demand.
+export function rhythmStep(edge: i32): i32 {
+  let now = deck_frame()
+  if (now < 0) { return J_NONE }   // song not running — freeze rather than judge against nothing
+
+  // deckpack bakes EVERY song with `loop_frame = 0`, so the playhead does not stop at the end — it
+  // jumps back to zero and the song starts again. A chart keyed to absolute frames has no second
+  // verse to play, so treat the wrap as the end of the run and let the game move to results. Past
+  // this point every cursor is already beyond `now`, so the judge goes inert on its own; the flag
+  // exists to tell the game, not to stop the machine.
+  if (now < JD.now) { JD.wrapped = 1 }
+  JD.prev = JD.now
+  JD.now = now
+
+  // Which response span are we in? Spans are sorted and disjoint, so one cursor walks them.
+  while (JD.span < PE.length && PE[JD.span] < now) { JD.span = JD.span + 1 }
+  let inSpan = 0
+  if (JD.span < PS.length && PS[JD.span] <= now && now <= PE[JD.span]) { inSpan = 1 }
+  JD.turn = inSpan
+
+  // The teacher's performance: report each call cue as its moment arrives so the game can pose the
+  // character and play the syllable.
+  JD.callBtn = -1
+  while (JD.fire < JD.n && CF[JD.fire] <= now) {
+    if (CR[JD.fire] === 0) {
+      CS[JD.fire] = 1
+      JD.callBtn = CB[JD.fire]
+    }
+    JD.fire = JD.fire + 1
+  }
+
+  // Expire: anything whose window has closed. A response nobody answered is a miss.
+  let out = J_NONE
+  while (JD.jud < JD.n && CF[JD.jud] + JD.wBad < now) {
+    if (CR[JD.jud] === 1 && CS[JD.jud] === 0) {
+      CS[JD.jud] = J_MISS
+      JD.lastBtn = CB[JD.jud]
+      apply(J_MISS)
+      out = J_MISS
+    }
+    JD.jud = JD.jud + 1
+  }
+
+  if (edge === 0) { return out }
+
+  // ⚠️ WHEN the button went down is not `now`, and assuming it was is a systematic LATE bias.
+  //
+  // Input is read once per game loop, but the playhead advances once per DISPLAY frame. A game
+  // running under 60fps therefore sees the playhead jump by more than one between polls, and a press
+  // detected at this poll actually happened somewhere in `(prev, now]` — on average half a gap ago.
+  // Judged at `now`, perfect play reads late by half the gap, every single time.
+  //
+  // Measured on rap-dojo at ~40fps before this existed: a robot pressing 3 frames EARLY scored 39
+  // COOL, and the same robot pressing 3 frames late scored 33 GOOD. The window was not tight, it was
+  // off-centre — which to a player feels like the game refusing every press they were sure of.
+  //
+  // The midpoint of the interval is the unbiased estimate. `Math.floor` so it can never over-correct
+  // and start rejecting genuinely early presses.
+  let pressAt = now
+  if (JD.prev >= 0 && now > JD.prev) { pressAt = now - Math.floor((now - JD.prev) / 2) }
+
+  // Look forward from the judge cursor for the first pending response cue that is both inside its
+  // window and asking for a button that was actually pressed.
+  let i = JD.jud
+  let hit = -1
+  while (i < JD.n) {
+    let f = CF[i]
+    if (f - JD.wBad > now) { break }          // this cue has not opened yet; nor has any after it
+    if (CR[i] === 1 && CS[i] === 0 && (edge & (1 << CB[i])) !== 0) { hit = i; break }
+    i = i + 1
+  }
+
+  if (hit >= 0) {
+    let d = CF[hit] - pressAt
+    if (d < 0) { d = -d }
+    let j = J_BAD
+    if (d <= JD.wCool) {
+      j = J_COOL
+    } else if (d <= JD.wGood) {
+      j = J_GOOD
+    }
+    CS[hit] = j
+    JD.lastBtn = CB[hit]
+    apply(j)
+    return j
+  }
+
+  // Nothing matched. Inside the player's own answering window that is a wrong or off-beat press and
+  // it costs; during the teacher's call it is freestyle and costs nothing.
+  if (inSpan === 1) {
+    apply(J_BAD)
+    return J_BAD
+  }
+  return out
+}
+
+// ── The icon bar ─────────────────────────────────────────────────────────────────────────────────
+
+/// Lay the visible stretch of chart onto a pool of sprites — the scrolling prompt bar.
+///
+/// Cues approach `hitX` from the right at `beatPx` pixels per beat and are due as they touch it;
+/// calls are drawn on the `callY` row and responses on `respY`, so the shape of the phrase — what
+/// was asked, above what you have to answer — is legible without reading the icons at all.
+///
+/// `icons` is the caller's sprite pool and `lit` is the offset from a button's normal frame to its
+/// lit frame in the caller's sheet. Those two arguments are the whole art coupling: the package
+/// picks no sprites, no colours and no position, it only knows which cue goes where and when.
+/// Everything it calls is a typed extern, so a pool of sixteen costs less than one boxed call.
+export function rhythmLane(
+  icons: i32[], hitX: i32, beatPx: i32, callY: i32, respY: i32, lit: i32
+) {
+  let now = JD.now
+  if (now < 0) { return }
+  let pool = icons.length
+
+  // ⚠️ ONE division per call, not one per icon. tish's `/` is float division and this CPU has no
+  // FPU, so every one is a software routine; the obvious `(frame - now) * beatPx / fpb` spelling put
+  // one on each prompt on screen. Folding the constant into a 24.8 fixed-point scale leaves a
+  // multiply and a divide by 256.
+  let scale: i32 = Math.floor(beatPx * 256 / JD.fpb)
+
+  while (JD.lane < JD.n && hitX + Math.floor((CF[JD.lane] - now) * scale / 256) < -20) {
+    JD.lane = JD.lane + 1
+  }
+
+  let k = JD.lane
+  let slot = 0
+  while (k < JD.n && slot < pool) {
+    let x: i32 = hitX + Math.floor((CF[k] - now) * scale / 256)
+    if (x > 244) { break }
+    // Lit means "this has happened": the teacher has said it, or you answered it well. A cue you
+    // fluffed stays dim and slides past, which is the only feedback that needs no words.
+    let f = CB[k]
+    let st = CS[k]
+    if (CR[k] === 0) {
+      if (st !== 0) { f = f + lit }
+      sprite_set_pos(icons[slot], x, callY)
+    } else {
+      if (st === J_COOL || st === J_GOOD) { f = f + lit }
+      sprite_set_pos(icons[slot], x, respY)
+    }
+    sprite_set_frame(icons[slot], f)
+    sprite_set_visible(icons[slot], 1)
+    slot = slot + 1
+    k = k + 1
+  }
+  while (slot < pool) {
+    sprite_set_visible(icons[slot], 0)
+    slot = slot + 1
+  }
+}
+
+// ── Read-back (scalars only; all cheap, call the ones you draw) ──────────────────────────────────
+
+/// The playhead as of the last `rhythmStep`, in sequencer frames.
+export function rhythmNow(): i32 { return JD.now }
+/// 1 while the player is inside a response span — i.e. it is their turn to rap.
+export function rhythmMyTurn(): i32 { return JD.turn }
+/// The button the teacher demonstrated this frame, or -1. Drives the call-side pose and syllable.
+export function rhythmCallBtn(): i32 { return JD.callBtn }
+export function rhythmScore(): i32 { return JD.score }
+export function rhythmCombo(): i32 { return JD.combo }
+export function rhythmBestCombo(): i32 { return JD.best }
+export function rhythmMeter(): i32 { return JD.meter }
+export function rhythmCools(): i32 { return JD.cools }
+export function rhythmGoods(): i32 { return JD.goods }
+export function rhythmBads(): i32 { return JD.bads }
+export function rhythmMisses(): i32 { return JD.misses }
+/// The most recent judgment. Note there is deliberately no "how long ago" companion: timing a HUD
+/// flash against the playhead skips its own expiry whenever a dropped frame makes the playhead jump
+/// by two, and leaves the banner up. Count those in game frames.
+export function rhythmLast(): i32 { return JD.last }
+/// The button the most recent judgment concerned, or -1 — so the player character can strike the
+/// pose for the button they actually played.
+export function rhythmLastBtn(): i32 { return JD.lastBtn }
+/// 1 once every cue has been resolved, or the song has looped past the end of the chart.
+export function rhythmDone(): i32 {
+  if (JD.wrapped === 1) { return 1 }
+  if (JD.jud >= JD.n) { return 1 }
+  return 0
+}
+/// The meter as a rank band: RANK_AWFUL / RANK_BAD / RANK_GOOD / RANK_COOL.
+export function rhythmRank(): i32 {
+  if (JD.meter >= 75) { return RANK_COOL }
+  if (JD.meter >= 50) { return RANK_GOOD }
+  if (JD.meter >= 25) { return RANK_BAD }
+  return RANK_AWFUL
+}

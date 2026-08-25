@@ -1,0 +1,363 @@
+// deckbuild — a single deckbuilding combat, built on `packages/cards.tish`.
+//
+// WHY THIS EXAMPLE EXISTS. `cards.tish` was extracted from `examples/solitaire`, and a package
+// extracted from one game is not yet a package — it is that game's code with a new filename. This
+// is the second consumer, and it was chosen to be as UNLIKE patience as a card game gets:
+//
+//   * the deck is BESPOKE — twelve cards with a cost and an effect, no suits and no ranks, so none
+//     of `cardRank`/`cardSuit`/`cardIsRed` is ever called;
+//   * cards leave the middle of a pile by identity (`pileRemoveAt`), not off the top;
+//   * the draw pile RUNS OUT mid-draw and is rebuilt from the discard (`pileRecycle` + reshuffle),
+//     which patience only ever does at a fixed moment.
+//
+// `examples/solitaire` was not touched. If it had needed an edit to fit, `cards.tish` would not be
+// a package — the same bar `examples/keep` holds `packages/keylock.tish` to.
+//
+// ── THE SCREEN IS COLD ──────────────────────────────────────────────────────────────────────────
+//
+// Nothing animates: the table is identical between one keypress and the next. So `paint()` runs
+// only when a signature over (hand, energy, hp, block, turn, cursor) changes. This is solitaire's
+// lesson applied rather than rediscovered — a `dirty = 1` flag gets written in seven places and
+// read in none, whereas a signature is DERIVED from the state it summarises and cannot disagree
+// with it.
+
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  backdrop, ui_begin, ui_text, ui_rect, ui_clear_rect, ui_reserve_tiles, frame,
+  audio_defer, audio_pump, keys_edge, log, ticks
+} from 'cargo:tish_agb'
+import { rngSeed } from '../../../packages/rng'
+import {
+  cardsInit, cardsBuildDeck, cardsTotal,
+  pileCount, pileAt, pileTop, pilePush, pilePop, pileClear,
+  pileDeal, pileMove, pileRecycle, pileShuffle, pileRemoveAt, pileFind
+} from '../../../packages/cards'
+
+// ── piles ───────────────────────────────────────────────────────────────────────────────────────
+// The four piles a deckbuilder has. `cards.tish` does not know what any of them mean; these are
+// just indices into it.
+let DRAW: i32 = 0
+let HAND: i32 = 1
+let DISC: i32 = 2
+let SPENT: i32 = 3       // cards exhausted for the combat — proof that a card can leave play
+
+// ── the card table ──────────────────────────────────────────────────────────────────────────────
+// A card id here is an index into THESE arrays and nothing else. That is the point: `cards.tish`
+// stores i32s and never interprets them, so a bespoke deck costs no adapter layer.
+//
+// Untyped on purpose — a `: string[]` annotation lowers to Vec<String> and deep-copies on every
+// read, where an untyped ArcStr index is a refcount bump. Solitaire's header documents the same.
+let CNAME = ["STRIKE", "STRIKE", "STRIKE", "STRIKE", "DEFEND", "DEFEND", "DEFEND", "DEFEND",
+             "BASH", "BASH", "SIPHON", "PURGE"]
+let CCOST: i32[] = [1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 1, 0]
+let CATK: i32[] = [6, 6, 6, 6, 0, 0, 0, 0, 10, 10, 4, 0]
+let CBLK: i32[] = [0, 0, 0, 0, 5, 5, 5, 5, 0, 0, 0, 0]
+let CHEAL: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0]
+// PURGE exhausts itself: it goes to SPENT instead of DISC and never comes back this combat.
+let CEXH: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+let DECK_SIZE: i32 = 12
+
+let HAND_SIZE: i32 = 5
+let ENERGY_MAX: i32 = 3
+
+// ── combat state ────────────────────────────────────────────────────────────────────────────────
+let S: i32[] = []
+let S_HP: i32 = 0
+let S_BLOCK: i32 = 1
+let S_ENERGY: i32 = 2
+let S_EHP: i32 = 3
+let S_EINTENT: i32 = 4
+let S_TURN: i32 = 5
+let S_CUR: i32 = 6
+let S_OVER: i32 = 7        // 0 fighting, 1 won, 2 lost
+let S_SIG: i32 = 8
+let S_WAIT: i32 = 9
+let S_N: i32 = 10
+
+let HP_MAX: i32 = 40
+let EHP_MAX: i32 = 60
+
+// ── palette ─────────────────────────────────────────────────────────────────────────────────────
+let BG: i32 = 0x181422
+let CARDBG: i32 = 0xE8E4D8
+let CARDRIM: i32 = 0x2A2A32
+let SELCOL: i32 = 0xFFC24A
+let INK: i32 = 0x202028
+let DIM: i32 = 0x6A6480
+let HPC: i32 = 0x50C060
+let EHPC: i32 = 0xC04848
+let BLKC: i32 = 0x60A0E0
+let GOLD: i32 = 0xFFD84A
+let WHITE: i32 = 0xF0ECE0
+
+// Card geometry. Cards are tile-aligned (x ≡ 1 mod 8, 46 wide) so `ui_clear_rect` — which snaps
+// OUT to whole 8x8 tiles — clears one card without eating its neighbour's edge.
+let CARD_W: i32 = 46
+let CARD_H: i32 = 44
+let CARD_PITCH: i32 = 48
+let CARD_X: i32 = 1
+let CARD_Y: i32 = 100
+
+// `"" + n` renders NOTHING on device — an empty prefix produces a correctly-sized blank. Every
+// number on screen goes through this table, and no branch below concatenates onto an empty string.
+let NUMS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
+            "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29",
+            "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43",
+            "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57",
+            "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70"]
+
+function numStr(n: i32) {
+  if (n < 0) { return "0" }
+  if (n > 70) { return "70" }
+  return NUMS[n]
+}
+
+// ── the draw, and the reshuffle that makes it a deckbuilder ─────────────────────────────────────
+//
+// ⚠️ THIS IS THE FUNCTION THE WHOLE EXAMPLE EXISTS TO EXERCISE. Drawing five cards from a pile that
+// holds two is the case patience never has: the draw pile runs dry MID-DRAW, the discard is tipped
+// back into it, reshuffled, and the draw continues. `pileDeal` returning short is what makes that
+// expressible without the caller counting — it moves what it can and reports it.
+function drawCards(n: i32) {
+  let got: i32 = pileDeal(DRAW, HAND, n, 1)
+  if (got < n) {
+    if (pileCount(DISC) === 0) { return }        // genuinely out of cards; a hand can be short
+    pileRecycle(DISC, DRAW)
+    pileShuffle(DRAW, 0)
+    log("DB reshuffle, draw=" + numStr(pileCount(DRAW)))
+    pileDeal(DRAW, HAND, n - got, 1)
+  }
+}
+
+function rollIntent() {
+  // A telegraphed intent, and deliberately not random every turn — the attract player needs
+  // something it can react to, and a reader needs to see block matter.
+  let t: i32 = S[S_TURN] % 3
+  if (t === 2) { S[S_EINTENT] = 14 } else { S[S_EINTENT] = 8 }
+}
+
+function newTurn() {
+  S[S_TURN] = S[S_TURN] + 1
+  S[S_ENERGY] = ENERGY_MAX
+  S[S_BLOCK] = 0
+  S[S_CUR] = 0
+  drawCards(HAND_SIZE)
+  rollIntent()
+}
+
+function startCombat() {
+  S[S_HP] = HP_MAX
+  S[S_EHP] = EHP_MAX
+  S[S_TURN] = 0
+  S[S_OVER] = 0
+  pileClear(DRAW)
+  pileClear(HAND)
+  pileClear(DISC)
+  pileClear(SPENT)
+  cardsBuildDeck(DRAW, DECK_SIZE)
+  pileShuffle(DRAW, 0)
+  newTurn()
+  log("DB combat start, deck=" + numStr(cardsTotal()))
+}
+
+// Play the card at hand index `i`. Returns 1 if it was played.
+function playCard(i: i32): i32 {
+  let c: i32 = pileAt(HAND, i)
+  if (c < 0) { return 0 }
+  if (CCOST[c] > S[S_ENERGY]) { return 0 }
+  S[S_ENERGY] = S[S_ENERGY] - CCOST[c]
+
+  if (CATK[c] > 0) { S[S_EHP] = S[S_EHP] - CATK[c] }
+  if (CBLK[c] > 0) { S[S_BLOCK] = S[S_BLOCK] + CBLK[c] }
+  if (CHEAL[c] > 0) {
+    S[S_HP] = S[S_HP] + CHEAL[c]
+    if (S[S_HP] > HP_MAX) { S[S_HP] = HP_MAX }
+  }
+
+  // ⚠️ The card leaves from the MIDDLE of the hand, by index, not off the top. `pileRemoveAt`
+  // closes the gap and keeps the order of everything above it — which is why the hand does not
+  // reshuffle itself visually every time a card is played.
+  pileRemoveAt(HAND, i)
+  if (CEXH[c] === 1) { pilePush(SPENT, c, 1) } else { pilePush(DISC, c, 0) }
+
+  if (S[S_EHP] <= 0) {
+    S[S_EHP] = 0
+    S[S_OVER] = 1
+    log("DB WON on turn " + numStr(S[S_TURN]) + ", cards=" + numStr(cardsTotal()))
+  }
+  return 1
+}
+
+function endTurn() {
+  // The whole hand is discarded — `pileMove` in one call, order preserved, rather than a pop loop.
+  let n: i32 = pileCount(HAND)
+  if (n > 0) { pileMove(HAND, DISC, n) }
+
+  let dmg: i32 = S[S_EINTENT] - S[S_BLOCK]
+  if (dmg < 0) { dmg = 0 }
+  S[S_HP] = S[S_HP] - dmg
+  log("DB turn " + numStr(S[S_TURN]) + " enemy hits for " + numStr(dmg)
+    + " hp=" + numStr(S[S_HP]) + " ehp=" + numStr(S[S_EHP]))
+  if (S[S_HP] <= 0) {
+    S[S_HP] = 0
+    S[S_OVER] = 2
+    log("DB LOST on turn " + numStr(S[S_TURN]))
+    return
+  }
+  newTurn()
+
+  // Cards are CONSERVED. A move that loses one hides for hours and shows up as a deck that quietly
+  // thins over a long combat, so it is asserted every turn rather than trusted.
+  let total: i32 = cardsTotal()
+  if (total !== DECK_SIZE) { log("DB *** CARD LEAK: " + numStr(total) + " of " + numStr(DECK_SIZE)) }
+}
+
+// ── paint ───────────────────────────────────────────────────────────────────────────────────────
+
+function bar(x: i32, y: i32, w: i32, v: i32, max: i32, col: i32) {
+  ui_rect(x, y, w, 6, 0x2A2438, 1)
+  let fw: i32 = 0
+  if (max > 0 && v > 0) { fw = ((v * w) / max) | 0 }
+  if (fw > 0) { ui_rect(x, y, fw, 6, col, 1) }
+}
+
+function paint() {
+  ui_clear_rect(0, 0, 240, 160)
+
+  ui_text(body, 4, 3, "YOU", WHITE)
+  bar(4, 12, 96, S[S_HP], HP_MAX, HPC)
+  ui_text(body, 4, 21, numStr(S[S_HP]) + "/" + numStr(HP_MAX), DIM)
+  if (S[S_BLOCK] > 0) { ui_text(body, 52, 21, "BLOCK " + numStr(S[S_BLOCK]), BLKC) }
+
+  ui_text(body, 140, 3, "WARDEN", WHITE)
+  bar(140, 12, 96, S[S_EHP], EHP_MAX, EHPC)
+  ui_text(body, 140, 21, numStr(S[S_EHP]) + "/" + numStr(EHP_MAX), DIM)
+  ui_text(body, 140, 31, "INTENT " + numStr(S[S_EINTENT]), EHPC)
+
+  ui_text(body, 4, 44, "TURN " + numStr(S[S_TURN]), DIM)
+  ui_text(body, 4, 54, "ENERGY " + numStr(S[S_ENERGY]) + "/" + numStr(ENERGY_MAX), GOLD)
+  ui_text(body, 4, 64, "draw " + numStr(pileCount(DRAW))
+    + "  disc " + numStr(pileCount(DISC))
+    + "  spent " + numStr(pileCount(SPENT)), DIM)
+
+  if (S[S_OVER] === 1) { ui_text(body, 90, 78, "WARDEN FALLS", GOLD) }
+  if (S[S_OVER] === 2) { ui_text(body, 100, 78, "YOU FALL", EHPC) }
+
+  let n: i32 = pileCount(HAND)
+  let i: i32 = 0
+  while (i < n) {
+    let x: i32 = CARD_X + i * CARD_PITCH
+    let c: i32 = pileAt(HAND, i)
+    let rim: i32 = CARDRIM
+    if (i === S[S_CUR] && S[S_OVER] === 0) { rim = SELCOL }
+    ui_rect(x, CARD_Y, CARD_W, CARD_H, rim, 1)
+    let face: i32 = CARDBG
+    if (CCOST[c] > S[S_ENERGY]) { face = 0x9C98A8 }   // unaffordable, greyed
+    ui_rect(x + 2, CARD_Y + 2, CARD_W - 4, CARD_H - 4, face, 1)
+    ui_text(body, x + 5, CARD_Y + 5, CNAME[c], INK)
+    ui_text(body, x + 5, CARD_Y + 16, "cost " + numStr(CCOST[c]), INK)
+    if (CATK[c] > 0) { ui_text(body, x + 5, CARD_Y + 26, "atk " + numStr(CATK[c]), INK) }
+    else if (CBLK[c] > 0) { ui_text(body, x + 5, CARD_Y + 26, "blk " + numStr(CBLK[c]), INK) }
+    else { ui_text(body, x + 5, CARD_Y + 26, "exhaust", INK) }
+    if (CHEAL[c] > 0) { ui_text(body, x + 5, CARD_Y + 35, "heal " + numStr(CHEAL[c]), INK) }
+    i = i + 1
+  }
+
+  ui_text(body, 4, 150, "d-pad pick  A play  B end turn", DIM)
+}
+
+// A signature over everything drawn. Derived, never assigned at mutation sites — see the header.
+function signature(): i32 {
+  let s: i32 = S[S_HP] + S[S_BLOCK] * 41 + S[S_ENERGY] * 907 + S[S_EHP] * 13
+  s = s + S[S_TURN] * 5501 + S[S_CUR] * 131 + S[S_OVER] * 20011
+  let i: i32 = 0
+  let n: i32 = pileCount(HAND)
+  while (i < n) {
+    s = s + (pileAt(HAND, i) + 1) * (17 + i * 53)
+    i = i + 1
+  }
+  return s + n * 3001 + pileCount(DRAW) * 7 + pileCount(SPENT) * 601
+}
+
+// ── attract ─────────────────────────────────────────────────────────────────────────────────────
+// It plays greedily and legally: spend energy on the most expensive affordable card, prefer BLOCK
+// on the turn the Warden's intent is big, then end the turn. No pathfinding, no lookahead — enough
+// to drive every pile operation the package exposes without a human at the pad.
+function attractChoice(): i32 {
+  let n: i32 = pileCount(HAND)
+  let best: i32 = 0 - 1
+  let bestScore: i32 = 0 - 1
+  let i: i32 = 0
+  while (i < n) {
+    let c: i32 = pileAt(HAND, i)
+    if (CCOST[c] <= S[S_ENERGY]) {
+      let score: i32 = CATK[c]
+      if (S[S_EINTENT] > 10) { score = CBLK[c] * 3 + CATK[c] }
+      score = score + CHEAL[c] * 2
+      if (CEXH[c] === 1) { score = 1 }    // free, so always worth playing, but never preferred
+      if (score > bestScore) { bestScore = score  best = i }
+    }
+    i = i + 1
+  }
+  return best
+}
+
+// ── boot ────────────────────────────────────────────────────────────────────────────────────────
+
+let i0: i32 = 0
+while (i0 < S_N) { S.push(0)  i0 = i0 + 1 }
+
+rngSeed(0, 0x51EED)
+cardsInit({ piles: 4, capacity: DECK_SIZE })
+backdrop(BG)
+ui_reserve_tiles(420)
+ui_begin()
+startCombat()
+paint()
+S[S_SIG] = signature()
+
+let attract: i32 = 1
+let frames: i32 = 0
+let worst: i32 = 0
+
+while (true) {
+  let k: i32 = keys_edge()
+  if (k !== 0) { attract = 0 }
+
+  if (S[S_OVER] === 0) {
+    if (attract === 1) {
+      S[S_WAIT] = S[S_WAIT] + 1
+      if (S[S_WAIT] >= 24) {
+        S[S_WAIT] = 0
+        let pick: i32 = attractChoice()
+        if (pick < 0) { endTurn() } else { S[S_CUR] = pick  playCard(pick) }
+      }
+    } else {
+      let n: i32 = pileCount(HAND)
+      if ((k & 256) > 0 && S[S_CUR] > 0) { S[S_CUR] = S[S_CUR] - 1 }
+      if ((k & 512) > 0 && S[S_CUR] < n - 1) { S[S_CUR] = S[S_CUR] + 1 }
+      if ((k & 1) > 0) { playCard(S[S_CUR])
+        let m: i32 = pileCount(HAND)
+        if (S[S_CUR] >= m && m > 0) { S[S_CUR] = m - 1 }
+      }
+      if ((k & 2) > 0) { endTurn() }
+    }
+  } else {
+    S[S_WAIT] = S[S_WAIT] + 1
+    if (S[S_WAIT] >= 180) { S[S_WAIT] = 0  startCombat() }
+  }
+
+  let sig: i32 = signature()
+  if (sig !== S[S_SIG]) {
+    S[S_SIG] = sig
+    let t0: i32 = ticks()
+    paint()
+    let dt: i32 = ticks() - t0
+    if (dt > worst) { worst = dt  log("DB paint worst=" + numStr(worst >> 4) + "x16 ticks") }
+  }
+
+  audio_defer()
+  frame()
+  audio_pump()
+  frames = frames + 1
+}

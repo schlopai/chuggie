@@ -1,0 +1,29 @@
+{
+  "name": "bench-build",
+  "private": true,
+  "scripts": {
+    "build": "tish build src/engine_only.tish --target gba -o engine_only.gba",
+    "build:fast": "TISH_FAST_NATIVE_BUILD=1 tish build src/engine_only.tish --target gba -o engine_only.gba",
+    "build:fat": "TISH_GBA_FAT_LTO=1 tish build src/engine_only.tish --target gba -o engine_only.gba",
+    "build:ui": "tish build src/with_ui.tish --target gba -o with_ui.gba",
+    "bench": "bash run.sh",
+    "clean": "rm -rf .tish engine_only.gba with_ui.gba"
+  },
+  "devDependencies": {
+    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_game_engine": {
+        "path": "../../crates/tish-gba-game-engine"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
+    }
+  },
+  "description": "A benchmark testing the performance of the build subsystem."
+}

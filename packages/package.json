@@ -1,0 +1,37 @@
+{
+  "name": "chuggie-engine",
+  "version": "0.0.0",
+  "description": "Game engine packages for writing Game Boy Advance games in tish — scenes, isoboard, platformer, top-down, shmup, versus fighting, brawler, grids, dialog, menus, save and link.",
+  "license": "MIT OR Apache-2.0",
+  "author": "spacedevin",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/schlopai/chuggie-engine.git",
+    "directory": "packages"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "tish",
+    "gba",
+    "gameboy-advance",
+    "agb",
+    "game-engine"
+  ],
+  "tish": {
+    "module": "./engine.tish"
+  },
+  "exports": {
+    ".": "./engine.tish",
+    "./*": "./*.tish",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "*.tish",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@tishlang/tish": ">=3.2.2"
+  }
+}

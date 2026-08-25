@@ -1,0 +1,198 @@
+// What a mutation-hot AI loop costs, and which way of writing it is fastest. The SAME patrol over N
+// entities, five ways (see README.md for the numbers and what to do about them):
+//   UNTYPED     — array of dynamic objects; `u.x` is a hashed get/set, math is boxed Value.
+//   TYPED       — native struct array (`Enemy[]` -> Vec<TishStruct_Enemy>, i32 fields). Fastest.
+//   TYPED+i32   — the same, plus an `i32` annotation on the loop counter.
+//   TYPED-noann — the same, minus the `i32` annotation on the value local.
+//   BARE        — the loop and one add, no body: the floor under all four.
+// The first two are the comparison. The next two are there because each is the obvious next thing to
+// try. BARE is there because without it, "typed costs 2020" reads as if the field access cost 2020,
+// when 1630 of it is the f64 counter and nothing else.
+//
+// Untyped and typed are drawn as marker sprites (x = ticks/64, top and bottom); all five are logged,
+// because a ratio is not something anyone can read off a sprite position. One frame is ~4389 ticks —
+// the number that turns any of these into "fits" or "does not fit".
+//
+// This bench is what argued for native integer arithmetic in the compiler, and it is where that landed.
+// TYPED+i32 — every participant an integer, counter and bound included — went 7153 -> 162 ticks.
+// UNTYPED and BARE are the control: both run on f64 locals, so neither should have moved, and neither
+// did. That is also the finding. An integer pair stays in registers only if BOTH sides are integers,
+// so the one unannotated counter in TYPED costs it 12x, and BARE is what that counter costs on its own.
+//
+// This bench used to say the opposite — that annotating a counter cost 16% — and packages/ui.tish's
+// layout solver used to disagree with it (de-annotating cost 57% there). The disagreement was real and
+// is now gone: both want the annotation.
+//
+// This file also carries two cautionary tales, both of which nearly published a wrong number.
+//
+// The first: it originally concluded that typed tish was slightly SLOWER and could not be made
+// faster without a compiler fix. That was true of a compiler that mis-compiled typed writes into a
+// boxed throwaway — `set_prop(&object_from_pairs([...]), "x", …)` — which was slower AND silently
+// discarded the store. The fix landed; the conclusion sat here unre-run for long enough to be quoted.
+// Since that bug made stores VANISH, and a loop whose writes are discarded is both faster and wrong,
+// the ratio proves nothing on its own — which is what the closing checksum is for. All four mutating
+// passes must end in identical state or the comparison is between different amounts of work.
+//
+// The second is in the BARE pass, below.
+import { timer_read, sprite_new, sprite_set_pos, sprite_set_hud, frame, log } from 'cargo:tish_agb'
+import { marker } from 'sheet:../assets/marker.png'
+
+type Enemy = { x: i32, dir: i32 }
+
+let N: i32 = 100
+let U = []              // untyped: dynamic objects
+let T: Enemy[] = []     // typed: native struct array
+let T2: Enemy[] = []    // typed, and walked with an i32 counter
+let T3: Enemy[] = []    // typed, with the value local left unannotated
+let NT: i32 = 100       // typed bound, so `d < NT` is an integer compare too
+
+let k: i32 = 0
+while (k < N) {
+  let x0 = (k * 3) % 232
+  let d0 = (k % 2) * 2 - 1
+  U.push({ x: x0, dir: d0 })
+  T.push({ x: x0, dir: d0 })
+  T2.push({ x: x0, dir: d0 })
+  T3.push({ x: x0, dir: d0 })
+  k = k + 1
+}
+
+let mU = sprite_new(marker)
+let mT = sprite_new(marker)
+sprite_set_hud(mU, 1)
+sprite_set_hud(mT, 1)
+
+let sumU: i32 = 0
+let sumT: i32 = 0
+let sumT2: i32 = 0
+let sumE: i32 = 0
+let sumT3: i32 = 0
+let acc: i32 = 0
+let nSamp: i32 = 0
+let f: i32 = 0
+while (f < 40) {
+  // ── UNTYPED pass ──
+  let a0 = timer_read()
+  let a = 0
+  while (a < N) {
+    let nx = U[a].x + U[a].dir
+    if (nx < 0) { U[a].dir = 0 - U[a].dir; nx = 0 }
+    if (nx > 232) { U[a].dir = 0 - U[a].dir; nx = 232 }
+    U[a].x = nx
+    a = a + 1
+  }
+  let a1 = timer_read()
+  let tU = a1 - a0
+  if (tU < 0) { tU = tU + 65536 }
+
+  // ── TYPED pass (same logic, native i32 struct fields — but the WRITES box; see header) ──
+  let b0 = timer_read()
+  let b = 0
+  while (b < N) {
+    let mx: i32 = T[b].x + T[b].dir
+    if (mx < 0) { T[b].dir = 0 - T[b].dir; mx = 0 }
+    if (mx > 232) { T[b].dir = 0 - T[b].dir; mx = 232 }
+    T[b].x = mx
+    b = b + 1
+  }
+  let b1 = timer_read()
+  let tT = b1 - b0
+  if (tT < 0) { tT = tT + 65536 }
+
+  // ── TYPED pass, with an i32 LOOP COUNTER (the same logic a third time) ──
+  // The pass above types the STORAGE and nothing else: `let b = 0` is an f64, so every index is an
+  // f64->usize convert and every `+` on an i32 field widens to f64 and narrows back. The ARM7TDMI has
+  // no FPU, so each of those is a soft-float CALL to do the work of one ADD. This pass changes one
+  // character — the counter's type — to find out how much of "typed is 2.2x" was left on the table.
+  let c0 = timer_read()
+  let d: i32 = 0
+  while (d < NT) {
+    let ox: i32 = T2[d].x + T2[d].dir
+    if (ox < 0) { T2[d].dir = 0 - T2[d].dir; ox = 0 }
+    if (ox > 232) { T2[d].dir = 0 - T2[d].dir; ox = 232 }
+    T2[d].x = ox
+    d = d + 1
+  }
+  let c1 = timer_read()
+  let tT2 = c1 - c0
+  if (tT2 < 0) { tT2 = tT2 + 65536 }
+
+  // ── TYPED pass with NO annotation on the value local ──
+  // packages/ui.tish annotates the layout solver's locals `: i32` on the stated grounds that
+  // "unannotated locals infer to boxed Value + ops::add". That claim is worth a pass of its own,
+  // because if it is wrong the hot path of the UI is carrying conversions for nothing — and if it is
+  // right, the counter is the only place the annotation hurts.
+  let g0 = timer_read()
+  let g = 0
+  while (g < N) {
+    let px = T3[g].x + T3[g].dir
+    if (px < 0) { T3[g].dir = 0 - T3[g].dir; px = 0 }
+    if (px > 232) { T3[g].dir = 0 - T3[g].dir; px = 232 }
+    T3[g].x = px
+    g = g + 1
+  }
+  let g1 = timer_read()
+  let tT3 = g1 - g0
+  if (tT3 < 0) { tT3 = tT3 + 65536 }
+
+  // ── BARE pass: the loop and one add, and nothing else ──
+  // The floor. Whatever this costs, no tish loop over N things can cost less, so it is the line that
+  // separates "the body is expensive" from "walking the list is expensive".
+  //
+  // It accumulates into `acc`, and `acc` is logged at the end, for a reason worth knowing: the first
+  // version of this pass had an EMPTY body, and an empty loop computes nothing, so LLVM deleted the
+  // whole thing. It duly reported 30 ticks — which is the cost of the two `timer_read` calls around a
+  // loop that no longer existed — and that number nearly became a published finding about loop
+  // overhead being free. A benchmark's result has to be observable or the optimiser is entitled to
+  // skip the work you are trying to time.
+  let e0 = timer_read()
+  let e = 0
+  while (e < N) { acc = acc + e; e = e + 1 }
+  let e1 = timer_read()
+  let tE = e1 - e0
+  if (tE < 0) { tE = tE + 65536 }
+
+  let xu = tU / 64
+  if (xu > 232) { xu = 232 }
+  let xt = tT / 64
+  if (xt > 232) { xt = 232 }
+  sprite_set_pos(mU, xu, 40)
+  sprite_set_pos(mT, xt, 90)
+  // Report the numbers as well as drawing them. A marker sprite shows the SHAPE at a glance, which is
+  // what it is for, but "is typed faster" is a question about a ratio and reading one off two sprite
+  // positions is not an answer anybody can quote. The first few frames are skipped: the timer's first
+  // read lands mid-frame and the caches are cold.
+  if (f >= 8) {
+    sumU = sumU + tU
+    sumT = sumT + tT
+    sumT2 = sumT2 + tT2
+    sumE = sumE + tE
+    sumT3 = sumT3 + tT3
+    nSamp = nSamp + 1
+  }
+  frame()
+  f = f + 1
+}
+// Prove the two passes did the SAME WORK before quoting the ratio. This is not ceremony: the bug this
+// bench was written to catch made typed writes evaporate, and a loop whose stores are discarded is
+// both faster and wrong. Identical sums mean every bounce off both walls happened in both passes.
+let sU: i32 = 0
+let sT: i32 = 0
+let sT2: i32 = 0
+let sT3: i32 = 0
+let c: i32 = 0
+while (c < N) {
+  sU = sU + U[c].x + U[c].dir
+  sT = sT + T[c].x + T[c].dir
+  sT2 = sT2 + T2[c].x + T2[c].dir
+  sT3 = sT3 + T3[c].x + T3[c].dir
+  c = c + 1
+}
+log("BENCH-AI n=" + N + " samples=" + nSamp)
+log("  checksum untyped " + sU + " typed " + sT + " typed+i32 " + sT2 + " typed-noann " + sT3)
+log("  untyped ticks/pass " + (sumU / nSamp))
+log("  typed   ticks/pass " + (sumT / nSamp))
+log("  typed+i32 ticks/pass " + (sumT2 / nSamp))
+log("  typed-noann ticks/pass " + (sumT3 / nSamp))
+log("  bareloop  ticks/pass " + (sumE / nSamp) + " (acc " + acc + ")")
+while (true) { frame() }

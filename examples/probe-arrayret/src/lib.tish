@@ -1,0 +1,24 @@
+// The IMPORTED half of the probe. Kept in its own module because the failure that prompted this is
+// specifically about crossing a module boundary — a same-module call may well lower differently.
+
+// Case B: imported, returns a freshly CONSTRUCTED array of numbers.
+export function makeNums(n) {
+  let out = []
+  let i = 0
+  while (i < n) {
+    out.push(i * 10)
+    i = i + 1
+  }
+  return out
+}
+
+// Case D: imported, returns a constructed array of OBJECTS — the shape a data-driven cutscene
+// timeline would actually take (`[{op: 0, …}, {op: 1, …}]`). This is the case that decides whether
+// packages/cutscene can become data instead of a chain of blocking calls.
+export function makeTimeline() {
+  let out = []
+  out.push({ op: 1, a: 30, b: 0 })
+  out.push({ op: 2, a: 120, b: 96 })
+  out.push({ op: 3, a: 7, b: 0 })
+  return out
+}

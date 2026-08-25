@@ -1,0 +1,42 @@
+# Depths Below — dungeon theme (4 bars). Sparse lead, drone bass, noise drips, dark PCM.
+deck 1
+bpm 80
+
+track Lead id lead gen gameBoyDmg * 4
+  gen type pulse duty 25 env_mode step vol 10 env_step 4
+  note 55 0 1.5 v 90
+  note 53 2 1 v 80
+  note 55 4 0.5 v 95
+  note 58 4.5 1.5 v 100
+  note 55 7 1 v 85
+  note 51 8 2 v 90
+  note 53 10 1 v 80
+  note 55 12 1.5 v 95
+  note 58 14 0.75 v 100
+  note 55 14.75 1.25 v 85
+
+track Drone id drone gen gameBoyDmg * 4
+  gen type wave wave_shape saw vol 11
+  note 31 0 4 v 100
+  note 29 4 4 v 95
+  note 31 8 4 v 100
+  note 28 12 4 v 105
+
+track Drip id drip gen gameBoyDmg * 4
+  gen type noise noise_mode short vol 8 env_mode step env_step 2
+  note 80 1.5 0.08 v 70
+  note 72 3.25 0.06 v 55
+  note 80 5.5 0.08 v 65
+  note 76 7.75 0.1 v 80
+  note 80 9.25 0.08 v 60
+  note 72 11 0.06 v 50
+  note 80 13.5 0.08 v 70
+  note 76 15.25 0.12 v 85
+
+track Pulse id pulse gen gbaDirectSound * 4
+  gen waveform sine vol 8 bitcrush true
+  adsr a 0.05 d 0.8 s 4 r 0.4
+  note 43 0 3 v 80
+  note 41 4 3 v 75
+  note 43 8 3 v 80
+  note 40 12 3.5 v 90

@@ -1,0 +1,2790 @@
+// warheads — turn-based artillery across a scrolling star field.
+//
+// Pick a hull, place it somewhere in the void, then take turns setting a heading and a velocity and
+// either firing along it or burning your engines along it. Every shot is bent by every planet at
+// once, and a shot fired hard enough leaves the screen entirely and comes back around.
+//
+// ── What this is, relative to examples/artillery ─────────────────────────────────────────────────
+//
+// `artillery` was the spike: it proved the physics — N-body inverse-square gravity integrated in
+// pure integer tish, checked in the generated Rust, bit-reproducible — on a single screen with two
+// fixed turrets. This is the game that spike was for, and it keeps the integrator verbatim while
+// adding everything the spike deliberately left out: a 512x384 arena with a camera, three ship
+// classes, nine weapons, thrust, a placement phase, and a simulation shaped for two-console lockstep.
+//
+// The numbers the spike measured are what this is budgeted against: ~33 ticks per N-body substep,
+// and ~6,000 ticks — well over a frame — every time a `hud_text` string changes.
+//
+// ── Controls ─────────────────────────────────────────────────────────────────────────────────────
+// SETUP   L/R pick a hull · A confirm
+// PLACE   d-pad move · A confirm (not inside a planet, not on top of your opponent)
+// AIM     LEFT/RIGHT heading · UP/DOWN power · L/R weapon · A hold-and-release to FIRE · B THRUST
+// OVER    START for a rematch
+// It plays itself until you touch the pad.
+
+import { SQ, GACC, ISQRT, SINT, COST } from './tables'
+import {
+  SHIP_HP, SHIP_FUEL, SHIP_THR, SHIP_SPD, SHIP_DEF,
+  W_SHOT, W_WARHEAD, W_AMMO,
+  SH_KIND, SH_COUNT, SH_FUSE, SH_ARC, SH_PEN, SH_SPD,
+  WH_KIND, WH_DMG, WH_R, WH_RINV, WH_TERR,
+  SK_FAN, SK_SPLIT, SK_BORE, WK_BUILDER
+} from './ships'
+import { wh16 } from 'sheet:../assets/wh16.png'
+import { wh8 } from 'sheet8:../assets/wh8.png'
+import { boom32 } from 'sheet32:../assets/boom32.png'
+import { menu32 } from 'sheet32:../assets/menu32.png'
+// ⚠️ ONE SHEET PER TEAM, because a sheet is one GBA palette bank: six hulls sharing fifteen colours
+// gave each livery about seven and posterised the art. The frame index is now the CLASS alone.
+import { hullsA32 } from 'sheet32:../assets/hullsA32.png'
+import { hullsB32 } from 'sheet32:../assets/hullsB32.png'
+import { small } from 'font:../../../assets/fonts/04b03.ttf@8'
+// ⚠️ THE IN-MATCH HUD IS A LAYOUT TREE, NOT HAND-PLACED TEXT. packages/ui owns the canvas —
+// `uiRender` opens it with `ui_begin()` and clears — so anything painted alongside it by hand is
+// wiped on its next repaint. Everything drawn DURING A MATCH therefore lives in one tree; the
+// hull-select screen and the briefing box are separate phases and keep their direct painting.
+import { uiInit, uiSetText, uiRelayoutAt } from '../../../packages/ui.tish'
+import { stars } from 'background:../assets/stars.png'
+import {
+  frame, log, backdrop, ticks, heap_free, hud_text, key_held,
+  camera_set, bg_new, bg_parallax, ui_begin, ui_text, ui_clear_rect, ui_rect, fx_flash,
+  terrain_new, terrain_palette, terrain_pal_bank, terrain_disc, terrain_planet, terrain_carve, terrain_solid, terrain_clear,
+  terrain_mass,
+  sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_visible, sprite_set_hud, sprite_clear
+} from 'cargo:tish_agb'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+import { titleScreen } from '../../../packages/title'
+import {
+  chipAccept, chipCancel, chipThrow, chipHit, chipPop, chipChime, chipCoin, chipWhoosh
+} from '../../../packages/chipsfx'
+import { feelBump, feelFreeze, feelFrozen, feelTick } from '../../../packages/feel'
+import {
+  LINK_PLAYING, LINK_LOST, LINK_STALL,
+  linkOpen, linkState, linkExchange, linkSeed, linkIsMaster, linkResync
+} from '../../../packages/link'
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// EVERY MODULE BINDING IS DECLARED BEFORE ANY CODE.
+// tish emits module bindings into `run()` in source order, so anything referencing a binding
+// declared LATER captures a `let` that appears below it (tishlang/tish#629). Declaring first is free.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+// ── The arena. Both dimensions are powers of two, and that IS the reason for them: world-to-radar
+// is a shift, and both camera clamps are shifts. 512x384 is 2.1 x 2.4 screens.
+let ARENA_W: i32 = 512
+let ARENA_H: i32 = 384
+let CAM_MAXX: i32 = 272            // ARENA_W - 240
+let CAM_MAXY: i32 = 224            // ARENA_H - 160
+
+let VMAX: i32 = 1310720            // 20 px/tick in Q16 — the anti-tunnelling bound rests on this
+let SHELL_R: i32 = 2
+let ESC: i32 = 240                 // how far outside the arena a shell may stray before it is gone
+
+// ── Sheet frame order — the contract with scripts/gen_warheads.py ───────────────────────────────
+let F_HULL0: i32 = 0               // +team*3 + class
+let F_CURSOR: i32 = 6
+let F_ARROW0: i32 = 7              // 16 headings
+let G_SHELL: i32 = 0
+// ⚠️ ONE PROJECTILE PER WARHEAD KIND. A shell in flight is the only thing on screen during the most
+// interesting part of a turn; if every weapon looks the same the player has to read a menu to know
+// what is coming, which is the only reason the menu was on screen during flight at all.
+let G_SHELL0: i32 = 10
+let G_TRAIL: i32 = 1
+let G_GHOST: i32 = 2
+let G_SEG_OFF: i32 = 3
+let G_SEG_ON: i32 = 4
+let G_SEG_HOT: i32 = 5
+let G_BLIP_P0: i32 = 6
+let G_BLIP_PLANET: i32 = 8
+let G_BLIP_SHELL: i32 = 9
+
+// ── Phases ───────────────────────────────────────────────────────────────────────────────────────
+let PH_SETUP: i32 = 0
+let PH_PLACE: i32 = 1
+let PH_AIM: i32 = 2
+let PH_FLIGHT: i32 = 3
+let PH_BOOM: i32 = 4
+let PH_THRUST: i32 = 5
+let PH_TURN: i32 = 6
+let PH_OVER: i32 = 7
+
+let ST_DEAD: i32 = 0
+let ST_FLY: i32 = 1
+let ST_PLANET: i32 = 2
+let ST_GONE: i32 = 3
+let ST_HIT: i32 = 4
+
+// ── The input word. Nine bits, laid out now: a link build sends exactly this and stamps a round
+// number above it, and a layout that moves later means nothing ever pairs again.
+let IN_UP: i32 = 1
+let IN_DOWN: i32 = 2
+let IN_LEFT: i32 = 4
+let IN_RIGHT: i32 = 8
+let IN_A: i32 = 16
+let IN_B: i32 = 32
+let IN_L: i32 = 64
+let IN_R: i32 = 128
+let IN_START: i32 = 256
+
+let TURN_TICKS: i32 = 1200
+// The rack has five entries: four guns and the manoeuvre. ⚠️ JUMP IS A RACK ENTRY, NOT A BUTTON —
+// it spends the same heading and power a gun does, it is the same one-action-per-turn choice, and
+// on its own key it was a mechanic most players never found.
+let W_JUMP: i32 = 4
+let W_SLOTS: i32 = 5
+let JUMP_COST: i32 = 25
+// ── The CPU's forward search ────────────────────────────────────────────────────────────────────
+// ⚠️ IT SEARCHES WITH THE GAME'S OWN INTEGRATOR, over the same PROBE slot the aim preview uses, so
+// what it predicts is exactly what a fired shell does — a second, cheaper model of the flight would
+// diverge from the real one precisely where the interesting shots are, near a planet.
+//
+// The budget is spent in SIMULATION TICKS, never against a wall clock. `timer_read()` would make the
+// search terminate at a different candidate on two consoles running the same match, and the whole
+// point of an integer simulation is that it does not do that. (A CPU is disabled on the cable
+// anyway, and verify.sh asserts it — but a search that COULD desync is one refactor from doing so.)
+// ⚠️ TWO PASSES, NOT ONE LONG SWEEP. Sixteen bearings is 5.6 degrees apart, and a graze at that
+// resolution is a 28 px miss against a 22 px blast — the search kept finding the right ARC and then
+// missing along it. The first sixteen candidates sweep the circle at one charge; the last sixteen
+// re-search a narrow window around whatever that found, at both charges. Refining beats widening:
+// doubling the coarse sweep costs twice the time for half the angular gain.
+let CS_N: i32 = 32
+let CS_COARSE: i32 = 16
+let CS_MAXK: i32 = 120             // ticks a candidate may fly before it is written off
+// ⚠️ THE BUDGET IS IN SUBSTEPS, NOT TICKS, and that is the difference between a bounded frame and a
+// hope. A tick costs one substep when the shell is slow and eight when it is fast, so "sixteen ticks
+// a frame" is a cost that varies 8x with the candidate — measured, the peak frame hit 3556 of 4389
+// while the average sat at 2873, and no emulator FPS counter shows either because mGBA measures the
+// emulated LCD, not whether the game finished its frame. Counting the substeps the integrator
+// actually runs makes the ceiling exact.
+//
+// It is still a SIMULATION quantity, never `timer_read()`: a wall-clock budget stops at a different
+// candidate on two consoles running the same match.
+// ⚠️ 30, NOT 44. The search is the other half of the frame: at 44 the integrator alone ran 9,600
+// substeps per 512 frames and took `sim` to 3,200 of a 4,389-tick budget, leaving nothing for the
+// HUD. Thinking takes proportionally longer; the game stays inside its frame.
+let CS_SUB: i32 = 20
+let CS_STEP: i32 = 64              // hard cap on ticks per frame; the substep budget is what binds
+let MAX_FLIGHT: i32 = 1200
+let MATCH_TURNS: i32 = 30
+let THRUST_TICKS: i32 = 40
+let FUSE_ARM: i32 = 14             // ticks before a shell's proximity fuse will see its own hull
+
+// ── Planets. Four slots, four planets, `& 3`. ───────────────────────────────────────────────────
+// ⚠️ The array length is the power of two the mask implies, and that is load-bearing rather than
+// tidy: a mask the compiler cannot prove in bounds emits an f64 bounds-check fallback whose type
+// then poisons every expression it feeds. One under-sized array turned the whole force computation
+// into soft float in examples/artillery.
+let PL_N: i32 = 4
+let PL_X: i32[] = [0, 0, 0, 0]
+let PL_Y: i32[] = [0, 0, 0, 0]
+let PL_R: i32[] = [0, 0, 0, 0]
+let PL_MASS: i32[] = [0, 0, 0, 0]
+let PL_HIT2: i32[] = [0, 0, 0, 0]
+let PL_SPR: i32[] = [0 - 1, 0 - 1, 0 - 1, 0 - 1]
+
+// ── TERRAIN ──────────────────────────────────────────────────────────────────────────────────────
+// PER-PIXEL, and owned by the engine. `terrain_*` keeps an occupancy bitmap in RAM and a sparse set
+// of dynamic tiles in VRAM; the game fills discs, carves discs and asks whether a pixel is solid.
+//
+// This replaces a tile version that kept an 8px occupancy grid here and rendered it through 16px
+// marching-squares cells. That worked and looked like rubble: a crater could only ever be a
+// staircase, because the smallest thing a streamed layer can draw is a 16px cell. The per-pixel
+// loops have to be native — a 64px-radius disc is ~13,000 pixels — which is why this is four calls
+// into Rust rather than a loop in tish.
+let MAT_ROCK: i32 = 1
+let PL_BLIP: i32[] = [0 - 1, 0 - 1, 0 - 1, 0 - 1]
+// The four packed material indices this planet draws with — see PC_PAL.
+let PL_MAT: i32[] = [0, 0, 0, 0]
+let PL_SEED: i32[] = [0, 0, 0, 0]
+// Engine-burn frames, in the order they are shown. ⚠️ A FOUR-ENTRY PING-PONG, not `1 + n % 3`: the
+// modulo is a software division on this chip, and a table indexed by `& 3` is one masked load. It
+// also looks better — a flame that ramps up and back down reads as a burn, where a sawtooth reads
+// as a glitch.
+let FLAME: i32[] = [1, 2, 3, 2]
+// ⚠️ THE LIVE HUD TREE IS KEPT, not rebuilt per change, and that is the difference between a rack
+// selection costing a whole-canvas relayout (about a second of streamed repaint, which is exactly
+// what pressing L/R felt like) and costing eight text writes. Structure changes — a different
+// player, hull or phase — rebuild; a selection change edits the nodes in place.
+let HUDN = { rows: [], bars: [], fills: [] }
+// ⚠️ FIFTEEN COLOURS PER PLANET, IN THAT PLANET'S OWN PALETTE BANK. A 4bpp GBA background picks a
+// bank per TILE, so one layer can hold several sixteen-colour palettes at once — and planets never
+// share a tile, because placement keeps them 56 px apart. Sharing one bank between four worlds gave
+// each of them about four colours, which is why they came out as flat slabs of a single hue no
+// matter what the shader did. The palette was the limit, not the shading.
+//
+// Layout is fixed so the shader can index it arithmetically: `1 + material * 5 + shade`, three
+// materials of five tones each. That is the range the reference art works in — an ocean is four or
+// five blues, not one — and with ordered dithering between adjacent tones it reads as a gradient.
+let PC_BANK0: i32 = 8              // planet i draws with bank 8 + i; 0 is the starfield, 14/15 UI
+let PC_RAMP: i32[] = [
+  // TERRAN — ocean, land, cloud
+  0x0A1A3A, 0x123A6E, 0x1E5A9E, 0x2E86C8, 0x58B0E0,
+  0x14301C, 0x1E5A2E, 0x2E8A42, 0x5CB05A, 0x8CD07C,
+  0x5A6A80, 0x8898A8, 0xB8C4D0, 0xE0E8F0, 0xFFFFFF, 0,
+  // ICE — ice, snow, exposed rock
+  0x18243E, 0x2C4468, 0x5878A0, 0x94B4D4, 0xD8ECFC,
+  0x243044, 0x486078, 0x8CA4B8, 0xC8DCEC, 0xFFFFFF,
+  0x1C2030, 0x343C50, 0x5C6478, 0x8890A4, 0xB4BCD0, 0,
+  // MOON — rock, dust, crater floor
+  0x14161C, 0x2A2E38, 0x4C5260, 0x787E8E, 0xA8AEBE,
+  0x1A1A1E, 0x343640, 0x5C6070, 0x8C90A0, 0xC0C4D0,
+  0x0E1014, 0x22242C, 0x3E4250, 0x646A7C, 0x9096A8, 0,
+  // VOLCANIC — basalt, ash, lava in the cracks
+  0x1A0E0E, 0x341C18, 0x543028, 0x7C4A38, 0xA86A4C,
+  0x121014, 0x282430, 0x443E4C, 0x686070, 0x908898,
+  0x601400, 0xA02800, 0xE05000, 0xFF8C10, 0xFFD060, 0,
+  // DESERT — sand, rock, salt flat
+  0x3A2410, 0x6A4418, 0x9C6C28, 0xC89A48, 0xE8C880,
+  0x2A1C10, 0x4C3418, 0x745028, 0x9C7440, 0xC49C60,
+  0x504430, 0x847460, 0xB4A890, 0xDCD4C0, 0xFFF8E8, 0,
+  // JUNGLE — water, canopy, undergrowth
+  0x0A2018, 0x14402E, 0x1E6048, 0x2E8A66, 0x50B48A,
+  0x0E2410, 0x18441C, 0x246830, 0x38904A, 0x58BC6C,
+  0x203000, 0x3A5410, 0x5C7C1C, 0x86A830, 0xB4D454, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+// ⚠️ CLASSES ARE DEALT WITHOUT REPLACEMENT. Drawing each planet's class independently produced
+// arenas of four identical worlds often enough to be the normal case. Shuffled with a FIXED number
+// of draws, so the RNG stream advances by the same amount whatever it deals.
+let PC_BAG: i32[] = [0, 1, 2, 3, 4, 5, 0, 0]
+// ⚠️ THE TERRAIN'S TILE BUDGET, AS A SUM OF SQUARED RADII. A planet claims ~r^2/20 of the GBA's
+// 1024 background tiles, so 13,000 caps terrain at ~640 and leaves ~380 for the HUD canvas and the
+// starfield. A hardware ceiling, not a tuning knob.
+let R2_BUDGET: i32 = 13000
+// ⚠️ GRAVITY FOLLOWS THE REMAINING MASS, NOT THE ORIGINAL CENTRE.
+//
+// A planet used to pull as a point mass fixed at its centre. Blow the middle out and that point
+// keeps pulling from a place with nothing in it: anything that falls inside is held at a core that
+// no longer exists, oscillating in the hole for ever. The physics answer is the shell theorem —
+// what pulls you at distance d is the mass ENCLOSED within d — and for a hollowed world that is
+// almost nothing, so you drift instead of sticking.
+//
+// Four buckets per planet at R/4, R/2, 3R/4 and R, refreshed after every carve. Stride 4 and
+// sixteen slots so `(p << 2) | k` is a masked index the compiler can prove.
+let PL_ENC: i32[] = [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]
+let PL_FULL: i32[] = [1, 1, 1, 1]        // enclosed mass at R when the world was whole
+// ⚠️ THE PER-BUCKET MASS AND RADIUS ARE PRECOMPUTED, and that is a 45x difference on the frame path.
+// The first version asked a helper `massAt(p, d2)` for this, which is a boxed call (~117 ticks plus
+// arguments) WITH A SOFTWARE DIVIDE INSIDE IT, evaluated once per planet per substep — the substep
+// cost went from 90 ticks to 450 and the worst frame to seven. Doing the scaling and the squaring
+// once per carve turns the hot path into three compares and two array reads.
+let PL_EMASS: i32[] = [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]   // enclosed mass, in PL_MASS units
+let PL_RQ: i32[] = [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]      // that bucket's outer radius, squared
+
+// The size classes the generator drew. Radii ARE gen_warheads.py's PLANET32_R / PLANET64_R.
+// ⚠️ PLANETS GREW WHEN THEY BECAME TERRAIN. They used to be capped by the 64x64 sprite cell that
+// drew them; now they are rasterised into the grid, so the only limits are the arena and how much
+// of a planet a crater should be able to remove. At r=14 a single NOVA erased a whole world.
+// ⚠️ SIZE IS DRAWN SEPARATELY FROM MATERIAL. Indexing both off one roll tied every jungle world to
+// one radius and made the arena's variety half of what it looks like.
+let PC_R: i32[] = [24, 32, 40, 52, 64, 0, 0, 0]
+let PC_MASS: i32[] = [320, 480, 640, 832, 1024, 0, 0, 0]   // Q8; 1024 is the generator's overflow bound
+// ⚠️ THE DRAWN RADIUS AND THE COLLIDING RADIUS ARE THE SAME NUMBER — PC_R indexes both, and the
+// planet sheet's frame index IS the class index.
+//
+// They were not the same. Planets were split across a 32x32 sheet and a 64x64 one to save VRAM, all
+// sprites were created against the 64x64 one, and the frame was set to a "is it big" flag — so a
+// class-0 planet DREW at radius 26 and COLLIDED at radius 14, and shells flew through twelve pixels
+// of visible planet. Re-pointing with `sprite_set_sheet` did not rescue it either: a sprite's cell
+// size is fixed at creation, so a 64x64 sprite aimed at a 32x32 sheet reads four cells as one and
+// the planet renders as a rounded square. One sheet at one cell size removes the whole class of bug.
+
+// ── Shells. Slots 0..7 are live, slot 8 is the aim-preview probe. Sixteen wide so `& 15` holds. ──
+let SH_MAX: i32 = 8
+let PROBE: i32 = 8
+let SHX: i32[] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]      // Q8 world px
+let SHY: i32[] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+let SHVX: i32[] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]     // Q16 px per tick
+let SHVY: i32[] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+let SHST: i32[] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+let SHK: i32[] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+let SHW: i32[] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]      // WARHEAD index — see ships.tish
+let SHFZ: i32[] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]     // ticks until a SPLIT opens, 0 = none
+let SHSHOT: i32[] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]   // the shot that launched it, for the split
+let SHPEN: i32[] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]    // substeps of rock a TUNNEL shell can still chew
+// ⚠️ 0 UNTIL THE SHELL HAS SEEN OPEN SPACE ONCE. A landed ship stands ON the ground, so its muzzle
+// is inside solid rock and every shot detonated on the tick it was fired — `k=1` on every single
+// BOOM. The same principle already exempts the firing hull from its own proximity fuse; the ground
+// that hull is standing on needs it too. A tick-count grace would be wrong: at 30 px/tick three
+// ticks of immunity is most of a planet, so a shell could pass clean through one. This arms on
+// GEOMETRY instead — the instant a substep lands in vacuum, terrain is live again for ever.
+let SHCLR: i32[] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+// Last frame written per shell sprite, so a typed sprite call happens on change and not per frame.
+let SHLF: i32[] = [0 - 1,0 - 1,0 - 1,0 - 1,0 - 1,0 - 1,0 - 1,0 - 1,0 - 1,0 - 1,0 - 1,0 - 1,0 - 1,0 - 1,0 - 1,0 - 1]
+let SHSPR: i32[] = [0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1]
+
+// ── Ships. Two slots, `& 1`. ────────────────────────────────────────────────────────────────────
+let S_X: i32[] = [0, 0]            // Q8 world px
+let S_Y: i32[] = [0, 0]
+let S_VX: i32[] = [0, 0]           // Q16, only non-zero during a thrust burn
+let S_VY: i32[] = [0, 0]
+let S_HP: i32[] = [0, 0]
+let S_MAXHP: i32[] = [0, 0]
+let S_FUEL: i32[] = [0, 0]
+let S_CLS: i32[] = [0, 1]
+let S_AIM: i32[] = [0, 2048]       // Q4 over 1/256ths: the fired heading is AIM >> 4
+let S_PWR: i32[] = [384, 384]      // Q4: the fired power is PWR >> 4
+let S_WPN: i32[] = [0, 0]
+let S_HOLDA: i32[] = [0, 0]
+let S_HOLDP: i32[] = [0, 0]
+let S_SPR: i32[] = [0 - 1, 0 - 1]
+let S_BLIP: i32[] = [0 - 1, 0 - 1]
+// Ammo, stride 4 per ship: index (who << 2) | slot. Eight wide, `& 7`.
+let S_AMMO: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+// Last-drawn state, so a sprite is only written when it has actually moved. See the presentation
+// block: a typed sprite call is ~20 ticks, and re-asserting every sprite every frame was 1,530 of
+// them — a third of the frame spent telling things that had not moved where they already were.
+let S_LASTX: i32[] = [0 - 9999, 0 - 9999]
+let S_LASTY: i32[] = [0 - 9999, 0 - 9999]
+let S_LASTF: i32[] = [0 - 1, 0 - 1]
+
+// ── The attract driver's per-side memory. Same hill climb the spike ended on; the real budgeted
+// search is the next task and slots in behind the same `cpuA`/`cpuP` targets.
+let CPU_BA: i32[] = [0, 0]
+let CPU_BP: i32[] = [0, 0]
+let CPU_BS: i32[] = [999999, 999999]
+
+// ⚠️ THE ROUND STAMP SITS ABOVE THE BUTTONS, so adding a button moves it. NINE button bits, so the
+// round is multiplied by 512 — not pong-link's 16, which has four. Both consoles must agree on this
+// layout exactly; a mismatch reads a round off by a power of two and nothing ever pairs again.
+// 9 + 5 = 14 bits, and the transport's payload is exactly 14 (packages/link.tish PAYLOAD_MASK).
+let RND_SHIFT: i32 = 512
+let RND_MASK: i32 = 31
+
+// Five round bits are enough for a STRUCTURAL reason, not a statistical one: the protocol keeps
+// exactly ONE round in flight, so the only stale value that can arrive is the current one, a round
+// late. Both tests are equality on the stamp rather than an ordering, so the wrap 31 -> 0 is free.
+// Do not "improve" this into a monotonic counter compared with `>`; that breaks at the wrap.
+let TICKS_SOLO: i32 = 1
+let TICKS_LINKED: i32 = 6
+
+interface Net {
+  shown: i32, mine: i32, waited: i32, round: i32, btn: i32, outWord: i32, seeded: i32,
+  // ⚠️ SOLO IS A WAITING ROOM, NOT A MODE. The port is pumped on every frame that is not already in
+  // lockstep, whether a one-player game is running or not, and reaching PLAYING takes over. Treating
+  // "play the CPU" as a decision that stops looking at the cable produces a console that can never
+  // link — indistinguishable from a broken cable, and reported as such in pong-link.
+  solo: i32
+}
+let N: Net = { shown: 0 - 1, mine: 0, waited: 0, round: 0, btn: 0, outWord: 0, seeded: 0, solo: 0 }
+
+interface Game {
+  phase: i32, phaseT: i32, who: i32, turn: i32, winner: i32,
+  simFrame: i32, simTick: i32, turnClock: i32,
+  charge: i32, prev0: i32, prev1: i32,
+  seq: i32, match: i32, rebuild: i32, human: i32, live: i32,
+  bx: i32, by: i32, bw: i32,          // last blast: centre and weapon
+  curX: i32, curY: i32, placed: i32,  // placement cursor, Q8 world
+  shotA: i32, shotP: i32, minD2: i32,
+  csI: i32, csBS: i32, csBA: i32, csBP: i32, csMin: i32, csA: i32, csP: i32, fireT: i32, settleT: i32,
+  rsMask: i32, rsI: i32,
+  cpuA: i32, cpuP: i32,
+  ticks: i32, seedBase: i32,
+  placeOk: i32,
+  landed: i32, grounded: i32,
+  genI: i32, genHold: i32, rSum: i32,
+  story: i32, storyT: i32
+}
+let G: Game = {
+  phase: PH_SETUP, phaseT: 0, who: 0, turn: 0, winner: 0 - 1,
+  simFrame: 0, simTick: 0, turnClock: TURN_TICKS,
+  charge: 0, prev0: 0, prev1: 0,
+  seq: 0, match: 0, rebuild: 1, human: 0, live: 0,
+  bx: 0, by: 0, bw: 0,
+  curX: 0, curY: 0, placed: 0,
+  shotA: 0, shotP: 0, minD2: 999999,
+  csI: 0 - 1, csBS: 999999, csBA: 0, csBP: 24, csMin: 999999, csA: 0, csP: 24, fireT: 0, settleT: 0,
+  rsMask: 0, rsI: 0,
+  cpuA: 0, cpuP: 24,
+  ticks: TICKS_SOLO, seedBase: 7717,
+  placeOk: 0,
+  landed: 1, grounded: 0,
+  genI: 99, rSum: 0,
+  story: 0, storyT: 0
+}
+
+// ── Presentation only. NOTHING in the step body may read or write this. ─────────────────────────
+interface View {
+  camX: i32, camY: i32, hudKey: i32,
+  pvKey: i32, pvN: i32, pvLastX: i32, pvLastY: i32,
+  trailHead: i32, lastX: i32, lastY: i32,
+  boomSpr: i32, curSpr: i32, shellBlip: i32,
+  edgeS: i32, edge0: i32, edge1: i32, edgeKey: i32,
+  hpKey: i32,
+  lastFilled: i32, shellVis: i32, curVis: i32, planetsDrawn: i32, selKey: i32, wpnKey: i32, wpnRow: i32,
+  storyKey: i32
+}
+let V: View = {
+  camX: 0, camY: 0, hudKey: 0 - 1,
+  pvKey: 0 - 1, pvN: 0, pvLastX: 0, pvLastY: 0,
+  trailHead: 0, lastX: 0, lastY: 0,
+  boomSpr: 0 - 1, curSpr: 0 - 1, shellBlip: 0 - 1,
+  edgeS: 0, edge0: 0, edge1: 0, edgeKey: 0 - 1,
+  hpKey: 0 - 1,
+  lastFilled: 0 - 1, shellVis: 0, curVis: 0 - 1, planetsDrawn: 0, selKey: 0 - 1, wpnKey: 0 - 1, wpnRow: 4,
+  storyKey: 0 - 1
+}
+
+// ── The dot ring: preview arc and in-flight trail, split by RANGE so neither starves the other. ──
+// Spaced by DISTANCE, never by elapsed ticks: a shell accelerating through a well covers three or
+// four times the ground per tick that it does at apoapsis, so time-spaced dots bunch where the shot
+// is slow and vanish where it is fast — which is exactly where the curve is worth seeing.
+let DOT_N: i32 = 40
+let DOT_TRAIL0: i32 = 16
+let TRAIL_SLOTS: i32 = 24
+let DOT_STEP: i32 = 7
+let DOTS: i32[] = [
+  0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1, 0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1,
+  0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1, 0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1,
+  0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1, 0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1,
+  0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1, 0-1,0-1,0-1,0-1,0-1,0-1,0-1,0-1
+]
+let SEG_N: i32 = 16
+let STAT_N: i32 = 32          // 4 bars of 8, shown only on the select screen
+let SEGS: i32[] = [
+  0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+  0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+  0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+  0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+  0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+  0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+  0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+  0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1
+]
+
+let dispFrame: i32 = 0
+let tkPeak: i32 = 0
+let tkAcc: i32 = 0
+let tkN: i32 = 0
+let igAcc: i32 = 0
+let igSub: i32 = 0
+let stepAcc: i32 = 0
+let presAcc: i32 = 0
+
+
+/// The seed for match `n` of a session.
+///
+/// ⚠️ `linkSeed()` IS A CONSTANT: packages/link.tish hard-codes the master's offer at 7919, so every
+/// first linked match would deal the identical arena and every rematch would repeat it. pong-link
+/// never noticed because its only use is a serve angle; a game whose appeal is a varied board does.
+/// Mixing in anything LOCAL would desync, so the only legal ingredient is the match index — which
+/// both consoles derive from the same exchanged START.
+function matchSeedOf(base: i32, n: i32): i32 {
+  let v: i32 = (base + Math.imul(n, 40503)) & 0x3FFF
+  if (v === 0) { v = 7919 }
+  return v
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// BOOT
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+// The star field goes up BEFORE the title, so the menu sits on the sky the game is played against.
+// `bg_new` re-derives the backdrop from the image's palette, so the backdrop is set after it.
+let skybg: i32 = bg_new(stars)
+bg_parallax(skybg, 96, 96)
+backdrop(0x000208)
+frame()
+
+// ── TITLE ────────────────────────────────────────────────────────────────────────────────────────
+// A self-contained mode that owns its own loop until the player chooses, exactly as examples/akari
+// runs it.
+//
+// ⚠️ IT RUNS BEFORE ANYTHING ELSE EXISTS, for two separate reasons. A sprite is visible the moment
+// it is created and the title drives its own loop, so hulls made first float over the menu. And
+// `packages/ui` calls `ui_begin()` itself, which is an assert if this game has already opened its
+// own canvas.
+let titleUi = titleScreen({
+  title: "WARHEADS",
+  menu: ["CAMPAIGN", "SKIRMISH"],
+  menuX: 84,
+  copyright: "SALVAGE RIGHTS DISPUTED",
+})
+
+// ⚠️ `.update()`, NOT `.run()`. `run()` owns its own vsync loop and waits for a keypress FOR EVER,
+// so an unattended run never gets past the title — no soak, no verify, not even a screenshot of the
+// game. Driving it a frame at a time lets it time out into the first entry.
+// autoadvance-ok: a title nobody can leave alone is a title no harness can test, and attracting into
+// a demo is what a title screen has always done.
+let tpick: i32 = 0 - 1
+let ttick: i32 = 0
+while (tpick < 0) {
+  tpick = titleUi.update()
+  ttick = ttick + 1
+  if (ttick > 260 && tpick < 0) { tpick = 0 }
+  frame()
+}
+chipAccept()
+// ⚠️ TEAR THE TITLE DOWN. `titleScreen` paints its title and menu with `text_draw`, which is SPRITE
+// objects — they do not belong to any background and nothing clears them when the mode ends, so the
+// words stay on screen over the game. `sprite_clear` drops every sprite's VRAM, which is safe here
+// precisely because this runs before the game creates any of its own.
+sprite_clear()
+
+
+let bi: i32 = 0
+while (bi < PL_N) {
+  PL_SPR[bi & 3] = 0 - 1
+  PL_BLIP[bi & 3] = sprite_new(wh8)
+  sprite_set_frame(PL_BLIP[bi & 3], G_BLIP_PLANET)
+  sprite_set_hud(PL_BLIP[bi & 3], 1)
+  bi = bi + 1
+}
+// ⚠️ Two planet sheets, so a planet's SPRITE has to be created against the sheet its radius came
+// from. They are made per match rather than at boot for that reason, and destroyed nowhere — a
+// rematch re-points the same handles.
+
+bi = 0
+while (bi < 2) {
+  if (bi === 0) { S_SPR[bi & 1] = sprite_new(hullsA32) }
+  else { S_SPR[bi & 1] = sprite_new(hullsB32) }
+  S_BLIP[bi & 1] = sprite_new(wh8)
+  sprite_set_frame(S_BLIP[bi & 1], G_BLIP_P0 + bi)
+  sprite_set_hud(S_BLIP[bi & 1], 1)
+  bi = bi + 1
+}
+// ⚠️ THREE EDGE POINTERS, SCREEN SPACE, made once. The radar shows WHERE things are on a 512x384
+// board; an edge arrow answers the more urgent question of WHICH WAY to look right now, and the two
+// are not redundant — a player tracking a shell that has slung off the top of the screen reads the
+// arrow, not the map. `sprite_set_hud(h,1)` is what makes a sprite ignore the camera.
+V.edgeS = sprite_new(wh16)
+sprite_set_hud(V.edgeS, 1)
+sprite_set_visible(V.edgeS, 0)
+V.edge0 = sprite_new(wh16)
+sprite_set_hud(V.edge0, 1)
+sprite_set_visible(V.edge0, 0)
+V.edge1 = sprite_new(wh16)
+sprite_set_hud(V.edge1, 1)
+sprite_set_visible(V.edge1, 0)
+V.curSpr = sprite_new(wh16)
+sprite_set_frame(V.curSpr, F_CURSOR)
+V.boomSpr = sprite_new(boom32)
+sprite_set_visible(V.boomSpr, 0)
+V.shellBlip = sprite_new(wh8)
+sprite_set_frame(V.shellBlip, G_BLIP_SHELL)
+sprite_set_hud(V.shellBlip, 1)
+sprite_set_visible(V.shellBlip, 0)
+
+bi = 0
+while (bi < SH_MAX) {
+  SHSPR[bi & 15] = sprite_new(wh8)
+  sprite_set_frame(SHSPR[bi & 15], G_SHELL)
+  sprite_set_visible(SHSPR[bi & 15], 0)
+  bi = bi + 1
+}
+bi = 0
+while (bi < DOT_N) {
+  let dh: i32 = sprite_new(wh8)
+  if (bi < DOT_TRAIL0) { sprite_set_frame(dh, G_GHOST) }
+  else { sprite_set_frame(dh, G_TRAIL) }
+  sprite_set_visible(dh, 0)
+  DOTS[bi & 63] = dh
+  bi = bi + 1
+}
+bi = 0
+while (bi < SEG_N + STAT_N) {
+  let sh2: i32 = sprite_new(wh8)
+  sprite_set_frame(sh2, G_SEG_OFF)
+  sprite_set_hud(sh2, 1)
+  if (bi < SEG_N) { sprite_set_pos(sh2, 76 + (bi << 3), 150) }
+  else {
+    // Four stat bars of eight, stacked down the right of the select screen.
+    let bq: i32 = (bi - SEG_N) >> 3
+    let bs: i32 = (bi - SEG_N) & 7
+    sprite_set_pos(sh2, 152 + (bs << 3), 48 + Math.imul(bq, 12))
+    sprite_set_visible(sh2, 0)
+  }
+  SEGS[bi & 63] = sh2
+  bi = bi + 1
+}
+let menuSpr: i32 = sprite_new(menu32)
+sprite_set_hud(menuSpr, 1)
+sprite_set_pos(menuSpr, 48, 52)
+sprite_set_visible(menuSpr, 0)
+
+
+// The star field goes back to being its own background: terrain owns palette bank 14 and an image
+// background owns the rest, so they no longer fight over all sixteen the way the tile version did.
+
+// ⚠️ tileReserve 0. The reserve is a CLIFF at 512 tiles (20 KB -> 40 KB of live tile map), and this
+// game's HUD is a few hundred cells of bars and short strings — nowhere near it.
+uiInit({ font: small, lineH: 9, tileReserve: 0, theme: {
+  bg: 0x000000, text: 0xD8DEEC, dim: 0x707890, title: 0xF8F8C0,
+  panel: 0x1A1C28, good: 0x58C060, bad: 0xE05858, accent: 0xF8F8C0,
+  p1: 0xE05858, p2: 0x58C0B0, spent: 0x505460
+} })
+ui_begin()
+terrain_new(ARENA_W, ARENA_H)
+// Slots 1..12 are rewritten per match, one triple per planet, from PC_COL. Only the two shared
+// tones are fixed: a near-black limb that separates a world from the starfield, and a specular the
+// lit face picks up where the surface noise peaks.
+// Nothing is written here: every planet fills its own bank at generation time.
+frame()
+
+linkOpen()
+log("WH BOOT heap=" + heap_free())
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// MAIN LOOP
+//
+// ⚠️ THE STEP BODY IS A PURE FUNCTION OF `in0` AND `in1`, AND IT IS INLINE ON PURPOSE.
+// Pure: nothing below the input read calls `key_held`, so two consoles exchanging these two words
+// run the identical simulation — which is what makes a link build an addition rather than a rewrite.
+// Inline: a tish function touching module state is a boxed call at ~117 ticks plus ~28 an argument,
+// and a lowered one historically could not see module scope at all. A module-level `while` is
+// neither lowered nor charged.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+while (true) {
+  let t0: i32 = ticks()
+
+  // ── Build a match. Inline, because a no-argument function that WRITES module arrays is the shape
+  // most likely to be lowered and lose its scope.
+  if (G.rebuild === 1) {
+    G.rebuild = 0
+    terrain_clear()
+    rngSeed(0, matchSeedOf(G.seedBase, G.match))
+    rngSeed(3, 40503 + Math.imul(G.match, 7717))
+    G.rSum = 0
+    // ⚠️ FIVE SWAPS, ALWAYS, over six classes: a Fisher-Yates shuffle with a FIXED number of draws,
+    // so the RNG stream advances by the same amount whatever it deals. A "keep drawing until it is
+    // one we have not used" loop draws a conditional number of times and a replay stops reproducing.
+    let sh: i32 = 0
+    while (sh < 5) {
+      let sj: i32 = sh + rngBelow(0, 6 - sh)
+      let st2: i32 = PC_BAG[sh & 7]
+      PC_BAG[sh & 7] = PC_BAG[sj & 7]
+      PC_BAG[sj & 7] = st2
+      sh = sh + 1
+    }
+    let pi: i32 = 0
+    while (pi < PL_N) {
+      // ⚠️ EIGHT CANDIDATES, ALWAYS DRAWN, first acceptable one kept. A `while (overlaps) retry`
+      // loop draws a CONDITIONAL number of times, so the stream position would depend on the values
+      // drawn and a replay would stop reproducing. Same principle as packages/rng.tish's refusal to
+      // short-circuit rngChance at 100.
+      // ⚠️ THE ARENA HAS A HARD VRAM BUDGET AND THE GENERATOR HAS TO RESPECT IT. Terrain is drawn
+      // as real 8x8 tiles, and a planet of radius r claims about r^2/20 of them — so four worlds at
+      // r=64 is ~800 of the GBA's 1024, before the HUD canvas and the starfield have had any. A
+      // LINKED match died on agb's "Ran out of video RAM for tiles" while the solo soak stayed
+      // green, purely because the two consoles dealt bigger planets than the single one did.
+      //
+      // Sizes are drawn and then SHRUNK to fit a running budget. The draw itself is unchanged — one
+      // call, always — so the RNG stream advances identically and the shrink is a pure function of
+      // what was dealt before it.
+      let cls: i32 = PC_BAG[pi & 7]
+      let sz: i32 = rngBelow(0, 5)
+      let rr: i32 = PC_R[sz & 7]
+      while (sz > 0 && G.rSum + Math.imul(rr, rr) > R2_BUDGET) {
+        sz = sz - 1
+        rr = PC_R[sz & 7]
+      }
+      G.rSum = G.rSum + Math.imul(rr, rr)
+      let bx: i32 = 128
+      let by: i32 = 96
+      let got: i32 = 0
+      let tries: i32 = 0
+      while (tries < 12) {
+        // ⚠️ Planets stay out of the launch corridors. When they doubled in size a default
+        // spawn ended up INSIDE one, placement could never be legal, and the match hung in
+        // PH_PLACE for ever with the driver pressing A at a spot it could not use.
+        // ⚠️ THE BOX HAS TO BE BIG ENOUGH TO HOLD WHAT IS BEING PACKED INTO IT. Four worlds of up
+        // to r=64, each wanting its neighbours a further 96 px away, cannot fit in a 256x224 region
+        // — so most candidates were rejected, placement fell through to the fixed fallback below,
+        // and two planets ended up 12 px apart with one drawn inside the other.
+        let cx: i32 = 96 + rngBelow(0, ARENA_W - 192)
+        let cy: i32 = 72 + rngBelow(0, ARENA_H - 144)
+        if (got === 0) {
+          let ok: i32 = 1
+          let qi: i32 = 0
+          while (qi < pi) {
+            let sx: i32 = cx - PL_X[qi & 3]
+            let sy: i32 = cy - PL_Y[qi & 3]
+            let ax2: i32 = sx   if (ax2 < 0) { ax2 = 0 - ax2 }
+            let ay2: i32 = sy   if (ay2 < 0) { ay2 = 0 - ay2 }
+            if (ax2 + ay2 < rr + PL_R[qi & 3] + 56) { ok = 0 }
+            qi = qi + 1
+          }
+          if (ok === 1) { bx = cx  by = cy  got = 1 }
+        }
+        tries = tries + 1
+      }
+      // ⚠️ THE FALLBACK MUST BE SAFE ON ITS OWN TERMS, because it is used exactly when the random
+      // search could not find room — the worst moment to place a planet somewhere that might
+      // collide. This grid is 120 px apart horizontally and 176 vertically, so the closest pair is
+      // 213 px apart against a worst-case 128 px of combined radius. Nothing it produces can
+      // overlap anything else it produces.
+      if (got === 0) { bx = 72 + Math.imul(pi, 120)  by = 96 + Math.imul(pi & 1, 176) }
+      PL_X[pi & 3] = bx
+      PL_Y[pi & 3] = by
+      PL_R[pi & 3] = rr
+      PL_MASS[pi & 3] = PC_MASS[sz & 7]
+      PL_HIT2[pi & 3] = Math.imul(rr + SHELL_R, rr + SHELL_R)
+      // This planet's three palette entries, taken from its class ramp. Written here rather than at
+      // boot because the classes are drawn per match — the same four slots are a different world
+      // next time round.
+      // Fifteen colours into this planet's own bank. ⚠️ `(cls << 4) | k` — the ramp table is 16
+      // wide per class precisely so the index is a shift-or rather than a multiply, and so the mask
+      // the compiler needs is provable.
+      PL_MAT[pi & 3] = PC_BANK0 + pi
+      let pk: i32 = 0
+      while (pk < 15) {
+        terrain_pal_bank(PC_BANK0 + pi, pk + 1, PC_RAMP[((cls << 4) | pk) & 127])
+        pk = pk + 1
+      }
+      // A per-planet seed off the match stream, so the same class is a different world each time
+      // and both consoles generate the identical one.
+      PL_SEED[pi & 3] = rngBelow(0, 65536) | (rngBelow(0, 65536) << 16)
+      // ⚠️ THE PLANET IS THE TERRAIN — one call, filled per pixel by the engine. The thing you see
+      // and the thing you collide with are the same bitmap by construction, which is what the
+      // sprite version could never guarantee and why shells used to pass through a visible rim.
+      // Material is per planet so a board reads as several distinct worlds.
+      sprite_set_pos(PL_BLIP[pi & 3], 172 + (bx >> 3), 8 + (by >> 3))
+      sprite_set_visible(PL_BLIP[pi & 3], 1)
+      pi = pi + 1
+    }
+    // Ships start on opposite sides; the placement phase lets each player move theirs.
+    S_X[0 & 1] = 44 << 8
+    S_Y[0 & 1] = 192 << 8
+    S_X[1 & 1] = (ARENA_W - 44) << 8
+    S_Y[1 & 1] = 192 << 8
+    let si2: i32 = 0
+    while (si2 < 2) {
+      S_HP[si2 & 1] = 100
+      S_MAXHP[si2 & 1] = 100
+      S_FUEL[si2 & 1] = 100
+      S_VX[si2 & 1] = 0
+      S_VY[si2 & 1] = 0
+      S_WPN[si2 & 1] = 0
+      si2 = si2 + 1
+    }
+    // ⚠️ The driver's learned aim does NOT survive a new arena. Leaving it in place let whichever
+    // side solved the first board keep that solution on boards it had never seen.
+    CPU_BS[0 & 1] = 999999
+    CPU_BS[1 & 1] = 999999
+    G.winner = 0 - 1
+    G.turn = 0
+    G.who = 0
+    G.placed = 0
+    G.genI = 0
+    G.genHold = 16
+    if (G.match === 0) { G.story = 1 }
+    G.phase = PH_SETUP
+    G.phaseT = 0
+    G.charge = 0
+    G.live = 0
+    V.pvKey = 0 - 1
+    log("WH TILES id=m" + G.match + " r2=" + G.rSum + " est=" + ((G.rSum / 20) | 0))
+    log("WH ARENA id=m" + G.match + " n=" + PL_N + " p="
+      + (PL_X[0 & 3] + Math.imul(PL_Y[0 & 3], 7) + Math.imul(PL_X[1 & 3], 31)
+         + Math.imul(PL_Y[1 & 3], 71) + Math.imul(PL_X[2 & 3], 131) + Math.imul(PL_Y[2 & 3], 197)
+         + Math.imul(PL_X[3 & 3], 251) + Math.imul(PL_Y[3 & 3], 313)))
+  }
+
+  // ── Input: the ONLY place the pad is read. ─────────────────────────────────────────────────────
+  let bits: i32 = 0
+  if (key_held(9) === 1) { bits = bits | IN_RIGHT }
+  if (key_held(8) === 1) { bits = bits | IN_LEFT }
+  if (key_held(6) === 1) { bits = bits | IN_UP }
+  if (key_held(7) === 1) { bits = bits | IN_DOWN }
+  if (key_held(0) === 1) { bits = bits | IN_A }
+  if (key_held(1) === 1) { bits = bits | IN_B }
+  if (key_held(4) === 1) { bits = bits | IN_L }
+  if (key_held(5) === 1) { bits = bits | IN_R }
+  if (key_held(3) === 1) { bits = bits | IN_START }
+  if (bits !== 0) { G.human = 1 }
+  // What THIS console puts on the wire. HELD buttons, never edges: only about one frame in six is
+  // staged onto the cable, so a single-frame `key_pressed` edge is usually never transmitted at all.
+  // Every discrete action is edge-detected INSIDE the step, from the exchanged words.
+  let mine: i32 = bits
+  let auto: i32 = 0
+
+  // ⚠️ The attract driver emits INPUT BITS, never a call into the fire path. examples/golf's driver
+  // calls its physics directly, so golf's attract mode never exercises golf's own input handling.
+  // Here the CPU and a player are indistinguishable to everything downstream.
+  let in0: i32 = bits
+  let in1: i32 = bits
+  if (G.human === 0 && N.solo === 1 && G.genI >= (PL_N << 5)) {
+    auto = 0
+    if (G.story > 0) { if ((G.simTick & 31) === 16) { auto = auto | IN_A } }
+    else if (G.phase === PH_SETUP) {
+      // Alternate the mode between matches so an unattended soak covers both, not just the default.
+      if (G.who === 0 && G.phaseT === 4 && (G.match & 1) === 1) { auto = auto | IN_UP }
+      // Linger, so an unattended run shows the hull screen rather than blinking past it.
+      if (G.phaseT > 70 && (G.phaseT & 15) === 8) { auto = auto | IN_A }
+    }
+    else if (G.phase === PH_PLACE) {
+      // ⚠️ It must SEARCH. Pressing A at wherever the cursor happens to start assumes that spot is
+      // legal, and the moment planets grew it stopped being — the match hung in placement for ever.
+      // `G.placeOk` is last tick's verdict, which is one tick stale and perfectly deterministic.
+      // ⚠️ IT STEERS TO A POINT ON THE SURFACE, NOT TO THE CENTRE — and to a DIFFERENT planet per
+      // player. Both mistakes deadlock placement rather than failing it: walking at a centre buries
+      // the cursor in solid rock, where `terrain_solid(cx,cy) === 0` is false for ever; and sending
+      // both players at the nearest planet puts them inside the 160px separation rule, which is
+      // also never satisfied. Player one takes planet 0 and player two the last, which the arena
+      // generator spreads across the full 512 — so the separation holds by construction.
+      let tpi: i32 = 0
+      if (G.who === 1) { tpi = PL_N - 1 }
+      let tbr: i32 = 176
+      if (G.who === 1) { tbr = 208 }
+      let trr: i32 = PL_R[tpi & 3] + 13
+      let tgx: i32 = (PL_X[tpi & 3] + (Math.imul(COST[tbr & 255], trr) >> 8)) - (G.curX >> 8)
+      let tgy: i32 = (PL_Y[tpi & 3] + (Math.imul(SINT[tbr & 255], trr) >> 8)) - (G.curY >> 8)
+      if (G.placeOk === 1 && G.phaseT > 20) { auto = auto | IN_A }
+      else {
+        if (tgx > 3) { auto = auto | IN_RIGHT }
+        if (tgx < 0 - 3) { auto = auto | IN_LEFT }
+        if (tgy > 3) { auto = auto | IN_DOWN }
+        if (tgy < 0 - 3) { auto = auto | IN_UP }
+      }
+    }
+    else if (G.phase === PH_AIM) {
+      let wc: i32 = G.who & 1
+      let curA: i32 = (S_AIM[wc & 1] >> 4) & 255
+      let curP: i32 = S_PWR[wc & 1] >> 4
+      // ⚠️ EXACTLY, AND EASING OFF AT THE END. Two separate errors, both worth an entire miss.
+      //
+      // A power unit is 14/256 of muzzle speed — 5.5% — so stopping "within one" of the answer the
+      // search worked out throws the solution away over a flight that crosses four gravity wells.
+      //
+      // And the driver decides from the state at the START of a tick, so its last press lands after
+      // the value has already arrived; because held input RAMPS, that late press moves the aim by
+      // as much as 24 sixteenths, over a whole angle unit. Measured: the search solved a=242 p=34
+      // and the shot left at a=243 p=33, every single turn. Releasing on alternate ticks once
+      // inside the last couple of units resets the repeat ramp to its slowest, so the final
+      // approach is one sixteenth at a time and cannot overshoot.
+      let fine: i32 = 0
+      if ((G.phaseT & 1) === 0) { fine = 1 }
+      // ⚠️ BOTH AXES EASE, AND IT WAS WORTH MEASURING BOTH WAYS. Easing costs about 32 ticks per
+      // unit — one press every other tick, sixteen sixteenths to a unit — which looks like pure
+      // waste on the angle, where a one-unit residual survives it anyway. Removing it took the soak
+      // from 10 hits in 18 shots to 4: the residual is one unit, but WITHOUT the ease-off the
+      // overshoot is a full ramp step of 24 sixteenths and lands anywhere within two units.
+      let da: i32 = (G.cpuA - curA) & 255
+      let daNear: i32 = 0
+      if (da < 3 || da > 253) { daNear = 1 }
+      if (daNear === 0 || fine === 1) {
+        if (da > 0 && da < 128) { auto = auto | IN_RIGHT }
+        if (da >= 128 && da < 255) { auto = auto | IN_LEFT }
+      }
+      let dp: i32 = G.cpuP - curP
+      let dpAbs: i32 = dp   if (dpAbs < 0) { dpAbs = 0 - dpAbs }
+      if (dpAbs > 2 || fine === 1) {
+        if (dp > 0) { auto = auto | IN_UP }
+        if (dp < 0) { auto = auto | IN_DOWN }
+      }
+      // Pick a weapon on the way in, so the soak fires more than slot 0 and the panel is exercised.
+      // ⚠️ NO `csI < 0` GUARD HERE. Gating the weapon press on "the search has finished" meant it
+      // never fired — the search owns the first hundred ticks of every turn — so an unattended soak
+      // shot slot zero for ever and the crater-size check saw one radius. The press restarts the
+      // search instead, which is what a human changing weapon mid-aim needs anyway.
+      // Tick 2, not tick 6: the restart this triggers costs whatever the search has already spent,
+      // so it happens before the first candidate has finished rather than a third of the way in.
+      if (G.phaseT === 2 && (G.turn & 1) === 1) { auto = auto | IN_R }
+      // ⚠️ THE DRIVER MUST ACTUALLY JUMP SOMETIMES, and this is not a nicety. The manoeuvre was
+      // unreachable in an unattended soak — the driver always wrapped past it — so the whole thrust
+      // phase went untested, and it was BROKEN: gated on space mode, it entered a phase that
+      // nothing could advance and the game stopped dead. Twelve thousand frames of soak, twenty-
+      // eight green checks, and the freeze was one keypress away the entire time.
+      //
+      // Every eighth turn, then, it takes the hop instead of the shot.
+      let wantJump: i32 = 0
+      if ((G.turn & 3) === 3 && S_FUEL[wc & 1] >= JUMP_COST) { wantJump = 1 }
+      if (wantJump === 1) {
+        if (S_WPN[wc & 1] !== W_JUMP && G.phaseT < 60 && (G.phaseT & 3) === 2) { auto = auto | IN_R }
+      } else {
+        if (G.phaseT === 5 && S_WPN[wc & 1] === W_JUMP) { auto = auto | IN_R }
+      }
+      // ⚠️ IT HOLDS FIRE UNTIL THE SEARCH HAS FINISHED. Firing on the first tick the d-pad has
+      // nothing left to do means shooting at candidate zero's answer, which is the same as not
+      // searching at all — the bug the previous random-walk version effectively had.
+      // ⚠️ A TAP, NOT A HOLD. Firing is press-and-RELEASE, so `auto |= IN_A` on every tick from the
+      // moment the sticks arrive meant the driver stood on the button until its 900-tick guard
+      // expired and only then let go: 680 wasted ticks in the middle of every single turn, which is
+      // most of why an unattended soak managed nine shots in twelve thousand frames. The button has
+      // to come back up for the shot to leave.
+      // ⚠️ THE DEADLINE HAS TO OUTLAST THE SLEW. Power now settles exactly, and near its target the
+      // hold-repeat ramp has reset, so the last few notches arrive one every sixteen ticks. A
+      // 220-tick deadline fired mid-adjustment — the shot left with the search's angle and somebody
+      // else's power. The turn clock is 1200; 520 leaves plenty and still guarantees a shot.
+      // ⚠️ FIRE ON CONVERGENCE, NOT ON "no button this tick". `auto === 0` used to stand in for
+      // "the sticks have arrived", and it stopped being true the moment the driver began releasing
+      // on alternate ticks to creep up on the answer — so it fired on the first skipped tick, two
+      // power units short of the solution, every turn.
+      // ⚠️ ONE TICK OF AGREEMENT IS THE RIGHT THRESHOLD, and it was worth measuring rather than
+      // reasoning about. Requiring the reading to HOLD for three ticks looked like the obvious cure
+      // for the residual one-unit angle error — it is not a settling artefact, and waiting merely
+      // spent ticks and let the hull drift: 10 hits in 18 shots became 6 in 17. The last angle unit
+      // is 1/256 of a turn, finer than the search's own refinement step, so it is left alone.
+      if (da === 0 && dp === 0) { G.settleT = G.settleT + 1 }
+      else { G.settleT = 0 }
+      if (G.csI < 0 && (G.settleT >= 1 || G.phaseT > 520)) {
+        if (G.fireT < 4) { auto = auto | IN_A  G.fireT = G.fireT + 1 }
+      }
+    }
+    else if (G.phase === PH_OVER) { auto = auto | IN_START }
+    mine = auto
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  // THE CABLE
+  //
+  // Neither console advances the simulation until it has BOTH sides' inputs for the same round, and
+  // because the simulation is deterministic they then compute the identical next state without ever
+  // sending any state. What crosses the wire is nine button bits and a five-bit round stamp.
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  let in0: i32 = 0
+  let in1: i32 = 0
+  let doStep: i32 = 0
+  let lstate: i32 = linkState()
+
+  if (lstate !== LINK_PLAYING) {
+    // Not in lockstep: turn the port anyway. This is the whole of the waiting-room discipline.
+    linkExchange(mine)
+    let now: i32 = linkState()
+    if (now !== N.shown) {
+      N.shown = now
+      log("WH LINK state=" + now + " master=" + linkIsMaster() + " seed=" + linkSeed()
+        + " solo=" + N.solo)
+    }
+    if (now === LINK_LOST) {
+      // ⚠️ A lost peer FREEZES the match; it does not hand it to a CPU and does not resume it. There
+      // is no state channel, so a returning peer cannot learn where the shell was — continuing
+      // locally would produce two entirely normal-looking, entirely different games.
+      N.seeded = 0
+      if ((mine & IN_START) !== 0) { linkResync() }
+    }
+    N.waited = N.waited + 1
+    // ⚠️ THREE SECONDS. A handshake takes about twenty frames, so a shorter wait means START — the
+    // button the screen invites you to press — drops you into the one-player game before the peer
+    // has finished linking, on the console you pressed it on.
+    if (N.solo === 0 && N.waited > 180) {
+      N.solo = 1
+      G.ticks = TICKS_SOLO
+      log("WH CPU linked=0 solo=1")
+    }
+    if (N.solo === 1) { in0 = mine  in1 = mine  doStep = 1 }
+  } else {
+    if (N.seeded === 0) {
+      N.seeded = 1
+      N.solo = 0
+      G.ticks = TICKS_LINKED
+      N.mine = 1 - linkIsMaster()
+      // ⚠️ NO CPU IN A LINKED MATCH, EVER. A budgeted search terminates on a wall clock, and two
+      // consoles spend different numbers of ticks on identical instructions — so the two searches
+      // would stop at different candidates and play two plausible, different matches.
+      G.human = 1
+      // The seed is the master's and both ends hold it by the time PLAYING is reached. Seeding at
+      // boot would use a local number and the two would build different arenas.
+      G.match = 0
+      G.rebuild = 1
+      G.seedBase = linkSeed()
+      log("WH LINK playing seed=" + linkSeed() + " side=" + N.mine)
+      if (linkIsMaster() === 1) {
+        N.round = 0
+        N.btn = mine
+        N.outWord = N.btn | Math.imul(N.round, RND_SHIFT)
+      } else {
+        N.round = 0 - 1
+        N.outWord = 0
+      }
+    }
+    let peer: i32 = linkExchange(N.outWord)
+    if (peer !== LINK_STALL) {
+      // ⚠️ Split, and each step explicitly i32: a bitwise operator applied straight to a Math.floor
+      // result operates on a NUMBER, not the integer it looks like.
+      let prRaw: i32 = Math.floor(peer / RND_SHIFT)
+      let pr: i32 = prRaw & RND_MASK
+      let pb: i32 = peer & 511
+      // ⚠️ THE MASTER OWNS THE CLOCK. It simulates round R only when the child's answer FOR THAT
+      // ROUND returns; the child simulates the moment it hears R and echoes the stamp with the
+      // buttons it used. Both then run R with (masterButtons_R, childButtons_R). A symmetric
+      // "both step when the rounds match" version drifts by one after a few dozen rounds and then
+      // deadlocks. Anything unexpected is ignored, which leaves the staged word in place so the peer
+      // hears the round again — idempotent, so it recovers instead of hanging.
+      if (linkIsMaster() === 1) {
+        if (pr === N.round) {
+          in0 = N.btn
+          in1 = pb
+          doStep = 1
+          N.round = (N.round + 1) & RND_MASK
+          N.btn = mine
+          N.outWord = N.btn | Math.imul(N.round, RND_SHIFT)
+        }
+      } else {
+        if (pr !== N.round) {
+          in0 = pb
+          in1 = mine
+          doStep = 1
+          N.round = pr
+          N.outWord = mine | Math.imul(pr, RND_SHIFT)
+        }
+      }
+    }
+  }
+
+  // A tick is the unit of time, NOT a display frame. Solo runs one per frame; linked runs
+  // G.ticks per exchanged word, so both modes move at the same speed across the arena.
+  // ⚠️ `G.ticks` is a CONSTANT PER MODE and never a measured elapsed time: two consoles that
+  // ran different numbers of ticks for the same pair of inputs are no longer the same game.
+  let tkq: i32 = 0
+  if (feelFrozen() > 0) { doStep = 0 }
+  while (tkq < G.ticks && doStep === 1) {
+    // ⚠️ TERRAIN IS BUILT ON SIMULATION TICKS, NOT DISPLAY FRAMES, and this is a desync fix.
+    //
+    // It used to sit in the outer loop, one planet per drawn frame. Two linked consoles draw
+    // DIFFERENT numbers of display frames per simulated tick — a stall costs one console a frame the
+    // other took — so they laid their worlds down at different simulated times. Ships fall onto
+    // terrain, so one console's hull landed a tick before the other's and their positions drifted
+    // apart from there. The desync differ caught it on its first run, disagreeing on x0 while x1
+    // still matched: exactly one falling ship, exactly one clock in the wrong place.
+    //
+    // Anything the simulation can observe has to be paced by the simulation's own clock.
+    // ⚠️ IT HAS TO WAIT OUT A COMMIT BEFORE IT REBUILDS. agb returns a dropped tile's VRAM only at
+    // the next commit, so clearing a match's terrain and rasterising the next one's first planet
+    // inside the same display frame peaks at BOTH sets resident — which is exactly what "Ran out of
+    // video RAM for tiles" was at the start of match two.
+    //
+    // The hold is counted in SIMULATION TICKS, not display frames, for the same reason the
+    // generation itself is: a linked pair draws a different number of display frames per tick, so
+    // anything the simulation can observe that is paced by frames desyncs it. Sixteen ticks is one
+    // quarter-second solo and still spans two commits at the linked rate.
+    if (G.genHold > 0) { G.genHold = G.genHold - 1 }
+    else if (G.genI < (PL_N << 5)) {
+      // ⚠️ A BAND PER TICK, THIRTY-TWO BANDS TO A PLANET. Generating a world is a table lookup, a
+      // bilinear noise sample and a dozen multiplies per pixel, and a radius-64 planet is ~13,000
+      // of them: at eight bands the worst frame measured 50,896 ticks, eleven times a GBA frame.
+      // Thirty-two puts every band comfortably inside budget for the same total work, which matters
+      // because this runs UNDER the hull-select screen — the player is reading stats while their
+      // solar system is being built, and a hitch there is a hitch in the menu.
+      //
+      // `genI` counts (planet, band) pairs, and 32 is a power of two precisely so the shift and
+      // mask do the divide for free.
+      let gpi: i32 = G.genI >> 5
+      let gbd: i32 = G.genI & 31
+      terrain_planet(PL_X[gpi & 3], PL_Y[gpi & 3], PL_R[gpi & 3], PL_MAT[gpi & 3],
+        PL_SEED[gpi & 3], gbd, 32)
+      G.genI = G.genI + 1
+      // The mass survey can only run once the whole world exists.
+      if (gbd === 31) {
+      let rp: i32 = gpi
+            let rr4: i32 = PL_R[rp & 3] >> 2
+            let rk: i32 = 0
+            while (rk < 4) {
+              let rad: i32 = Math.imul(rr4, rk + 1)
+              PL_ENC[((rp << 2) | rk) & 15] = terrain_mass(PL_X[rp & 3], PL_Y[rp & 3], rad)
+              PL_RQ[((rp << 2) | rk) & 15] = Math.imul(rad, rad)
+              rk = rk + 1
+            }
+            if (PL_FULL[rp & 3] < 1) { PL_FULL[rp & 3] = 1 }
+            rk = 0
+            while (rk < 4) {
+              PL_EMASS[((rp << 2) | rk) & 15] =
+                (Math.imul(PL_ENC[((rp << 2) | rk) & 15], PL_MASS[rp & 3]) / PL_FULL[rp & 3]) | 0
+              rk = rk + 1
+            }
+      PL_FULL[gpi & 3] = PL_ENC[((gpi << 2) | 3) & 15]
+      if (PL_FULL[gpi & 3] < 1) { PL_FULL[gpi & 3] = 1 }
+      let rk2: i32 = 0
+      while (rk2 < 4) {
+        PL_EMASS[((gpi << 2) | rk2) & 15] =
+          (Math.imul(PL_ENC[((gpi << 2) | rk2) & 15], PL_MASS[gpi & 3]) / PL_FULL[gpi & 3]) | 0
+        rk2 = rk2 + 1
+      }
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+    // STEP
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+    G.simTick = G.simTick + 1
+    G.phaseT = G.phaseT + 1
+
+    // ⚠️ Edges are computed in SIMULATION time, from the exchanged words. `key_pressed` would give an
+    // edge on the console that pressed the button and on no other — which fires a shell on one screen
+    // only, a desync on the very first turn.
+    let e0: i32 = in0 & (in0 ^ G.prev0)
+    let e1: i32 = in1 & (in1 ^ G.prev1)
+    G.prev0 = in0
+    G.prev1 = in1
+    // ⚠️ Counted down in the STEP, not in the attract driver: a lockout that only expires while
+    // nobody is playing never expires for a player, which is a permanently deaf setup screen.
+    if (G.storyT > 0) { G.storyT = G.storyT - 1 }
+    let me: i32 = in0
+    let myEdge: i32 = e0
+    if (G.who === 1) { me = in1  myEdge = e1 }
+    let wi: i32 = G.who & 1
+
+    // ════════════════════════════════════════════════════════════════════════════════════════
+    // LANDED PHYSICS — every tick, both ships, whatever phase it is.
+    //
+    // ⚠️ IT RUNS OUTSIDE THE TURN, and that is the feature rather than an oversight: carve the
+    // ground out from under a hull and it FALLS. Were this gated on the active player's turn, a
+    // ship could hang in the air over its own crater until its turn came round again.
+    //
+    // "Down" is toward whichever planet has you — the same N-body field the shells fly through —
+    // so a hull stands upright on one world and upside down on the one across the arena, and a
+    // big enough shot can drop it off a rim into another planet's pull.
+    // ════════════════════════════════════════════════════════════════════════════════════════
+    // ⚠️ NOT UNTIL BOTH SHIPS ARE PLACED. Gravity used to run in every phase, so hulls fell out of
+    // their default spawn and landed on a planet before the placement cursor was ever shown — the
+    // player then "placed" a ship that had already chosen somewhere else to be.
+    if (G.landed === 1 && G.story === 0 && G.phase !== PH_SETUP && G.phase !== PH_PLACE) {
+      let sh: i32 = 0
+      while (sh < 2) {
+        let hx: i32 = S_X[sh & 1] >> 8
+        let hy: i32 = S_Y[sh & 1] >> 8
+        let ggx: i32 = 0
+        let ggy: i32 = 0
+        let gp: i32 = 0
+        while (gp < PL_N) {
+          let gdx: i32 = PL_X[gp & 3] - hx
+          let gdy: i32 = PL_Y[gp & 3] - hy
+          let gax: i32 = gdx   if (gax < 0) { gax = 0 - gax }
+          let gay: i32 = gdy   if (gay < 0) { gay = 0 - gay }
+          if (gax < 1024 && gay < 1024) {
+            let gd2: i32 = SQ[gax & 1023] + SQ[gay & 1023]
+            let gidx: i32 = 0
+            if (gd2 < 4096) { gidx = gd2 >> 2 }
+            else { let gh: i32 = gd2 >> 9  if (gh > 1023) { gh = 1023 }  gidx = 1024 | gh }
+            let gk: i32 = GACC[gidx & 2047]
+            let gemq: i32 = 0
+            if (gd2 >= PL_RQ[((gp << 2) | 0) & 15]) { gemq = 1 }
+            if (gd2 >= PL_RQ[((gp << 2) | 1) & 15]) { gemq = 2 }
+            if (gd2 >= PL_RQ[((gp << 2) | 2) & 15]) { gemq = 3 }
+            let gem: i32 = PL_EMASS[((gp << 2) | gemq) & 15]
+            ggx = (ggx + ((Math.imul(Math.imul(gdx, gk) >> 10, gem)) >> 8)) | 0
+            ggy = (ggy + ((Math.imul(Math.imul(gdy, gk) >> 10, gem)) >> 8)) | 0
+          }
+          gp = gp + 1
+        }
+        S_VX[sh & 1] = (S_VX[sh & 1] + ggx) | 0
+        S_VY[sh & 1] = (S_VY[sh & 1] + ggy) | 0
+        let SVMAX: i32 = 262144
+        if (S_VX[sh & 1] > SVMAX) { S_VX[sh & 1] = SVMAX }
+        if (S_VX[sh & 1] < 0 - SVMAX) { S_VX[sh & 1] = 0 - SVMAX }
+        if (S_VY[sh & 1] > SVMAX) { S_VY[sh & 1] = SVMAX }
+        if (S_VY[sh & 1] < 0 - SVMAX) { S_VY[sh & 1] = 0 - SVMAX }
+        // ⚠️ WALKED ONE PIXEL AT A TIME, not integrated in one jump. Stepping pixel-by-pixel is
+        // what makes "rests exactly on the surface" true rather than approximately true: an
+        // integrated step lands INSIDE the ground and has to be pushed back out, which is where
+        // jitter on a slope comes from. A hull never moves more than four pixels a tick anyway.
+        let ax3: i32 = S_VX[sh & 1] >> 16   if (ax3 < 0) { ax3 = 0 - ax3 }
+        let ay3: i32 = S_VY[sh & 1] >> 16   if (ay3 < 0) { ay3 = 0 - ay3 }
+        let nst: i32 = ax3
+        if (ay3 > nst) { nst = ay3 }
+        if (nst > 8) { nst = 8 }
+        let hit: i32 = 0
+        let stp: i32 = 0
+        while (stp < nst) {
+          let tryx: i32 = (S_X[sh & 1] + ((S_VX[sh & 1] >> 8) / nst)) | 0
+          let tryy: i32 = (S_Y[sh & 1] + ((S_VY[sh & 1] >> 8) / nst)) | 0
+          if (terrain_solid(tryx >> 8, tryy >> 8) === 1) { hit = 1  stp = nst }
+          else { S_X[sh & 1] = tryx  S_Y[sh & 1] = tryy  stp = stp + 1 }
+        }
+        if (hit === 1) {
+          S_VX[sh & 1] = 0
+          S_VY[sh & 1] = 0
+          if (sh === wi) { G.grounded = 1 }
+        } else if (sh === wi && nst > 0) { G.grounded = 0 }
+        if (S_X[sh & 1] < 8 << 8) { S_X[sh & 1] = 8 << 8  S_VX[sh & 1] = 0 }
+        if (S_X[sh & 1] > (ARENA_W - 8) << 8) { S_X[sh & 1] = (ARENA_W - 8) << 8  S_VX[sh & 1] = 0 }
+        if (S_Y[sh & 1] < 8 << 8) { S_Y[sh & 1] = 8 << 8  S_VY[sh & 1] = 0 }
+        if (S_Y[sh & 1] > (ARENA_H - 8) << 8) { S_Y[sh & 1] = (ARENA_H - 8) << 8  S_VY[sh & 1] = 0 }
+        sh = sh + 1
+      }
+    }
+
+    // ⚠️ THE DESYNC INSTRUMENT. Two linked consoles must compute the identical world from the
+    // identical pair of input words, and NO SCREENSHOT OF ONE CONSOLE CAN SHOW THAT THEY DID —
+    // each side on its own looks like a perfectly ordinary game of Warheads. So each prints its
+    // whole simulation state every 32 ticks, keyed by the tick number, and verify.sh diffs the two
+    // logs line for line. This is the only assertion in the suite that a single cartridge cannot make.
+    if ((G.simTick & 31) === 0) {
+      log("WH SYNC f=" + G.simTick + " ph=" + G.phase + " who=" + G.who + " turn=" + G.turn
+        + " x0=" + (S_X[0 & 1] >> 8) + " y0=" + (S_Y[0 & 1] >> 8)
+        + " x1=" + (S_X[1 & 1] >> 8) + " y1=" + (S_Y[1 & 1] >> 8)
+        + " h0=" + S_HP[0 & 1] + " h1=" + S_HP[1 & 1]
+        + " a0=" + S_AIM[0 & 1] + " a1=" + S_AIM[1 & 1]
+        + " w0=" + S_WPN[0 & 1] + " w1=" + S_WPN[1 & 1]
+        + " sx=" + (SHX[0 & 15] >> 8) + " sy=" + (SHY[0 & 15] >> 8) + " st=" + SHST[0 & 15])
+    }
+
+    // The briefing plays once, before the first hull is chosen, and is advanced by the same edge
+    // the rest of the game uses — so it crosses the cable like everything else.
+    if (G.story > 0) {
+      if ((myEdge & IN_A) !== 0) {
+        chipAccept()
+        G.story = G.story + 1
+        if (G.story > 3) {
+          G.story = 0
+          // ⚠️ A SHORT DEAF PERIOD, and it is the difference between having a ship-select screen and
+          // appearing not to. The briefing takes three A presses; without this the FOURTH lands on
+          // the hull screen the instant it appears and confirms whatever was selected, so anyone
+          // tapping through the story never sees it at all. A modal that closes on a button must not
+          // hand that same button to whatever was behind it.
+          G.storyT = 20
+        }
+      }
+    }
+
+    // ⚠️ THE BRIEFING OWNS THE TURN. It used to gate only the setup INPUT, so every other phase kept
+    // advancing underneath it: hulls were chosen and confirmed while the text was still on screen,
+    // which reads as "the game starts during the dialog" and as "there is no ship selection".
+    // A modal box has to be the first arm of the chain, not a condition inside one of them.
+    if (G.story > 0) { let storyHold: i32 = 1 }
+
+    // ── SETUP: pick a hull ─────────────────────────────────────────────────────────────────────────
+    else if (G.phase === PH_SETUP) {
+        // ⚠️ THE MODE IS A MATCH SETTING, AND ONLY PLAYER ONE SETS IT. Both hulls have to agree about
+      // whether gravity holds them, so it cannot be a per-ship choice — and going through the
+      // exchanged word rather than a local keypress is what makes it survive the cable.
+      if (wi === 0) {
+        if ((myEdge & IN_UP) !== 0 || (myEdge & IN_DOWN) !== 0) { G.landed = 1 - G.landed }
+      }
+    if ((myEdge & IN_R) !== 0) { S_CLS[wi & 1] = S_CLS[wi & 1] + 1  if (S_CLS[wi & 1] > 2) { S_CLS[wi & 1] = 0 } }
+      if ((myEdge & IN_L) !== 0) { S_CLS[wi & 1] = S_CLS[wi & 1] - 1  if (S_CLS[wi & 1] < 0) { S_CLS[wi & 1] = 2 } }
+      if ((myEdge & IN_A) !== 0 && G.storyT === 0) {
+        let cc: i32 = S_CLS[wi & 1] & 3
+        S_MAXHP[wi & 1] = SHIP_HP[cc & 3]
+        S_HP[wi & 1] = SHIP_HP[cc & 3]
+        S_FUEL[wi & 1] = SHIP_FUEL[cc & 3]
+        let wq: i32 = 0
+        while (wq < 3) { S_AMMO[((wi << 2) | wq) & 7] = W_AMMO[((cc << 2) | wq) & 15]  wq = wq + 1 }
+        chipAccept()
+        log("WH PICK id=s" + wi + "m" + G.match + " cls=" + cc + " hp=" + S_HP[wi & 1])
+        if (wi === 0) { G.who = 1  G.phaseT = 0 }
+        else {
+          G.who = 0
+          G.phase = PH_PLACE
+          G.phaseT = 0
+          G.curX = S_X[0 & 1]
+          G.curY = S_Y[0 & 1]
+        }
+      }
+    }
+
+    // ── PLACE: move a cursor and commit to a spot ──────────────────────────────────────────────────
+    else if (G.phase === PH_PLACE) {
+      let cs: i32 = 768                      // Q8 px per tick — a placement cursor wants to be quick
+      if ((me & IN_LEFT) !== 0) { G.curX = G.curX - cs }
+      if ((me & IN_RIGHT) !== 0) { G.curX = G.curX + cs }
+      if ((me & IN_UP) !== 0) { G.curY = G.curY - cs }
+      if ((me & IN_DOWN) !== 0) { G.curY = G.curY + cs }
+      if (G.curX < 12 << 8) { G.curX = 12 << 8 }
+      if (G.curX > (ARENA_W - 12) << 8) { G.curX = (ARENA_W - 12) << 8 }
+      if (G.curY < 12 << 8) { G.curY = 12 << 8 }
+      if (G.curY > (ARENA_H - 12) << 8) { G.curY = (ARENA_H - 12) << 8 }
+
+      // Legality: clear of every planet, and not sitting on top of the other ship.
+      let cx2: i32 = G.curX >> 8
+      let cy2: i32 = G.curY >> 8
+      let legal: i32 = 1
+      let li: i32 = 0
+      while (li < PL_N) {
+        let ldx: i32 = cx2 - PL_X[li & 3]
+        let ldy: i32 = cy2 - PL_Y[li & 3]
+        let lax: i32 = ldx   if (lax < 0) { lax = 0 - lax }
+        let lay: i32 = ldy   if (lay < 0) { lay = 0 - lay }
+        if (lax < 1024 && lay < 1024) {
+          let ld2: i32 = SQ[lax & 1023] + SQ[lay & 1023]
+          let need: i32 = PL_R[li & 3] + 20
+          if (ld2 < Math.imul(need, need)) { legal = 0 }
+        }
+        li = li + 1
+      }
+      // ⚠️ IN LANDED MODE A SHIP MUST BE STANDING ON SOMETHING. The space-mode rule is the exact
+    // opposite of the landed one — clear of every planet versus touching one — so the same cursor
+    // means two different things and the check has to fork.
+    if (G.landed === 1) {
+      legal = 0
+      if (terrain_solid(cx2, cy2) === 0) {
+        // Solid within a ship's height in ANY direction: "down" is toward whichever planet has you,
+        // and on a round world that is a different direction on every face.
+        let pr: i32 = 0
+        while (pr < 8) {
+          let pxo: i32 = (Math.imul(COST[((pr << 5) & 255)], 20) >> 8)
+          let pyo: i32 = (Math.imul(SINT[((pr << 5) & 255)], 20) >> 8)
+          if (terrain_solid(cx2 + pxo, cy2 + pyo) === 1) { legal = 1 }
+          pr = pr + 1
+        }
+      }
+    }
+    if (G.placed === 1) {
+        let odx: i32 = cx2 - (S_X[0 & 1] >> 8)
+        let ody: i32 = cy2 - (S_Y[0 & 1] >> 8)
+        let oax: i32 = odx   if (oax < 0) { oax = 0 - oax }
+        let oay: i32 = ody   if (oay < 0) { oay = 0 - oay }
+        if (oax + oay < 160) { legal = 0 }
+      }
+      G.placeOk = legal
+      if ((myEdge & IN_A) !== 0 && legal === 1) {
+        S_X[wi & 1] = G.curX
+        S_Y[wi & 1] = G.curY
+        chipAccept()
+      log("WH PLACE id=s" + wi + "m" + G.match + " x=" + cx2 + " y=" + cy2 + " f=" + G.simTick)
+        if (G.placed === 0) {
+          G.placed = 1
+          G.who = 1
+          G.phaseT = 0
+          G.curX = S_X[1 & 1]
+          G.curY = S_Y[1 & 1]
+        } else {
+          // Who opens is drawn from the SEEDED stream, so both consoles agree without saying so.
+          G.who = rngBelow(0, 2)
+          G.phase = PH_AIM
+          G.phaseT = 0
+          G.turnClock = TURN_TICKS
+          CPU_BA[0 & 1] = 0
+          CPU_BA[1 & 1] = 128
+          CPU_BP[0 & 1] = 24
+          CPU_BP[1 & 1] = 24
+          G.cpuA = CPU_BA[G.who & 1]
+          G.cpuP = CPU_BP[G.who & 1]
+          V.pvKey = 0 - 1
+          log("WH OPEN id=m" + G.match + " first=" + G.who)
+        }
+      }
+    }
+
+    // ── AIM: heading, power, weapon; then fire or burn ─────────────────────────────────────────────
+    else if (G.phase === PH_AIM) {
+      G.turnClock = G.turnClock - 1
+      let ad: i32 = 0
+      if ((me & IN_LEFT) !== 0) { ad = 0 - 1 }
+      if ((me & IN_RIGHT) !== 0) { ad = 1 }
+      if (ad === 0) { S_HOLDA[wi & 1] = 0 }
+      else {
+        S_HOLDA[wi & 1] = S_HOLDA[wi & 1] + 1
+        // ⚠️ THE RAMP, NOT THE CAP, IS WHAT MAKES TURNING PAINFUL. At `hold >> 4` it took 304 ticks
+        // to reach full slew and about 800 to spin half a turn — five seconds of holding LEFT before
+        // the ship is even pointing the right way. `>> 2` reaches the cap in ninety and crosses the
+        // circle in about a hundred and thirty, while still being fine enough for one unit of
+        // adjustment on a tap.
+        let sp2: i32 = 1 + (S_HOLDA[wi & 1] >> 2)
+        if (sp2 > 24) { sp2 = 24 }
+        S_AIM[wi & 1] = (S_AIM[wi & 1] + Math.imul(ad, sp2)) & 4095
+      }
+      let pd: i32 = 0
+      if ((me & IN_DOWN) !== 0) { pd = 0 - 1 }
+      if ((me & IN_UP) !== 0) { pd = 1 }
+      if (pd === 0) { S_HOLDP[wi & 1] = 0 }
+      else {
+        S_HOLDP[wi & 1] = S_HOLDP[wi & 1] + 1
+        let sp3: i32 = 1 + (S_HOLDP[wi & 1] >> 3)
+        if (sp3 > 16) { sp3 = 16 }
+        S_PWR[wi & 1] = S_PWR[wi & 1] + Math.imul(pd, sp3)
+        if (S_PWR[wi & 1] < 16) { S_PWR[wi & 1] = 16 }
+        if (S_PWR[wi & 1] > 768) { S_PWR[wi & 1] = 768 }
+      }
+      if ((myEdge & IN_R) !== 0) {
+        chipCancel()
+        S_WPN[wi & 1] = S_WPN[wi & 1] + 1
+        if (S_WPN[wi & 1] >= W_SLOTS) { S_WPN[wi & 1] = 0 }
+        V.pvKey = 0 - 1
+        // ⚠️ A DIFFERENT WEAPON IS A DIFFERENT TRAJECTORY. Shot kinds carry their own muzzle speed
+        // multiplier, so an answer found for one rack is the wrong answer for another; the search
+        // has to start again rather than fire a solution it computed for a different gun.
+        if (G.csI >= 0) { G.csI = 0  G.csBS = 999999  G.csMin = 999999 }
+      }
+      if ((myEdge & IN_L) !== 0) {
+        S_WPN[wi & 1] = S_WPN[wi & 1] - 1
+        if (S_WPN[wi & 1] < 0) { S_WPN[wi & 1] = W_SLOTS - 1 }
+        V.pvKey = 0 - 1
+        if (G.csI >= CS_COARSE) { G.csI = CS_COARSE }
+        else if (G.csI >= 0) { G.csI = 0 }
+        if (G.csI >= 0) { G.csBS = 999999  G.csMin = 999999 }
+      }
+
+
+      if ((me & IN_A) !== 0) { G.charge = 1 }
+      let fire: i32 = 0
+      if (G.charge === 1 && (me & IN_A) === 0) { fire = 1 }
+      if (G.turnClock <= 0) { fire = 1 }
+      // THRUST: the same heading and power, spent on the hull instead of a shell — selected from
+      // the rack like any other option, and fired with the same button.
+      if (fire === 1 && G.phase === PH_AIM && S_WPN[wi & 1] === W_JUMP) {
+        G.charge = 0
+        if (S_FUEL[wi & 1] >= JUMP_COST) {
+          let ta: i32 = (S_AIM[wi & 1] >> 4) & 255
+          let cc2: i32 = S_CLS[wi & 1] & 3
+          let tp: i32 = SHIP_THR[cc2 & 3]
+          // ⚠️ IN LANDED MODE THIS IS A JUMP, NOT A BURN. Space mode gives a sustained push the hull
+          // coasts on; landed mode gives ONE impulse and hands it straight back to gravity, so a hop
+          // is a committed arc you cannot steer. That is the reason the two modes PLAY differently
+          // rather than merely looking different — and you cannot jump off nothing.
+          if (G.landed === 1) {
+            tp = Math.imul(tp, 12)
+            if (G.grounded === 0) { tp = 0 }
+          }
+          S_VX[wi & 1] = Math.imul(COST[ta & 255], tp)
+          S_VY[wi & 1] = Math.imul(SINT[ta & 255], tp)
+          S_FUEL[wi & 1] = S_FUEL[wi & 1] - JUMP_COST
+          if (S_FUEL[wi & 1] < 0) { S_FUEL[wi & 1] = 0 }
+          G.phase = PH_THRUST
+          G.phaseT = 0
+          chipWhoosh()
+          log("WH THRUST id=s" + wi + " a=" + ta + " fuel=" + S_FUEL[wi & 1] + " f=" + G.simTick)
+        }
+      }
+      else if (fire === 1 && G.phase === PH_AIM) {
+        G.charge = 0
+        let cc3: i32 = S_CLS[wi & 1] & 3
+        let wslot: i32 = S_WPN[wi & 1] & 3
+        // No ammo means the standard shot, which is unlimited. A turn is never wasted on an empty rack.
+        if (S_AMMO[((wi << 2) | wslot) & 7] === 0) { wslot = 0 }
+        let widx: i32 = ((cc3 << 2) | wslot) & 15
+        if (W_AMMO[widx & 15] > 0) { S_AMMO[((wi << 2) | wslot) & 7] = S_AMMO[((wi << 2) | wslot) & 7] - 1 }
+
+        let a: i32 = (S_AIM[wi & 1] >> 4) & 255
+      let pw: i32 = S_PWR[wi & 1] >> 4
+      // ⚠️ THE SHOT DECIDES DELIVERY, THE WARHEAD DECIDES ARRIVAL, AND NEITHER IMPLIES THE OTHER.
+      let shot: i32 = W_SHOT[widx & 15] & 7
+      let head: i32 = W_WARHEAD[widx & 15] & 7
+      let sk: i32 = SH_KIND[shot & 7]
+      let base: i32 = 256 + Math.imul(pw, 14)
+      let spd: i32 = Math.imul(Math.imul(SHIP_SPD[cc3 & 3], SH_SPD[shot & 7]) >> 8, base) >> 8
+      let mx: i32 = (S_X[wi & 1] >> 8) + (Math.imul(COST[a & 255], 11) >> 8)
+      let my: i32 = (S_Y[wi & 1] >> 8) + (Math.imul(SINT[a & 255], 11) >> 8)
+      // A FAN leaves the tube as several; a SPLIT leaves as one and opens later.
+      let born: i32 = 1
+      if (sk === SK_FAN) { born = SH_COUNT[shot & 7] }
+      let bj: i32 = 0
+      while (bj < born) {
+        let off: i32 = bj - (born >> 1)
+        let sa: i32 = (a + Math.imul(off, SH_ARC[shot & 7])) & 255
+        SHX[bj & 15] = mx << 8
+        SHY[bj & 15] = my << 8
+        SHVX[bj & 15] = Math.imul(COST[sa & 255], spd)
+        SHVY[bj & 15] = Math.imul(SINT[sa & 255], spd)
+        SHST[bj & 15] = ST_FLY
+        SHK[bj & 15] = 0
+        SHW[bj & 15] = head
+        SHFZ[bj & 15] = 0
+        if (sk === SK_SPLIT) { SHFZ[bj & 15] = SH_FUSE[shot & 7] }
+        SHPEN[bj & 15] = 0
+        SHCLR[bj & 15] = 0
+        if (sk === SK_BORE) { SHPEN[bj & 15] = SH_PEN[shot & 7] }
+        SHSHOT[bj & 15] = shot
+        bj = bj + 1
+      }
+      G.live = born
+        G.shotA = a
+        G.shotP = pw
+        G.minD2 = 999999
+        G.seq = G.seq + 1
+        G.phase = PH_FLIGHT
+        G.phaseT = 0
+        V.lastX = mx
+        V.lastY = my
+        chipThrow()
+      log("WH SHOT id=q" + G.seq + " side=" + wi + " cls=" + cc3 + " w=" + wslot
+          + " a=" + a + " p=" + pw + " n=" + born + " f=" + G.simTick)
+      }
+    }
+
+    // ── THRUST: the hull coasts under the same gravity a shell feels ───────────────────────────────
+    // ⚠️ NO `landed === 0` GUARD. This whole arm — including the `phaseT >= THRUST_TICKS` exit at
+    // the bottom of it — used to be gated on space mode, while its BODY contained the landed-mode
+    // grounding test. So a landed jump entered a phase that nothing could advance and nothing could
+    // leave: the game accepted the input, moved the hull once, and then stopped for ever.
+    //
+    // A frozen phase is the worst kind of bug to see from outside. The ROM is still running, the
+    // starfield still scrolls, the frame counter still climbs — it just never takes another turn.
+    else if (G.phase === PH_THRUST) {
+      // Deliberately simpler than a shell: one tick, no substeps. A hull moves at a tenth of a shell's
+      // speed, so it cannot tunnel and does not need the machinery.
+      let hx: i32 = S_X[wi & 1] >> 8
+      let hy: i32 = S_Y[wi & 1] >> 8
+      let hgx: i32 = 0
+      let hgy: i32 = 0
+      let hp2: i32 = 0
+      while (hp2 < PL_N) {
+        let hdx: i32 = PL_X[hp2 & 3] - hx
+        let hdy: i32 = PL_Y[hp2 & 3] - hy
+        let hax: i32 = hdx   if (hax < 0) { hax = 0 - hax }
+        let hay: i32 = hdy   if (hay < 0) { hay = 0 - hay }
+        if (hax < 1024 && hay < 1024) {
+          let hd2: i32 = SQ[hax & 1023] + SQ[hay & 1023]
+          let hidx: i32 = 0
+          if (hd2 < 4096) { hidx = hd2 >> 2 }
+          else { let hh: i32 = hd2 >> 9  if (hh > 1023) { hh = 1023 }  hidx = 1024 | hh }
+          let hk: i32 = GACC[hidx & 2047]
+          // Enclosed mass here too, so a burn through a hollowed planet behaves the way the shot
+          // that hollowed it does. Three sites read this table and all three must agree.
+          let hemq: i32 = 0
+          if (hd2 >= PL_RQ[((hp2 << 2) | 0) & 15]) { hemq = 1 }
+          if (hd2 >= PL_RQ[((hp2 << 2) | 1) & 15]) { hemq = 2 }
+          if (hd2 >= PL_RQ[((hp2 << 2) | 2) & 15]) { hemq = 3 }
+          let hem: i32 = PL_EMASS[((hp2 << 2) | hemq) & 15]
+          hgx = (hgx + ((Math.imul(Math.imul(hdx, hk) >> 10, hem)) >> 8)) | 0
+          hgy = (hgy + ((Math.imul(Math.imul(hdy, hk) >> 10, hem)) >> 8)) | 0
+        }
+        hp2 = hp2 + 1
+      }
+      S_VX[wi & 1] = (S_VX[wi & 1] + hgx) | 0
+      S_VY[wi & 1] = (S_VY[wi & 1] + hgy) | 0
+      S_X[wi & 1] = (S_X[wi & 1] + (S_VX[wi & 1] >> 8)) | 0
+      S_Y[wi & 1] = (S_Y[wi & 1] + (S_VY[wi & 1] >> 8)) | 0
+      // A hull cannot leave the board or fly into a rock.
+      if (S_X[wi & 1] < 12 << 8) { S_X[wi & 1] = 12 << 8  S_VX[wi & 1] = 0 }
+      if (S_X[wi & 1] > (ARENA_W - 12) << 8) { S_X[wi & 1] = (ARENA_W - 12) << 8  S_VX[wi & 1] = 0 }
+      if (S_Y[wi & 1] < 12 << 8) { S_Y[wi & 1] = 12 << 8  S_VY[wi & 1] = 0 }
+      if (S_Y[wi & 1] > (ARENA_H - 12) << 8) { S_Y[wi & 1] = (ARENA_H - 12) << 8  S_VY[wi & 1] = 0 }
+      let ci: i32 = 0
+      while (ci < PL_N) {
+        let cdx: i32 = (S_X[wi & 1] >> 8) - PL_X[ci & 3]
+        let cdy: i32 = (S_Y[wi & 1] >> 8) - PL_Y[ci & 3]
+        let cax: i32 = cdx   if (cax < 0) { cax = 0 - cax }
+        let cay: i32 = cdy   if (cay < 0) { cay = 0 - cay }
+        if (cax < 1024 && cay < 1024) {
+          let cd2: i32 = SQ[cax & 1023] + SQ[cay & 1023]
+          let cneed: i32 = PL_R[ci & 3] + 10
+          if (cd2 < Math.imul(cneed, cneed)) {
+            // Scraping a planet ends the burn and costs a little hull.
+            S_VX[wi & 1] = 0
+            S_VY[wi & 1] = 0
+            S_HP[wi & 1] = S_HP[wi & 1] - 4
+            G.phaseT = THRUST_TICKS
+          }
+        }
+        ci = ci + 1
+      }
+      if (G.landed === 1 && G.grounded === 1 && G.phaseT > 6) { G.phaseT = THRUST_TICKS }
+      if (G.phaseT >= THRUST_TICKS) {
+        S_VX[wi & 1] = 0
+        S_VY[wi & 1] = 0
+        G.phase = PH_TURN
+        G.phaseT = 0
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+    // THE INTEGRATOR. One body, three callers: every live shell, the aim-preview probe, and (via the
+    // same code) whatever a future CPU search asks for. A second copy would make the self-test and
+    // the preview assert nothing about the shot the player actually takes.
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+    let previewing: i32 = 0
+    // ⚠️ ONE PROBE SLOT, TWO CLIENTS, so only one may own it at a time. The preview reseeds PROBE
+    // whenever the player's aim changes; left live during a CPU search it would restart the
+    // candidate mid-flight and the search would score a trajectory it never flew.
+    let searching: i32 = 0
+    if (G.csI >= 0 && G.csI < CS_N) { searching = 1 }
+    if (G.phase === PH_AIM && searching === 0) {
+      let key: i32 = (S_AIM[wi & 1] << 14) | (S_PWR[wi & 1] << 2) | S_WPN[wi & 1]
+      if (key !== V.pvKey) {
+        V.pvKey = key
+        V.pvN = 0
+        let pa: i32 = (S_AIM[wi & 1] >> 4) & 255
+        let ppw: i32 = S_PWR[wi & 1] >> 4
+        let pc: i32 = S_CLS[wi & 1] & 3
+        let pwi: i32 = ((pc << 2) | (S_WPN[wi & 1] & 3)) & 15
+        let pbase: i32 = 256 + Math.imul(ppw, 14)
+        let pshot: i32 = W_SHOT[pwi & 15] & 7
+      let pspd: i32 = Math.imul(Math.imul(SHIP_SPD[pc & 3], SH_SPD[pshot & 7]) >> 8, pbase) >> 8
+        SHX[PROBE & 15] = ((S_X[wi & 1] >> 8) + (Math.imul(COST[pa & 255], 11) >> 8)) << 8
+        SHY[PROBE & 15] = ((S_Y[wi & 1] >> 8) + (Math.imul(SINT[pa & 255], 11) >> 8)) << 8
+        SHVX[PROBE & 15] = Math.imul(COST[pa & 255], pspd)
+        SHVY[PROBE & 15] = Math.imul(SINT[pa & 255], pspd)
+        SHST[PROBE & 15] = ST_FLY
+        SHK[PROBE & 15] = 0
+        SHFZ[PROBE & 15] = 0
+        V.pvLastX = SHX[PROBE & 15] >> 8
+        V.pvLastY = SHY[PROBE & 15] >> 8
+        let dz: i32 = 0
+        while (dz < DOT_TRAIL0) { sprite_set_visible(DOTS[dz & 63], 0)  dz = dz + 1 }
+      }
+      if (V.pvN < DOT_TRAIL0 && SHST[PROBE & 15] === ST_FLY && tkq === 0) { previewing = 1 }
+    }
+
+    let jobs: i32 = SH_MAX
+    if (previewing === 1 || searching === 1) { jobs = SH_MAX + 1 }
+    let csSub: i32 = 0
+    let s: i32 = 0
+    while (s < jobs) {
+      let nticks: i32 = 0
+      if (s < SH_MAX) { if (G.phase === PH_FLIGHT && SHST[s & 15] === ST_FLY) { nticks = 1 } }
+      // ⚠️ THE PROBE NEEDS THE SAME ST_FLY GUARD THE REAL SHELLS HAVE. Without it the tick loop ran
+      // its full budget over a probe that had already resolved — and because `steps` is derived from
+      // whatever velocity was left in the slot, that was up to eight substeps of integration per
+      // tick on a shell going nowhere. It cost 20,000 ticks on the frame each turn began, the single
+      // worst frame in the game, entirely on work that was discarded.
+      else if (SHST[s & 15] === ST_FLY) {
+        if (searching === 1) { nticks = CS_STEP }
+        else { nticks = 6 }
+      }
+
+      let tk: i32 = 0
+      while (tk < nticks) {
+        let asx: i32 = SHVX[s & 15]   if (asx < 0) { asx = 0 - asx }
+        let asy: i32 = SHVY[s & 15]   if (asy < 0) { asy = 0 - asy }
+        let sq2: i32 = asx + asy
+        let sub: i32 = 0
+        if (sq2 > 131072) { sub = 1 }
+        if (sq2 > 262144) { sub = 2 }
+        if (sq2 > 524288) { sub = 3 }
+        let steps: i32 = 1 << sub
+        igSub = igSub + steps
+        if (s === SH_MAX && searching === 1) { csSub = csSub + steps }
+        let ig0: i32 = ticks()
+        let sn: i32 = 0
+        while (sn < steps) {
+          let px: i32 = SHX[s & 15] >> 8
+          let py: i32 = SHY[s & 15] >> 8
+          // Escape check FIRST, in whole pixels. It also keeps |dx| inside SQ's 1024 entries: past
+          // this bound a masked index would alias a far offset onto a near one, and a planet across
+          // the board would yank the shell — which looks like physics and is masking.
+          if (px < 0 - ESC || px > ARENA_W + ESC || py < 0 - ESC || py > ARENA_H + ESC) {
+            SHST[s & 15] = ST_GONE
+            sn = steps
+          } else {
+            let gx: i32 = 0
+            let gy: i32 = 0
+            let p: i32 = 0
+            while (p < PL_N) {
+              let dx: i32 = PL_X[p & 3] - px
+              let dy: i32 = PL_Y[p & 3] - py
+              let adx: i32 = dx   if (adx < 0) { adx = 0 - adx }
+              let ady: i32 = dy   if (ady < 0) { ady = 0 - ady }
+              // ⚠️ MASKED INDEX INTO A POWER-OF-TWO ARRAY — both halves matter. 0.45 ticks this way,
+              // 25 through any form the compiler cannot reduce to a mask, and the f64 fallback it
+              // emits otherwise poisons the type of everything downstream of it.
+              let d2: i32 = SQ[adx & 1023] + SQ[ady & 1023]
+              // COLLISION AND GRAVITY SHARE ONE d2 — the reason this loop is cheap.
+              // ⚠️ d2 IS NOW GRAVITY ONLY. A planet is no longer a circle you test against —
+              // it is whatever is LEFT of it, and a shell has to be able to fly through the
+              // hole the last shot made. Collision moved to the terrain grid, below.
+              if (0 === 1) { p = PL_N }
+              else {
+                // ⚠️ `1024 | hi`, NOT `1024 + hi`: a shift result is not i32-typed to a surrounding
+                // `+`, so the add would drag the whole index into soft float.
+                let idx: i32 = 0
+                if (d2 < 4096) { idx = d2 >> 2 }
+                else {
+                  let hi: i32 = d2 >> 9
+                  if (hi > 1023) { hi = 1023 }
+                  idx = 1024 | hi
+                }
+                let kk: i32 = GACC[idx & 2047]
+              // ⚠️ ENCLOSED MASS, NOT TOTAL. Inside a planet only the mass closer to the centre than
+              // you are pulls; hollow the core out and that is nearly none of it. This is what stops
+              // a shell — or a hull — being trapped orbiting a core that has been blown away.
+              let emq: i32 = 0
+              if (d2 >= PL_RQ[((p << 2) | 0) & 15]) { emq = 1 }
+              if (d2 >= PL_RQ[((p << 2) | 1) & 15]) { emq = 2 }
+              if (d2 >= PL_RQ[((p << 2) | 2) & 15]) { emq = 3 }
+              let em: i32 = PL_EMASS[((p << 2) | emq) & 15]
+                // ⚠️ EVERY MULTIPLY IS `Math.imul`, EVERY PRODUCT CONSUMED BY A SHIFT. A plain `a * b`
+                // between two i32 locals is an f64 multiply. The generator asserts the peaks fit i32.
+                // ⚠️ `em`, NOT `PL_MASS`. This line read the FULL mass while the enclosed mass sat
+                // computed and unused directly above it, so a shell that flew into a hollowed-out
+                // planet was still pulled toward a core that no longer existed: it fell to the
+                // centre, could never reach a wall to detonate against, and orbited there until its
+                // TTL expired. A shell obeys the same shell theorem the hulls do.
+                gx = (gx + ((Math.imul(Math.imul(dx, kk) >> 10, em)) >> 8)) | 0
+                gy = (gy + ((Math.imul(Math.imul(dy, kk) >> 10, em)) >> 8)) | 0
+                p = p + 1
+              }
+            }
+            // ⚠️ TERRAIN COLLISION is now a single PIXEL test against the engine's occupancy
+            // bitmap — no grid, no cell rounding, and the same data the renderer draws from.
+            if (terrain_solid(px, py) === 0) { SHCLR[s & 15] = 1 }
+            else if (SHCLR[s & 15] === 1) {
+              // ⚠️ A TUNNEL SHELL EATS THE ROCK AND KEEPS GOING. Every other kind stops dead at the
+              // surface; this one spends a substep of penetration, bores a hole and flies on, so it
+              // detonates INSIDE a world rather than on its face — and leaves a shaft behind it that
+              // the next shot can follow.
+              if (SHPEN[s & 15] > 0) {
+                SHPEN[s & 15] = SHPEN[s & 15] - 1
+                terrain_carve(px, py, 5)
+              } else { SHST[s & 15] = ST_PLANET  sn = steps }
+            }
+            if (SHST[s & 15] === ST_FLY) {
+              let nvx: i32 = (SHVX[s & 15] + (gx >> sub)) | 0
+              let nvy: i32 = (SHVY[s & 15] + (gy >> sub)) | 0
+              // ⚠️ CLAMPED EVERY SUBSTEP, not once a tick: the anti-tunnelling bound is only as good
+              // as the speed cap it assumes.
+              if (nvx > VMAX) { nvx = VMAX }
+              if (nvx < 0 - VMAX) { nvx = 0 - VMAX }
+              if (nvy > VMAX) { nvy = VMAX }
+              if (nvy < 0 - VMAX) { nvy = 0 - VMAX }
+              SHVX[s & 15] = nvx
+              SHVY[s & 15] = nvy
+              // `>>`, never `/`: faster, and it floors toward -inf where `x/256|0` truncates toward
+              // zero. A shell that slingshots goes negative, and one rounding rule everywhere is what
+              // makes the arc reproducible.
+              SHX[s & 15] = (SHX[s & 15] + (nvx >> (8 + sub))) | 0
+              SHY[s & 15] = (SHY[s & 15] + (nvy >> (8 + sub))) | 0
+            }
+            sn = sn + 1
+          }
+        }
+        igAcc = igAcc + ((ticks() - ig0) & 0xFFFF)
+        SHK[s & 15] = SHK[s & 15] + 1
+        // ⚠️ A SHELL THAT HAS STOPPED FLYING MUST LEAVE THE TICK LOOP. The ST_FLY test at the top
+        // only decides how many ticks to ASK for; a probe that buries itself in rock on tick three
+        // of sixty-four kept going round for the other sixty-one, deriving a substep count from the
+        // velocity still sitting in its slot and integrating a shell that no longer existed. That
+        // is what pushed search frames to 7,565 ticks with a twenty-substep budget supposedly
+        // binding them.
+        if (SHST[s & 15] !== ST_FLY) { tk = nticks }
+        if (csSub >= CS_SUB) { tk = nticks }
+        // ⚠️ SAMPLED PER TICK, INSIDE THE FLIGHT LOOP. Scoring once per budget slice would look at
+        // the probe every CS_STEP ticks — three hundred pixels apart at muzzle speed — so a shell
+        // that flew straight through the target would score as a miss and the search would reject
+        // its own best answer.
+        if (s === SH_MAX && searching === 1 && SHST[s & 15] === ST_FLY) {
+          let cex: i32 = (SHX[s & 15] >> 8) - (S_X[(1 - wi) & 1] >> 8)
+          let cey: i32 = (SHY[s & 15] >> 8) - (S_Y[(1 - wi) & 1] >> 8)
+          let ceax: i32 = cex   if (ceax < 0) { ceax = 0 - ceax }
+          let ceay: i32 = cey   if (ceay < 0) { ceay = 0 - ceay }
+          if (ceax < 1024 && ceay < 1024) {
+            let ced2: i32 = SQ[ceax & 1023] + SQ[ceay & 1023]
+            if (ced2 < G.csMin) { G.csMin = ced2 }
+          }
+        }
+
+        // The cluster opens. The pieces fan out PERPENDICULAR to the current velocity, which needs no
+        // trig at all: the perpendicular of (vx, vy) is (-vy, vx), and scaling it by the piece's offset
+        // spreads the shot proportionally to how fast it is already going.
+        if (s < SH_MAX && SHFZ[s & 15] > 0) {
+          SHFZ[s & 15] = SHFZ[s & 15] - 1
+          if (SHFZ[s & 15] === 0) {
+            let wsp: i32 = SH_COUNT[SHSHOT[s & 15] & 7]
+            SHSHOT[s & 15] = 0
+          let bvx: i32 = SHVX[s & 15]
+            let bvy: i32 = SHVY[s & 15]
+            let kj: i32 = 1
+            while (kj < wsp) {
+              if (G.live < SH_MAX) {
+                let slot: i32 = G.live
+                let offk: i32 = kj - (wsp >> 1)
+                SHX[slot & 15] = SHX[s & 15]
+                SHY[slot & 15] = SHY[s & 15]
+                SHVX[slot & 15] = (bvx + (Math.imul(0 - bvy, offk) >> 3)) | 0
+                SHVY[slot & 15] = (bvy + (Math.imul(bvx, offk) >> 3)) | 0
+                SHST[slot & 15] = ST_FLY
+                SHK[slot & 15] = SHK[s & 15]
+                SHW[slot & 15] = SHW[s & 15]
+                SHFZ[slot & 15] = 0
+                G.live = G.live + 1
+              }
+              kj = kj + 1
+            }
+          }
+        }
+
+        // Proximity fuse. ⚠️ It does NOT arm on the firing hull for the first FUSE_ARM ticks: a shell
+        // spawns 11 px from its own muzzle, well inside the blast radius, so without this every shot
+        // detonates on its own launcher on tick one. A boomerang that comes back and hits you is still
+        // fair game, hence a delay rather than an exemption.
+        if (s < SH_MAX && SHST[s & 15] === ST_FLY) {
+          let hx2: i32 = SHX[s & 15] >> 8
+          let hy2: i32 = SHY[s & 15] >> 8
+          let vi: i32 = 0
+          while (vi < 2) {
+            let armed: i32 = 1
+            if (vi === G.who && SHK[s & 15] <= FUSE_ARM) { armed = 0 }
+            if (armed === 1) {
+              let qx: i32 = hx2 - (S_X[vi & 1] >> 8)
+              let qy: i32 = hy2 - (S_Y[vi & 1] >> 8)
+              let aqx: i32 = qx   if (aqx < 0) { aqx = 0 - aqx }
+              let aqy: i32 = qy   if (aqy < 0) { aqy = 0 - aqy }
+              if (aqx < 1024 && aqy < 1024) {
+                let fd2: i32 = SQ[aqx & 1023] + SQ[aqy & 1023]
+                let fr: i32 = WH_R[SHW[s & 15] & 7] >> 1
+                if (fd2 < Math.imul(fr, fr)) { SHST[s & 15] = ST_HIT }
+              }
+            }
+            vi = vi + 1
+          }
+        }
+        // ⚠️ REACHING THIS IS A BUG, NOT A FEATURE, so it announces itself. The TTL exists as a
+        // backstop against a shell that can never resolve — and the way that happens is gravity
+        // pulling it into a place it cannot leave, which is precisely what a hollowed-out planet
+        // did while the integrator was still using each planet's FULL mass. verify.sh fails on any
+        // TTL expiry at all; without the line, a shot trapped in a dead core just looks like a
+        // player who missed.
+        if (s < SH_MAX && SHK[s & 15] > MAX_FLIGHT) {
+          SHST[s & 15] = ST_GONE
+          // ⚠️ IT HAS TO SAY WHERE. A shell can reach its TTL two ways and only one is a bug: held
+          // inside a planet by gravity aimed at a core that is no longer there, or in a perfectly
+          // legitimate orbit out in the open, which four wells on a board can absolutely produce.
+          // The first is the dead-core defect; the second is physics. Reporting only "stuck" made
+          // the suite fail on an orbit and would have hidden the real one behind a loosened gate.
+          let ui3: i32 = 0
+          let up: i32 = 0
+          while (up < PL_N) {
+            let udx: i32 = (SHX[s & 15] >> 8) - PL_X[up & 3]
+            let udy: i32 = (SHY[s & 15] >> 8) - PL_Y[up & 3]
+            let uax: i32 = udx   if (uax < 0) { uax = 0 - uax }
+            let uay: i32 = udy   if (uay < 0) { uay = 0 - uay }
+            if (uax < 1024 && uay < 1024) {
+              if (SQ[uax & 1023] + SQ[uay & 1023] < Math.imul(PL_R[up & 3], PL_R[up & 3])) { ui3 = 1 }
+            }
+            up = up + 1
+          }
+          log("WH STUCK id=q" + G.seq + " in=" + ui3 + " k=" + SHK[s & 15]
+              + " x=" + (SHX[s & 15] >> 8) + " y=" + (SHY[s & 15] >> 8))
+        }
+
+        if (s < SH_MAX && (SHK[s & 15] & 15) === 0 && s === 0) {
+          log("WH SHELL id=q" + G.seq + "k" + SHK[s & 15] + " x=" + (SHX[s & 15] >> 8)
+            + " y=" + (SHY[s & 15] >> 8) + " vx=" + SHVX[s & 15] + " vy=" + SHVY[s & 15])
+        }
+        if (SHST[s & 15] !== ST_FLY) { tk = nticks }
+        else { tk = tk + 1 }
+      }
+
+      // ── A shell that has stopped flying detonates, here, once. ─────────────────────────────────
+      if (s < SH_MAX && SHST[s & 15] !== ST_FLY && SHST[s & 15] !== ST_DEAD) {
+        let bst: i32 = SHST[s & 15]
+        let bxx: i32 = SHX[s & 15] >> 8
+        let byy: i32 = SHY[s & 15] >> 8
+        let bwi: i32 = SHW[s & 15] & 7
+        SHST[s & 15] = ST_DEAD
+        sprite_set_visible(SHSPR[s & 15], 0)
+        if (bst !== ST_GONE) {
+          G.bx = bxx
+          G.by = byy
+          G.bw = bwi
+          let d0: i32 = 0
+          let d1: i32 = 0
+          // Blast damage is linear in DISTANCE, so it needs a real root — tabled — and the falloff
+          // reciprocal is baked, so there is no runtime divide either. BOTH hulls are tested,
+          // including the firer's own: self-damage is what makes a close shot a decision.
+          let vj: i32 = 0
+          while (vj < 2) {
+            let bdx: i32 = bxx - (S_X[vj & 1] >> 8)
+            let bdy: i32 = byy - (S_Y[vj & 1] >> 8)
+            let bax: i32 = bdx   if (bax < 0) { bax = 0 - bax }
+            let bay: i32 = bdy   if (bay < 0) { bay = 0 - bay }
+            if (bax < 45 && bay < 45) {
+              let bd2: i32 = SQ[bax & 1023] + SQ[bay & 1023]
+              if (bd2 < 2048) {
+                let dist: i32 = ISQRT[bd2 & 2047]
+                let rr2: i32 = WH_R[bwi & 7]
+                if (dist < rr2) {
+                  // ⚠️ A FLOOR UNDER THE FALLOFF, and it is a pacing decision rather than a
+                  // physical one. Pure linear falloff means a hit two thirds of the way out does a
+                  // third of its damage, so at a 55% hit rate a 140 HP hull survives about thirty-
+                  // six turns — measured, and far longer than an artillery duel should run. Mapping
+                  // the curve into 45%..100% keeps accuracy worth having (a centre hit still does
+                  // more than twice an edge one) while making a graze cost something.
+                  let fall: i32 = Math.imul(rr2 - dist, WH_RINV[bwi & 7]) >> 8
+                  fall = 115 + (Math.imul(fall, 141) >> 8)
+                  if (fall > 256) { fall = 256 }
+                  let dmg: i32 = Math.imul(WH_DMG[bwi & 7], fall) >> 8
+                  S_HP[vj & 1] = S_HP[vj & 1] - dmg
+                  if (S_HP[vj & 1] < 0) { S_HP[vj & 1] = 0 }
+                  if (vj === 0) { d0 = dmg }
+                  else { d1 = dmg }
+                }
+              }
+            }
+            vj = vj + 1
+          }
+          // ⚠️ TERRAIN DESTRUCTION. One call, per pixel, scaled by BOTH the weapon's blast radius
+        // and its damage — so a wide soft shell and a narrow hard one dig differently: RAILSPIKE
+        // (r12 d60) bores a small deep hole, NOVA (r40 d44) takes a bite out of the horizon.
+        // ⚠️ TERRAFORM BUILDS. One detonation path either takes ground away or puts it there, which
+        // is what makes cover a WEAPON rather than a separate system: fire it at your own feet to
+        // raise a wall, or into a gap to bridge it.
+        // ⚠️ A BUILDER LAYS GROUND WHERE EVERY OTHER WARHEAD TAKES IT AWAY. One arrival path, and
+        // the difference is a table entry — which is what makes cover a weapon rather than a
+        // separate system: fire it at your feet for a wall, or into a gap to bridge it.
+        let hk2: i32 = WH_KIND[bwi & 7]
+        let crat: i32 = WH_TERR[bwi & 7]
+        if (hk2 === WK_BUILDER) { terrain_disc(bxx, byy, crat, 1) }
+        else { terrain_carve(bxx, byy, crat) }
+        // Re-measure every planet's enclosed mass. Four discs per planet, once per blast, during
+        // the explosion — not on a played frame.
+        // ⚠️ ONLY THE PLANETS THE BLAST ACTUALLY TOUCHED. Re-measuring all four is sixteen disc
+        // scans and it showed up as an eight-frame hitch on every explosion. A crater can only
+        // change a world whose radius it reached, which is almost always exactly one.
+        // ⚠️ FLAGGED HERE, MEASURED OVER THE FOLLOWING TICKS. Re-measuring a planet is four disc
+        // scans of up to seventy pixels radius, and doing them the instant the shell landed cost
+        // 14,539 ticks in one frame — three and a half frames' budget, a visible stutter on every
+        // single explosion. The explosion itself runs for 34 ticks with nothing else to do, so the
+        // work fits comfortably inside it one scan at a time.
+        //
+        // Gravity uses the previous enclosed mass until the scan catches up. That is 16 ticks at
+        // worst, entirely inside PH_BOOM, so no shell is ever in flight while the figures are stale.
+        let rp: i32 = 0
+        while (rp < PL_N) {
+          let mdx: i32 = bxx - PL_X[rp & 3]
+          let mdy: i32 = byy - PL_Y[rp & 3]
+          let max2: i32 = mdx   if (max2 < 0) { max2 = 0 - max2 }
+          let may2: i32 = mdy   if (may2 < 0) { may2 = 0 - may2 }
+          let reach: i32 = PL_R[rp & 3] + crat + 2
+          if (max2 <= reach && may2 <= reach) { G.rsMask = G.rsMask | (1 << (rp & 3)) }
+          rp = rp + 1
+        }
+        G.rsI = 0
+        chipPop()
+        log("WH DIG id=q" + G.seq + " w=" + bwi + " r=" + crat)
+        // ⚠️ THE SHAKE IS PROPORTIONAL TO WHAT LANDED, not a constant. feelBump takes an impulse in
+        // 8.8 px/frame and bumps ADD, so a cluster arriving across three ticks compounds into one
+        // bigger, longer shake rather than each piece cancelling the decay of the one before it.
+        let kickv: i32 = WH_DMG[bwi & 7] << 3
+        feelBump(kickv, kickv)
+        chipHit()
+        if (d0 > 0 || d1 > 0) {
+          // Hit-stop, only on a hit that actually hurt. A freeze on every impact reads as lag.
+          feelFreeze(6)
+          fx_flash(8)
+        }
+        log("WH BOOM id=q" + G.seq +  " st=" + bst + " k=" + SHK[s & 15] + " x=" + bxx + " y=" + byy
+            + " w=" + bwi + " d0=" + d0 + " d1=" + d1 + " h0=" + S_HP[0 & 1] + " h1=" + S_HP[1 & 1])
+        }
+      }
+      s = s + 1
+    }
+
+    if (previewing === 1) {
+      // The preview arc is spaced by distance too, or the proposed line and the line a shot actually
+      // draws would not look like the same object.
+      let px3: i32 = SHX[PROBE & 15] >> 8
+      let py3: i32 = SHY[PROBE & 15] >> 8
+      let qdx: i32 = px3 - V.pvLastX
+      let qdy: i32 = py3 - V.pvLastY
+      if (qdx < 0) { qdx = 0 - qdx }
+      if (qdy < 0) { qdy = 0 - qdy }
+      let qseg: i32 = qdx + (qdy >> 1)
+      if (qdy > qdx) { qseg = qdy + (qdx >> 1) }
+      if (qseg >= DOT_STEP && V.pvN < DOT_TRAIL0) {
+        V.pvLastX = px3
+        V.pvLastY = py3
+        let dh2: i32 = DOTS[V.pvN & 63]
+        sprite_set_pos(dh2, px3 - 4, py3 - 4)
+        sprite_set_visible(dh2, 1)
+        V.pvN = V.pvN + 1
+      }
+    }
+
+    // ── FLIGHT is over when nothing is still flying ────────────────────────────────────────────────
+    if (G.phase === PH_FLIGHT) {
+      let anyLive: i32 = 0
+      let li2: i32 = 0
+      while (li2 < SH_MAX) {
+        if (SHST[li2 & 15] === ST_FLY) { anyLive = 1 }
+        li2 = li2 + 1
+      }
+      if (anyLive === 0) {
+        // Score the shot on where it DETONATED, not on how close it ever came: damage is dealt at the
+        // blast, and a driver that optimises fly-by distance converges on shots that miss.
+        let edx: i32 = G.bx - (S_X[(1 - G.who) & 1] >> 8)
+        let edy: i32 = G.by - (S_Y[(1 - G.who) & 1] >> 8)
+        let eax: i32 = edx   if (eax < 0) { eax = 0 - eax }
+        let eay: i32 = edy   if (eay < 0) { eay = 0 - eay }
+        if (eax > 1023) { eax = 1023 }
+        if (eay > 1023) { eay = 1023 }
+        G.minD2 = SQ[eax & 1023] + SQ[eay & 1023]
+        if (G.minD2 < CPU_BS[G.who & 1]) {
+          CPU_BS[G.who & 1] = G.minD2
+          CPU_BA[G.who & 1] = G.shotA
+          CPU_BP[G.who & 1] = G.shotP
+        }
+        G.live = 0
+        G.phase = PH_BOOM
+        G.phaseT = 0
+      }
+    }
+
+    // ── BOOM / TURN / OVER ─────────────────────────────────────────────────────────────────────────
+    // ── The deferred enclosed-mass rescan: ONE disc scan per tick ───────────────────────────────
+    // Paced by simulated ticks, so two linked consoles do the same work on the same tick and read
+    // the same gravity — a rescan paced by display frames would be a desync with a plausible cause.
+    if (G.rsMask !== 0) {
+      if (G.rsI < 16) {
+        let qp: i32 = G.rsI >> 2
+        let qk: i32 = G.rsI & 3
+        if ((G.rsMask & (1 << (qp & 3))) !== 0 && qp < PL_N) {
+          let qrad: i32 = Math.imul(PL_R[qp & 3] >> 2, qk + 1)
+          PL_ENC[((qp << 2) | qk) & 15] = terrain_mass(PL_X[qp & 3], PL_Y[qp & 3], qrad)
+          PL_RQ[((qp << 2) | qk) & 15] = Math.imul(qrad, qrad)
+        }
+        G.rsI = G.rsI + 1
+      } else {
+        let qp2: i32 = 0
+        while (qp2 < PL_N) {
+          if ((G.rsMask & (1 << (qp2 & 3))) !== 0) {
+            if (PL_FULL[qp2 & 3] < 1) { PL_FULL[qp2 & 3] = 1 }
+            let qk2: i32 = 0
+            while (qk2 < 4) {
+              PL_EMASS[((qp2 << 2) | qk2) & 15] =
+                (Math.imul(PL_ENC[((qp2 << 2) | qk2) & 15], PL_MASS[qp2 & 3]) / PL_FULL[qp2 & 3]) | 0
+              qk2 = qk2 + 1
+            }
+          }
+          qp2 = qp2 + 1
+        }
+        G.rsMask = 0
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+    // THE CPU'S FORWARD SEARCH — advance the current candidate, score it, move to the next.
+    //
+    // Twelve bearings around the whole circle at two charges. The full circle rather than an arc
+    // toward the enemy IS the point: with four wells on the board the shot that lands is often the
+    // one fired away from the target and slung round something, and an arc-limited search can never
+    // find it. Twenty-four candidates at up to 150 ticks, twelve ticks of probe per simulated tick,
+    // is at worst 300 frames of thinking and typically far less because most candidates bury
+    // themselves in rock within thirty.
+    //
+    // Score is the closest the shell ever came, squared — no square root, and it ranks correctly
+    // without one. A candidate that resolves is scored on the approach it achieved; one that runs
+    // out of budget is scored the same way, so a slow arc that ends up near the target still beats
+    // a fast one that does not.
+    if (G.csI >= 0 && G.csI < CS_N) {
+      let csDone: i32 = 0
+      let csTtl: i32 = 0
+      if (SHST[PROBE & 15] !== ST_FLY) { csDone = 1 }
+      if (SHK[PROBE & 15] >= CS_MAXK) { csDone = 1  csTtl = 1 }
+      if (csDone === 1) {
+        // ⚠️ SCORE WHERE IT STOPS, NOT HOW CLOSE IT PASSED. A shell damages what is near the point
+        // it DETONATES; flying five pixels past the enemy and burying itself in a hillside sixty
+        // pixels further on is a miss, and scoring it as a five-pixel result made the search prefer
+        // exactly those trajectories. It reported a median 32 px solution while landing one shot in
+        // five — the objective was wrong, not the search.
+        let cfx: i32 = (SHX[PROBE & 15] >> 8) - (S_X[(1 - wi) & 1] >> 8)
+        let cfy: i32 = (SHY[PROBE & 15] >> 8) - (S_Y[(1 - wi) & 1] >> 8)
+        let cfax: i32 = cfx   if (cfax < 0) { cfax = 0 - cfax }
+        let cfay: i32 = cfy   if (cfay < 0) { cfay = 0 - cfay }
+        let csc: i32 = 999999
+        if (cfax < 1024 && cfay < 1024) { csc = SQ[cfax & 1023] + SQ[cfay & 1023] }
+        // A candidate still in the air when its budget ran out never resolved anywhere, so the only
+        // thing known about it is how close it got. Penalised, so a real arrival always wins.
+        if (csTtl === 1) { csc = G.csMin + 8192 }
+        if (csc < G.csBS) { G.csBS = csc  G.csBA = G.csA  G.csBP = G.csP }
+        G.csI = G.csI + 1
+      }
+      if (G.csI < CS_N) {
+        if (csDone === 1 || SHST[PROBE & 15] !== ST_FLY) {
+          // ⚠️ THE CANDIDATE SET IS A PURE FUNCTION OF THE INDEX — no RNG draw. The search runs a
+          // different number of ticks depending on where the terrain is, so anything it pulled from
+          // a shared stream would move that stream by an amount the other console cannot predict.
+          // ⚠️ A SHIFT, NOT A MULTIPLY BY 21. Sixteen bearings sixteen 1/256ths apart cover the
+          // circle exactly and cost one shift; twelve at 256/12 needs a real multiply, does not
+          // divide the circle evenly, and wraps past 255 on the last few candidates so the search
+          // re-flies bearings it has already tried.
+          let cai: i32 = G.csI & 31
+          if (cai < CS_COARSE) {
+            G.csA = cai << 4
+            G.csP = 26
+          } else {
+            // Refine around the best so far, +/- 14 in steps of 4, at both charges. The centre is
+            // the RUNNING best, so a refinement that improves on the coarse answer re-centres the
+            // rest of the pass on itself.
+            let cj: i32 = (cai - CS_COARSE) & 15
+            G.csA = (G.csBA + ((cj >> 1) << 2) - 14) & 255
+            G.csP = 18
+            if ((cj & 1) === 1) { G.csP = 34 }
+          }
+          G.csMin = 999999
+          let cpc: i32 = S_CLS[wi & 1] & 3
+          // ⚠️ THE SAME EMPTY-RACK FALLBACK THE FIRE PATH USES. Firing a weapon with no ammo left
+          // quietly substitutes slot zero, which is a different shot kind at a different muzzle
+          // speed — so a search that ignored the fallback solved for a gun the turn would not use.
+          let cws: i32 = S_WPN[wi & 1] & 3
+          if (S_AMMO[((wi << 2) | cws) & 7] === 0) { cws = 0 }
+          let cwi: i32 = ((cpc << 2) | cws) & 15
+          let cshot: i32 = W_SHOT[cwi & 15] & 7
+          let cbase: i32 = 256 + Math.imul(G.csP, 14)
+          let cspd: i32 = Math.imul(Math.imul(SHIP_SPD[cpc & 3], SH_SPD[cshot & 7]) >> 8, cbase) >> 8
+          SHX[PROBE & 15] = ((S_X[wi & 1] >> 8) + (Math.imul(COST[G.csA & 255], 11) >> 8)) << 8
+          SHY[PROBE & 15] = ((S_Y[wi & 1] >> 8) + (Math.imul(SINT[G.csA & 255], 11) >> 8)) << 8
+          SHVX[PROBE & 15] = Math.imul(COST[G.csA & 255], cspd)
+          SHVY[PROBE & 15] = Math.imul(SINT[G.csA & 255], cspd)
+          SHST[PROBE & 15] = ST_FLY
+          SHK[PROBE & 15] = 0
+          SHFZ[PROBE & 15] = 0
+          SHPEN[PROBE & 15] = 0
+          // The probe leaves its own muzzle the way a real shell does, or a landed ship's search
+          // scores every candidate as an instant burial.
+          SHCLR[PROBE & 15] = 0
+        }
+      } else {
+        // Search over: hand the answer to the driver, which now flies the sticks to it and fires.
+        G.cpuA = G.csBA
+        G.cpuP = G.csBP
+        SHST[PROBE & 15] = ST_GONE
+        G.csI = 0 - 1
+        log("WH AIM id=m" + G.match + "t" + G.turn + " side=" + G.who
+            + " a=" + G.csBA + " p=" + G.csBP + " miss=" + G.csBS + " f=" + G.simTick)
+      }
+    }
+
+    if (G.phase === PH_BOOM && G.phaseT >= 34) {
+      sprite_set_visible(V.boomSpr, 0)
+      G.phase = PH_TURN
+      G.phaseT = 0
+    }
+    if (G.phase === PH_TURN && G.phaseT >= 18) {
+      if (S_HP[0 & 1] <= 0 || S_HP[1 & 1] <= 0 || G.turn >= MATCH_TURNS) {
+        G.winner = 2
+        if (S_HP[0 & 1] > S_HP[1 & 1]) { G.winner = 0 }
+        if (S_HP[1 & 1] > S_HP[0 & 1]) { G.winner = 1 }
+        G.phase = PH_OVER
+        G.phaseT = 0
+        chipCoin()
+      log("WH RESULT id=m" + G.match + " winner=" + G.winner + " turns=" + G.turn
+          + " f=" + G.simTick + " h0=" + S_HP[0 & 1] + " h1=" + S_HP[1 & 1])
+      } else {
+        G.who = 1 - G.who
+        G.turn = G.turn + 1
+        G.turnClock = TURN_TICKS
+        G.phase = PH_AIM
+        G.phaseT = 0
+        V.pvKey = 0 - 1
+        // ⚠️ THE FORWARD SEARCH IS THE PRIMARY AIM; the annealed jitter below is what perturbs its
+        // answer so two identical turns are not identical shots. Setting csI here is what starts it,
+        // and the driver holds fire until it clears.
+        // ⚠️ THE FULL SWEEP IS FOR A SIDE THAT IS STILL LOST. Re-searching all thirty-two candidates
+        // every turn costs the same whether the CPU has no idea or is already landing shells within
+        // ten pixels, and that cost is what held an unattended soak to sixteen shots in twelve
+        // thousand frames. Once a side has a remembered solution good enough to be worth adjusting,
+        // it skips the coarse sweep and spends its budget on the refinement pass around what it
+        // already knows — which is also how the shot reads: a big rethink after a miss, a small
+        // correction after a near one.
+        G.csI = 0
+        G.csBA = CPU_BA[G.who & 1]
+        G.csBP = CPU_BP[G.who & 1]
+        if (CPU_BS[G.who & 1] < 16384) { G.csI = CS_COARSE }
+        G.fireT = 0
+        G.settleT = 0
+        G.csBS = 999999
+        G.csMin = 999999
+        SHST[PROBE & 15] = ST_GONE
+        SHK[PROBE & 15] = CS_MAXK
+        // Anneal the driver's search: wide while it is lost, exact once it has actually landed one.
+        let spr: i32 = 12
+        if (CPU_BS[G.who & 1] < 16384) { spr = 5 }
+        if (CPU_BS[G.who & 1] < 4096) { spr = 2 }
+        if (CPU_BS[G.who & 1] < 1024) { spr = 1 }
+        if (CPU_BS[G.who & 1] < 256) { spr = 0 }
+        G.cpuA = (CPU_BA[G.who & 1] + rngBelow(3, (spr << 1) | 1) - spr) & 255
+        G.cpuP = CPU_BP[G.who & 1] + rngBelow(3, (spr << 1) | 1) - spr
+        if (G.cpuP < 8) { G.cpuP = 8 }
+        if (G.cpuP > 46) { G.cpuP = 46 }
+        let dj: i32 = DOT_TRAIL0
+        while (dj < DOT_N) { sprite_set_visible(DOTS[dj & 63], 0)  dj = dj + 1 }
+        chipChime()
+      log("WH TURN id=m" + G.match + "t" + G.turn + " side=" + G.who + " f=" + G.simTick)
+      }
+    }
+    if (G.phase === PH_OVER && (myEdge & IN_START) !== 0) {
+      G.match = G.match + 1
+      G.rebuild = 1
+      let dk: i32 = 0
+      while (dk < DOT_N) { sprite_set_visible(DOTS[dk & 63], 0)  dk = dk + 1 }
+    }
+
+    tkq = tkq + 1
+  }
+  let tSim: i32 = ticks()
+  stepAcc = stepAcc + ((tSim - t0) & 0xFFFF)
+  // The step body's own `wi` is scoped to the tick loop now; presentation needs its own.
+  let wi: i32 = G.who & 1
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  // PRESENTATION. Nothing above reads any of this.
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+
+  // ⚠️ THE CAMERA IS PRESENTATION ONLY, AND THAT IS A CORRECTNESS RULE.
+  // The lerp below advances once per DISPLAY frame. Two linked consoles draw different numbers of
+  // display frames per simulated frame, so their cameras are legitimately in different places — and
+  // the moment anything the simulation reads is derived from the camera, they compute different
+  // worlds while both screens still look like a perfectly ordinary game.
+  let tx: i32 = 0
+  let ty: i32 = 0
+  if (G.phase === PH_FLIGHT) { tx = (SHX[0 & 15] >> 8) - 120  ty = (SHY[0 & 15] >> 8) - 80 }
+  else if (G.phase === PH_PLACE) { tx = (G.curX >> 8) - 120  ty = (G.curY >> 8) - 80 }
+  else if (G.phase === PH_BOOM) { tx = G.bx - 120  ty = G.by - 80 }
+  else { tx = (S_X[wi & 1] >> 8) - 120  ty = (S_Y[wi & 1] >> 8) - 80 }
+  if (tx < 0) { tx = 0 }
+  if (tx > CAM_MAXX) { tx = CAM_MAXX }
+  if (ty < 0) { ty = 0 }
+  if (ty > CAM_MAXY) { ty = CAM_MAXY }
+  V.camX = (V.camX + ((tx - V.camX) >> 3)) | 0
+  V.camY = (V.camY + ((ty - V.camY) >> 3)) | 0
+  camera_set(V.camX, V.camY)
+
+  // ⚠️ EVERY WRITE BELOW IS GUARDED ON HAVING ACTUALLY CHANGED — the whole block is a dirty render.
+  //
+  // Re-asserting the scene every frame is the obvious way to write this and it cost 1,530 ticks of a
+  // 4,389-tick frame, against 300 for the entire simulation. A typed sprite call is not free: it is
+  // a thread-local context borrow and a slot lookup, ~20 ticks, and seventy of them a frame is a
+  // third of the budget spent telling static things where they already are. Planets are placed once
+  // per match (see the rebuild block); ships move only while thrusting or being placed; the power
+  // meter changes only while it is being charged.
+
+  // ── SHIP SELECT ────────────────────────────────────────────────────────────────────────────
+  // ⚠️ Repainted only when the SELECTION changes, never per frame. A hud_text whose string moves
+  // costs ~6,000 ticks — more than a whole frame — so a menu that re-asserts itself every frame is
+  // a menu that runs at half speed while doing nothing.
+  if (G.phase === PH_SETUP && G.story === 0) {
+    let selKey: i32 = (G.who << 6) | (S_CLS[wi & 1] << 2) | G.landed
+    if (selKey !== V.selKey) {
+      V.selKey = selKey
+      let cc4: i32 = S_CLS[wi & 1] & 3
+      sprite_set_frame(menuSpr, cc4)
+      sprite_set_visible(menuSpr, 1)
+      // Four bars, eight segments each: HP, defence, fuel, muzzle speed. Bars rather than numbers
+      // because the question a player is asking here is "which of these is tougher", not "by how
+      // many points" — and a bar answers it without being read.
+      let bars: i32 = 0
+      while (bars < 4) {
+        let val: i32 = 0
+        if (bars === 0) { val = SHIP_HP[cc4 & 3] / 20 }
+        else if (bars === 1) { val = SHIP_DEF[cc4 & 3] >> 4 }
+        else if (bars === 2) { val = SHIP_FUEL[cc4 & 3] / 20 }
+        else { val = SHIP_SPD[cc4 & 3] / 40 }
+        if (val > 8) { val = 8 }
+        let bseg: i32 = 0
+        while (bseg < 8) {
+          let h3: i32 = SEGS[(SEG_N + (bars << 3) + bseg) & 63]
+          if (bseg < val) { sprite_set_frame(h3, G_SEG_ON) }
+          else { sprite_set_frame(h3, G_SEG_OFF) }
+          sprite_set_visible(h3, 1)
+          bseg = bseg + 1
+        }
+        bars = bars + 1
+      }
+      let sj2: i32 = 0
+      while (sj2 < SEG_N) { sprite_set_visible(SEGS[sj2 & 63], 0)  sj2 = sj2 + 1 }
+      // ⚠️ CLEAR ONLY WHAT CHANGES. `ui_clear_rect(0, 0, 240, 136)` is 30x17 = 510 cells, which
+      // lands exactly on the UI canvas's 512-tile cliff — past it the canvas jumps to about 40 KB of
+      // scratch, and on top of the terrain's tiles that exhausted BG VRAM and the screen went white
+      // with nothing in the log. The stat LABELS never change, so they are drawn once and left; only
+      // the name, the weapon list and the prompt are wiped, and those are 90 cells between them.
+      ui_clear_rect(0, 86, 240, 28)
+      ui_clear_rect(0, 116, 240, 14)
+      ui_text(small, 8, 8, "P" + (G.who + 1) + " - CHOOSE HULL", 0xF8F8C0)
+      if (cc4 === 0) { ui_text(small, 8, 92, "LANCE", 0xFFFFFF) }
+      else if (cc4 === 1) { ui_text(small, 8, 92, "TORTOISE", 0xFFFFFF) }
+      else { ui_text(small, 8, 92, "HORNET", 0xFFFFFF) }
+      if (cc4 === 0) { ui_text(small, 8, 104, "BOLT  FAN  BORE  SPIKE", 0xA8C0E0) }
+      else if (cc4 === 1) { ui_text(small, 8, 104, "SHELL  SIEGE  SPLITTER  RAMPART", 0xA8C0E0) }
+      else { ui_text(small, 8, 104, "STING  SWARM  SCATTER  TERRA", 0xA8C0E0) }
+      if (G.landed === 1) { ui_text(small, 8, 120, "L/R HULL   UP/DN LANDED   A OK", 0xC0C0C0) }
+      else { ui_text(small, 8, 120, "L/R HULL   UP/DN SPACE   A OK", 0xC0C0C0) }
+      ui_text(small, 120, 48, "HULL", 0x90A0B8)
+      ui_text(small, 120, 60, "ARMOUR", 0x90A0B8)
+      ui_text(small, 120, 72, "FUEL", 0x90A0B8)
+      ui_text(small, 120, 84, "MUZZLE", 0x90A0B8)
+
+      // ⚠️ THE MENU'S WORDS GO ON THE UI CANVAS, NOT THROUGH hud_text.
+      //
+      // The first version used four hud_text slots and the screen went WHITE with nothing in the
+      // log. hud_text draws SPRITES — a 32x32 object per glyph group — so four long strings on top
+      // of forty-eight segment sprites and a 32x32 hull exhausted the 32 KB of sprite VRAM, and
+      // agb's allocation failure HALTS without printing anything. docs/perf-rules.md §4 says it
+      // outright: anything that is a WORD belongs on the canvas, which is background tiles and has
+      // no sprite ceiling at all. Only the two short play-HUD lines stay as sprites.
+    }
+  } else if (V.selKey !== 0 - 1 && G.story === 0) {
+    // Leaving the menu: put its sprites away and let the play HUD reclaim its text slots.
+    V.selKey = 0 - 1
+    sprite_set_visible(menuSpr, 0)
+    let sj3: i32 = SEG_N
+    while (sj3 < SEG_N + STAT_N) { sprite_set_visible(SEGS[sj3 & 63], 0)  sj3 = sj3 + 1 }
+    let sj4: i32 = 0
+    while (sj4 < SEG_N) { sprite_set_visible(SEGS[sj4 & 63], 1)  sj4 = sj4 + 1 }
+    ui_clear_rect(0, 4, 240, 16)
+    ui_clear_rect(0, 44, 240, 52)
+    ui_clear_rect(0, 96, 240, 34)
+    V.hudKey = 0 - 1
+    V.lastFilled = 0 - 1
+  }
+
+  // ── STORY BOX ──────────────────────────────────────────────────────────────────────────────
+  // ⚠️ Built from ui_rect and ui_text rather than `packages/dialog`, and the reason is mechanical
+  // rather than stylistic: dialog draws through `packages/ui`, which opens the canvas itself, and
+  // this game already owns one. Same shape as the repo's dialog boxes — framed panel, speaker,
+  // body, a prompt to advance — drawn on the canvas that is already here.
+  //
+  // Repainted only when the BEAT changes. A typewriter would mean repainting every frame, and on
+  // this canvas that is background-tile traffic, not free text.
+  if (G.story > 0) {
+    if (G.story !== V.storyKey) {
+      V.storyKey = G.story
+      ui_clear_rect(0, 96, 240, 60)
+      ui_rect(6, 100, 228, 46, 0x101828, 1)
+      ui_rect(6, 100, 228, 2, 0x5878A0, 1)
+      ui_rect(6, 144, 228, 2, 0x5878A0, 1)
+      if (G.story === 1) {
+        ui_text(small, 12, 106, "SALVAGE MASTER", 0xF8C860)
+        ui_text(small, 12, 118, "Two fleets. One dying system.", 0xE0E8F0)
+        ui_text(small, 12, 130, "Whatever is inside these worlds", 0xE0E8F0)
+      } else if (G.story === 2) {
+        ui_text(small, 12, 106, "SALVAGE MASTER", 0xF8C860)
+        ui_text(small, 12, 118, "belongs to whoever digs it out", 0xE0E8F0)
+        ui_text(small, 12, 130, "and still has a hull afterwards.", 0xE0E8F0)
+      } else {
+        ui_text(small, 12, 106, "SALVAGE MASTER", 0xF8C860)
+        ui_text(small, 12, 118, "Pick your hull. Mind the wells -", 0xE0E8F0)
+        ui_text(small, 12, 130, "they bend everything you fire.", 0xE0E8F0)
+      }
+      ui_text(small, 210, 134, "\u25BC A", 0x90A0B8)
+    }
+  } else if (V.storyKey !== 0 - 1) {
+    V.storyKey = 0 - 1
+    ui_clear_rect(0, 96, 240, 60)
+    // ⚠️ A MODAL CLOSING INVALIDATES WHAT IT COVERED. This wipe lands on the same rows the hull
+    // sheet writes its name and weapon list into, and both fire on the frame the story hits zero —
+    // so whichever ran first lost. Forcing the panels to repaint next frame is the fix; ordering the
+    // two blocks by hand is not, because it only holds until someone moves one of them.
+    V.selKey = 0 - 1
+    V.wpnKey = 0 - 1
+  }
+
+  // ── WEAPON PANEL ───────────────────────────────────────────────────────────────────────────
+  // ⚠️ THE SELECTOR EXISTED AND WAS INVISIBLE. L/R has always cycled the weapon, but the only thing
+  // on screen was "W1" in a corner — no name, no ammo, no hint the control was there at all. A
+  // selector nobody can see is a selector nobody uses.
+  //
+  // Three rows: name, ammo, and the selected one marked and brightened. Repainted only when the
+  // selection or a count changes, and the clear is 17x5 cells — nowhere near the UI canvas's
+  // 512-tile cliff that white-screened the ship-select menu.
+  // (The weapon rack used to be painted here by hand, with its own dirty key and clear-rect. It is
+  // a node in the HUD tree now — which is also how it disappears during flight: the tree simply
+  // does not contain it outside PH_AIM.)
+
+  // Ships: only when the hull moved or the class changed.
+  let ri: i32 = 0
+  while (ri < 2) {
+    // 32px hulls now, so the draw offset is half a 32-cell, not half a 16.
+    let sxw: i32 = (S_X[ri & 1] >> 8) - 16
+    let syw: i32 = (S_Y[ri & 1] >> 8) - 16
+    if (sxw !== S_LASTX[ri & 1] || syw !== S_LASTY[ri & 1]) {
+      S_LASTX[ri & 1] = sxw
+      S_LASTY[ri & 1] = syw
+      sprite_set_pos(S_SPR[ri & 1], sxw, syw)
+      sprite_set_pos(S_BLIP[ri & 1], 172 + ((sxw + 16) >> 3), 8 + ((syw + 16) >> 3))
+      sprite_set_visible(S_SPR[ri & 1], 1)
+      sprite_set_visible(S_BLIP[ri & 1], 1)
+    }
+    // ⚠️ FOUR FRAMES PER HULL, AND THE INDEX IS A SHIFT-OR. The sheet is laid out (class << 2) |
+    // phase, so `class * 4 + phase` would be an integer multiply where `<<` and `|` are free — and
+    // the four-frame stride is chosen for exactly that reason.
+    let mvx: i32 = S_VX[ri & 1]   if (mvx < 0) { mvx = 0 - mvx }
+    let mvy: i32 = S_VY[ri & 1]   if (mvy < 0) { mvy = 0 - mvy }
+    let ph2: i32 = 0
+    // The flame is lit by MOTION rather than by the thrust phase, so a hull still coasting after a
+    // burn — or falling after a jump — keeps its engine visibly running.
+    if (mvx + mvy > 96) { ph2 = FLAME[(G.simTick >> 2) & 3] }
+    let sf: i32 = ((S_CLS[ri & 1] & 3) << 2) | ph2
+    if (sf !== S_LASTF[ri & 1]) {
+      S_LASTF[ri & 1] = sf
+      sprite_set_frame(S_SPR[ri & 1], sf)
+    }
+    // Hidden until they are placed: during hull select the only ship that means anything is the one
+    // on the sheet, and during the briefing there is no ship yet at all.
+    if (G.phase === PH_SETUP || G.story > 0) {
+      sprite_set_visible(S_SPR[ri & 1], 0)
+      S_LASTX[ri & 1] = 0 - 9999
+    }
+    ri = ri + 1
+  }
+
+  if (G.phase === PH_PLACE) {
+    sprite_set_pos(V.curSpr, (G.curX >> 8) - 8, (G.curY >> 8) - 8)
+    if (V.curVis !== 1) { V.curVis = 1  sprite_set_visible(V.curSpr, 1) }
+  } else if (V.curVis !== 0) { V.curVis = 0  sprite_set_visible(V.curSpr, 0) }
+
+  // The heading is shown by a 16-way arrow beside the hull, not by a number on a text line:
+  // hud_text reallocates sprite VRAM whenever its string changes, at ~6,000 ticks a go.
+// ⚠️ THERE IS NO AIM ARROW, DELIBERATELY.
+  //
+  // There was one — a 16-way pointer beside the hull — and it was the single most confusing thing on
+  // screen, because the placeholder hull was also a triangle: every ship had two arrows on it,
+  // pointing different ways, one of which was the ship. The dotted preview arc is a strictly better
+  // indicator anyway: it shows the heading, the power AND the curve the wells will put on the shot,
+  // which is the thing the player is actually choosing. One fewer sprite and one fewer question.
+
+  let shellOn: i32 = 0
+  let ui2: i32 = 0
+  while (ui2 < SH_MAX) {
+    let bitm: i32 = 1 << ui2
+    if (SHST[ui2 & 15] === ST_FLY) {
+      let sfr: i32 = G_SHELL0 + (WH_KIND[SHW[ui2 & 15] & 7] & 7)
+      if (sfr !== SHLF[ui2 & 15]) {
+        SHLF[ui2 & 15] = sfr
+        sprite_set_frame(SHSPR[ui2 & 15], sfr)
+      }
+      sprite_set_pos(SHSPR[ui2 & 15], (SHX[ui2 & 15] >> 8) - 4, (SHY[ui2 & 15] >> 8) - 4)
+      if ((V.shellVis & bitm) === 0) { V.shellVis = V.shellVis | bitm  sprite_set_visible(SHSPR[ui2 & 15], 1) }
+      shellOn = 1
+    } else if ((V.shellVis & bitm) !== 0) {
+      V.shellVis = V.shellVis & (0 - 1 - bitm)
+      sprite_set_visible(SHSPR[ui2 & 15], 0)
+    }
+    ui2 = ui2 + 1
+  }
+
+  if (shellOn === 1) {
+    let sx4: i32 = SHX[0 & 15] >> 8
+    let sy4: i32 = SHY[0 & 15] >> 8
+    // Trail spaced by DISTANCE. The octagonal approximation `max + (min >> 1)` is within ~5% of the
+    // true hypotenuse for two compares and a shift; Manhattan would overestimate a diagonal by 41%
+    // and visibly tighten the spacing on exactly the diagonals an arc is made of.
+    let tdx: i32 = sx4 - V.lastX
+    let tdy: i32 = sy4 - V.lastY
+    if (tdx < 0) { tdx = 0 - tdx }
+    if (tdy < 0) { tdy = 0 - tdy }
+    let seg2: i32 = tdx + (tdy >> 1)
+    if (tdy > tdx) { seg2 = tdy + (tdx >> 1) }
+    if (seg2 >= DOT_STEP) {
+      V.lastX = sx4
+      V.lastY = sy4
+      let th: i32 = DOTS[(DOT_TRAIL0 + V.trailHead) & 63]
+      sprite_set_pos(th, sx4 - 4, sy4 - 4)
+      sprite_set_visible(th, 1)
+      V.trailHead = V.trailHead + 1
+      if (V.trailHead >= TRAIL_SLOTS) { V.trailHead = 0 }
+    }
+    sprite_set_pos(V.shellBlip, 172 + (sx4 >> 3), 8 + (sy4 >> 3))
+    sprite_set_visible(V.shellBlip, 1)
+  } else if (V.shellVis === 0) { sprite_set_visible(V.shellBlip, 0) }
+
+  // ── EDGE POINTERS ───────────────────────────────────────────────────────────────────────────
+  // One per hull plus one for the shell. Each is clamped to the screen border and rotated to the
+  // 16-heading arrow frame that points at what it is tracking.
+  //
+  // ⚠️ THE HEADING COMES FROM A SIGN-AND-COMPARE OCTANT, NOT AN ARCTANGENT. There is no atan table
+  // in this game and adding one to point an arrow would be 512 bytes for eight distinct answers.
+  // Comparing |dx| against |dy| picks the octant and the signs pick the quadrant, which is exactly
+  // the resolution a 16-frame arrow can display.
+  //
+  // ⚠️ AND IT IS PRESENTATION ONLY. It reads V.camX/V.camY, which are display-frame smoothed and so
+  // differ between two linked consoles drawing different numbers of frames per simulated tick.
+  // Nothing here may ever be read back by the simulation.
+  let eK: i32 = 0
+  let eI: i32 = 0
+  while (eI < 3) {
+    let ewx: i32 = 0
+    let ewy: i32 = 0
+    let eOn: i32 = 0
+    if (eI < 2) {
+      if (G.phase !== PH_SETUP && G.story === 0 && S_HP[eI & 1] > 0) {
+        ewx = S_X[eI & 1] >> 8
+        ewy = S_Y[eI & 1] >> 8
+        eOn = 1
+      }
+    } else if (G.phase === PH_FLIGHT && SHST[0 & 15] === ST_FLY) {
+      ewx = SHX[0 & 15] >> 8
+      ewy = SHY[0 & 15] >> 8
+      eOn = 1
+    }
+    let esx: i32 = ewx - V.camX
+    let esy: i32 = ewy - V.camY
+    // On screen with a margin means there is nothing to point at.
+    if (esx > 10 && esx < 230 && esy > 10 && esy < 150) { eOn = 0 }
+    let eh: i32 = eI
+    let ehnd: i32 = V.edgeS
+    if (eI === 0) { ehnd = V.edge0 }
+    else if (eI === 1) { ehnd = V.edge1 }
+    if (eOn === 1) {
+      let edx: i32 = esx - 120
+      let edy: i32 = esy - 80
+      let eax: i32 = edx   if (eax < 0) { eax = 0 - eax }
+      let eay: i32 = edy   if (eay < 0) { eay = 0 - eay }
+      // Octant: 0 = right, rising anticlockwise on screen, matching F_ARROW0's frame order.
+      let eoc: i32 = 0
+      if (edx >= 0 && edy < 0) { eoc = 2   if (eay > eax) { eoc = 4 } }
+      else if (edx < 0 && edy < 0) { eoc = 6   if (eax > eay) { eoc = 8 } }
+      else if (edx < 0) { eoc = 10   if (eay > eax) { eoc = 12 } }
+      else { eoc = 14   if (eax > eay) { eoc = 0 } }
+      let epx: i32 = esx - 8
+      let epy: i32 = esy - 8
+      if (epx < 2) { epx = 2 }
+      if (epx > 222) { epx = 222 }
+      if (epy < 2) { epy = 2 }
+      if (epy > 142) { epy = 142 }
+      sprite_set_pos(ehnd, epx, epy)
+      sprite_set_frame(ehnd, F_ARROW0 + (eoc & 15))
+      sprite_set_visible(ehnd, 1)
+      eK = eK | (1 << (eI & 3))
+    } else {
+      let unusedE: i32 = eh
+      sprite_set_visible(ehnd, 0)
+    }
+    eI = eI + 1
+  }
+  V.edgeKey = eK
+
+  if (G.phase === PH_BOOM) {
+    sprite_set_visible(V.boomSpr, 1)
+    let bf: i32 = G.phaseT >> 3
+    if (bf > 3) { bf = 3 }
+    sprite_set_frame(V.boomSpr, bf)
+    sprite_set_pos(V.boomSpr, G.bx - 16, G.by - 16)
+  }
+
+  // The power meter is SEGMENT SPRITES: power changes every frame while charging, where hud_bar
+  // would be a boxed eight-argument call and hud_text a full reallocation.
+  let filled: i32 = (S_PWR[wi & 1] >> 4) >> 1
+  if (filled !== V.lastFilled) {
+    V.lastFilled = filled
+    let sj: i32 = 0
+    while (sj < SEG_N) {
+      let f2: i32 = G_SEG_OFF
+      if (sj < filled) { f2 = G_SEG_ON }
+      if (sj < filled && sj >= 12) { f2 = G_SEG_HOT }
+      sprite_set_frame(SEGS[sj & 15], f2)
+      sj = sj + 1
+    }
+  }
+
+  // ── THE IN-MATCH HUD, AS A LAYOUT TREE ──────────────────────────────────────────────────────
+  // ⚠️ THE WEAPON RACK IS ONLY IN THE TREE WHILE AIMING. Once a shell is in the air the rack is
+  // just a wall of text over the interesting part of the screen, and the shot itself now says what
+  // it is — each warhead kind has its own projectile sprite. Dropping the node IS the whole
+  // mechanism: no visibility flag, no clear-rect, the layout simply does not contain it.
+  //
+  // ⚠️ AND HEALTH IS A BAR, not a number. A bar is a length the eye reads without parsing, which is
+  // what you want from something glanced at mid-flight — and it is two nested boxes in the layout
+  // engine rather than a string built every time a hit lands.
+  // ⚠️ LITERALS ONLY, AND IT TOUCHES NO MODULE STATE. A string-returning helper that reads a module
+  // binding is the exact shape that lowers AND corrupts the returned &str, detonating later inside
+  // agb's font code with a panic that names no caller. Everything it needs arrives as a parameter.
+  function wname(cw, row) {
+    if (row === 4) { return "JUMP" }
+    if (cw === 0) {
+      if (row === 0) { return "BOLT" }
+      if (row === 1) { return "FAN" }
+      if (row === 2) { return "BORE" }
+      return "SPIKE"
+    }
+    if (cw === 1) {
+      if (row === 0) { return "SHELL" }
+      if (row === 1) { return "SIEGE" }
+      if (row === 2) { return "SPLITTER" }
+      return "RAMPART"
+    }
+    if (row === 0) { return "STING" }
+    if (row === 1) { return "SWARM" }
+    if (row === 2) { return "SCATTER" }
+    return "TERRA"
+  }
+
+  // ⚠️ A QUARTER OF THE SCREEN EACH, so four of these fit across the top. Two players is the game
+  // that exists; four-player boards are coming, and a bar sized to half the screen would have to be
+  // redesigned rather than repeated. 56 px of column with a 52 px track leaves room for three more.
+  function hpBar(idx, name, hp, maxHp, tint) {
+    // The fill is a child box whose width is the fraction; the parent is the track. No arithmetic
+    // in the paint path — the engine arranges both from the numbers handed to it here.
+    let w: i32 = 0
+    if (maxHp > 0) { w = (Math.imul(hp, 50) / maxHp) | 0 }
+    if (w < 0) { w = 0 }
+    if (w > 50) { w = 50 }
+    let fillCol = "good"
+    if (Math.imul(hp, 4) < maxHp) { fillCol = "bad" }
+    // Both nodes are remembered so a hit can change the length in place. Rebuilding the tree for
+    // every point of damage was two full-canvas relayouts a turn on top of the two the rack needs,
+    // and a relayout is the single most expensive thing this game does on a frame.
+    let fillN = { w: w, h: 4, fill: fillCol }
+    let trackN = { dir: "row", w: 52, h: 6, fill: "panel", pad: 1, children: [ fillN ] }
+    HUDN.bars[idx] = trackN
+    HUDN.fills[idx] = fillN
+    return {
+      dir: "col", gap: 1, w: 56,
+      children: [ { text: name, color: tint, font: small }, trackN ],
+    }
+  }
+
+  // ⚠️ THE TWO RIGHT-HAND COLUMNS ARRIVE PRE-FORMATTED. A gun's are "x4" and "34/24"; the jump's
+  // are a fuel figure and a cost, which share no format with either — building them inside the row
+  // meant JUMP rendered as "x90  -25/0".
+  function rackRow(cw, row, selRow, spent, amText, statText) {
+    let col = "dim"
+    if (row === selRow) { col = "accent" }
+    if (spent === 1) { col = "spent" }
+    let mark = " "
+    if (row === selRow) { mark = ">" }
+    let nm = wname(cw, row)
+    let am = amText
+    return {
+      dir: "row", gap: 3, children: [
+        { text: mark, color: col, font: small, w: 6 },
+        { text: nm, color: col, font: small, w: 54 },
+        { text: am, color: col, font: small, w: 22 },
+        { text: statText, color: col, font: small, w: 34 },
+      ],
+    }
+  }
+
+  // ⚠️ THREE SEPARATE REGIONS, NOT ONE FULL-SCREEN TREE, AND THIS IS A HARD VRAM CONSTRAINT.
+  // `uiRender` opens with `ui_begin()`, which claims the WHOLE 240x160 canvas — about 600 of the
+  // GBA's 1024 background tiles. Per-pixel destructible terrain needs 500-800 of them for four
+  // planets, and the two together overflow: a LINKED match died on agb's "Ran out of video RAM for
+  // tiles" at frame 909 while the solo soak stayed green, because the two consoles happened to deal
+  // a bigger arena.
+  //
+  // `uiRelayoutAt` lays out and paints a subtree inside a box WITHOUT opening the canvas, so it
+  // only ever holds the ~150 cells actually drawn — which is what the hand-painted HUD this
+  // replaced did, and why that one fitted. The layout engine still does the arranging; it simply is
+  // not allowed to claim the screen.
+  function hudBars() {
+    return { dir: "row", gap: 4, children: [
+      hpBar(0, "P1", S_HP[0 & 1], SHIP_HP[S_CLS[0 & 1] & 3], "p1"),
+      hpBar(1, "P2", S_HP[1 & 1], SHIP_HP[S_CLS[1 & 1] & 3], "p2"),
+    ] }
+  }
+
+  function hudFoot() {
+    let foot = "P" + (G.who + 1) + "  FUEL " + S_FUEL[wi & 1] + "   L/R RACK"
+    if (G.phase === PH_PLACE) { foot = "P" + (G.who + 1) + "  PLACE - A" }
+    if (G.phase === PH_OVER) { foot = "WINNER P" + (G.winner + 1) + " - START" }
+    return { text: foot, color: "dim", font: small }
+  }
+
+  function hudRack() {
+    let cw2: i32 = S_CLS[wi & 1] & 3
+    let rk: i32 = 0
+    let rows = []
+    while (rk < 4) {
+      let widx3: i32 = ((cw2 << 2) | rk) & 15
+      let av: i32 = S_AMMO[((wi << 2) | rk) & 7]
+      let amt = "x" + av
+      let sp: i32 = 0
+      if (W_AMMO[widx3 & 15] < 0) { amt = "--" }
+      else if (av === 0) { sp = 1 }
+      rows.push(rackRow(cw2, rk, S_WPN[wi & 1], sp, amt,
+        "" + WH_DMG[W_WARHEAD[widx3 & 15] & 7] + "/" + WH_R[W_WARHEAD[widx3 & 15] & 7]))
+      rk = rk + 1
+    }
+    let jsp: i32 = 0
+    if (S_FUEL[wi & 1] < JUMP_COST) { jsp = 1 }
+    rows.push(rackRow(cw2, W_JUMP, S_WPN[wi & 1], jsp, "" + S_FUEL[wi & 1], "-" + JUMP_COST))
+    HUDN.rows = rows
+    return { dir: "col", gap: 1, children: rows }
+  }
+
+  // ⚠️ Guarded on a packed key, and the key deliberately contains NOTHING that changes continuously.
+  let hk: i32 = 0 - 2
+  // ⚠️ EVERY FIELD MASKED INTO ITS OWN BITS — see the note on the rack panel's key, where an
+  // unlimited rack's -1 flooded the high bits and the selection could never change the key.
+  // ⚠️ THE SELECTION IS NOT IN THIS KEY. It used to be, and every L/R press therefore triggered a
+  // full streamed relayout of the whole canvas — about a second of visible redraw for a change that
+  // moves one marker and recolours two rows. This key covers STRUCTURE only: whose turn, which
+  // hull, which phase, and the numbers that change a bar's length.
+  // ⚠️ THE PHASE IS COLLAPSED TO WHAT THE HUD ACTUALLY SHOWS. Keying on the raw phase meant four
+  // full-canvas relayouts per turn — AIM, FLIGHT, BOOM, TURN — where the picture only has three
+  // distinct states, and a streamed relayout is not free: it cost about 700 ticks a frame,
+  // sustained, and took the game from 3,308 of its 4,389-tick budget to 4,005.
+  let hmode: i32 = 0
+  if (G.phase === PH_AIM) { hmode = 1 }
+  if (G.phase === PH_PLACE) { hmode = 2 }
+  if (G.phase === PH_OVER) { hmode = 3 }
+  if (G.phase !== PH_SETUP) { hk = ((G.who & 1) << 30) | ((hmode & 3) << 11)
+    | ((S_CLS[wi & 1] & 3) << 6) | ((G.landed & 1) << 5) | ((S_FUEL[wi & 1] >> 3) & 31) }
+  if (hk !== 0 - 2 && hk !== V.hudKey) {
+    V.hudKey = hk
+    // ⚠️ STREAMED, NOT PAINTED IN ONE GO. A full-canvas layout is thousands of ticks, and this
+    // repaints whenever health changes — which is the frame a shell lands, already the most
+    // expensive in the game. `uiPaintStep` spreads it over the following frames.
+    V.wpnKey = S_WPN[wi & 1]
+    V.hpKey = (S_HP[0 & 1] << 8) | S_HP[1 & 1]
+    // Each region lays out and paints inside its own box. The rack's box is CLEARED rather than
+    // painted when the phase is not PH_AIM — which is how it disappears while a shell is in flight.
+    uiRelayoutAt(hudBars(), 3, 3, 120, 16)
+    uiRelayoutAt(hudFoot(), 3, 146, 200, 10)
+    if (G.phase === PH_AIM) { uiRelayoutAt(hudRack(), 3, 88, 140, 56) }
+    else { ui_clear_rect(2, 87, 142, 58)  HUDN.rows = [] }
+    // ⚠️ ANNOUNCED so the suite can tell "the HUD followed the selection" from "the turn changed".
+    // The bug this guards against was invisible to every other check: the rack was right, the
+    // selection was right, and only the picture was stale.
+    log("WH PANEL w=" + S_WPN[wi & 1] + " who=" + G.who + " f=" + G.simTick)
+  }
+  // ⚠️ HEALTH CHANGES THE BAR, NOT THE LAYOUT. `uiRelayoutAt` re-solves and repaints ONE subtree
+  // without opening the canvas, so a hit costs two small rectangles instead of a streamed relayout
+  // of everything. With health in the structure key the game was spending ~4,700 of its 4,389-tick
+  // frame — over budget, and varying by a thousand ticks between builds because tish codegen
+  // ordering is not stable.
+  if (HUDN.fills.length > 1 && V.hpKey !== ((S_HP[0 & 1] << 8) | S_HP[1 & 1])) {
+    V.hpKey = (S_HP[0 & 1] << 8) | S_HP[1 & 1]
+    let bi2: i32 = 0
+    while (bi2 < 2) {
+      let mx: i32 = SHIP_HP[S_CLS[bi2 & 1] & 3]
+      let bw: i32 = 0
+      if (mx > 0) { bw = (Math.imul(S_HP[bi2 & 1], 50) / mx) | 0 }
+      if (bw < 0) { bw = 0 }
+      if (bw > 50) { bw = 50 }
+      HUDN.fills[bi2].w = bw
+      if (Math.imul(S_HP[bi2 & 1], 4) < mx) { HUDN.fills[bi2].fill = "bad" }
+      else { HUDN.fills[bi2].fill = "good" }
+      let tn = HUDN.bars[bi2]
+      if (tn._x !== null) { uiRelayoutAt(tn, tn._x, tn._y, tn._w, tn._h) }
+      bi2 = bi2 + 1
+    }
+  }
+
+  // ⚠️ A SELECTION CHANGE EDITS THE NODES, IT DOES NOT REBUILD THEM. `uiSetText` clears one text
+  // box and repaints it; five rows of four cells is twenty small writes against a whole-canvas
+  // relayout, and it lands within a frame instead of streaming for a second.
+  else if (G.phase === PH_AIM && S_WPN[wi & 1] !== V.wpnKey && HUDN.rows.length > 0) {
+    V.wpnKey = S_WPN[wi & 1]
+    let rr2: i32 = 0
+    while (rr2 < HUDN.rows.length) {
+      let row = HUDN.rows[rr2]
+      // ⚠️ RECOMPUTED, NOT READ BACK OFF THE NODE. The first refresh overwrites the colour these
+      // cells carry, so asking a node what colour it is tells you what the LAST refresh decided,
+      // not whether the rack is empty — a spent row would light up again the moment you scrolled
+      // past it.
+      let cw3: i32 = S_CLS[wi & 1] & 3
+      let spent2: i32 = 0
+      if (rr2 === W_JUMP) {
+        if (S_FUEL[wi & 1] < JUMP_COST) { spent2 = 1 }
+      } else if (W_AMMO[((cw3 << 2) | rr2) & 15] >= 0 && S_AMMO[((wi << 2) | rr2) & 7] === 0) {
+        spent2 = 1
+      }
+      let mk = " "
+      let cl = "dim"
+      if (spent2 === 1) { cl = "spent" }
+      if (rr2 === S_WPN[wi & 1]) { mk = ">"  cl = "accent" }
+      uiSetText(row.children[0], mk, cl)
+      uiSetText(row.children[1], row.children[1].text, cl)
+      uiSetText(row.children[2], row.children[2].text, cl)
+      uiSetText(row.children[3], row.children[3].text, cl)
+      rr2 = rr2 + 1
+    }
+    log("WH PANEL w=" + S_WPN[wi & 1] + " who=" + G.who + " f=" + G.simTick)
+  }
+  // ⚠️ ONLY WHILE A PAINT IS ACTUALLY IN FLIGHT. Pumping the streamer unconditionally spends real
+  // ticks on every frame of a game that repaints its HUD a few times a turn.
+  // Nothing streams any more: each region paints inside its own call, and each is small.
+
+  // ⚠️ feel OWNS A CLOCK, so it has to be ticked every DISPLAY frame — hit-stop is a countdown
+  // and this is what counts it down. Missing it froze the game solid on the first impact:
+  // one shot in twelve thousand frames, no crash, nothing in the log.
+  let feelMask: i32 = feelTick()
+  let unusedFeel: i32 = feelMask
+  presAcc = presAcc + ((ticks() - tSim) & 0xFFFF)
+  let t1: i32 = (ticks() - t0) & 0xFFFF
+  if (t1 > 3000) { log("WH SPIKE t=" + t1 + " ph=" + G.phase + " pt=" + G.phaseT + " f=" + G.simTick) }
+  if (t1 > tkPeak) { tkPeak = t1 }
+  tkAcc = tkAcc + t1
+  tkN = tkN + 1
+  dispFrame = dispFrame + 1
+  if ((dispFrame & 511) === 0) {
+    let per100: i32 = 0
+    if (igSub > 0) { per100 = ((Math.imul(igAcc, 100) / igSub) | 0) }
+    log("WH TICKS peak=" + tkPeak + " avg=" + (tkAcc >> 9) + " n=" + tkN
+      + " igsub=" + igSub + " per100=" + per100
+      + " sim=" + (stepAcc >> 9) + " pres=" + (presAcc >> 9))
+    log("HEAP " + heap_free())
+    tkPeak = 0
+    tkAcc = 0
+    tkN = 0
+    igAcc = 0
+    igSub = 0
+    stepAcc = 0
+    presAcc = 0
+  }
+
+  frame()
+}

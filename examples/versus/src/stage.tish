@@ -1,0 +1,37 @@
+// The arena: one opaque 256x256 background image, scrolled as a single layer.
+//
+// ── Why this is NOT `bg_bands`, even though it obviously should be ───────────────────────────────
+// A fighting stage is horizontally stratified — sky, cliff, treeline, floor — which is exactly the
+// shape per-scanline band parallax handles, and that is how this was first built: one layer, four
+// bands, three depths for free (see examples/bands-demo).
+//
+// It shredded. `bg_bands` hands the horizontal scroll register to an HBlank DMA whose table is
+// rebuilt from the camera inside `frame()`, and agb commits that frame WITHOUT waiting for vblank
+// when the game has already overrun. On a late frame the DMA is therefore re-armed partway down the
+// visible screen, its source pointer restarts at row 0, and every row below the re-arm gets the
+// SKY band's offset instead of its own — the treeline jumps eight pixels sideways for the bottom
+// half of the picture. Measured on this game: ~11,000 Timer2 ticks on its busiest frames against a
+// 4,389-tick budget, so several frames a second were late, and each one was a visible tear.
+//
+// The lesson is not "bands are broken", it is that BANDS TURN A DROPPED FRAME INTO A CORRUPT ONE.
+// They belong on a scene with headroom — bands-demo has a whole frame spare. A plain layer degrades
+// the other way: its scroll register is written once, so a late commit shifts the whole picture by
+// the one pixel the camera moved, which nobody can see.
+//
+// What is lost is depth, and less than it sounds: the stage is 256px against a 240px screen, so the
+// camera has sixteen pixels of travel in the entire match.
+import { bg_parallax } from 'cargo:tish_agb'
+
+// How far apart the corners are, in world pixels. The camera's whole range is those 16 spare pixels;
+// the walls are inset from the screen edge so a cornered fighter reads as against the wall rather
+// than half off the side of it.
+export let STAGE_LEFT: i32 = 30
+export let STAGE_RIGHT: i32 = 226
+
+// Half the camera's speed: enough that the backdrop is not nailed to the screen, slow enough that
+// the arena floor does not visibly slide under the fighters' feet.
+let DRIFT: i32 = 128
+
+export function stageBands(bg: i32) {
+  bg_parallax(bg, DRIFT, 0)
+}

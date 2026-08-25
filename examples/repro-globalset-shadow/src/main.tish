@@ -1,0 +1,43 @@
+// repro / tripwire — a struct-global store whose right-hand side mentions a variable named `c`.
+//
+// EXPECTED TODAY: builds, and logs "cur=7".
+//
+// WHAT IT GUARDS. When struct-global stores were lowered natively (tishlang `581bb749d`), a field
+// write became a `thread_local` Cell round-trip whose closure bound `c`, with the right-hand side —
+// USER CODE — interpolated inside it:
+//
+//   G_G.with(|c| { let mut __t = c.get(); __t.cur = BASE.wrapping_add((c) as i32); c.set(__t); });
+//                                                                       ^ the CLOSURE's c
+//
+// so a program with its own local named `c` failed to compile:
+//
+//   error[E0606]: casting `&Cell<TishStruct_Game>` as `i32` is invalid
+//
+// `examples/solitaire` line 951 is exactly `G.cur = TAB0 + c` and stopped building on it.
+//
+// That whole lowering was later reverted (tishlang `ad68e6388`, "core tish must stay untouched"), so
+// the bug cannot occur today — this file builds because the emitter no longer exists. It is kept as
+// a TRIPWIRE: if struct-global lowering ever returns, this fails on the first build, before a real
+// game does.
+//
+// THE FIX, if that day comes: bind the closure to a name a tish program cannot use. `__`-prefixed
+// names are already reserved for emitted temporaries (`__t` sits in that same string), so `__c`
+// cannot collide. Rename the binding rather than hoisting the value into a `let` above the closure:
+// a hoisted binding infers its type from the EXPRESSION alone rather than from the field it is
+// assigned to, which silently changes an `f64` field initialised from an integer literal.
+// Three emitters interpolate user code inside such a closure and all three need it:
+// `struct_global_field_set`, `native_global_set`, and the module-struct-global initialiser.
+import { log } from 'cargo:tish_agb'
+
+interface Game { cur: i32 }
+let G: Game = { cur: 0 }
+let BASE: i32 = 4
+
+function bump() {
+  let c: i32 = 3
+  G.cur = BASE + c
+}
+
+bump()
+log("cur=" + G.cur)
+while (true) {}

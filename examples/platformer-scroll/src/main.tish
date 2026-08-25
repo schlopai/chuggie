@@ -1,0 +1,23 @@
+// Platformer camera-SCROLL demo — the side-scrolling counterpart of ninja-adventure (which is
+// top-down). One wide level (49x13 tiles = 784x208 px, far bigger than the 240x160 screen); the
+// camera smoothly follows the player, streaming tiles in as it goes. Walk with the d-pad, jump
+// with A. Same engine, just `hero.follow()` (smooth scroll) instead of `roomFollow` (room-pan).
+import { tileset } from 'background:../assets/tileset.png'
+import { heroSheet } from 'sheet:../assets/hero.png'
+import { sprite_new } from 'cargo:tish_agb'
+import { mount, create, loadStreamMap, step } from '../../../packages/engine'
+import { level } from './maps'
+import * as components from './components'
+import { Player } from './components'
+
+mount(components)
+loadStreamMap(level, tileset)
+
+let hero = create()
+hero.setPos(level.spawnCol * 16, level.spawnRow * 16)
+hero.setSprite(sprite_new(heroSheet))
+hero.platformer(16, 16)   // 16x16 hitbox with gravity + solid-tile collision
+hero.behave(Player, {})
+hero.follow()             // smooth camera scroll across the whole level
+
+while (true) { step() }

@@ -1,0 +1,12 @@
+Ark Pixel Font — 10px monospaced (v2026.07.20)
+https://github.com/TakWolf/ark-pixel-font
+
+Vendored files:
+  ark-pixel-10px.ttf      ← ark-pixel-10px-monospaced-latin.ttf
+  ark-pixel-10px-cjk.ttf  ← ark-pixel-10px-monospaced-zh_cn.ttf
+  fallback.ttf            → ark-pixel-10px-cjk.ttf
+
+Bake at @10 (matches agb's default:
+  include_font!("fnt/ark-pixel-10px-proportional-latin.ttf", 10)).
+
+License: SIL OFL 1.1 — see ark-pixel.OFL.txt

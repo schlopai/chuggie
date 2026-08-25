@@ -1,0 +1,40 @@
+// deck — play deck songs baked for the GBA (LR35902 + GBA PCM).
+//
+// Music is authored as `.deck` text, imported with `deck:`, and started with `deckPlay`.
+// Do not call psg_* / mixer guts to write songs — edit the `.deck` file.
+//
+//   import { theme } from 'deck:../assets/theme.deck'
+//   import { deckPlay, deckStop } from '../../../packages/deck'
+//   deckPlay(theme)
+//
+// Full grammar, channel limits, and role recipes: docs/deck.md
+import {
+  deck_play, deck_stop, deck_playing, deck_set_intensity, deck_intensity,
+} from 'cargo:tish_agb'
+
+/// Start (or replace) a `deck:`-imported song. Stops any `chip_play` BGM.
+/// Resets intensifier level to 0.
+export function deckPlay(song) {
+  deck_play(song)
+}
+
+/// Stop the deck song and silence the channels it owned.
+export function deckStop() {
+  deck_stop()
+}
+
+/// 1 while a deck song is running, else 0.
+export function deckPlaying() {
+  return deck_playing()
+}
+
+/// Set crossfading-stem-style intensity 0..=3. Stems with `layer N` stay silent until level >= N.
+/// Playhead keeps running so layers blend in time.
+export function deckSetIntensity(level) {
+  return deck_set_intensity(level)
+}
+
+/// Current intensifier level 0..=3.
+export function deckIntensity() {
+  return deck_intensity()
+}

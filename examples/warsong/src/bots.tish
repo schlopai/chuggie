@@ -1,0 +1,30 @@
+// bots.tish — roster assignment. Match-loop AI is inlined in main.tish (steer + botTryCast).
+
+import {
+  U_CLASS, U_SPEC, U_ROLE, unitSetClass
+} from './units'
+import { specRole } from './classes'
+
+export let ROLE_PEEL: i32 = 0
+export let ROLE_HEAL: i32 = 1
+export let ROLE_RUN: i32 = 2
+
+export function botsAssignRoster(playerCls: i32, playerSpec: i32) {
+  // Player is unit 0 Alliance.
+  unitSetClass(0, playerCls, playerSpec)
+  U_ROLE[0] = specRole(playerCls, playerSpec)
+
+  // Ally: holy priest healer + subtlety rogue runner
+  unitSetClass(1, 4, 1)
+  U_ROLE[1] = ROLE_HEAL
+  unitSetClass(2, 3, 2)
+  U_ROLE[2] = ROLE_RUN
+
+  // Horde: frost mage peel, resto sham healer, arms warrior runner
+  unitSetClass(3, 6, 2)
+  U_ROLE[3] = ROLE_PEEL
+  unitSetClass(4, 5, 2)
+  U_ROLE[4] = ROLE_HEAL
+  unitSetClass(5, 0, 0)
+  U_ROLE[5] = ROLE_RUN
+}

@@ -1,0 +1,416 @@
+// motion.tish — the input half of a fighting game: a history ring and a command recogniser.
+//
+// A fighter does not read the pad, it reads the RECENT PAST of the pad. "Down, down-forward,
+// forward, punch" is not four inputs, it is one input spread over up to twelve frames, and the
+// player will not deliver it cleanly: they will hold down for six frames, brush down-forward for
+// one, and press punch two frames after forward. Everything in here exists to make that count.
+//
+//   import * as motion from '../../../packages/motion'
+//
+//   motion.motionInit()
+//   // once per player per frame, BEFORE the fighter ticks:
+//   motion.motionPush(p, dir, held, edge)
+//   if (motion.motionRead(p, facing) === motion.MOT_QCF) { ... }
+//
+// `dir` is numpad notation — 7 8 9 / 4 5 6 / 1 2 3, with 5 = neutral — which is how every fighting
+// game on earth writes a motion, and which packs into four bits. `held`/`edge` are BTN_* masks.
+//
+// ── Why a ring and not a state machine ───────────────────────────────────────────────────────────
+// The obvious implementation is a per-command state machine advanced on each input. It is smaller,
+// and it is wrong twice: it cannot express "these two directions may arrive in either order", and
+// it needs one instance per command per player, so adding a command costs memory in the hot loop.
+// A 24-entry ring is 96 bytes per player, and every recogniser is a backward scan over it — new
+// commands are new comparisons, not new state.
+//
+// ── Facing is applied to the INPUT, not to the command table ─────────────────────────────────────
+// A quarter-circle-forward is 2,3,6 when you are on the left and 2,1,4 when you are on the right.
+// Writing both into the tables doubles them and makes every future command two edits. Instead
+// `motionRead` mirrors the recorded directions (4<->6, 1<->3, 7<->9) before matching, so every
+// command in here is authored once, facing right.
+//
+// ── Consumption ──────────────────────────────────────────────────────────────────────────────────
+// A recognised motion is CONSUMED: the scan will not see it again. Without that, one quarter-circle
+// fires a fireball on twelve consecutive frames. Consumption marks a push counter rather than
+// clearing the ring, so a charge that was building underneath the motion survives it.
+
+// ── recognised motions ───────────────────────────────────────────────────────────────────────────
+export let MOT_NONE: i32 = 0
+export let MOT_QCF: i32 = 1        // 2,3,6 — quarter circle forward (fireball)
+export let MOT_QCB: i32 = 2        // 2,1,4 — quarter circle back
+export let MOT_DP: i32 = 3         // 6,2,3 — dragon punch
+export let MOT_RDP: i32 = 4        // 4,2,1 — reverse dragon punch
+export let MOT_HCF: i32 = 5        // 4,1,2,3,6 — half circle forward
+export let MOT_DD: i32 = 6         // 2,2 — double tap down (super)
+
+// Dashes, reported separately from MOT_* because they are a MOVEMENT input: they fire on the
+// direction alone, with no button, so they cannot share the motion slot.
+export let DASH_NONE: i32 = 0
+export let DASH_FWD: i32 = 1       // → → 
+export let DASH_BACK: i32 = 2      // ← ←
+
+// ── buttons ──────────────────────────────────────────────────────────────────────────────────────
+// Four attack buttons on a four-button pad. Strength pairs (LP+LK etc.) are read by the caller with
+// `motionBuffered`, which is what makes a throw or a taunt possible without a fifth button.
+export let BTN_LP: i32 = 1         // GBA B
+export let BTN_HP: i32 = 2         // GBA A
+export let BTN_LK: i32 = 4         // GBA R
+export let BTN_HK: i32 = 8         // GBA L
+
+// ⚠️ A POWER OF TWO, and it must stay one. Every read here indexes the ring with `& RING_MASK`;
+// written the obvious way, as `% RING`, it is an integer modulo — and the ARM7TDMI has no divide
+// instruction, so each one is a call into a software division routine. `motionRead` walks fourteen
+// entries and was measured at 1,400 Timer2 ticks of a 4,389-tick frame, almost all of it division.
+let RING: i32 = 16                 // frames of history kept per player — 0.27s, past every input window
+let RING_MASK: i32 = 15
+let DEPTH: i32 = 12                // how far back a motion may reach. Longer accepts sloppier input.
+let PLAYERS: i32 = 2
+
+// R[p * RING + i] = dir | held << 4 | edge << 8, written at i = N[p] & RING_MASK.
+let R: i32[] = []
+// N[p]  total pushes ever (the ring's write cursor and the clock a consume marks).
+// C[p]  the push count at which a motion was last consumed; the scan stops there.
+let N: i32[] = [0, 0]
+let C: i32[] = [0, 0]
+// CD[p] the same marker for DASHES — separate, or reading one input would consume the other.
+let CD: i32[] = [0, 0]
+
+// Scratch for the distinct-direction walk in motionRead. Module level so the scan allocates nothing.
+let D: i32[] = []
+let DMAX: i32 = 10
+
+let i: i32 = 0
+while (i < PLAYERS * RING) { R.push(5) i = i + 1 }
+i = 0
+while (i < DMAX) { D.push(0) i = i + 1 }
+
+// Reset both players. Call once at boot and again whenever a round starts — stale history across a
+// round reset is how a fireball comes out during the "FIGHT!" freeze.
+export function motionInit() {
+  let k: i32 = 0
+  while (k < PLAYERS * RING) { R[k] = 5 k = k + 1 }
+  N[0] = 0
+  N[1] = 0
+  C[0] = 0
+  C[1] = 0
+  CD[0] = 0
+  CD[1] = 0
+}
+
+// Drop this player's history without touching the other's.
+export function motionClear(p: i32) {
+  let k: i32 = 0
+  while (k < RING) { R[p * RING + k] = 5 k = k + 1 }
+  C[p] = N[p]
+  CD[p] = N[p]
+}
+
+// Record one frame of input. `dir` is numpad 1..9 (5 = neutral), `held` and `edge` are BTN_* masks —
+// `edge` being the buttons that went DOWN this frame.
+export function motionPush(p: i32, dir: i32, held: i32, edge: i32) {
+  let slot: i32 = p * RING + (N[p] & RING_MASK)
+  R[slot] = dir | (held << 4) | (edge << 8)
+  N[p] = N[p] + 1
+}
+
+// THE WHOLE OF THIS FRAME'S PAD, as one packed word: `dir | held << 4 | edge << 8`.
+//
+// ⚠️ Prefer this to motionDir/motionHeld/motionEdge in anything that runs per frame. Those are three
+// calls that each re-read the same ring slot, and a fighter's move-selection asks about six buttons
+// plus the direction: twenty cross-module calls a frame, measured at ~6,700 Timer2 ticks — one and a
+// half whole frames — before this existed. One call plus local bit tests is ~200.
+export function motionWord(p: i32): i32 {
+  if (N[p] === 0) { return 5 }
+  return R[p * RING + ((N[p] - 1) & RING_MASK)]
+}
+
+// Buttons that went down within the last 2 frames (bits 0..3) and within the last 4 (bits 4..7).
+// The narrow window is what makes "both punches at once" a throw rather than two punches; the wide
+// one is the input buffer that lets a special be pressed slightly before the motion finishes.
+export function motionEdgeWindows(p: i32): i32 {
+  let out: i32 = 0
+  let back: i32 = 0
+  while (back < 4) {
+    if (back >= N[p]) { return out }
+    let e: i32 = (R[p * RING + ((N[p] - 1 - back) & RING_MASK)] >> 8) & 15
+    out = out | (e << 4)
+    if (back < 2) { out = out | e }
+    back = back + 1
+  }
+  return out
+}
+
+// EVERYTHING a fighter needs to know about its pad this frame, in ONE call and one word:
+//
+//   bits  0..3   dir            numpad direction now
+//   bits  4..7   edge           attack buttons pressed THIS frame
+//   bits  8..11  near           attack buttons pressed within 2 frames (throws)
+//   bits 12..15  buf            attack buttons pressed within 4 frames (the special buffer)
+//   bits 16..19  mot            the MOT_* recognised now, mirrored for `facing`, consumed
+//   bits 20..21  dash           DASH_FWD / DASH_BACK from a double tap, mirrored and consumed
+//
+// ⚠️ A call from one tish module into another is a boxed `Value` dispatch: measured at ~117 Timer2
+// ticks against a 4,389-tick frame, where a call WITHIN a module is about one. The fighter used to
+// ask four separate questions per fighter per frame and it cost more than the physics did. The
+// motion is only read when a button is actually in the buffer, because `motionRead` walks the ring.
+export function motionFrame(p: i32, facing: i32): i32 {
+  if (N[p] === 0) { return 5 }
+  let w: i32 = R[p * RING + ((N[p] - 1) & RING_MASK)]
+  let out: i32 = (w & 15) | (((w >> 8) & 15) << 4)
+  let near: i32 = 0
+  let buf: i32 = 0
+  let back: i32 = 0
+  while (back < 4) {
+    if (back >= N[p]) { back = 4 }
+    else {
+      let e: i32 = (R[p * RING + ((N[p] - 1 - back) & RING_MASK)] >> 8) & 15
+      buf = buf | e
+      if (back < 2) { near = near | e }
+      back = back + 1
+    }
+  }
+  out = out | (near << 8) | (buf << 12)
+  if (buf > 0) { out = out | (motionRead(p, facing) << 16) }
+  out = out | (dashRead(p, facing) << 20)
+  return out
+}
+
+// A double tap on the horizontal, within DASH_WINDOW frames: tap, release, tap. The release is what
+// separates it from simply holding a direction, so the scan is looking for the SEQUENCE
+// horizontal → not-that-horizontal → horizontal, and the middle entry may be neutral or the
+// opposite way (a pad rolls through neutral, a stick does not always).
+let DASH_WINDOW: i32 = 13
+
+function dashRead(p: i32, facing: i32): i32 {
+  if (N[p] - CD[p] < 3) { return DASH_NONE }
+  let limit: i32 = DASH_WINDOW
+  if (N[p] - CD[p] < limit) { limit = N[p] - CD[p] }
+  if (limit > RING) { limit = RING }
+
+  let now: i32 = hori(mirror(R[p * RING + ((N[p] - 1) & RING_MASK)] & 15, facing))
+  if (now === 0) { return DASH_NONE }
+
+  // Walk back: the current direction must have been released and pressed again inside the window.
+  let phase: i32 = 0        // 0 = still in the first hold, 1 = in the gap, 2 = found the second tap
+  let back: i32 = 1
+  while (back < limit) {
+    let h: i32 = hori(mirror(R[p * RING + ((N[p] - 1 - back) & RING_MASK)] & 15, facing))
+    if (phase === 0) {
+      if (h !== now) { phase = 1 }
+    } else if (h === now) {
+      phase = 2
+      back = limit
+    }
+    back = back + 1
+  }
+  if (phase !== 2) { return DASH_NONE }
+  CD[p] = N[p]
+  if (now > 0) { return DASH_FWD }
+  return DASH_BACK
+}
+
+// The horizontal component of a numpad direction: +1 forward, -1 back, 0 neither.
+function hori(d: i32): i32 {
+  if (d === 6) { return 1 }
+  if (d === 3) { return 1 }
+  if (d === 9) { return 1 }
+  if (d === 4) { return 0 - 1 }
+  if (d === 1) { return 0 - 1 }
+  if (d === 7) { return 0 - 1 }
+  return 0
+}
+
+// Read the pad and record it, in one crossing: the decode is pure, so keeping it on this side of the
+// boundary turns four cross-module calls into one.
+export function motionPushPad(p: i32, keysHeld: i32, keysEdge: i32) {
+  motionPush(p, padDirOf(keysHeld), padButtonsOf(keysHeld), padButtonsOf(keysEdge))
+}
+
+// The `i`-th most recent entry (0 = this frame), as a packed word. Used by the debug overlay.
+export function motionDebug(p: i32, back: i32): i32 {
+  if (back >= RING) { return 5 }
+  if (back >= N[p]) { return 5 }
+  return R[p * RING + ((N[p] - 1 - back) & RING_MASK)]
+}
+
+export function motionDir(p: i32): i32 {
+  if (N[p] === 0) { return 5 }
+  return R[p * RING + ((N[p] - 1) & RING_MASK)] & 15
+}
+
+export function motionHeld(p: i32, btn: i32): i32 {
+  if (N[p] === 0) { return 0 }
+  let w: i32 = R[p * RING + ((N[p] - 1) & RING_MASK)]
+  if ((((w >> 4) & 15) & btn) > 0) { return 1 }
+  return 0
+}
+
+export function motionEdge(p: i32, btn: i32): i32 {
+  if (N[p] === 0) { return 0 }
+  let w: i32 = R[p * RING + ((N[p] - 1) & RING_MASK)]
+  if ((((w >> 8) & 15) & btn) > 0) { return 1 }
+  return 0
+}
+
+// Was `btn` pressed within the last `window` frames? This is the input buffer, and it is what makes
+// the game feel like it is listening: a punch pressed two frames before hitstun ends still comes
+// out, and two buttons "at the same time" only have to be within `window` of each other.
+export function motionBuffered(p: i32, btn: i32, window: i32): i32 {
+  let back: i32 = 0
+  while (back < window) {
+    if (back >= N[p]) { return 0 }
+    if (back >= RING) { return 0 }
+    let w: i32 = R[p * RING + ((N[p] - 1 - back) & RING_MASK)]
+    if ((((w >> 8) & 15) & btn) > 0) { return 1 }
+    back = back + 1
+  }
+  return 0
+}
+
+// How many consecutive recent frames the player has been holding a direction FAMILY: 4 means any of
+// 1/4/7 (back), 2 means any of 1/2/3 (down). Charge specials read this. Mirror `dir` yourself for
+// facing — a charge is a physical direction, not a relative one, until the move comes out.
+export function motionChargeHeld(p: i32, dir: i32): i32 {
+  let back: i32 = 0
+  while (back < RING) {
+    if (back >= N[p]) { return back }
+    let d: i32 = R[p * RING + ((N[p] - 1 - back) & RING_MASK)] & 15
+    if (family(d, dir) === 0) { return back }
+    back = back + 1
+  }
+  return RING
+}
+
+function family(d: i32, dir: i32): i32 {
+  if (dir === 4) { if (d === 1) { return 1 } if (d === 4) { return 1 } if (d === 7) { return 1 } return 0 }
+  if (dir === 6) { if (d === 3) { return 1 } if (d === 6) { return 1 } if (d === 9) { return 1 } return 0 }
+  if (dir === 2) { if (d === 1) { return 1 } if (d === 2) { return 1 } if (d === 3) { return 1 } return 0 }
+  if (dir === 8) { if (d === 7) { return 1 } if (d === 8) { return 1 } if (d === 9) { return 1 } return 0 }
+  if (d === dir) { return 1 }
+  return 0
+}
+
+// Mirror a numpad direction for a fighter facing left, so command tables are written once.
+function mirror(d: i32, facing: i32): i32 {
+  if (facing >= 0) { return d }
+  if (d === 4) { return 6 }
+  if (d === 6) { return 4 }
+  if (d === 1) { return 3 }
+  if (d === 3) { return 1 }
+  if (d === 7) { return 9 }
+  if (d === 9) { return 7 }
+  return d
+}
+
+// The recognised motion ending on THIS frame, mirrored for `facing`, or MOT_NONE. Consumed on a hit.
+//
+// The scan walks backwards collecting DISTINCT directions — a direction held for six frames is one
+// entry, which is what makes the recogniser indifferent to how long the player leaned on each step.
+// Neutral (5) is recorded too, because a double-tap needs to see the gap between the taps, but the
+// pattern matcher skips it everywhere else.
+export function motionRead(p: i32, facing: i32): i32 {
+  let avail: i32 = N[p] - C[p]
+  if (avail < 2) { return MOT_NONE }
+  let limit: i32 = DEPTH
+  if (avail < limit) { limit = avail }
+  if (limit > RING) { limit = RING }
+
+  let n: i32 = 0
+  let last: i32 = 0 - 1
+  let back: i32 = 0
+  while (back < limit) {
+    if (n >= DMAX) { back = limit }
+    else {
+      let d: i32 = mirror(R[p * RING + ((N[p] - 1 - back) & RING_MASK)] & 15, facing)
+      if (d !== last) {
+        D[n] = d
+        n = n + 1
+        last = d
+      }
+      back = back + 1
+    }
+  }
+  // D is now newest-first: D[0] is the direction being held right now.
+  let m: i32 = match(n)
+  if (m !== MOT_NONE) { C[p] = N[p] }
+  return m
+}
+
+// Match the newest-first distinct-direction list in D against the command table. Each pattern is
+// written oldest-to-newest in the comment and read newest-to-oldest here.
+function match(n: i32): i32 {
+  if (n < 2) { return MOT_NONE }
+  // 2,2 with a gap — double tap down. The gap is why neutral stays in the distinct list.
+  if (D[0] === 2) {
+    if (n >= 3) {
+      if (D[1] === 5) { if (D[2] === 2) { return MOT_DD } }
+      if (D[1] === 8) { if (D[2] === 2) { return MOT_DD } }
+    }
+  }
+  // Everything else ends on a horizontal. Skip a trailing neutral so releasing the stick on the
+  // same frame as the button does not lose the motion.
+  let a: i32 = D[0]
+  let off: i32 = 0
+  if (a === 5) { a = D[1] off = 1 }
+  if (n - off < 3) { return MOT_NONE }
+
+  if (a === 6) {
+    // 4,1,2,3,6 — half circle forward, checked before QCF because it is a superset of it.
+    if (n - off >= 5) {
+      if (D[off + 1] === 3) { if (D[off + 2] === 2) { if (D[off + 3] === 1) { if (D[off + 4] === 4) { return MOT_HCF } } } }
+    }
+    // 2,3,6 — quarter circle forward.
+    if (D[off + 1] === 3) { if (D[off + 2] === 2) { return MOT_QCF } }
+  }
+  if (a === 3) {
+    // 6,2,3 — dragon punch. The 6 may be any forward-ish entry two steps back.
+    if (D[off + 1] === 2) { if (D[off + 2] === 6) { return MOT_DP } }
+    if (D[off + 1] === 2) { if (D[off + 2] === 3) { if (n - off >= 4) { if (D[off + 3] === 6) { return MOT_DP } } } }
+  }
+  if (a === 4) {
+    // 2,1,4 — quarter circle back.
+    if (D[off + 1] === 1) { if (D[off + 2] === 2) { return MOT_QCB } }
+  }
+  if (a === 1) {
+    // 4,2,1 — reverse dragon punch.
+    if (D[off + 1] === 2) { if (D[off + 2] === 4) { return MOT_RDP } }
+  }
+  return MOT_NONE
+}
+
+// ── pad helpers ──────────────────────────────────────────────────────────────────────────────────
+// Turning the GBA's ten key bits into one numpad digit and one BTN_* mask, in one place, because
+// getting the diagonal wrong is invisible until a dragon punch stops working.
+//
+// ⚠️ Both take the RAW pad word — `keys_held()` or `keys_edge()` — rather than reading the pad
+// themselves. That is deliberate: eight `key_held` calls is eight boxed dispatches and eight context
+// crossings per fighter per frame, and these two functions touch no module state, so taking the word
+// as an argument is also what lets them lower to real Rust fns instead of boxed closures.
+let KB_A: i32 = 1
+let KB_B: i32 = 2
+let KB_L: i32 = 16
+let KB_R: i32 = 32
+let KB_UP: i32 = 64
+let KB_DOWN: i32 = 128
+let KB_LEFT: i32 = 256
+let KB_RIGHT: i32 = 512
+
+// A pad word as numpad notation: 7 8 9 / 4 5 6 / 1 2 3, with 5 = neutral.
+export function padDirOf(keys: i32): i32 {
+  let x: i32 = 0
+  let y: i32 = 0
+  if ((keys & KB_LEFT) > 0) { x = 0 - 1 }
+  if ((keys & KB_RIGHT) > 0) { x = 1 }
+  if ((keys & KB_UP) > 0) { y = 1 }
+  if ((keys & KB_DOWN) > 0) { y = 0 - 1 }
+  return 5 + x + y * 3
+}
+
+// A pad word as a BTN_* mask.
+export function padButtonsOf(keys: i32): i32 {
+  let m: i32 = 0
+  if ((keys & KB_B) > 0) { m = m + BTN_LP }
+  if ((keys & KB_A) > 0) { m = m + BTN_HP }
+  if ((keys & KB_R) > 0) { m = m + BTN_LK }
+  if ((keys & KB_L) > 0) { m = m + BTN_HK }
+  return m
+}

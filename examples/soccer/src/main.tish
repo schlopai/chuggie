@@ -1,0 +1,268 @@
+// soccer — six players and a ball, and the acceptance test for disc-vs-disc contact.
+//
+// ── What it is the acceptance test for ────────────────────────────────────────────────────────
+//
+// `dynamic_system` at N BODIES. `examples/golf` proves a single disc integrates, bounces off tiles
+// and comes to rest; that says nothing about what happens when discs meet each other, which is the
+// half of a physics engine that is easy to make *present* and hard to make *stable*.
+//
+// The three things this pins down, none of which golf can:
+//
+//   1. **Contact is stable, not merely detected.** Six players converging on one ball is a pile of
+//      simultaneous overlaps every frame. A resolver that pushes without a consistent split makes
+//      bodies jitter or squirt out of the pile; one that pushes too little lets them interpenetrate
+//      and stick. The verifier asserts nobody ends up inside anybody.
+//   2. **The rank split does what it says.** The ball is rank 0 and the players rank 1, so a player
+//      meeting the ball moves the ball and not himself, while two players meeting each other split
+//      the correction evenly. That is the whole mass model — see `struct Dynamic` for why it is a
+//      rank and not a mass on a chip with no divide instruction.
+//   3. **`body_last_hit` is real.** Who touched the ball last is the difference between a goal and
+//      an own goal, and the engine records it during contact resolution rather than making the game
+//      guess from positions afterwards.
+//
+// It also re-tests the native-AI budget from the other side: six chasing players cost ZERO
+// per-frame tish callbacks. The steering below is arithmetic in the frame loop, not a component.
+//
+// ── Controls ──────────────────────────────────────────────────────────────────
+// It plays itself. There is no player input, deliberately: what is under test is the physics, and a
+// human in the middle of it would make the soak's outcome depend on nobody holding the pad.
+
+import { pitch } from 'scene:../assets/pitch.tmj'
+import { soccer8 } from 'sheet8:../assets/soccer8.png'
+import {
+  frame, log, backdrop, hud_text, sprite_new, sprite_set_frame, heap_free, bg_clear
+} from 'cargo:tish_agb'
+import {
+  spawn, set_transform, attach_sprite, set_sprite_offset, world_step,
+  entity_x, entity_y, entity_count,
+  set_dynamic, body_impulse, body_kick, body_asleep, body_speed2, body_last_hit,
+  surface_def
+} from 'cargo:tish_gba_game_engine'
+import { loadSceneRom } from '../../../packages/engine'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+
+let TILE: i32 = 16
+let PW: i32 = 22
+let PH: i32 = 14
+let GOAL_R0: i32 = 5
+let GOAL_R1: i32 = 8
+
+let F_BALL: i32 = 0
+let F_HOME: i32 = 1
+let F_AWAY: i32 = 2
+
+let TEAM_N: i32 = 3
+let PLAYERS: i32 = 6        // 3 home + 3 away
+
+// Flat typed columns, never an array of objects: read once per player per frame.
+let P_ENT: i32[] = [0, 0, 0, 0, 0, 0]
+let P_TEAM: i32[] = [0, 0, 0, 1, 1, 1]
+let P_HOMEX: i32[] = [0, 0, 0, 0, 0, 0]
+let P_HOMEY: i32[] = [0, 0, 0, 0, 0, 0]
+
+let ball: i32 = 0 - 1
+let scoreHome: i32 = 0
+let scoreAway: i32 = 0
+let kickoffHold: i32 = 0
+let lastHud: i32 = 0 - 1
+let goals: i32 = 0
+let ownGoals: i32 = 0
+// Frames since the last goal. A ball wedged in a corner between two players is a legal physical
+// outcome, not a bug — but it is a DEAD BALL, and football restarts one rather than waiting. Without
+// this the soak sat on a stalemate and reported it as "no goals", which reads like broken physics.
+let idle: i32 = 0
+let deadBalls: i32 = 0
+let IDLE_MAX: i32 = 600
+
+function absi(v: i32): i32 { if (v < 0) { return 0 - v } return v }
+
+/// Put everyone back on their mark and stop the ball dead.
+function kickoff(dir: i32) {
+  set_transform(ball, PW * TILE / 2, PH * TILE / 2)
+  // Re-arming clears velocity and wakes the body, which is what a kickoff is.
+  set_dynamic(ball, 6, 220, 250, 0.18, 0)
+  let i: i32 = 0
+  while (i < PLAYERS) {
+    set_transform(P_ENT[i], P_HOMEX[i], P_HOMEY[i])
+    set_dynamic(P_ENT[i], 10, 128, 200, 0.10, 1)
+    i = i + 1
+  }
+  if (dir !== 0) { body_impulse(ball, dir, 2) }
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+
+backdrop(0)
+rngSeed(0, 20260812)
+
+bg_clear()
+frame()
+loadSceneRom(pitch)
+
+// One surface class: the pitch. Friction 250/256 — a ball that keeps rolling, unlike golf's green,
+// because a football that stopped like a golf ball would make a six-a-side game a series of stalls.
+surface_def(0, 0, 0, 250)
+
+ball = spawn()
+let bspr: i32 = sprite_new(soccer8)
+sprite_set_frame(bspr, F_BALL)
+attach_sprite(ball, bspr)
+set_sprite_offset(ball, 0 - 4, 0 - 4)
+
+// ⚠️ THE BALL IS RANK 0 AND THE PLAYERS RANK 1, AND THAT ORDER IS THE MASS MODEL.
+// A LOWER rank takes the WHOLE of a contact correction against a higher one, so the ball is what
+// moves when a player runs into it. Equal ranks (player vs player) split it evenly. Getting this
+// backwards gives a ball that shoves players around and cannot be dribbled.
+let i: i32 = 0
+while (i < PLAYERS) {
+  let e: i32 = spawn()
+  P_ENT[i] = e
+  let sp: i32 = sprite_new(soccer8)
+  if (P_TEAM[i] === 0) { sprite_set_frame(sp, F_HOME) } else { sprite_set_frame(sp, F_AWAY) }
+  attach_sprite(e, sp)
+  set_sprite_offset(e, 0 - 4, 0 - 4)
+  // Home marks: home team on the left third, away on the right.
+  let lane: i32 = i - (P_TEAM[i] * TEAM_N)
+  if (P_TEAM[i] === 0) { P_HOMEX[i] = 5 * TILE } else { P_HOMEX[i] = (PW - 6) * TILE }
+  P_HOMEY[i] = (3 + lane * 4) * TILE
+  i = i + 1
+}
+
+kickoff(0)
+log("SOC BOOT ENT " + entity_count())
+log("HEAP " + heap_free())
+
+let t: i32 = 0
+while (true) {
+  t = t + 1
+
+  if (kickoffHold > 0) {
+    kickoffHold = kickoffHold - 1
+    if (kickoffHold === 0) { kickoff(rngBelow(0, 256)) }
+  } else {
+    let bx: i32 = entity_x(ball)
+    let by: i32 = entity_y(ball)
+
+    // ── steering: six chasers, no callbacks ──────────────────────────────────
+    // Each player accelerates toward the ball, capped by its own friction. Eight-way from the sign
+    // of each axis — no atan2, no division, and no per-entity tish component.
+    let p: i32 = 0
+    while (p < PLAYERS) {
+      let e: i32 = P_ENT[p]
+      let dx: i32 = bx - entity_x(e)
+      let dy: i32 = by - entity_y(e)
+      // ⚠️ THE CHASE RADIUS MUST COVER THE PITCH. At 96px — six tiles — on a 352x224 pitch, every
+      // player was usually too far to chase and drifted back to his mark instead, so the ball sat
+      // still and the disc-vs-disc case under test barely happened: one goal in 3,000 frames with
+      // the ball asleep throughout. Everyone chases; this is six-a-side, not a formation drill.
+      let d: i32 = absi(dx) + absi(dy)
+      if (d < 400) {
+        let turn: i32 = 0
+        if (dx > 0 && dy > 0) { turn = 32 }
+        else if (dx > 0 && dy < 0) { turn = 224 }
+        else if (dx < 0 && dy > 0) { turn = 96 }
+        else if (dx < 0 && dy < 0) { turn = 160 }
+        else if (dx > 0) { turn = 0 }
+        else if (dx < 0) { turn = 128 }
+        else if (dy > 0) { turn = 64 }
+        else { turn = 192 }
+        body_impulse(e, turn, 0.35)
+      } else {
+        // Too far to chase: drift back toward the mark, so the pitch does not collapse into one
+        // scrum and the disc-vs-disc case stays interesting rather than permanent.
+        let hx: i32 = P_HOMEX[p] - entity_x(e)
+        let hy: i32 = P_HOMEY[p] - entity_y(e)
+        if (absi(hx) + absi(hy) > 12) {
+          let turn: i32 = 0
+          if (hx > 0 && hy > 0) { turn = 32 }
+          else if (hx > 0 && hy < 0) { turn = 224 }
+          else if (hx < 0 && hy > 0) { turn = 96 }
+          else if (hx < 0 && hy < 0) { turn = 160 }
+          else if (hx > 0) { turn = 0 }
+          else if (hx < 0) { turn = 128 }
+          else if (hy > 0) { turn = 64 }
+          else { turn = 192 }
+          body_impulse(e, turn, 0.2)
+        }
+      }
+      p = p + 1
+    }
+
+    // ── goals ────────────────────────────────────────────────────────────────
+    // A goal is a REGION, not a tile: the mouth is a gap in the wall, so the ball passes through it
+    // and the test is where the ball is. Tiles that stopped the ball would be a goal you cannot
+    // score in.
+    let brow: i32 = by / TILE
+    if (brow >= GOAL_R0 && brow <= GOAL_R1) {
+      let scored: i32 = 0 - 1
+      if (bx < TILE) { scored = 1 }              // through the LEFT mouth: away scores
+      else if (bx > (PW - 1) * TILE) { scored = 0 }
+      if (scored >= 0) {
+        // ⚠️ WHO TOUCHED IT LAST decides whether this is a goal or an own goal, and the ENGINE
+        // knows — it records the toucher during contact resolution. Reconstructing it here from
+        // positions after the fact is exactly the guess `body_last_hit` exists to remove.
+        let toucher: i32 = body_last_hit(ball)
+        let tteam: i32 = 0 - 1
+        let q: i32 = 0
+        while (q < PLAYERS) {
+          if (P_ENT[q] === toucher) { tteam = P_TEAM[q] }
+          q = q + 1
+        }
+        let own: i32 = 0
+        if (tteam >= 0 && tteam !== scored) { own = 1 }
+        if (scored === 0) { scoreHome = scoreHome + 1 } else { scoreAway = scoreAway + 1 }
+        goals = goals + 1
+        if (own === 1) { ownGoals = ownGoals + 1 }
+        log("SOC GOAL team=" + scored + " own=" + own + " toucher=" + toucher + " tteam=" + tteam
+          + " score=" + scoreHome + "-" + scoreAway)
+        kickoffHold = 40
+        idle = 0
+      }
+    }
+  }
+
+  if (kickoffHold === 0) {
+    idle = idle + 1
+    if (idle >= IDLE_MAX) {
+      deadBalls = deadBalls + 1
+      log("SOC DEADBALL t=" + t)
+      idle = 0
+      kickoffHold = 20
+    }
+  }
+
+  let hud: i32 = scoreHome * 100 + scoreAway
+  if (hud !== lastHud) {
+    hud_text(0, 4, 4, "HOME " + scoreHome + "  AWAY " + scoreAway)
+    lastHud = hud
+  }
+
+  if ((t & 511) === 0) {
+    log("SOC TELE t=" + t + " goals=" + goals + " own=" + ownGoals + " dead=" + deadBalls
+      + " bv2=" + body_speed2(ball) + " bx=" + entity_x(ball) + " by=" + entity_y(ball)
+      + " asleep=" + body_asleep(ball) + " ENT " + entity_count())
+    log("HEAP " + heap_free())
+    // Overlap audit: no two discs may end a frame inside one another. A resolver that pushes
+    // inconsistently shows up here and nowhere else — on screen it looks like a scrum either way.
+    // ⚠️ SQUARED EUCLIDEAN, NOT MANHATTAN. Manhattan distance is always >= Euclidean, so a
+    // Manhattan separation of 9 is consistent with two discs 6px apart and overlapping — the audit
+    // would have reported healthy numbers for a resolver that let bodies sink into each other.
+    // Players are diameter 10, so touching is a centre distance of 10 and d2 of 100.
+    let a: i32 = 0
+    let worst: i32 = 0
+    while (a < PLAYERS) {
+      let b: i32 = a + 1
+      while (b < PLAYERS) {
+        let dx: i32 = entity_x(P_ENT[a]) - entity_x(P_ENT[b])
+        let dy: i32 = entity_y(P_ENT[a]) - entity_y(P_ENT[b])
+        let d2: i32 = dx * dx + dy * dy
+        if (worst === 0 || d2 < worst) { worst = d2 }
+        b = b + 1
+      }
+      a = a + 1
+    }
+    log("SOC SEP d2min=" + worst)
+  }
+
+  world_step()
+}

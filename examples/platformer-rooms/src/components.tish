@@ -1,0 +1,29 @@
+// Side-scrolling platformer player. Walk left/right with the d-pad, jump with A. The engine's
+// platformer system applies gravity + solid-tile collision; here we only feed input and pick the
+// animation clip. The hero sheet is 4 frames facing right: 0 idle, 1-2 run, 3 jump/fall (flip for
+// left). `this.data.face` remembers the last direction so the idle frame keeps facing it.
+import { input_x, key_pressed } from 'cargo:tish_agb'
+
+function animateHero(e, dx) {
+  if (dx < 0) { e.setFlip(true); e.data.face = -1 }
+  else if (dx > 0) { e.setFlip(false); e.data.face = 1 }
+  else { e.setFlip(e.data.face < 0) }
+
+  if (!e.onGround()) {
+    e.play(3, 1, 1, false)      // airborne — jump/fall pose
+  } else if (dx !== 0) {
+    e.play(1, 2, 6, true)       // run cycle
+  } else {
+    e.play(0, 1, 1, false)      // idle
+  }
+}
+
+export const Player = {
+  start: ({ this }) => { this.data.face = 1 },
+  update: ({ this }) => {
+    let dx = input_x()
+    this.moveX(dx)
+    if (key_pressed(0) > 0) { this.jump() }
+    animateHero(this, dx)
+  }
+}

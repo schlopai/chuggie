@@ -1,0 +1,15 @@
+{
+ "columns": 8,
+ "image": "wf_tiles.png",
+ "imagewidth": 128,
+ "imageheight": 96,
+ "margin": 0,
+ "name": "wf_tiles",
+ "spacing": 0,
+ "tilecount": 48,
+ "tiledversion": "1.11.0",
+ "tileheight": 16,
+ "tilewidth": 16,
+ "type": "tileset",
+ "version": "1.10"
+}

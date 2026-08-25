@@ -1,0 +1,26 @@
+// Repro #654 aggregate: push + length via shared cell (no boards_capt).
+import { log, vblank } from 'cargo:tish_agb'
+
+let boards = []
+
+function pushBoard(b) {
+  boards.push(b)
+}
+
+function countBoards() {
+  return boards.length
+}
+
+pushBoard(1)
+pushBoard(2)
+pushBoard(3)
+log("boards=" + countBoards())
+
+let f: i32 = 0
+while (f < 130) {
+  if (f % 40 === 0) { pushBoard(f) }
+  if (f % 40 === 1) { log("len=" + countBoards()) }
+  vblank()
+  f = f + 1
+}
+log("repro-654-agg-push done")

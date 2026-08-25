@@ -1,0 +1,199 @@
+// The CPU opponent.
+//
+// It does not read the fighter's internals and it does not get a private path into the state
+// machine: it produces a direction and a button mask, pushes them into `packages/motion` exactly
+// like the pad does, and lives with the same startup frames and the same blockstun the player does.
+// That is the only way an AI stays honest — anything it can do, the player can do, and any bug in
+// the fighter shows up in both.
+//
+// ── The shape of it ──────────────────────────────────────────────────────────────────────────────
+// Distance bands, an intent that lasts a while, and a reaction delay. Re-deciding every frame reads
+// as a twitching insect rather than an opponent, so a chosen intent is held for a random 8–24
+// frames. The reaction delay is what makes it beatable: it cannot begin blocking until `REACT`
+// frames after the player's attack started, so a fast enough poke gets through and a slow one does
+// not — which is the same rule the player is playing by.
+import { FS_ATTACK, FS_HITSTUN } from '../../../packages/fighter'
+import { BTN_LP, BTN_HP, BTN_LK, BTN_HK } from '../../../packages/motion'
+
+// Intents. Each is a (direction, buttons) generator rather than a fixed pair, because "approach"
+// means a different numpad digit depending on which side the CPU is standing on.
+let I_WAIT: i32 = 0
+let I_APPROACH: i32 = 1
+let I_RETREAT: i32 = 2
+let I_BLOCK: i32 = 3
+let I_POKE: i32 = 4
+let I_HEAVY: i32 = 5
+let I_SWEEP: i32 = 6
+let I_JUMP_IN: i32 = 7
+let I_SPECIAL: i32 = 8
+let I_THROW: i32 = 9
+
+// A[0] current intent, A[1] frames left on it, A[2] rng state, A[3] the frame the opponent's
+// current attack started, A[4] difficulty 0..2, A[5] motion step for a special being input.
+let A: i32[] = [0, 0, 0x2545F491, 0 - 99, 1, 0]
+let A_INTENT: i32 = 0
+let A_LEFT: i32 = 1
+let A_RNG: i32 = 2
+let A_SAW: i32 = 3
+let A_DIFF: i32 = 4
+let A_STEP: i32 = 5
+
+// Reaction delay in frames by difficulty: about a fifth of a second down to a twelfth.
+let REACT: i32[] = [12, 8, 5]
+
+export function aiInit(difficulty: i32) {
+  A[A_INTENT] = I_WAIT
+  A[A_LEFT] = 0
+  A[A_SAW] = 0 - 99
+  A[A_DIFF] = difficulty
+  A[A_STEP] = 0
+}
+
+function rnd(n: i32): i32 {
+  // xorshift; `& 0x3FFFFFFF` keeps it inside a signed 32-bit int on every backend.
+  let x: i32 = A[A_RNG]
+  x = x ^ (x << 13)
+  x = x ^ ((x >> 17) & 0x7FFF)
+  x = x ^ (x << 5)
+  A[A_RNG] = x & 0x3FFFFFFF
+  return (A[A_RNG] >> 3) % n
+}
+
+// Choose an intent for the next few frames.
+function decide(gap: i32, foeState: i32, frameNo: i32) {
+  let r: i32 = rnd(100)
+
+  // Reacting to an attack has priority over anything the CPU wanted to do — but only after the
+  // reaction delay, and only if it is close enough for the attack to matter.
+  if (foeState === FS_ATTACK) {
+    if (gap < 62) {
+      if (frameNo - A[A_SAW] >= REACT[A[A_DIFF]]) {
+        A[A_INTENT] = I_BLOCK
+        A[A_LEFT] = 10 + rnd(8)
+        return
+      }
+    }
+  }
+
+  if (gap > 96) {
+    // Far: close the distance, or jump in if it has meter to punish an anti-air whiff.
+    if (r < 70) { A[A_INTENT] = I_APPROACH } else { A[A_INTENT] = I_JUMP_IN }
+    A[A_LEFT] = 14 + rnd(14)
+    return
+  }
+  if (gap > 52) {
+    // Mid: the poking range. Sweeps and long kicks live here.
+    if (r < 34) { A[A_INTENT] = I_APPROACH }
+    else if (r < 54) { A[A_INTENT] = I_SWEEP }
+    else if (r < 72) { A[A_INTENT] = I_POKE }
+    else if (r < 84) { A[A_INTENT] = I_RETREAT }
+    else if (r < 92) { A[A_INTENT] = I_JUMP_IN }
+    else { A[A_INTENT] = I_SPECIAL }
+    A[A_LEFT] = 10 + rnd(12)
+    return
+  }
+  // Close: commit. Blocking here is what makes the player have to open it up.
+  if (r < 26) { A[A_INTENT] = I_POKE }
+  else if (r < 44) { A[A_INTENT] = I_HEAVY }
+  else if (r < 58) { A[A_INTENT] = I_SWEEP }
+  else if (r < 70) { A[A_INTENT] = I_THROW }
+  else if (r < 84) { A[A_INTENT] = I_BLOCK }
+  else if (r < 92) { A[A_INTENT] = I_RETREAT }
+  else { A[A_INTENT] = I_SPECIAL }
+  A[A_LEFT] = 8 + rnd(12)
+}
+
+// The CPU's numpad direction for this frame. Packed with `aiButtons` below: call `aiTick` first.
+let OUT: i32[] = [5, 0, 0]
+let O_DIR: i32 = 0
+let O_HELD: i32 = 1
+let O_EDGE: i32 = 2
+
+// Advance the CPU one frame. Afterwards `aiDir`, `aiHeld` and `aiEdge` describe the pad it is
+// "pressing", ready to hand to motionPush.
+// `view` is one packed word from fighterAiView — see the note there on why this is not four calls.
+export function aiTick(view: i32, frameNo: i32) {
+  let gap: i32 = view & 511
+  let myState: i32 = (view >> 9) & 15
+  let foeState: i32 = (view >> 13) & 15
+  let face: i32 = 0 - 1
+  if (((view >> 17) & 1) === 1) { face = 1 }
+
+  if (foeState !== FS_ATTACK) { A[A_SAW] = frameNo }
+
+  A[A_LEFT] = A[A_LEFT] - 1
+  if (A[A_LEFT] <= 0) { decide(gap, foeState, frameNo) }
+
+  if (myState === FS_HITSTUN) { A[A_STEP] = 0 }
+  // Numpad digits for "toward the opponent" and "away from it", given which way the CPU faces.
+  let fwd: i32 = 6
+  let back: i32 = 4
+  if (face < 0) { fwd = 4 back = 6 }
+
+  let dir: i32 = 5
+  let edge: i32 = 0
+  let held: i32 = 0
+  let intent: i32 = A[A_INTENT]
+
+  if (intent === I_APPROACH) { dir = fwd }
+  else if (intent === I_RETREAT) { dir = back }
+  else if (intent === I_BLOCK) {
+    dir = back
+    // Crouch-block half the time so the player cannot simply sweep every guard.
+    if ((A[A_LEFT] & 1) === 1) { dir = back - 3 }
+  }
+  else if (intent === I_POKE) {
+    dir = 5
+    if (A[A_LEFT] === 6) { edge = BTN_LP held = BTN_LP }
+  }
+  else if (intent === I_HEAVY) {
+    dir = 5
+    if (A[A_LEFT] === 6) { edge = BTN_HP held = BTN_HP }
+  }
+  else if (intent === I_SWEEP) {
+    dir = 2
+    if (A[A_LEFT] === 5) { edge = BTN_HK held = BTN_HK }
+  }
+  else if (intent === I_THROW) {
+    dir = fwd
+    if (A[A_LEFT] === 5) { edge = BTN_LP | BTN_HP held = BTN_LP | BTN_HP }
+  }
+  else if (intent === I_JUMP_IN) {
+    dir = fwd + 3
+    if (A[A_LEFT] < 8) {
+      dir = 5
+      if (A[A_LEFT] === 4) { edge = BTN_HK held = BTN_HK }
+    }
+  }
+  else if (intent === I_SPECIAL) {
+    // A special is INPUT, not invoked: the CPU walks the quarter-circle through the same ring the
+    // player's does, so a special it "should not" have got is a bug in the recogniser, visibly.
+    let s: i32 = A[A_STEP]
+    if (s === 0) { A[A_STEP] = 1 dir = 2 }
+    else if (s === 1) { A[A_STEP] = 2 dir = 2 }
+    else if (s === 2) { A[A_STEP] = 3 dir = fwd - 3 }
+    else if (s === 3) { A[A_STEP] = 4 dir = fwd }
+    else if (s === 4) {
+      A[A_STEP] = 0
+      dir = fwd
+      edge = BTN_HP
+      held = BTN_HP
+      A[A_LEFT] = 0
+    }
+  }
+
+  OUT[O_DIR] = dir
+  OUT[O_HELD] = held
+  OUT[O_EDGE] = edge
+}
+
+export function aiDir(): i32 { return OUT[O_DIR] }
+export function aiHeld(): i32 { return OUT[O_HELD] }
+export function aiEdge(): i32 { return OUT[O_EDGE] }
+
+// Menu navigation: the CPU picks its fighter on the select screen, so the player never waits.
+export function aiPickChar(exclude: i32): i32 {
+  let c: i32 = rnd(4)
+  if (c === exclude) { c = (c + 1 + rnd(3)) % 4 }
+  return c
+}

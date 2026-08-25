@@ -1,0 +1,43 @@
+// iso_actors.tish — the frame contract for 32x32 isometric actor sheets, plus 4-way iso facing.
+//
+// Separate from packages/iso on purpose: `iso.tish` is the projection and works with any art, while
+// this file is the LAYOUT of one particular sheet format. A game that draws its own actors wants
+// the first without the second.
+//
+// These indices MUST match the isoboard SRPG example's pack_actors.py (now in the chuggie-tactics repo), which packs each character
+// sheet as two facing blocks (SE then NE) — the game h-flips them for the SW / NW diagonals — with
+// this per-block layout:
+//
+//     walk 0..7 | attack 8..11 | charge 12 | release 13 | damage 14 | weak 15 | dead 16
+//
+// SE block starts at frame 0, NE block at DIR_STRIDE (17). Weapon sheets hold the 4-frame swing for
+// both facings: SE 0..3, NE 4..7.
+//
+// This was a byte-identical copy in the isoboard SRPG example's anim.tish (now in the chuggie-tactics repo) and
+// examples/iso-town/src/anim.tish. Two files that must stay in step is the same failure that let
+// the projection drift; one file cannot.
+
+export let DIR_STRIDE: i32 = 17  // frames per facing block; NE block base = DIR_STRIDE
+export let ANIM_WALK: i32 = 0  // + sub-frame 0..7 (idle = sub 0)
+export let ANIM_ATTACK: i32 = 8  // + sub-frame 0..3 (melee swing)
+export let ANIM_CHARGE: i32 = 12  // spell/power wind-up (held)
+export let ANIM_RELEASE: i32 = 13  // spell/power release (cast)
+export let ANIM_DAMAGE: i32 = 14  // hit recoil
+export let ANIM_WEAK: i32 = 15  // low-HP stagger (idle when badly hurt)
+export let ANIM_DEAD: i32 = 16  // defeated (corpse)
+export let WPN_DIR_STRIDE: i32 = 4  // weapon: SE swing = 0..3, NE swing = 4..7
+
+// Which facing block + h-flip draws a unit at (ac,ar) looking toward (tc,tr). Returns { base, flip }:
+// base 0 = SE-facing art, DIR_STRIDE = NE-facing art; flip mirrors either to its "west" diagonal.
+export function facing(ac, ar, tc, tr) {
+  if (tc > ac) { return { base: 0, flip: 0 } }            // +col → SE (down-right)
+  if (tr > ar) { return { base: 0, flip: 1 } }            // +row → SW (down-left)
+  if (tr < ar) { return { base: DIR_STRIDE, flip: 0 } }   // -row → NE (up-right)
+  return { base: DIR_STRIDE, flip: 1 }                    // -col → NW (up-left)
+}
+
+// The weapon-overlay facing block for a body drawn from facing block `base` (0 = SE, else NE).
+export function weaponBase(base) {
+  if (base > 0) { return WPN_DIR_STRIDE }
+  return 0
+}

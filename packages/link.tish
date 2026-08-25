@@ -1,0 +1,270 @@
+// link.tish — two GBAs on one cable, in lockstep.
+//
+// The hardware surface is in `cargo:tish_agb` (`sio_link_*`); this is the protocol a game plays
+// over it. The whole idea is one sentence: **neither side advances a frame until it has both
+// sides' inputs for that frame**, and because the simulation is deterministic, both consoles then
+// compute the identical next state without ever sending the state itself.
+//
+//     linkOpen()
+//     while (true) {
+//       let peer = linkExchange(myInputBits)
+//       if (peer === LINK_STALL) { frame(); continue }     // waiting on the other console
+//       driveLocal(myInputBits)
+//       driveRemote(peer)
+//       stepTheGame()
+//       frame()
+//     }
+//
+// WHY LOCKSTEP AND NOT STATE SYNC. A 16-bit word per frame is what the cable comfortably carries;
+// a board is 63 cells plus chain state plus a queue, and sending that at 60Hz is not close to
+// possible. Sending only the inputs works exactly as long as both machines agree on everything
+// else — which is why `schlop/drop-gba/archive/crates/tish-gba-drop` has a seeded LCG rather than a clock-seeded one, and
+// why nothing in the rules reads the frame counter. That property was built in from the start and
+// is the reason this is a transport rather than a rewrite.
+//
+// HOW THIS IS TESTED. `tools/gba-link` runs two cores in one process with their serial ports
+// wired together through mGBA's own SIO lockstep, so the two-console case is exercised for real:
+// both units enumerate, agree a seed and exchange words. drop-gba's `examples/drop-link` covers the other
+// half — a side driven by a word from outside — without needing a peer at all.
+//
+// Three bugs came out of actually running it, and none would have been visible from reading:
+//   * the master waited on the SD "all ready" bit, which does not go high until a transfer has
+//     been attempted — so it waited for a readiness only its own transfer could establish;
+//   * the master flipped to PLAYING on the child's first empty word, stopped tagging the seed,
+//     and left the child waiting for one that would never be sent again;
+//   * SIOCNT's id field reads 0 on BOTH units until the port enumerates, so `other = 1 - id` had
+//     the child reading its own slot forever.
+import {
+  sio_link_open, sio_link_master, sio_link_busy, sio_link_error,
+  sio_link_send, sio_link_recv, log
+} from 'cargo:tish_agb'
+
+export let LINK_OFFLINE: i32 = 0     // the port could not be opened at all
+export let LINK_SYNCING: i32 = 1     // waiting for a peer, or agreeing on a seed
+export let LINK_PLAYING: i32 = 2     // in lockstep
+export let LINK_LOST: i32 = 3        // was playing, and the peer went away
+
+/// `linkExchange` returns this when the peer's word for this frame has not arrived yet. The
+/// caller must NOT advance the simulation on a stall — that is the one rule that keeps two
+/// consoles on the same frame number.
+export let LINK_STALL: i32 = -1
+
+// The handshake word. A frame's payload is 16 bits, and the top two are spent saying what the
+// other fourteen mean: 0 = input, 1 = the master's seed. That leaves a 14-bit seed, which is
+// plenty — it only has to be unpredictable between matches, not cryptographic.
+let TAG_INPUT: i32 = 0
+let TAG_SEED: i32 = 0x4000
+let TAG_MASK: i32 = 0xC000
+let PAYLOAD_MASK: i32 = 0x3FFF
+
+// Frames without a word from the peer before a match in progress is declared lost.
+//
+// This does NOT apply while syncing. A unit that has not yet found a peer waits indefinitely,
+// because on real hardware and in two emulator windows that is the normal case: somebody boots
+// one console, then the other, then plugs the cable in, and any of those can be a minute apart.
+// An earlier version latched to OFFLINE after three seconds of silence, which meant whichever
+// unit was switched on first could never see the second one.
+let TIMEOUT: i32 = 180
+
+interface Link {
+  state: i32, id: i32, master: i32, seed: i32, quiet: i32, started: i32, sim: i32, simWord: i32,
+  echoed: i32,
+  // The payload actually put on the wire for the transfer now in flight — see `linkSent`.
+  lastSent: i32
+}
+let L: Link = {
+  state: 0, id: -1, master: 0, seed: 0, quiet: 0, started: 0, sim: 0, simWord: 0,
+  echoed: 0, lastSent: 0
+}
+
+/// Open the port. Returns the state; expect LINK_SYNCING with a cable and LINK_OFFLINE without.
+export function linkOpen(): i32 {
+  L.id = -1
+  L.master = 0
+  L.seed = 0
+  L.quiet = 0
+  L.started = 0
+  L.echoed = 0
+  if (sio_link_open(3) === 0) {          // baud 3 = 115200; the cable is short
+    L.state = LINK_OFFLINE
+    return L.state
+  }
+  L.state = LINK_SYNCING
+  return L.state
+}
+
+export function linkState(): i32 { return L.state }
+export function linkId(): i32 { return L.id }
+export function linkIsMaster(): i32 { return L.master }
+
+/// The seed both consoles agreed on. 0 until the handshake completes — a caller must not start a
+/// match before `linkState() === LINK_PLAYING`, or the two will deal different boards.
+export function linkSeed(): i32 { return L.seed }
+
+// TEST HOOK. Drive the state machine as though a peer were present, returning `word` as the
+// peer's input every frame. This is not a network stub pretending to be a cable: it exists so the
+// LOCKSTEP CALLER can be exercised headlessly — the part where a game drives side 1 from a word
+// instead of from its CPU, which is the part that would otherwise be written blind and debugged
+// on hardware.
+export function linkSimulate(on: i32, word: i32) {
+  L.sim = on
+  L.simWord = word
+  if (on !== 0) {
+    L.state = LINK_PLAYING
+    L.id = 0
+    L.master = 1
+    if (L.seed === 0) { L.seed = 12345 }
+  }
+}
+
+// Silence handling. While SYNCING there is nothing to lose yet, so wait forever; once PLAYING,
+// a peer that stops answering is a pulled cable and the caller has to be told.
+function lostOrWait() {
+  L.quiet = L.quiet + 1
+  if (L.state === LINK_PLAYING && L.quiet > TIMEOUT) {
+    L.state = LINK_LOST
+    log("LINK LOST")
+  }
+}
+
+/// Go back to looking for a peer after a LINK_LOST, without reopening the port.
+export function linkResync() {
+  L.state = LINK_SYNCING
+  L.seed = 0
+  L.quiet = 0
+  L.started = 0
+  L.echoed = 0
+}
+
+/// Frames since the last word from the peer — 0 while a link is healthy.
+export function linkQuiet(): i32 { return L.quiet }
+
+// One frame of the protocol. Returns the peer's word, or LINK_STALL.
+//
+// `word` is this console's 14-bit payload — normally a packed button mask. The caller keeps
+// sending until it gets something back, and does not step the game in between.
+export function linkExchange(word: i32): i32 {
+  if (L.sim !== 0) { return L.simWord & PAYLOAD_MASK }
+  if (L.state === LINK_OFFLINE || L.state === LINK_LOST) { return LINK_STALL }
+
+  // An error means the words sitting in SIOMULTI are stale and would be read as real input.
+  //
+  // NOT gated on the SD "all ready" bit. That bit is not a reliable precondition on the master
+  // side — it does not go high until a transfer has been attempted, so waiting for it deadlocks
+  // the whole protocol: the master waits for readiness that only its own transfer establishes,
+  // the child waits for the master's seed, and neither ever moves. Observed exactly that way.
+  // Absence is detected where it is actually visible instead: a completed transfer whose peer slot
+  // reads 0xFFFF, which `sio_link_recv` returns as -1 and the quiet counter below turns into a
+  // timeout.
+  if (sio_link_error() === 1) {
+    lostOrWait()
+    return LINK_STALL
+  }
+
+  // WHO WE ARE COMES FROM THE SI PIN, NOT THE ID FIELD.
+  //
+  // SIOCNT's multi-player id bits are only meaningful once the port has enumerated, and it does
+  // not enumerate until transfers are running — so during the handshake both consoles read id 0.
+  // With that, `other = 1 - id` made the CHILD read slot 1, which is itself: it received its own
+  // staged word forever, the master's seed was never seen, and the handshake sat there. The SI pin
+  // is wired, not negotiated, and is correct from the first instruction.
+  L.master = sio_link_master()
+  L.id = 1 - L.master
+
+  // A transfer is in flight — the words from the last one have already been consumed.
+  if (sio_link_busy() === 1) { return LINK_STALL }
+
+  if (L.started === 1) {
+    // A transfer completed since the last call: read the OTHER slot. Two units only, so the peer
+    // is whichever of slots 0 and 1 is not us.
+    L.started = 0
+    // Two consoles: the master is slot 0 and the child is slot 1, so each reads the other's.
+    let other = L.master
+    let got = sio_link_recv(other)
+    if (got >= 0) {
+      L.quiet = 0
+      let tag = got & TAG_MASK
+      let payload = got & PAYLOAD_MASK
+      if (L.state === LINK_SYNCING) {
+        // A THREE-WAY HANDSHAKE, and it has to be three.
+        //
+        // The seed is the master's, always: both ends offering one and taking the larger means a
+        // dropped word leaves them disagreeing about which was larger while both believe they
+        // synced. But the master must also not start playing the moment ANY word arrives — that
+        // was the first version, and it flipped to PLAYING on the child's very first (empty)
+        // frame, stopped tagging the seed, and left the child waiting for a seed that would never
+        // be sent again. Observed exactly: the master reported LINK PLAYING and the child silently
+        // fell back to its local CPU, so the two consoles ran different opponents.
+        //
+        // So the child echoes the seed back, and the master waits for its own value to return.
+        if (L.master === 1) {
+          if (tag === TAG_SEED && payload === L.seed) {
+            L.state = LINK_PLAYING
+            log("LINK PLAYING id " + L.id + " seed " + L.seed)
+          }
+        } else if (tag === TAG_SEED) {
+          L.seed = payload
+          L.state = LINK_PLAYING
+          log("LINK PLAYING id " + L.id + " seed " + L.seed)
+        }
+        return LINK_STALL
+      }
+      // ⚠️ HANDSHAKE RESIDUE IS NEVER GAME INPUT.
+      //
+      // The two units do not reach PLAYING on the same round: the child flips when it receives the
+      // seed, and the master only when its echo comes back one round later. So the master is still
+      // staging a SEED-tagged word on a round where the child has already started playing — and
+      // without this check the child returned that word's payload (the seed itself, 7919) to the
+      // game as the master's buttons, while the master saw no such thing. One asymmetric frame is
+      // all a lockstep simulation needs to become two different games, which is exactly how it
+      // showed up: two screens, both plausible Pong, different scores.
+      if (tag === TAG_SEED) { return LINK_STALL }
+      return payload
+    }
+    lostOrWait()
+    return LINK_STALL
+  }
+
+  // Stage this frame's word and, if we are the master, start the transfer.
+  let out = word & PAYLOAD_MASK
+  if (L.seed !== 0 && L.master === 0 && L.echoed === 0) {
+    // The child owes the master exactly one echo after it has the seed, and it flips to PLAYING
+    // on receipt — so the echo cannot be gated on still being in SYNCING.
+    out = TAG_SEED | (L.seed & PAYLOAD_MASK)
+    L.echoed = 1
+  } else if (L.state === LINK_SYNCING) {
+    if (L.master === 1) {
+      if (L.seed === 0) { L.seed = 7919 }
+      out = TAG_SEED | (L.seed & PAYLOAD_MASK)
+    } else if (L.seed !== 0) {
+      // The child's echo: send the seed back so the master knows it landed.
+      out = TAG_SEED | (L.seed & PAYLOAD_MASK)
+    }
+  }
+  // The child transitions on RECEIPT but must still send one echo, so the echo is staged on the
+  // frame it flips to PLAYING — hence the seed check above rather than a state check.
+  L.lastSent = out & PAYLOAD_MASK
+  if (sio_link_send(out) === 1) { L.started = 1 }
+  // A child never starts a transfer, so it has to assume one is coming and check next frame.
+  if (L.master === 0) { L.started = 1 }
+  return LINK_STALL
+}
+
+/// The word THIS console put on the wire for the exchange that just returned. Diagnostic.
+///
+/// ⚠️ DO NOT build a lockstep game on this. It is tempting: `linkExchange` alternates, the call that
+/// returns the peer's word ignores the word passed to it, so the answer belongs to an earlier round
+/// — and this tells you which word that was. But it is still an assumption, not a guarantee: a stall
+/// also happens when the port is busy or an error is being cleared, and nothing here says the peer
+/// staged ITS word for the same transfer. Pairing on it produced a game that agreed for hundreds of
+/// frames and then quietly did not.
+///
+/// What works is putting a ROUND NUMBER in the word and checking it — see `examples/pong-link`.
+export function linkSent(): i32 { return L.lastSent }
+
+/// Close the port and forget the session.
+export function linkClose() {
+  L.state = LINK_OFFLINE
+  L.id = -1
+  L.sim = 0
+}

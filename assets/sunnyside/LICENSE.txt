@@ -1,0 +1,15 @@
+Sunnyside World asset pack by Daniel Diggle
+https://danieldiggle.itch.io/sunnyside
+
+Licensed under the author's itch.io V1 license terms (as published on the
+asset page at download time, 2026-08-18):
+
+- Can be used in free and commercial projects.
+- Can be modified.
+- Credit is appreciated but not required.
+- Can be redistributed for educational purposes with proper attribution.
+- Cannot be resold or redistributed as an asset pack.
+- Cannot be used in NFTs or to train AI models.
+
+This vendored copy is included for use by the chuggie-engine examples with
+attribution to Daniel Diggle.

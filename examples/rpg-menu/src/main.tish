@@ -1,0 +1,329 @@
+// rpg-menu — INVENTORY / EQUIPMENT / SHOP, now built DECLARATIVELY on packages/ui.tish.
+//
+// Compare with the git history of this file: the old version hand-placed every sprite and text slot
+// at fixed pixel coordinates. This version describes each screen as a flex TREE (rows/cols, gap, pad,
+// grow, justify, align) and the layout engine computes positions + renders — text to the bg canvas
+// (no sprite-VRAM ceiling), icons through the engine's sprite pool. Selection is a cursor sprite
+// placed from the selected cell's computed geometry (nodes keep _x/_y after layout).
+//
+// Modules: items.tish (content), rpg.tish (inventory/equipment/stats/gold model),
+// menu.tish (grid/list cursor), ui.tish (layout engine). main.tish = screens + input + self-play.
+import { icons } from 'sheet32:../assets/icons32.png'
+import { uif } from 'font:../../../assets/fonts/ark-pixel-10px.ttf@10'
+import {
+  backdrop, frame, key_pressed, sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_visible
+} from 'cargo:tish_agb'
+import { uiInit, uiRender, makeGrid } from '../../../packages/ui'
+import { makeCursor } from './menu'
+import { item, shopCount, shopId, slotName } from './items'
+import {
+  rpgInit, atk, def, spd, maxHp, hp, gold,
+  bagCount, bagId, bagQty, equipped, activate, unequip, buy, sell
+} from './rpg'
+
+let SELF_PLAY: i32 = 1
+let FR_CURSOR: i32 = 13
+let FR_EMPTY: i32 = 14
+
+let BTN_A: i32 = 0
+let BTN_B: i32 = 1
+let BTN_SELECT: i32 = 2
+let BTN_START: i32 = 3
+
+let SCREEN_INV: i32 = 0
+let SCREEN_SHOP: i32 = 1
+let FOCUS_BAG: i32 = 0
+let FOCUS_EQ: i32 = 1
+
+let C_TITLE: i32 = 0xF4E4C1
+let C_TEXT: i32 = 0xB9C0D6
+let C_DIM: i32 = 0x6E7690
+let C_SEL: i32 = 0xFFE06A
+let C_GOLD: i32 = 0xFFCE4A
+let C_LABEL: i32 = 0xE0925A
+let C_FRAME: i32 = 0x8A6A4A
+
+let S = { screen: 0, focus: 0, msg: "", msgT: 0, dirty: 1 }
+function mark() { S.dirty = 1 }
+let shopCur = makeCursor(1, 1)
+let cursorSp = -1
+
+let bag = makeGrid({
+  // 12 slots in a 2-row window: only 2×4 fits under the header (a 3rd row overflowed the 160px screen),
+  // so the grid scrolls a row at a time. Before that, a 9th distinct item was simply unreachable — BAG
+  // holds any number of stacks, and `slots` only ever capped what was drawn.
+  cols: 4, slots: 12, h: 66, size: 32, gutter: 2, emptyIcon: FR_EMPTY,
+  outline: 0, qty: 0,
+  count: () => bagCount(),
+  item: (i) => {
+    return { icon: item(bagId(i)).icon }
+  },
+  selected: () => {
+    if (S.screen !== SCREEN_INV) { return 0 }
+    if (S.focus !== FOCUS_BAG) { return 0 }
+    return 1
+  }
+})
+
+let gear = makeGrid({
+  cols: 2, slots: 4, size: 32, gutter: 4, emptyIcon: FR_EMPTY,
+  outline: 0, qty: 0,
+  count: () => 4,
+  item: (i) => {
+    let slot = i + 1
+    let id = equipped(slot)
+    let fr = FR_EMPTY
+    if (id >= 0) { fr = item(id).icon }
+    return { icon: fr, label: slotName(slot) }
+  },
+  selected: () => {
+    if (S.screen !== SCREEN_INV) { return 0 }
+    if (S.focus !== FOCUS_EQ) { return 0 }
+    return 1
+  }
+})
+
+function pickC(sel, on, off) { if (sel) { return on } return off }
+function sign(n) { if (n > 0) { return "+" } return "" }
+function modStr(it) {
+  let s = ""
+  if (it.atk !== 0) { s = s + sign(it.atk) + it.atk + " ATK " }
+  if (it.def !== 0) { s = s + sign(it.def) + it.def + " DEF " }
+  if (it.spd !== 0) { s = s + sign(it.spd) + it.spd + " SPD " }
+  if (it.hp !== 0) { s = s + sign(it.hp) + it.hp + " HP " }
+  if (it.heal > 0) { s = s + "Heal " + it.heal }
+  if (s === "") { s = "-" }
+  return s
+}
+function flash(m) { S.msg = m; S.msgT = 100; mark() }
+
+// ── Tree builders ─────────────────────────────────────────────────────────
+function statsLine() {
+  return "ATK " + atk() + "   DEF " + def() + "   SPD " + spd() + "   HP " + hp() + "/" + maxHp()
+}
+function goldStr() { let g = gold(); return g + " G" }
+
+function invSelDesc() {
+  if (S.focus === FOCUS_BAG) {
+    let bi = bag.index()
+    if (bi >= bagCount()) { return "Empty slot." }
+    let it = item(bagId(bi))
+    return it.name + "  " + modStr(it)
+  }
+  let id = equipped(gear.index() + 1)
+  if (id < 0) { return "Empty slot." }
+  let it = item(id)
+  return it.name + "  " + modStr(it)
+}
+
+function invTree() {
+  // Keep pad/gap tight: header + gear/bag + 3 footer lines must fit in 160px.
+  return {
+    dir: "col", pad: 3, gap: 2,
+    children: [
+      { dir: "row", justify: "between", children: [
+        { text: "INVENTORY", color: C_TITLE },
+        { text: goldStr(), color: C_GOLD }
+      ]},
+      { dir: "row", grow: 1, gap: 5, children: [
+        { dir: "col", gap: 2, border: C_FRAME, pad: 3, children: [ { text: "GEAR", color: C_LABEL }, gear.view() ] },
+        { dir: "col", grow: 1, gap: 2, border: C_FRAME, pad: 3, children: [ { text: "BAG", color: C_LABEL }, bag.view() ] }
+      ]},
+      { text: statsLine(), color: C_TITLE },
+      { text: invSelDesc(), color: C_TEXT, w: 234, ellip: true },
+      { text: msgOrHint("A Use/Equip  B Sell  Sel Gear  Start Shop"), color: hintColor() }
+    ]
+  }
+}
+
+function shopListNode() {
+  let n = shopCount()
+  let rows = []
+  let i = 0
+  while (i < n) {
+    let it = item(shopId(i))
+    let onSel = (shopCur.index() === i)
+    rows.push({ dir: "row", gap: 4, children: [
+      { text: pickC(onSel, ">", " "), color: C_SEL },
+      { text: it.name, color: pickC(onSel, C_SEL, C_TEXT), grow: 1 },
+      { text: "" + it.price, color: C_GOLD }
+    ]})
+    i = i + 1
+  }
+  return { dir: "col", gap: 3, children: rows }
+}
+
+function shopPreviewNode() {
+  let sel = item(shopId(shopCur.index()))
+  return { dir: "col", align: "center", gap: 5, children: [
+    { icon: sel.icon, size: 32 },
+    { text: sel.name, color: C_TITLE },
+    { text: modStr(sel), color: C_TEXT },
+    { text: "Price " + sel.price, color: C_GOLD }
+  ]}
+}
+
+function shopTree() {
+  let sel = item(shopId(shopCur.index()))
+  return {
+    dir: "col", pad: 5, gap: 4,
+    children: [
+      { dir: "row", justify: "between", children: [
+        { text: "SHOP", color: C_TITLE },
+        { text: goldStr(), color: C_GOLD }
+      ]},
+      { dir: "row", grow: 1, gap: 8, children: [
+        { dir: "col", grow: 1, gap: 3, border: C_FRAME, pad: 5, children: [ { text: "WARES", color: C_LABEL }, shopListNode() ] },
+        { dir: "col", border: C_FRAME, pad: 5, children: [ shopPreviewNode() ] }
+      ]},
+      { text: sel.desc, color: C_TEXT, w: 230, ellip: true },
+      { text: msgOrHint("A Buy   B Back   Start Inventory"), color: hintColor() }
+    ]
+  }
+}
+
+function msgOrHint(hint) { if (S.msgT > 0) { return S.msg } return hint }
+function hintColor() { if (S.msgT > 0) { return C_SEL } return C_DIM }
+
+// ── Render ────────────────────────────────────────────────────────────────
+function render() {
+  // Drop retained grid nodes before rebuilding — otherwise two full bag+gear graphs stay live
+  // until GC and the second uiRender OOMs (40960) on hardware.
+  bag.clear()
+  gear.clear()
+  if (S.screen === SCREEN_INV) { uiRender(invTree()) } else { uiRender(shopTree()) }
+  // Cursor: placed from the selected cell's computed geometry.
+  let cell = null
+  if (S.screen === SCREEN_INV) {
+    if (S.focus === FOCUS_BAG) {
+      if (bagCount() > 0) { cell = bag.cellAt(bag.index()) }
+    } else {
+      cell = gear.cellAt(gear.index())
+    }
+  }
+  if (cell !== null) {
+    sprite_set_frame(cursorSp, FR_CURSOR)
+    sprite_set_pos(cursorSp, cell._x, cell._y)
+    sprite_set_visible(cursorSp, 1)
+  } else {
+    sprite_set_visible(cursorSp, 0)
+  }
+}
+
+// ── Intents (shared by input + self-play) ───────────────────────────────────
+function onNav() {
+  let m = 0
+  if (S.screen === SCREEN_INV) {
+    if (S.focus === FOCUS_BAG) { m = bag.nav() }
+    else { m = gear.nav() }
+  } else {
+    shopCur.setCount(shopCount())
+    m = shopCur.nav()
+  }
+  if (m > 0) { mark() }
+}
+function onConfirm() {
+  if (S.screen === SCREEN_INV) {
+    if (S.focus === FOCUS_BAG) {
+      let bi = bag.index()
+      if (bi >= bagCount()) { return }
+      let nm = item(bagId(bi)).name
+      let r = activate(bi)
+      if (r === 1) { flash("Used " + nm) }
+      if (r === 2) { flash("Equipped " + nm) }
+    } else {
+      let slot = gear.index() + 1
+      if (equipped(slot) >= 0) {
+        let nm = item(equipped(slot)).name
+        unequip(slot)
+        flash("Removed " + nm)
+      }
+    }
+  } else {
+    let nm = item(shopId(shopCur.index())).name
+    if (buy(shopCur.index()) > 0) { flash("Bought " + nm) } else { flash("Too poor!") }
+  }
+}
+function onCancel() {
+  if (S.screen === SCREEN_SHOP) { S.screen = SCREEN_INV; return }
+  if (S.focus === FOCUS_BAG) {
+    let bi = bag.index()
+    if (bi >= bagCount()) { return }
+    let nm = item(bagId(bi)).name
+    if (sell(bi) > 0) { flash("Sold " + nm) }
+  }
+}
+function onToggleFocus() {
+  if (S.screen === SCREEN_INV) {
+    if (S.focus === FOCUS_BAG) { S.focus = FOCUS_EQ } else { S.focus = FOCUS_BAG }
+    mark()
+  }
+}
+function onSwitch() {
+  if (S.screen === SCREEN_INV) { S.screen = SCREEN_SHOP } else { S.screen = SCREEN_INV }
+  mark()
+}
+
+function readInput() {
+  onNav()
+  if (key_pressed(BTN_A) > 0) { onConfirm() }
+  if (key_pressed(BTN_B) > 0) { onCancel() }
+  if (key_pressed(BTN_SELECT) > 0) { onToggleFocus() }
+  if (key_pressed(BTN_START) > 0) { onSwitch() }
+}
+
+// ── Self-play attract ────────────────────────────────────────────────────
+let PLAY = { t: 0, i: 0 }
+function bagIndexOf(id) {
+  let k = 0
+  while (k < bagCount()) { if (bagId(k) === id) { return k } k = k + 1 }
+  return -1
+}
+function selBag(id) { let bi = bagIndexOf(id); if (bi >= 0) { bag.setIndex(bi) } }
+function selfPlay() {
+  PLAY.t = PLAY.t + 1
+  if (PLAY.t % 40 !== 0) { return }
+  let step = PLAY.i
+  PLAY.i = PLAY.i + 1
+  if (step === 0) { S.focus = FOCUS_BAG; selBag(9); return }
+  if (step === 1) { onConfirm(); return }
+  if (step === 2) { selBag(5); return }
+  if (step === 3) { onConfirm(); return }
+  if (step === 4) { selBag(10); return }
+  if (step === 5) { onConfirm(); return }
+  // The bag holds 12 slots in a 2-row window: selecting the last one scrolls it down a row.
+  if (step === 6) { bag.setIndex(11); return }
+  if (step === 7) { bag.setIndex(0); return }
+  if (step === 8) { S.focus = FOCUS_EQ; gear.setIndex(0); return }
+  if (step === 9) { onSwitch(); shopCur.setIndex(3); return }
+  if (step === 10) { onConfirm(); return }
+  if (step === 11) { shopCur.setIndex(0); return }
+  if (step === 12) { onConfirm(); return }
+  if (step === 13) { onSwitch(); S.focus = FOCUS_BAG; selBag(4); return }
+  if (step === 14) { onConfirm(); return }
+  if (step === 15) { selBag(1); return }
+  if (step === 16) { onConfirm(); return }
+  PLAY.i = 6
+}
+// Each self-play step changes selection/state; re-render after firing one.
+function selfPlayTick() {
+  let before = PLAY.i
+  selfPlay()
+  if (PLAY.i !== before) { mark() }
+}
+
+// ── Boot ────────────────────────────────────────────────────────────────
+backdrop(0x0E0C16)
+rpgInit()
+uiInit({ font: uif, sheet: icons, iconSize: 32, icons: 32 })
+cursorSp = sprite_new(icons)
+shopCur.setCount(shopCount())
+
+// Menus are COLD: only re-lay-out + redraw when state changes (a nav, an action, a screen switch, or
+// the flash message clearing). Between changes we just present the persisted canvas + sprites.
+while (true) {
+  if (SELF_PLAY > 0) { selfPlayTick() } else { readInput() }
+  if (S.msgT > 0) { S.msgT = S.msgT - 1; if (S.msgT === 0) { mark() } }
+  if (S.dirty > 0) { render(); S.dirty = 0 }
+  frame()
+}

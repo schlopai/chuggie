@@ -1,0 +1,911 @@
+// platformer.tish — shared side-scrolling character control.
+//
+// The engine already owns the physics: gravity, AABB tile collision, coyote time, jump buffering,
+// variable jump height, one-way drop-through. What it does NOT own is everything above that — what
+// the buttons mean, when you're crouching, when a fall becomes a scrape down a wall, how a ladder
+// works, what happens between grabbing a ledge and standing on top of it. Every platformer example
+// in this repo re-wrote that from scratch, and `INVENTORY.md` lists extracting it as the single
+// biggest DX lever in the tree. This is it.
+//
+//     import {
+//       platformerInit, platformerDrive, platformerAnimate, platformerBusy
+//     } from '../../../packages/platformer'
+//
+//     export const Player = {
+//       start:  ({ this }) => { platformerInit(this, this.data, { boxW: 16, boxH: 16, ladders: 1 }) },
+//       update: ({ this }) => {
+//         platformerDrive(this, this.data, input_x(), input_y(), busy)
+//         platformerAnimate(this, this.data, CLIPS)
+//       }
+//     }
+//
+// `platformerDrive` reads the buttons itself (codes come from the config; A and B by default) so
+// the common case is one call. A game that needs to SYNTHESISE input — a cutscene walking the hero
+// across the screen, an attract loop, a headless test — calls `platformerDriveRaw` instead and
+// spells the presses out.
+//
+// ── WHAT IT DELIBERATELY DOES NOT DO ─────────────────────────────────────────────────────────────
+// The hit and death ANIMATIONS are here; the health model is not. The engine's `Health` component
+// already owns hp, i-frames and the `onDeath` hook, so a game calls `platformerHurt` / `platformerKill`
+// from its own handlers and this state machine only plays the right clip and holds input for the
+// right number of frames. Two systems owning hp is how you get a character that dies twice.
+import { key_pressed, key_held, key_released, sprite_set_flip } from 'cargo:tish_agb'
+// ⚠️ LEAF OPS ARE TYPED NATIVES, NOT WRAPPER METHODS. `this_.onGround()` is a boxed closure
+// dispatch measured at ~108 ticks (examples/repro-platformer-cost); a frame of `platformerDrive`
+// made ~14 of them and cost 1,534 ticks — a third of the whole 60fps budget, for one character.
+// Importing the same natives directly (`platformer_grounded(id)`) is the same semantics at
+// ~1/3 the price. The wrapper API stays for GAMES; this package is hot enough to go direct.
+import {
+  platformer_walk, platformer_run, platformer_jump, platformer_jump_release, platformer_drop,
+  platformer_grounded, platformer_blocked, platformer_bounce, platformer_vy, platformer_set_vy,
+  platformer_face, platformer_hold, set_transform, set_collider, entity_x, entity_y,
+  tile_solid, tile_ladder, entity_sprite, anim_play, set_sprite_offset, cvar, set_cvar
+} from 'cargo:tish_gba_game_engine'
+
+// ── HOT STATE LIVES IN THE ENGINE'S TYPED cvar SLOTS, NOT ON `data` ──────────────────────────────
+// Every `data.pfX` is a string-keyed hashmap lookup on a boxed object (~35 ticks); a cvar slot is
+// a typed i32 read (~1). The idle frame touched these fields sixteen times, which was over half
+// of `platformerDrive`'s whole cost. Only the five fields NOTHING outside this file reads moved —
+// pfMode / pfState / pfTimer stay on `data` because `platformerBusy` / `platformerState` /
+// `platformerDeadFor` are public and take `data`, not the entity.
+// ── PER-DRIVER CONFIG CACHE ─────────────────────────────────────────────────────────────────────
+// `platformerDrive` is called by exactly one body per game — the player; enemies run on native
+// AI. Its read-only config cost ~9 string-keyed property reads (~35 ticks each) EVERY frame, so
+// it is cached in typed module scalars (~1.7 ticks) and keyed by entity id: a different body
+// driving simply reloads once.
+//
+// ⚠️ ONLY FIELDS NO GAME MUTATES AT RUNTIME ARE IN HERE. examples/metroidvania grants its
+// abilities by writing `heroData.pfDouble` / `pfWall` / `pfCanSlide` mid-play, so those three are
+// deliberately NOT cached — caching them would silently swallow an ability pickup. Anything a
+// game is documented to flip at runtime must stay a live property read.
+let ccId: i32 = 0 - 1
+let ccJumpBtn: i32 = 0
+let ccRunBtn: i32 = 1
+let ccAlwaysRun: i32 = 0
+let ccCrouchH: i32 = 0
+let ccLandFrames: i32 = 0
+let ccBoxW: i32 = 16
+let ccBoxH: i32 = 16
+let ccLadders: i32 = 0
+let ccLedges: i32 = 0
+
+function cfgCache(d, id: i32) {
+  if (ccId === id) { return }
+  ccId = id
+  ccJumpBtn = d.pfJumpBtn
+  ccRunBtn = d.pfRunBtn
+  ccAlwaysRun = d.pfAlwaysRun
+  ccCrouchH = d.pfCrouchH
+  ccLandFrames = d.pfLandFrames
+  ccBoxW = d.pfBoxW
+  ccBoxH = d.pfBoxH
+  ccLadders = d.pfLadders
+  ccLedges = d.pfLedges
+}
+
+let K_FACE: i32 = 0
+let K_CROUCH: i32 = 1
+let K_AIRJ: i32 = 2
+let K_WLOCK: i32 = 3
+let K_WDIR: i32 = 4
+
+// ── States returned by `platformerDrive` ─────────────────────────────────────────────────────────
+export let PF_IDLE: i32 = 0
+export let PF_WALK: i32 = 1
+export let PF_RUN: i32 = 2
+export let PF_JUMP: i32 = 3         // rising
+export let PF_FALL: i32 = 4         // falling
+export let PF_LAND: i32 = 5         // touchdown recovery (a one-shot)
+export let PF_CROUCH: i32 = 6
+export let PF_CROUCHWALK: i32 = 7
+export let PF_SLIDE: i32 = 8
+export let PF_CLIMB: i32 = 9        // on a ladder, moving
+export let PF_CLIMB_IDLE: i32 = 10  // on a ladder, holding still
+export let PF_HANG: i32 = 11        // hanging off a grabbed ledge
+export let PF_LEDGE: i32 = 12       // pulling up over it
+export let PF_WALLSLIDE: i32 = 13
+export let PF_HURT: i32 = 14
+export let PF_DEAD: i32 = 15
+
+// Internal modes. NOT the same axis as the states above: a couple of modes animate as more than one
+// state (a ladder is CLIMB or CLIMB_IDLE depending on whether you're moving), and most states are
+// derived straight from physics with no mode at all.
+let M_FREE: i32 = 0
+let M_LAND: i32 = 1
+let M_HANG: i32 = 2
+let M_LEDGE: i32 = 3
+let M_LADDER: i32 = 4
+let M_SLIDE: i32 = 5
+let M_HURT: i32 = 6
+let M_DEAD: i32 = 7
+
+let TILE: i32 = 16
+
+// Defaults, tuned against the engine's own P_WALK / P_RUN / P_JUMP so these read as part of the same
+// character rather than a second opinion about how gravity works.
+let D_BOX_W: i32 = 16
+let D_BOX_H: i32 = 16
+let D_CROUCH_H: i32 = 10        // shorter box while ducked — fits under a one-tile gap
+let D_CLIMB_SPEED: i32 = 1      // px/frame up or down a ladder
+// ⚠️ `: fixed`, not a bare const. A fractional `const`/`let` with no annotation is a
+// thread-local Cell<f64> on a chip with no FPU (docs/perf-rules.md §1), and
+// `scripts/const_to_let.py --check` does NOT flag it — that checker only converts integer
+// consts, so fractional soft-floats pass it silently.
+let D_WALL_VY: fixed = 0.75  // px/frame scrape down a wall (terminal fall is 6)
+let D_WALL_KICK: i32 = 4        // px/frame upward launch off a wall jump
+let D_WALL_LOCK: i32 = 10       // frames a wall jump steers itself away before input is yours again
+let D_LADDER_HOP: i32 = 4       // px/frame upward launch when you jump off a ladder
+let D_LEDGE_FRAMES: i32 = 26    // pull-up duration; match your climb clip's length × speed
+let D_SLIDE_FRAMES: i32 = 16
+let D_LAND_FRAMES: i32 = 9
+let D_HURT_FRAMES: i32 = 14
+let D_DEATH_HOLD: i32 = 60      // frames the final death frame is held before a game may respawn
+let D_DOUBLE_JUMP_VEL: i32 = 5  // px/frame for the mid-air second jump
+
+let D_JUMP_BTN: i32 = 0         // A
+let D_RUN_BTN: i32 = 1          // B
+
+// ── small helpers (defined before every use: tish resolves a module binding only once it appears
+// above the reference — see the same note in examples/sunny-land/src/components.tish) ────────────
+
+function pick(v, dflt) { if (v === null) { return dflt } return v }
+
+// Floor a pixel coordinate to its tile index. Levels are non-negative, and `/` truncates toward
+// zero, which for a negative x would round the wrong way and put the hero in the column to its right.
+function tileOf(px) { let m = px % TILE; return (px - m) / TILE }
+
+// LIVE position. `this_.x` / `this_.y` are a snapshot taken when the wrapper was bound at the top of
+// the hook, and `setPos` does not refresh them — so anything that moves the body and then reads its
+// position again (crouching, then centring on a ladder) must ask the engine, not the wrapper.
+function liveX(this_) { return entity_x(this_.id) }
+function liveY(this_) { return entity_y(this_.id) }
+
+// sprite flip via natives (an entity with no sprite gets the same no-op the wrapper gave it)
+function flipN(this_, f) { sprite_set_flip(entity_sprite(this_.id), f ? 1 : 0) }
+
+function crouchDown(this_, data) {
+  let id: i32 = this_.id
+  if (cvar(id, K_CROUCH) === 1) { return }
+  if (data.pfCrouchH <= 0) { return }
+  set_cvar(id, K_CROUCH, 1)
+  // Keep the FEET planted: the box shrinks from the top, so the transform slides DOWN by the
+  // difference. Shrinking around the top-left instead leaves the character hovering.
+  set_transform(id, liveX(this_), liveY(this_) + (data.pfBoxH - data.pfCrouchH))
+  set_collider(id, data.pfBoxW, data.pfCrouchH)
+}
+
+function standUp(this_, data) {
+  let id: i32 = this_.id
+  if (cvar(id, K_CROUCH) === 0) { return }
+  set_cvar(id, K_CROUCH, 0)
+  set_transform(id, liveX(this_), liveY(this_) - (data.pfBoxH - data.pfCrouchH))
+  set_collider(id, data.pfBoxW, data.pfBoxH)
+}
+
+// Is there headroom to stand back up? Probes the tile row the FULL-height box's head would occupy.
+// Without it you can crawl under a one-tile gap and then stand up inside the ceiling.
+function canStand(this_, data) {
+  let id: i32 = this_.id
+  if (cvar(id, K_CROUCH) === 0) { return 1 }
+  let hy: i32 = liveY(this_) - (data.pfBoxH - data.pfCrouchH)
+  let row: i32 = tileOf(hy)
+  let hx: i32 = liveX(this_)
+  if (tile_solid(tileOf(hx), row)) { return 0 }
+  if (tile_solid(tileOf(hx + data.pfBoxW - 1), row)) { return 0 }
+  return 1
+}
+
+// Unfreeze a held body and put the box back to full height if it will fit. Every exit from a modal
+// state goes through here, so none of them can leave the character stuck frozen or stuck ducked.
+function unfreeze(this_, data) {
+  let id: i32 = this_.id
+  platformer_hold(id, 0)
+  if (canStand(this_, data) === 1) { standUp(this_, data) }
+}
+
+// The tile column the character's centre is over — which ladder they're on, and which column to
+// snap to once they grab it.
+function centreCol(this_, data) { return tileOf(liveX(this_) + data.pfBoxW / 2) }
+
+// Falling past a grabbable ledge on the side we're facing? A ledge is a solid tile at the box's TOP
+// row with nothing solid directly above it — the top edge of a wall. Writes the hang spot and the
+// pull-up target into `data` and returns 1; returns 0 and touches nothing otherwise.
+//
+// The hang box sits FLUSH OUTSIDE the wall, never overlapping it. Overlapping looks a few pixels
+// better and lets a release clip you straight through the wall; take the gap.
+function grabLedge(this_, data, face) {
+  let bx: i32 = liveX(this_)
+  let row: i32 = tileOf(liveY(this_))
+  let col: i32 = tileOf(bx - 1)
+  if (face > 0) { col = tileOf(bx + data.pfBoxW) }
+  if (!tile_solid(col, row)) { return 0 }
+  if (tile_solid(col, row - 1)) { return 0 }
+  let topY: i32 = row * TILE
+  if (face > 0) {
+    data.pfHangX = col * TILE - data.pfBoxW
+    data.pfTopX = col * TILE
+  } else {
+    data.pfHangX = (col + 1) * TILE
+    data.pfTopX = (col + 1) * TILE - data.pfBoxW
+  }
+  // Hang with the head roughly level with the ledge — half a tile below its top edge, which puts a
+  // tall sprite's hands on the corner. Fine-tune per character with `spriteOffset`, not here.
+  data.pfHangY = topY + TILE / 2
+  data.pfTopY = topY - data.pfBoxH
+  return 1
+}
+
+// Turn "what the physics is doing" into a state, and run the two behaviours that have no mode of
+// their own: landing recovery on the ground, wall-sliding in the air.
+// `gnd` and `moving` are 0/1 ints rather than bools on purpose — a bare bool variable on the RIGHT
+// of `&&` is MOVED by tish codegen (E0382), and these get reused.
+// `flags` packs moving | gnd<<1 | running<<2. A boxed call charges ~28 ticks PER ARGUMENT
+// (docs/perf-rules.md §2), so three 0/1 ints ride in one word; `vy` stays a real arg because it
+// is fixed-point, not a flag.
+function settleFree(this_, d, flags: i32, vy: fixed) {
+  let id: i32 = this_.id
+  let moving: i32 = flags & 1
+  let gnd: i32 = (flags >> 1) & 1
+  let running: i32 = (flags >> 2) & 1
+  // pfWasAir is read up to three times below and written once — one property read, then a local.
+  let wasAir: i32 = d.pfWasAir
+  let crouched: i32 = cvar(id, K_CROUCH)
+  if (gnd === 0) {
+    if (wasAir === 0) { d.pfWasAir = 1 }
+    // Wall slide: falling, with horizontal intent a wall is refusing. `blocked` already means
+    // "wanted to move and a wall stopped it", so there is no separate direction test to do.
+    if (d.pfWall === 1 && vy > 0 && platformer_blocked(id)) {
+      platformer_set_vy(id, d.pfWallVy)
+      d.pfState = PF_WALLSLIDE
+      return PF_WALLSLIDE
+    }
+    if (vy < 0) { d.pfState = PF_JUMP; return PF_JUMP }
+    d.pfState = PF_FALL
+    return PF_FALL
+  }
+
+  // Just touched down: play the landing recovery, but let a moving player cancel straight out of it
+  // so it never reads as a stumble.
+  if (d.pfMode === M_LAND) {
+    let t: i32 = d.pfTimer + 1
+    d.pfTimer = t
+    if (t >= ccLandFrames || moving === 1) {
+      d.pfMode = M_FREE
+      d.pfTimer = 0
+    } else {
+      if (wasAir === 1) { d.pfWasAir = 0 }
+      d.pfState = PF_LAND
+      return PF_LAND
+    }
+  } else if (wasAir === 1 && ccLandFrames > 0) {
+    d.pfMode = M_LAND
+    d.pfTimer = 0
+    d.pfWasAir = 0
+    d.pfState = PF_LAND
+    return PF_LAND
+  }
+  // only WRITE when it is actually set — the idle frame is the common case and a property
+  // store costs the same as a read
+  if (wasAir === 1) { d.pfWasAir = 0 }
+
+  if (crouched === 1) {
+    if (moving === 1) { d.pfState = PF_CROUCHWALK; return PF_CROUCHWALK }
+    d.pfState = PF_CROUCH
+    return PF_CROUCH
+  }
+  if (moving === 1) {
+    if (running === 1) { d.pfState = PF_RUN; return PF_RUN }
+    d.pfState = PF_WALK
+    return PF_WALK
+  }
+  d.pfState = PF_IDLE
+  return PF_IDLE
+}
+
+// Resolve a state to a clip, walking a fallback chain that always ends somewhere sensible. A
+// character with only four clips drawn still animates for running, crouch-walking and sliding.
+function clipFor(clips, st) {
+  if (st === PF_DEAD) { return pick(clips.dead, pick(clips.hurt, clips.idle)) }
+  if (st === PF_HURT) { return pick(clips.hurt, clips.idle) }
+  if (st === PF_HANG) { return pick(clips.hang, pick(clips.climb, clips.idle)) }
+  if (st === PF_LEDGE) { return pick(clips.ledge, pick(clips.climb, clips.idle)) }
+  if (st === PF_CLIMB) { return pick(clips.climb, clips.idle) }
+  if (st === PF_CLIMB_IDLE) { return pick(clips.climbIdle, pick(clips.climb, clips.idle)) }
+  if (st === PF_WALLSLIDE) { return pick(clips.wallslide, pick(clips.fall, clips.idle)) }
+  if (st === PF_SLIDE) { return pick(clips.slide, pick(clips.crouch, clips.idle)) }
+  if (st === PF_CROUCHWALK) { return pick(clips.crouchWalk, pick(clips.crouch, clips.idle)) }
+  if (st === PF_CROUCH) { return pick(clips.crouch, clips.idle) }
+  if (st === PF_LAND) { return pick(clips.land, pick(clips.fall, clips.idle)) }
+  if (st === PF_FALL) { return pick(clips.fall, pick(clips.jump, clips.idle)) }
+  if (st === PF_JUMP) { return pick(clips.jump, pick(clips.fall, clips.idle)) }
+  if (st === PF_RUN) { return pick(clips.run, pick(clips.walk, clips.idle)) }
+  if (st === PF_WALK) { return pick(clips.walk, pick(clips.run, clips.idle)) }
+  return clips.idle
+}
+
+// ── public API ───────────────────────────────────────────────────────────────────────────────────
+
+// Seed the controller's fields on a component's `data`. Call once, from `start`. Every `cfg` field
+// is optional:
+//
+//   boxW, boxH        hitbox, default 16x16. The ART can be any size — place it with `spriteOffset`.
+//   crouchH           hitbox height while ducked (default 10); 0 disables crouching entirely
+//   jumpBtn, runBtn   `key_pressed` codes, default A and B
+//   doubleJump        1 = one extra mid-air jump
+//   ladders           1 = Up/Down grabs tiles marked with the engine's `setLadder`
+//   ledges            1 = falling into a wall's top edge grabs it; A or Up then pulls up
+//   wallSlide         1 = pressing into a wall while falling scrapes down it; A jumps off
+//   slide             1 = Down + the run button, moving, on the ground, is a slide
+//   spriteOX spriteOY where the art sits relative to the hitbox, for art bigger than its box (a
+//                     64x64 cell over a 16x16 body is `-24, -48`). The package owns the offset from
+//                     here on, so a clip can shift it — see `platformerAnimate`.
+//   gripNudge         px to push the sprite toward the wall while hanging off a ledge. Art drawn
+//                     NARROWER than the hitbox is centred in it, so it hangs with daylight between
+//                     its hands and the wall; this closes that gap. Measure it: it is the distance
+//                     from the hitbox edge to the character's own edge, plus a pixel to overlap.
+//   alwaysRun         1 = move at run speed with no button held. The run button still exists and
+//                     still starts a slide with Down — it just no longer gates the speed. For a
+//                     game with ground to cover, where holding a button the whole time is a tax
+//                     rather than a choice. `walkSpeed` then only applies to crouch-walking.
+//   walkSpeed runSpeed  ground speed in px/frame, default 1.25 / 2.25. THIS ENTITY only — the
+//                     defaults are shared by every platformer in the repo, so a game whose hero
+//                     should feel quicker sets it here rather than retuning the engine. A slide is
+//                     a run burst and inherits `runSpeed`.
+//   climbSpeed wallVy wallKick wallLock ladderHop ledgeFrames slideFrames landFrames
+//   hurtFrames deathHold doubleJumpVel   speeds and timings, all defaulted above
+export function platformerInit(this_, data, cfg) {
+  ccId = 0 - 1   // config changed: drop the cache
+  let id: i32 = this_.id
+  let c = pick(cfg, {})
+  // 0 tells the engine "keep your default", which is also what an unset option means here.
+  this_.setSpeed(pick(c.walkSpeed, 0), pick(c.runSpeed, 0))
+  data.pfBoxW = pick(c.boxW, D_BOX_W)
+  data.pfBoxH = pick(c.boxH, D_BOX_H)
+  data.pfCrouchH = pick(c.crouchH, D_CROUCH_H)
+  data.pfJumpBtn = pick(c.jumpBtn, D_JUMP_BTN)
+  data.pfRunBtn = pick(c.runBtn, D_RUN_BTN)
+  data.pfDouble = pick(c.doubleJump, 0)
+  data.pfLadders = pick(c.ladders, 0)
+  data.pfLedges = pick(c.ledges, 0)
+  data.pfWall = pick(c.wallSlide, 0)
+  data.pfCanSlide = pick(c.slide, 0)
+  data.pfAlwaysRun = pick(c.alwaysRun, 0)
+  data.pfSprOX = pick(c.spriteOX, 0)
+  data.pfSprOY = pick(c.spriteOY, 0)
+  data.pfGrip = pick(c.gripNudge, 0)
+  // Seeded to the base and pushed once, so `platformerAnimate` only writes it again on a change —
+  // and so a character whose first clip carries no offset still starts correctly aligned.
+  data.pfSprCurX = data.pfSprOX
+  data.pfSprCurY = data.pfSprOY
+  set_sprite_offset(id, data.pfSprOX, data.pfSprOY)
+  data.pfClimbSpeed = pick(c.climbSpeed, D_CLIMB_SPEED)
+  data.pfWallVy = pick(c.wallVy, D_WALL_VY)
+  data.pfWallKick = pick(c.wallKick, D_WALL_KICK)
+  data.pfWallLockF = pick(c.wallLock, D_WALL_LOCK)
+  data.pfLadderHop = pick(c.ladderHop, D_LADDER_HOP)
+  data.pfLedgeFrames = pick(c.ledgeFrames, D_LEDGE_FRAMES)
+  data.pfSlideFrames = pick(c.slideFrames, D_SLIDE_FRAMES)
+  data.pfLandFrames = pick(c.landFrames, D_LAND_FRAMES)
+  data.pfHurtFrames = pick(c.hurtFrames, D_HURT_FRAMES)
+  data.pfDeathHold = pick(c.deathHold, D_DEATH_HOLD)
+  data.pfDoubleVel = pick(c.doubleJumpVel, D_DOUBLE_JUMP_VEL)
+
+  data.pfMode = M_FREE
+  data.pfTimer = 0
+  data.pfState = PF_IDLE
+  data.pfWasAir = 0
+  set_cvar(id, K_AIRJ, 0)
+  set_cvar(id, K_CROUCH, 0)
+  set_cvar(id, K_FACE, 1)
+  set_cvar(id, K_WLOCK, 0)
+  set_cvar(id, K_WDIR, 0)
+  data.pfSlideDir = 0
+  // Ledge bookkeeping: where we hang, and where the pull-up puts us down.
+  data.pfHangX = 0
+  data.pfHangY = 0
+  data.pfTopX = 0
+  data.pfTopY = 0
+  // the animate fast-path cache (see platformerAnimate)
+  data.pfAnimSt = 0 - 1
+  data.pfAnimFace = 0
+  data.pfAnimFrom = 0
+  data.pfAnimLen = 1
+  data.pfAnimSpd = 1
+  data.pfAnimLoop = 1
+}
+
+// Is a modal state currently eating input? True while on a ladder, hanging, pulling up over a
+// ledge, sliding, staggering, or dead. A game checks this before letting A open a dialog or a menu:
+// you should not be able to start a conversation halfway up a wall, and on a ladder A already means
+// "jump off".
+export function platformerBusy(data) {
+  if (data.pfMode === M_FREE) { return 0 }
+  if (data.pfMode === M_LAND) { return 0 }
+  return 1
+}
+
+// The state the last `platformerDrive` produced, for branching outside the animation — footstep
+// sounds, dust puffs, "can I talk right now".
+export function platformerState(data) { return data.pfState }
+
+// On a ladder? Worth its own query because it changes what other verbs mean; most games suppress
+// attacking and interacting while climbing.
+export function platformerClimbing(data) { if (data.pfMode === M_LADDER) { return 1 } return 0 }
+
+// Frames since `platformerKill`, or -1 while alive. Once this reaches the configured `deathHold` the
+// clip has played out and the sprawl has been held long enough to respawn.
+export function platformerDeadFor(data) {
+  if (data.pfMode === M_DEAD) { return data.pfTimer }
+  return 0 - 1
+}
+
+// Stagger: play the hit clip and lock input for `hurtFrames`. Call it from the game's damage path
+// (usually the `onCollide` that dealt the hit), NOT every frame — the engine's `Health` owns the
+// i-frames and the sprite flicker; this is only the animation and the input lock.
+export function platformerHurt(this_, data) {
+  if (data.pfMode === M_DEAD) { return }
+  unfreeze(this_, data)
+  data.pfMode = M_HURT
+  data.pfTimer = 0
+}
+
+// Death: play the death clip and stay there. Call from the component's `onDeath` hook. The game
+// decides when to respawn — ask `platformerDeadFor`.
+export function platformerKill(this_, data) {
+  unfreeze(this_, data)
+  data.pfMode = M_DEAD
+  data.pfTimer = 0
+}
+
+// Put a live character back in the free state at (x, y): a respawn, or the far side of a warp.
+export function platformerReset(this_, data, x, y) {
+  let id: i32 = this_.id
+  platformer_hold(id, 0)
+  if (cvar(id, K_CROUCH) === 1) {
+    set_cvar(id, K_CROUCH, 0)
+    set_collider(id, data.pfBoxW, data.pfBoxH)
+  }
+  set_transform(id, x, y)
+  data.pfMode = M_FREE
+  data.pfTimer = 0
+  data.pfWasAir = 0
+  set_cvar(id, K_AIRJ, 0)
+  set_cvar(id, K_WLOCK, 0)
+  data.pfState = PF_IDLE
+}
+
+// One frame of control with every input spelled out — for cutscenes, attract loops and headless
+// tests. `jump` and `jumpUp` are EDGES (pressed / released this frame); `run` is a level (held).
+// `busy` non-zero means something else owns the character: it keeps falling and keeps its modal
+// state, but takes no input.
+// Synthesised-input override, set by `platformerDriveRaw` for the one frame that follows.
+// ⚠️ THIS EXISTS TO REMOVE A CALL, NOT FOR ELEGANCE. Measured (examples/repro-platformer-cost):
+// a boxed call is ~117 ticks and each typed argument only ~9, so a wrapper that forwarded to a
+// shared implementation cost more than the arguments it was saving. Now the path EVERY game
+// takes — `platformerDrive` — is one call into the whole state machine, and the rare
+// synthesised path (cutscenes, attract loops, headless tests) pays the extra hop instead.
+let ovOn: i32 = 0
+let ovJump: i32 = 0
+let ovJumpUp: i32 = 0
+let ovRun: i32 = 0
+
+/// Drive the character for one frame: reads the jump/run buttons itself (codes from the config)
+/// and runs the whole state machine. Returns the PF_* state.
+export function platformerDrive(this_, data, ix: i32, iy: i32, busy: i32) {
+  let id: i32 = this_.id
+  let jump: i32 = 0
+  let jumpUp: i32 = 0
+  let run: i32 = 0
+  if (ovOn === 1) {
+    ovOn = 0
+    jump = ovJump
+    jumpUp = ovJumpUp
+    run = ovRun
+  } else if (busy === 0) {
+    if (key_pressed(ccJumpBtn) > 0) { jump = 1 }
+    if (key_released(ccJumpBtn) > 0) { jumpUp = 1 }
+    if (key_held(ccRunBtn) > 0) { run = 1 }
+  }
+  let d = data
+  cfgCache(d, id)
+  // ⚠️ ONE read of the mode. `d.pfMode` is a string-keyed hashmap lookup (~35 ticks); the modal
+  // dispatch below compared it six times a frame. Branches that CHANGE the mode still write
+  // d.pfMode — only the top-of-frame dispatch reads this local.
+  let mode: i32 = d.pfMode
+
+  // ── DEAD: nothing reaches the character again until the game resets it ──
+  if (mode === M_DEAD) {
+    d.pfTimer = d.pfTimer + 1
+    d.pfState = PF_DEAD
+    return PF_DEAD
+  }
+
+  // ── HURT: a short stagger with no control. Physics still runs, so a hit taken mid-air still arcs
+  // and lands where it should. ──
+  if (mode === M_HURT) {
+    d.pfTimer = d.pfTimer + 1
+    if (d.pfTimer >= d.pfHurtFrames) { d.pfMode = M_FREE; d.pfTimer = 0 }
+    d.pfState = PF_HURT
+    return PF_HURT
+  }
+
+  // ── HANGING off a ledge: frozen, facing LOCKED to the side we grabbed. The lock matters — without
+  // it, pressing away from the wall spins the character round while still holding on. ──
+  if (mode === M_HANG) {
+    flipN(this_, cvar(id, K_FACE) < 0)
+    if (busy === 0) {
+      if (jump === 1 || iy < 0) {
+        d.pfMode = M_LEDGE
+        d.pfTimer = 0
+      } else if (iy > 0) {
+        unfreeze(this_, d)
+        d.pfMode = M_FREE
+      }
+    }
+    d.pfState = PF_HANG
+    return PF_HANG
+  }
+
+  // ── PULLING UP: slide the body along a straight line from the hang spot to standing on the ledge
+  // over the clip's length, then hand it back to physics. Interpolating rather than teleporting at
+  // the end is what makes it read as climbing ONTO the platform instead of rising through it and
+  // snapping sideways. `setPos` works on a held body: no gravity moves it, but the transform and
+  // the sprite follow. ──
+  if (mode === M_LEDGE) {
+    flipN(this_, cvar(id, K_FACE) < 0)
+    d.pfTimer = d.pfTimer + 1
+    let total: i32 = d.pfLedgeFrames
+    let p: i32 = d.pfTimer
+    if (p > total) { p = total }
+    set_transform(id,
+      d.pfHangX + (d.pfTopX - d.pfHangX) * p / total,
+      d.pfHangY + (d.pfTopY - d.pfHangY) * p / total
+    )
+    if (d.pfTimer >= total) {
+      set_transform(id, d.pfTopX, d.pfTopY)
+      unfreeze(this_, d)
+      d.pfMode = M_FREE
+      d.pfTimer = 0
+      d.pfWasAir = 0     // arriving on top is not a landing — don't play the land clip
+    }
+    d.pfState = PF_LEDGE
+    return PF_LEDGE
+  }
+
+  // ── ON A LADDER: gravity off, position driven by hand. `onGround` and `vy` read stale while the
+  // body is held, so every decision here is a tile probe. ──
+  if (mode === M_LADDER) {
+    // Jump off with `bounce`, not `jump`: a buffered jump only fires when grounded or coyote-timed,
+    // and the held branch of the physics clears the buffer every frame anyway, so a queued jump
+    // would simply evaporate.
+    if (busy === 0 && jump === 1) {
+      unfreeze(this_, d)
+      d.pfMode = M_FREE
+      platformer_bounce(id, d.pfLadderHop)
+      d.pfState = PF_JUMP
+      return PF_JUMP
+    }
+    // Step off sideways.
+    if (busy === 0 && ix !== 0) {
+      unfreeze(this_, d)
+      d.pfMode = M_FREE
+      d.pfState = PF_FALL
+      return PF_FALL
+    }
+    let moved: i32 = 0
+    if (busy === 0 && iy < 0) {
+      // Up: stop where the ladder does. Testing the FEET row (not the head) means a ladder whose top
+      // tile is level with the landing lets you climb clear of it and step off onto the floor.
+      let feetRow: i32 = tileOf(liveY(this_) + d.pfBoxH - 1)
+      if (tile_ladder(centreCol(this_, d), feetRow)) {
+        set_transform(id, liveX(this_), liveY(this_) - d.pfClimbSpeed)
+        moved = 1
+      } else {
+        unfreeze(this_, d)
+        d.pfMode = M_FREE
+      }
+    } else if (busy === 0 && iy > 0) {
+      // Down: stop on the floor. Physics is off, so nothing else will.
+      let belowRow: i32 = tileOf(liveY(this_) + d.pfBoxH + d.pfClimbSpeed)
+      if (tile_solid(centreCol(this_, d), belowRow)) {
+        unfreeze(this_, d)
+        d.pfMode = M_FREE
+      } else {
+        set_transform(id, liveX(this_), liveY(this_) + d.pfClimbSpeed)
+        moved = 1
+      }
+    }
+    if (mode === M_LADDER) {
+      if (moved === 1) { d.pfState = PF_CLIMB; return PF_CLIMB }
+      d.pfState = PF_CLIMB_IDLE
+      return PF_CLIMB_IDLE
+    }
+    // Otherwise we left the ladder this frame — fall through into normal movement below.
+  }
+
+  // ── SLIDING: a fixed-length burst at run speed in the direction it started, ducked the whole way.
+  // Ends early on a wall, and refuses to end under a low ceiling — you keep sliding rather than
+  // standing up inside the tile. ──
+  if (mode === M_SLIDE) {
+    d.pfTimer = d.pfTimer + 1
+    platformer_run(id, 1)
+    platformer_walk(id, d.pfSlideDir)
+    let done: i32 = 0
+    if (d.pfTimer >= d.pfSlideFrames) { done = 1 }
+    if (platformer_blocked(id)) { done = 1 }
+    if (done === 1 && canStand(this_, d) === 1) {
+      standUp(this_, d)
+      d.pfMode = M_FREE
+      d.pfTimer = 0
+    }
+    d.pfState = PF_SLIDE
+    return PF_SLIDE
+  }
+
+  // ── FREE MOVEMENT ────────────────────────────────────────────────────────────────────────────
+  // 0/1 ints, not bools: tish's `&&` MOVES a bare-variable right operand (E0382), and both of these
+  // are read more than once below.
+  let gnd: i32 = 0
+  if (platformer_grounded(id)) { gnd = 1 }
+  let vy: fixed = platformer_vy(id)
+  let wasWallSliding: i32 = 0
+  if (d.pfState === PF_WALLSLIDE) { wasWallSliding = 1 }
+
+  if (busy !== 0) {
+    // Someone else owns the character. No input, but gravity still applies and we still report a
+    // real state, so the animation doesn't freeze mid-stride while a dialog box is up.
+    platformer_walk(id, 0)
+    return settleFree(this_, d, gnd << 1, vy)
+  }
+
+  // ── wall-jump lockout: for a few frames after kicking off, steering is OURS, pointed away from
+  // the wall. Without it the player is usually still holding TOWARD the wall (that's how they got
+  // there) and would stick straight back to it — the jump would look like it did nothing. ──
+  if (cvar(id, K_WLOCK) > 0) {
+    set_cvar(id, K_WLOCK, cvar(id, K_WLOCK) - 1)
+    platformer_run(id, 0)
+    platformer_walk(id, cvar(id, K_WDIR))
+    flipN(this_, platformer_face(id) < 0)
+    if (jumpUp === 1) { platformer_jump_release(id) }
+    set_cvar(id, K_FACE, platformer_face(id))
+    return settleFree(this_, d, 1 | (gnd << 1), vy)
+  }
+
+  // ── grab a ladder ──
+  if (iy !== 0 && ccLadders === 1) {
+    let col = centreCol(this_, d)
+    let midRow: i32 = tileOf(liveY(this_) + d.pfBoxH / 2)
+    let feetRow: i32 = tileOf(liveY(this_) + d.pfBoxH - 1)
+    let grab: i32 = 0
+    if (iy < 0 && tile_ladder(col, midRow)) { grab = 1 }
+    if (iy < 0 && tile_ladder(col, feetRow)) { grab = 1 }
+    // Down grabs the ladder BELOW you, so you can climb down off a landing instead of having to
+    // walk off the edge first.
+    if (iy > 0 && gnd === 1 && tile_ladder(col, feetRow + 1)) { grab = 1 }
+    if (grab === 1) {
+      standUp(this_, d)
+      // Centre on the ladder's column so a long climb doesn't drift out of the rungs.
+      set_transform(id, col * TILE + TILE / 2 - d.pfBoxW / 2, liveY(this_))
+      platformer_hold(id, 1)
+      d.pfMode = M_LADDER
+      d.pfState = PF_CLIMB_IDLE
+      return PF_CLIMB_IDLE
+    }
+  }
+
+  // ── crouch, and the slide that starts from it ──
+  if (gnd === 1 && iy > 0 && ccCrouchH > 0) {
+    if (d.pfCanSlide === 1 && run === 1 && ix !== 0 && cvar(id, K_CROUCH) === 0) {
+      crouchDown(this_, d)
+      d.pfMode = M_SLIDE
+      d.pfTimer = 0
+      d.pfSlideDir = ix
+      d.pfState = PF_SLIDE
+      return PF_SLIDE
+    }
+    crouchDown(this_, d)
+  } else if (cvar(id, K_CROUCH) === 1 && canStand(this_, d) === 1) {
+    standUp(this_, d)
+  }
+
+  // ── move ──
+  // Crouch-walking is deliberately not run-able: `run(0)` while ducked keeps it a crawl — which is
+  // true under `alwaysRun` too, so ducking is still the way to move slowly and precisely.
+  //
+  // `alwaysRun` decides the SPEED only. The run button is read exactly as before and still starts a
+  // slide with Down (above), so freeing it from the speed does not cost the character a verb.
+  let wantRun: i32 = run
+  if (ccAlwaysRun === 1) { wantRun = 1 }
+  let running: i32 = 0
+  if (wantRun === 1 && cvar(id, K_CROUCH) === 0) { running = 1 }
+  platformer_run(id, running)
+  platformer_walk(id, ix)
+  let faceNow: i32 = platformer_face(id)
+  if (faceNow !== cvar(id, K_FACE)) { flipN(this_, faceNow < 0) }
+  set_cvar(id, K_FACE, faceNow)
+
+  // ── jump ──
+  if (gnd === 1) { set_cvar(id, K_AIRJ, 0) }
+  if (jump === 1) {
+    if (gnd === 1) {
+      if (iy > 0) { platformer_drop(id) } else { platformer_jump(id) }
+    } else if (wasWallSliding === 1) {
+      // Kick off the wall: up, and away. `wasWallSliding` is LAST frame's state, which is the frame
+      // the player was actually pinned to the wall — this one they may already have slid past it.
+      set_cvar(id, K_WDIR, 0 - cvar(id, K_FACE))
+      set_cvar(id, K_WLOCK, d.pfWallLockF)
+      platformer_bounce(id, d.pfWallKick)
+      platformer_walk(id, cvar(id, K_WDIR))
+      flipN(this_, cvar(id, K_WDIR) < 0)
+      set_cvar(id, K_FACE, cvar(id, K_WDIR))
+      d.pfState = PF_JUMP
+      return PF_JUMP
+    } else if (d.pfDouble === 1 && cvar(id, K_AIRJ) === 0) {
+      platformer_bounce(id, d.pfDoubleVel)
+      set_cvar(id, K_AIRJ, 1)
+    }
+  }
+  if (jumpUp === 1) { platformer_jump_release(id) }
+
+  // ── grab a ledge on the way down ──
+  if (gnd === 0 && vy > 0 && ccLedges === 1) {
+    if (grabLedge(this_, d, cvar(id, K_FACE)) === 1) {
+      standUp(this_, d)
+      set_transform(id, d.pfHangX, d.pfHangY)
+      platformer_hold(id, 1)
+      d.pfMode = M_HANG
+      d.pfState = PF_HANG
+      return PF_HANG
+    }
+  }
+
+  let moving: i32 = 0
+  if (ix !== 0) { moving = 1 }
+  return settleFree(this_, d, moving | (gnd << 1) | (running << 2), vy)
+}
+
+/// Drive the character with SYNTHESISED input — a cutscene walking the hero across the screen, an
+/// attract loop, a headless test. `ix`/`iy` are -1/0/1; the rest are 0/1 edges and levels.
+export function platformerDriveRaw(this_, data, ix: i32, iy: i32, jump: i32, jumpUp: i32, run: i32, busy: i32) {
+  ovOn = 1
+  ovJump = jump
+  ovJumpUp = jumpUp
+  ovRun = run
+  return platformerDrive(this_, data, ix, iy, busy)
+}
+
+// One frame of control, reading the live d-pad and buttons. This is the call you want; see
+// `platformerDriveRaw` for the version that takes synthesised input.
+
+
+// Play the clip for the current state. `clips` maps names to `[firstFrame, frameCount,
+// framesPerStep, looping]` on the sprite sheet. Only `idle` is required — everything else falls
+// back along the chain in `clipFor`, so a four-clip character works with a four-key object:
+//
+//   const CLIPS = {
+//     idle: [0, 4, 12, 1], walk: [4, 6, 6, 1], run: [10, 6, 4, 1],
+//     jump: [16, 4, 5, 0], fall: [20, 2, 6, 1], land: [22, 3, 4, 0],
+//     climb: [25, 4, 6, 1], hang: [29, 4, 8, 1], ledge: [33, 5, 5, 0],
+//     crouch: [38, 4, 8, 1], slide: [42, 2, 6, 0], wallslide: [44, 2, 8, 1],
+//     hurt: [46, 3, 5, 0], dead: [49, 7, 6, 0]
+//   }
+//
+// A clip may carry TWO MORE numbers — `[first, count, framesPerStep, looping, ox, oy]` — a sprite
+// offset applied for as long as it is playing, on top of the character's `spriteOX`/`spriteOY`.
+//
+// This is for the clips whose visual anchor is not the feet. Every frame on a sheet is bottom
+// aligned so one offset lines the character up with its hitbox, which is right for everything that
+// stands on the ground — and wrong for a ledge grab, where what has to touch the world is the HANDS.
+// A character drawn taller than its hitbox then hangs with its hands up in the air above the ledge,
+// by exactly the difference. The offset cannot be baked into the sheet: shifting the art down inside
+// its own cell would push the feet out of the bottom of it.
+//
+// `play` is idempotent, so calling this every frame costs nothing — the engine only restarts a clip
+// when the frame range actually changes. The offset is written only when it changes, for the same
+// reason.
+export function platformerAnimate(this_, data, clips) {
+  let id: i32 = this_.id
+  // FAST PATH: state and facing unchanged since the last resolve -> re-assert the cached clip
+  // (anim_play is idempotent; the re-assert is what lets a game's manual `play` - a sword swing -
+  // hand the sprite back instead of sticking) and skip the whole clip-chain walk. Measured
+  // (examples/repro-platformer-cost): full resolve 735 ticks, this path ~150.
+  let stNow: i32 = data.pfState
+  if (stNow === data.pfAnimSt && cvar(id, K_FACE) === data.pfAnimFace) {
+    anim_play(id, data.pfAnimFrom, data.pfAnimLen, data.pfAnimSpd, data.pfAnimLoop === 1)
+    return
+  }
+  let c = clipFor(clips, stNow)
+  if (c === null) { return }
+  let loop = false
+  if (c[3] !== 0) { loop = true }
+  anim_play(id, c[0], c[1], c[2], loop)
+  data.pfAnimSt = stNow
+  data.pfAnimFace = cvar(id, K_FACE)
+  data.pfAnimFrom = c[0]
+  data.pfAnimLen = c[1]
+  data.pfAnimSpd = c[2]
+  data.pfAnimLoop = 0
+  if (c[3] !== 0) { data.pfAnimLoop = 1 }
+
+  let ox: i32 = data.pfSprOX
+  let oy: i32 = data.pfSprOY
+  if (c.length > 5) {
+    ox = ox + c[4]
+    oy = oy + c[5]
+  }
+  // ── the grip nudge ──
+  // The hang BOX is placed flush against the wall, but the ART is centred in that box, so a
+  // character drawn narrower than its hitbox hangs with a stripe of daylight between its hands and
+  // the wall it is supposedly holding. `gripNudge` is how far to push it back toward the wall.
+  //
+  // It is applied HERE, by facing, rather than as a per-clip `ox`, because the wall is on whichever
+  // side the character is facing and a sprite offset is screen-space — the engine adds it to the
+  // transform and does NOT mirror it when the sprite flips. A fixed number would be right hanging
+  // one way and twice wrong hanging the other.
+  //
+  // PF_HANG only, deliberately. The pull-up ends with the character standing ON the ledge, where a
+  // sideways nudge would be plainly wrong; a 3-4px pop at the start of the climb is the cheaper bug.
+  if (data.pfState === PF_HANG) { ox = ox + data.pfGrip * cvar(id, K_FACE) }
+  // Two ifs, not `||`: tish's `&&`/`||` MOVE a bare-variable operand, and both are read again below.
+  let changed: i32 = 0
+  if (ox !== data.pfSprCurX) { changed = 1 }
+  if (oy !== data.pfSprCurY) { changed = 1 }
+  if (changed === 1) {
+    set_sprite_offset(id, ox, oy)
+    data.pfSprCurX = ox
+    data.pfSprCurY = oy
+  }
+}
+
+// ── Generic side-scroller props ──────────────────────────────────────────────────────────────────
+// Data-driven components for the three things every town, cave and dungeon needs. Each calls a
+// closure the GAME supplies, so this package never has to know about `packages/dialog` — importing
+// that would drag the whole UI layer into every platformer that only wanted physics.
+//
+//   import * as pf from '../../../packages/platformer'
+//   mount(pf)                       // registers PfNpc / PfSign / PfDoor by export name
+//   npc.behave(PfNpc, { onTalk: (d) => dialogSay(d.lines, { speaker: d.name }) })
+//
+// Both hooks receive the component's own `data`, so ONE shared closure can serve every NPC in the
+// game and branch on whatever fields that NPC was spawned with.
+
+// Someone to talk to. Blocks nothing by default — a townsperson you can walk past is friendlier
+// than one who corks the street — but pass `block: 1` for a guard who shouldn't be squeezed past.
+export const PfNpc = {
+  start: ({ this }) => {
+    let d = this.data
+    this.setCollider(pick(d.w, 14), pick(d.h, 16))
+    if (d.block === 1) { this.block() }
+  },
+  onInteract: ({ this }) => {
+    let f = this.data.onTalk
+    if (f !== null) { f(this.data) }
+  }
+}
+
+// A signpost, notice board or gravestone: an NPC minus the pretence of being alive. Kept separate
+// because the two get different art, different colliders and different prompts, and collapsing them
+// just means every game re-adds the distinction itself.
+export const PfSign = {
+  start: ({ this }) => {
+    let d = this.data
+    this.setCollider(pick(d.w, 16), pick(d.h, 16))
+  },
+  onInteract: ({ this }) => {
+    let f = this.data.onRead
+    if (f !== null) { f(this.data) }
+  }
+}
+
+// A doorway. `onEnter` does the travelling (`loadScene`, usually): a door has no idea where it goes,
+// which is exactly what lets one component serve every door in the game.
+export const PfDoor = {
+  start: ({ this }) => {
+    let d = this.data
+    this.setCollider(pick(d.w, 16), pick(d.h, 24))
+  },
+  onInteract: ({ this }) => {
+    let f = this.data.onEnter
+    if (f !== null) { f(this.data) }
+  }
+}

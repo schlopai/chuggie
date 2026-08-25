@@ -1,0 +1,486 @@
+// iso.tish — the isometric projection, shared by every game built on the `isobattle:` bake.
+//
+// This existed as a verbatim copy in BOTH the isoboard SRPG example (now in the chuggie-tactics repo) and examples/iso-town, and the
+// copies had already drifted apart in two ways that each produced a visible bug:
+//
+//   * `UNIT_LIFT` was 12 in one and 20 in the other. 20 is correct and 12 puts every character
+//     8px low — see the derivation on ISO.unitLift below.
+//   * the SRPG example HARDCODED the origin to (96, 24), which silently pinned it to the 256px baked
+//     atlas and therefore to boards of about 8x8. iso-town read the origin from the bake and
+//     handled the 512px atlas. Reading it from the bake is the behaviour that survived.
+//
+// A third copy of these constants lives in crates/tish-gba-scenepack/src/isoboardpack.rs, where
+// the board is composited at build time. That one has to stay — it runs in the proc-macro, not
+// on the GBA — but THIS file is the single tish-side source, and the Rust side carries a comment
+// pointing here.
+//
+//     import { isoInit, isoX, isoTileTopY, isoUnitDepth, isoDrawRisers } from '../../../packages/iso'
+//     isoInit({ board: board, tiles: tiles })
+//     sprite_set_pos(spr, isoX(col, row), isoUnitTopY(col, row))
+//     sprite_set_depth(spr, isoUnitDepth(col, row))
+//
+// Deliberately imports nothing from packages/ — native merge pulls WHOLE modules, so an SRPG
+// game that never opens a menu must not link the UI through this file.
+import {
+  bg_new, bg_new_fg, bg_clear, bg_scroll, bg_set_visible, camera_set, sky_clear,
+  sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_depth, sprite_set_visible
+} from 'cargo:tish_agb'
+import {
+  isob_load, isob_board_bg, isob_board_fg, isob_board_ox, isob_board_oy, isob_board_lift,
+  isob_board_mapw, isob_board_maph, isob_board_cw, isob_board_ch, isob_w, isob_h, isob_height,
+  isob_stack_count, isob_stack_elev, isob_stack_tile
+} from 'cargo:tish_gba_game_engine'
+
+// ── geometry constants ────────────────────────────────────────────────────────────────────────
+// A tile diamond is 32x16 inside a 32x32 cell, so a step is (±16, +8).
+export let ISO_TILE_HALF_W: i32 = 16
+export let ISO_TILE_HALF_H: i32 = 8
+// Elevation is in 8px units — a half block is 1, a full block 2. This matches what the block art
+// actually draws, and what Tiled shows while editing (a layer's Vertical Offset of -16 is a full
+// block), so there is no lift constant to keep in sync with the map.
+//
+// ⚠️ This is only the DEFAULT. A board baked from a real game raises a level by whatever that game
+// chose — an imported board may use 2px, not 8 — and the bake records it, so `isoUseBoard` reads the real number
+// back into `ISO.lift`. Lift a unit by a different number than the ART was lifted by and it stands
+// `8 - lift` px per level above its own ground: invisible on a flat board, wrong on every terraced
+// one. Use `isoLift()`, not this constant.
+export let ISO_LIFT_PER_STEP: i32 = 8
+
+export let ISO_DEPTH_PER_TILE: i32 = 16
+
+// Painter's-sort biases, for pieces sharing one cell. Depth is PURE (col+row): in isometric,
+// elevation moves a sprite UP the screen but does not change how near the cell is to the camera,
+// so occlusion follows real on-screen overlap. Adding height into the depth key sorted raised
+// terrain too far forward and produced both failure modes at once — legs cut off, and characters
+// floating over walls.
+export let ISO_BIAS_DECAL: i32 = 1
+export let ISO_BIAS_CORPSE: i32 = 2
+export let ISO_BIAS_UNIT: i32 = 3
+export let ISO_BIAS_CURSOR: i32 = 512
+
+// State lives in ONE struct rather than in bare module scalars on purpose: a bare `let` at module
+// scope that is reassigned from inside a function reads back unreliably on the GBA, and every
+// field here is written by isoInit.
+// THE SCALARS ARE A TYPED STRUCT and the containers are not, deliberately. An `interface` lowers
+// to a native Rust struct: `ISO.ox` becomes a field load instead of a hashed key scan into a boxed
+// object, which on GBA is the difference between ~2 cycles and ~100 — and with PropIC compiled out
+// there (tishlang/tish#620) there is no inline cache to soften the scan. Every one of these fields
+// is read inside `isoDrawRisersCapped`'s per-riser loop.
+//
+// The arrays stay OUT of the struct. A typed array held in a struct field is exactly the shape
+// tishlang/tish#597/#558 are open on (pass-by-copy, silently discarded writes), and `risers` is a
+// pool whose whole contract is that mutations persist. Module bindings have none of that doubt.
+interface IsoState {
+  ox: i32, oy: i32,
+  fg: i32,
+  // Whether to build a board's FOREGROUND occluder layer. A second background costs real VRAM and
+  // heap; a game whose battle is short of both can trade the mounds drawing in front of units for
+  // the memory. Defaults on — the layer is what makes scenery read as scenery.
+  wantFg: i32,
+  lift: i32,
+  unitLift: i32,
+  boardPx: i32,
+  camMaxX: i32, camMaxY: i32,
+  bg: i32,
+  tiles: i32,
+  w: i32, h: i32,
+  live: i32,
+  cur: i32,
+}
+
+let ISO: IsoState = {
+  ox: 96, oy: 24,
+  fg: -1,
+  wantFg: 1,
+  // px the floor art rises per elevation unit; `isoUseBoard` replaces this with the board's own
+  // baked value. 8 is the Tiled default, kept so a board that predates the field still works.
+  lift: 8,
+  unitLift: 20,
+  boardPx: 256,
+  camMaxX: 16, camMaxY: 96,
+  bg: 0 - 1,
+  tiles: 0 - 1,
+  w: 0, h: 0,
+  // `live` is how many of the riser POOL the current board uses; the tail stays allocated and
+  // hidden. See `isoRisers` below for why that pool exists at all.
+  live: 0,
+  cur: 0 - 1,
+}
+
+// Every riser sprite ever emitted, so the board can be taken OFF the screen again — and, once
+// there is more than one board, REUSED rather than reallocated.
+//
+// ⚠️ This exists because riser sprites outlive the phase that wanted them. `isoDrawRisersCapped`
+// used to emit and forget, and a shell that draws the board once at init then shows a title screen
+// gets the battlefield behind its title — 28 gold cliff blocks under the game's own name.
+//
+// ⚠️⚠️ It is a POOL, not a log. Repainting on every board switch with `sprite_new` would allocate
+// a fresh set each time and never give one back; a story that moves between two boards a dozen
+// times would exhaust OBJ VRAM.
+let isoRisers = []
+// The riser sheet each registered board draws with, parallel to `bRaw`/`bTiles` below. (The old
+// `ISO.boards` field went with this split: it was already dead — the registry has been `bRaw` +
+// `bTiles`, two typed `i32[]`s, since boards became per-example.)
+let isoTileSheets = null
+
+// The live board's px-per-elevation-unit. Set on every `isoUseBoard`.
+//
+// ⚠️ Declared BELOW `ISO`, and it has to be: tish emits a module function as a closure at its
+// position in the file, so one that reads `ISO` from above it fails with `cannot find value ISO in
+// this scope` — at the generated-Rust level, naming nothing about the tish line that caused it.
+export function isoLift(): i32 { return ISO.lift }
+
+
+// ── init ──────────────────────────────────────────────────────────────────────────────────────
+// `cfg.board` is a `isobattle:` import; `cfg.tiles` the 32px tile sheet used to redraw raised blocks.
+// `cfg.unitLift` overrides the default only if a game's actor art has a different bottom gap.
+//
+// A game with more than one board passes `cfg.boards` — a list of `isobattle:` handles — and then
+// calls `isoUseBoard(i)` to move between them. `cfg.board` is the one-board spelling of the same
+// thing and stays valid.
+// The registered boards: their `isobattle:` handles, and the riser sheet each one draws with.
+//
+// ⚠️ TWO columns, and there used to be eleven. Caching every board's geometry (origin, size, camera
+// clamp) looked free and was not: at 162 boards the columns cost 46 KB untyped, 6 KB typed, and —
+// worse than either — the 88 vector reallocs from growing eleven columns to 162 entries fragmented
+// the heap badly enough that the UI canvas's **40 KB contiguous** request failed with 58 KB free.
+//
+// The geometry is four native calls away and a board switch happens once per battle. Caching it to
+// save four calls, at the cost of the one big allocation the UI needs, is a bad trade.
+//
+// ⚠️ Both are `i32[]`. An untyped array in tish is a `Vec<Value>` at ~28 bytes an element; typed it
+// is a `Vec<i32>` at 4. Never write a numeric array in this codebase without its type.
+let bRaw: i32[] = []
+let bTiles: i32[] = []
+
+function clearBoards() {
+  while (bRaw.length > 0) {
+    bRaw.pop()
+    bTiles.pop()
+  }
+}
+
+// Record a board. No `isob_load` — geometry is read on switch, see `isoUseBoard`.
+function addBoard(board: i32) {
+  bRaw.push(board)
+  let sheet = ISO.tiles
+  if (isoTileSheets !== null) {
+    if (bRaw.length - 1 < isoTileSheets.length) { sheet = isoTileSheets[bRaw.length - 1] }
+  }
+  bTiles.push(sheet)
+}
+
+export function isoInit(cfg): i32 {
+  ISO.tiles = cfg.tiles
+  clearBoards()
+  // ⚠️ TILES ARE PER BOARD. One sheet for every board draws each board's risers in some other
+  // board's art — the school rendered in board 38's gold cliffs, over the school's own baked floor,
+  // which looks like corrupted geometry rather than a wrong handle. `cfg.tileSheets[i]` pairs with
+  // `cfg.boards[i]`; `cfg.tiles` remains the single-board spelling.
+  isoTileSheets = cfg.tileSheets
+  // ⚠️ Only the HANDLES are stored here. Reading a board's geometry costs a `isob_load`, and a game
+  // that registers 162 of them cannot afford 162 loads before its first frame — the geometry is
+  // read on switch instead, in `isoUseBoard`.
+  if (cfg.boards !== null) {
+    let bi = 0
+    while (bi < cfg.boards.length) {
+      addBoard(cfg.boards[bi])
+      bi = bi + 1
+    }
+  }
+  if (cfg.board !== null) { addBoard(cfg.board) }
+
+  // How far above its tile a character is drawn.
+  //
+  // The actor cell is 32x32 and the art leaves a 4px gap at the bottom, so the feet land at
+  // `sprite_y + 28`. A character is drawn at `tileTopY - unitLift`, and the tile diamond's centre
+  // — where feet belong — is at `tileTopY + 8` (the diamond is 32x16 at the top of a 32px cell).
+  // Setting those equal gives 28 - 8 = 20. At 12 every character stood at the diamond's FRONT
+  // CORNER instead of its middle, which reads as "hanging off the edge" on a raised block.
+  ISO.unitLift = 20
+  if (cfg.unitLift !== null) { ISO.unitLift = cfg.unitLift }
+
+  // A title / menu ROM that registered many boards still has to build its highlight pool before
+  // any floor is resident. `load: 0` registers only; the first `isoUseBoard` is the caller's.
+  if (cfg.load === 0) { return ISO.bg }
+  isoUseBoard(0)
+  return ISO.bg
+}
+
+// Read back everything the BAKE decided about one board and keep it.
+//
+// ⚠️ `isob_load` overwrites the single iso grid, so `isob_w()`/`isob_h()` only ever describe the
+// board loaded LAST. Geometry has to be captured per board at registration time; there is no way to
+// ask about a board that is not currently loaded.
+//
+// ⚠️ NO background is created here, and that is the whole design.
+//
+// The obvious implementation — one `bg_new` per board at registration, then flip visibility — dies
+// on the second board with agb's *"Not enough space to allocate for background"* from
+// `display/tiled/screenblock.rs`. A `isobattle:` floor is baked 8bpp so its tileset is not crushed
+// into one 16-colour palette, and two of them do not fit BG VRAM at once. That is a hardware
+// ceiling, not a budget to tune.
+//
+// So exactly ONE floor is resident: `isoUseBoard` drops it and uploads the incoming board's.
+// Geometry is still captured per board up front, because it cannot be read back later.
+export function isoBoardCount(): i32 { return bRaw.length }
+export function isoCurrentBoard(): i32 { return ISO.cur }
+export function isoBoardHandle(i: i32): i32 { return bRaw[i] }
+
+// Make board `i` the live one: load its grid, restore its geometry, and upload its floor.
+//
+// ⚠️ `bg_clear()` drops EVERY background, not just the board's — which is safe here only because
+// this package is the sole caller of `bg_new` in a grid-battle game (the HUD and the UI canvas are
+// sprite-backed). A game that stacks its own parallax layers behind the board must re-create them
+// after a switch.
+//
+// ⚠️ Does NOT repaint the risers — the caller decides the budget, and a phase that switches boards
+// almost always wants to place units before anything is drawn. Call `isoDrawRisersCapped` after.
+// Turn the foreground occluder layer on or off for subsequent board loads.
+export function isoWantFg(on: i32) { ISO.wantFg = on }
+
+export function isoUseBoard(i: i32): i32 {
+  if (i === ISO.cur) { return ISO.bg }
+  let board = bRaw[i]
+  isob_load(board)
+  // The bake composites small boards onto a 256px atlas at origin (96, 24) and larger ones onto a
+  // 512px atlas at a computed origin. Reading the origin back is what tells them apart — a game
+  // must never assume the small one, which is exactly what pinned the SRPG example to 8x8 boards.
+  let ox = isob_board_ox(board)
+  let oy = isob_board_oy(board)
+  ISO.lift = isob_board_lift(board)
+  let px = 256
+  if (ox !== 96) { px = 512 }
+  if (oy !== 24) { px = 512 }
+  // ⚠️ Clamp the camera to the BOARD, not to the atlas.
+  //
+  // Deriving the limit from the atlas size let the view scroll past the art into the map's wrap,
+  // which paints a band of bare backdrop with terrain on both sides of it. On a 64x32 layer that is
+  // 256px tall the wrap is only ~50px past the board, so it is not an edge case — every board showed
+  // the seam, and it reads as corrupted art rather than as a camera that went too far.
+  //
+  // The board's own extent is exactly computable: the diamond spans `(w-1)` steps right and `(h-1)`
+  // left of the origin, and `(w+h-2)` half-steps down, plus a tile for the block the last cell sits
+  // on and a little headroom for raised stacks.
+  // ⚠️ The reach comes from the MEASURED painted extent, not from the cell diamond. Block faces,
+  // overhangs and decorations paint past the last cell, so `ox + (w-1)*16 + 32` stops the camera
+  // short — 106 of 162 boards were cropped that way, which looks like missing map rather than a
+  // camera that will not travel.
+  let cx = isob_board_cw(board) - 240
+  let cy = isob_board_ch(board) - 160
+  // ⚠️ And never past the END OF THE LAYER, which is NOT the atlas size. A direct-upload board's
+  // layer is whatever the bake emitted — 512x256 for a short board, 512x512 for a tall one — so a
+  // vertical limit taken from a fixed 512 atlas let the camera reach y=114 on a 13x16 board whose
+  // layer was 256 tall. The window then spanned rows 114..273, wrapped, and painted terrain, a band
+  // of bare backdrop, then terrain again. That reads as broken art, not an over-scrolled camera, and
+  // clamping to the board's own extent alone does NOT prevent it. Read the size, never assume it.
+  let mw = isob_board_mapw(board) - 240
+  let mh = isob_board_maph(board) - 160
+  if (cx > mw) { cx = mw }
+  if (cy > mh) { cy = mh }
+  if (cx < 0) { cx = 0 }
+  if (cy < 0) { cy = 0 }
+  ISO.w = isob_w()
+  ISO.h = isob_h()
+  ISO.ox = ox
+  ISO.oy = oy
+  ISO.boardPx = px
+  ISO.camMaxX = cx
+  ISO.camMaxY = cy
+  bg_clear()
+  ISO.bg = bg_new(isob_board_bg(board))
+  // The FOREGROUND layer, when the board has one. Scenery that must occlude units — snow mounds,
+  // trees, chimneys — lives here rather than in the floor.
+  //
+  // ⚠️ Priority 1, and the number is the whole point. Sprites sit at 2, and a background only draws
+  // in front of a sprite when its priority is LOWER. At 2 it would tie and lose (OBJ wins ties), at 3
+  // it would sit behind the floor. Get it wrong and the mounds simply vanish behind the units, which
+  // reads as a missing layer rather than a priority bug.
+  ISO.fg = -1
+  let fga = isob_board_fg(board)
+  if (fga >= 0) { if (ISO.wantFg === 1) { ISO.fg = bg_new_fg(fga, 1) } }
+  ISO.cur = i
+  ISO.tiles = bTiles[i]
+  // The pool still holds the OUTGOING board's blocks, at the outgoing board's coordinates. Nothing
+  // here knows the caller's budget, so blank them rather than leave a wrong board half-painted.
+  hideRiserTail(0)
+  ISO.live = 0
+  return ISO.bg
+}
+
+// ── projection ────────────────────────────────────────────────────────────────────────────────
+export function isoW(): i32 { return ISO.w }
+export function isoH(): i32 { return ISO.h }
+export function isoBoardBg(): i32 { return ISO.bg }
+export function isoBoardPx(): i32 { return ISO.boardPx }
+export function isoUnitLift() { return ISO.unitLift }
+
+export function isoCellHeight(col: i32, row: i32): i32 { return isob_height(col, row) }
+export function isoX(col: i32, row: i32): i32 { return ISO.ox + (col - row) * ISO_TILE_HALF_W }
+export function isoY(col: i32, row: i32): i32 { return ISO.oy + (col + row) * ISO_TILE_HALF_H }
+
+// Top surface of the cell — where a decal or a corpse lies.
+export function isoTileTopY(col: i32, row: i32): i32 {
+  return isoY(col, row) - isoCellHeight(col, row) * ISO.lift
+}
+
+// Where a standing character's sprite goes.
+export function isoUnitTopY(col: i32, row: i32): i32 { return isoTileTopY(col, row) - ISO.unitLift }
+
+// Sub-cell projection, for anything that sits BETWEEN tiles: free quarter-tile walking, or a
+// grid-battle unit lerping along a path. `q` is how many sub-steps make one cell, so (qc, qr) are cell
+// coordinates multiplied by q.
+//
+// Multiply before dividing, so the half-step stays exact rather than rounding to zero. `q` should
+// divide both 16 and 8 — that is 1, 2, 4 or 8 — otherwise the division truncates toward zero and
+// the projection is very slightly asymmetric about the origin. iso-town uses 4.
+export function isoXSub(qc: i32, qr: i32, q: i32) { return ISO.ox + (qc - qr) * ISO_TILE_HALF_W / q }
+export function isoYSub(qc: i32, qr: i32, q: i32) { return ISO.oy + (qc + qr) * ISO_TILE_HALF_H / q }
+
+// Screen Y of a character standing at a sub-cell position over a cell of the given height.
+export function isoUnitYSub(qc: i32, qr: i32, q: i32, height: i32) {
+  return isoYSub(qc, qr, q) - height * ISO.lift - ISO.unitLift
+}
+
+export function isoDepthAt(col: i32, row: i32, bias: i32): i32 { return (col + row) * ISO_DEPTH_PER_TILE + bias }
+export function isoUnitDepth(col: i32, row: i32): i32 {
+  return isoDepthAt(col, row, isoCellHeight(col, row) + ISO_BIAS_UNIT)
+}
+
+// ── raised terrain ────────────────────────────────────────────────────────────────────────────
+// The flat floor is baked into a background — zero OBJs, which is what keeps the per-scanline
+// sprite budget clear. RAISED cells are redrawn as depth-sorted sprites so they can occlude
+// whatever stands behind them, since a background always sits behind sprites.
+//
+// Redraw EVERY stacked block, not just the top one: a character behind a tall tower otherwise
+// shows through its lower blocks. Each block carries its own tile and its own elevation, so mixed
+// towers composite correctly.
+//
+// Takes `board` as an argument rather than reading it back from state: it is a `isobattle:` import
+// handle, and the caller always has it in scope at this point anyway.
+export function isoDrawRisers(board: i32): i32 {
+  return isoDrawRisersCapped(board, 0)
+}
+
+// ⚠️ The same thing with an OBJ BUDGET, which a dense imported SRPG board needs and a hand-made one does not.
+//
+// The GBA has 128 hardware sprites. An 8x8 demo board raises a dozen cells and never comes close;
+// **the ROM's own boards raise up to 184 of their 196**, and going over does not warn — OAM simply
+// stops accepting entries, and what disappears is whatever was emitted last. That is how a board
+// swallows the HUD text: 91 risers of 128 once cost this repo an afternoon.
+//
+// `budget` of 0 means unlimited, so every existing caller is unchanged.
+//
+// When the budget bites, the cells kept are the ones NEAREST the camera — descending `col + row`.
+// That is not a guess about which look best: a riser exists only to hide something standing behind
+// it, and a block further from the camera than every unit cannot occlude anything. The floor is in
+// the background image either way, so what is dropped is redundant paint, not terrain.
+export function isoDrawRisersCapped(board: i32, budget: i32): i32 {
+  let used = 0
+  let far = ISO.w + ISO.h - 2
+  let d = far
+  while (d >= 0) {
+    let rc = 0
+    while (rc < ISO.w) {
+      let rr = d - rc
+      if (rr >= 0) {
+        if (rr < ISO.h) {
+          let stack = isob_stack_count(board, rc, rr)
+          let si = 0
+          while (si < stack) {
+            if (budget > 0) {
+              if (used >= budget) {
+                hideRiserTail(used)
+                ISO.live = used
+                return used
+              }
+            }
+            let elev = isob_stack_elev(board, rc, rr, si)
+            paintRiser(used, isob_stack_tile(board, rc, rr, si),
+                       isoX(rc, rr), isoY(rc, rr) - elev * ISO.lift,
+                       isoDepthAt(rc, rr, elev))
+            used = used + 1
+            si = si + 1
+          }
+        }
+      }
+      rc = rc + 1
+    }
+    d = d - 1
+  }
+  hideRiserTail(used)
+  ISO.live = used
+  return used
+}
+
+// Take pool slot `i`, growing the pool by one sprite only when it has never been that large.
+function paintRiser(i: i32, tile: i32, x: i32, y: i32, depth: i32) {
+  if (i >= isoRisers.length) { isoRisers.push(sprite_new(ISO.tiles)) }
+  let s = isoRisers[i]
+  sprite_set_frame(s, tile)
+  sprite_set_pos(s, x, y)
+  sprite_set_depth(s, depth)
+  sprite_set_visible(s, 1)
+}
+
+// A board with fewer risers than the last one leaves the surplus sitting where the previous board
+// put them. Hiding rather than freeing keeps the pool's high-water mark as the allocation ceiling.
+function hideRiserTail(from: i32) {
+  let i = from
+  while (i < isoRisers.length) {
+    sprite_set_visible(isoRisers[i], 0)
+    i = i + 1
+  }
+}
+
+// ── showing and hiding the board ──────────────────────────────────────────────────────────────
+// A board is a MODE, not a permanent fixture. A title card, an opening cutscene and a results
+// screen all want the screen to themselves, and the board is two separate things that each have to
+// be told: the baked floor BACKGROUND and the riser SPRITES. Hiding one and forgetting the other
+// leaves either a floating set of blocks or a full-screen floor with nothing on it — both of which
+// read as a rendering bug rather than a missing call.
+//
+// `isoBoardVisible` does both, which is what a caller almost always means.
+// ⚠️ Shows only the LIVE prefix, never the whole pool. Toggling every allocated sprite back on
+// would resurrect the tail left over from a bigger board — blocks from the previous map scattered
+// across this one, at the previous map's coordinates.
+export function isoRisersVisible(on: i32) {
+  let i = 0
+  while (i < isoRisers.length) {
+    let want = on
+    if (i >= ISO.live) { want = 0 }
+    sprite_set_visible(isoRisers[i], want)
+    i = i + 1
+  }
+}
+
+export function isoFloorVisible(on: i32) {
+  if (ISO.bg >= 0) { bg_set_visible(ISO.bg, on) }
+  if (ISO.fg >= 0) { bg_set_visible(ISO.fg, on) }
+}
+
+export function isoBoardVisible(on: i32) {
+  isoFloorVisible(on)
+  isoRisersVisible(on)
+  if (on === 0) { sky_clear() }
+}
+
+// ── camera ────────────────────────────────────────────────────────────────────────────────────
+function clampCam(v: i32, hi: i32): i32 {
+  if (v < 0) { return 0 }
+  if (v > hi) { return hi }
+  return v
+}
+
+// Centre the view on a world-pixel focus, clamped to the baked atlas. Scrolls the floor background
+// in step with the camera so sprites and terrain stay locked together.
+export function isoFollowCam(wx: i32, wy: i32) {
+  let cx = clampCam(wx + 16 - 120, ISO.camMaxX)
+  let cy = clampCam(wy + 16 - 80, ISO.camMaxY)
+  camera_set(cx, cy)
+  bg_scroll(ISO.bg, cx, cy)
+  // ⚠️ The foreground scrolls by the SAME amount, not a parallax fraction. It is the same
+  // battlefield at the same depth — a mound is level with the ground it sits on — so any difference
+  // slides the scenery off its own shadow.
+  if (ISO.fg >= 0) { bg_scroll(ISO.fg, cx, cy) }
+}

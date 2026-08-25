@@ -1,0 +1,315 @@
+// cutscene-core.tish — the cutscene sequencer, with NO game-engine crate dependency.
+//
+// ── why this file exists ──────────────────────────────────────────────────────────────────────
+//
+// `packages/cutscene.tish` documented three hooks — `cutSetAnim`, `cutSetMover`, `cutSetStep` — so
+// that "a game that draws with raw sprites and presents its own frames can use every verb here".
+// Then it imported five natives from `cargo:tish_gba_game_engine` at module top for the DEFAULTS
+// behind those hooks, and tish's native merge links whole modules. So the escape hatch did not
+// reach: a game that supplied all three hooks still linked the engine, and a game that could not
+// link it could not use the package at all (schlopai/chuggie-engine#63).
+//
+// The cost of that was not theoretical. `card-gba` ships three card RPGs on `tish_agb` with 33
+// Tiled towns between them, and a grep across all three for `cutSay` / `cutMove` / `camera_set`
+// returns ZERO. Every story beat in every game is a talking head triggered by walking into a
+// stationary sprite: nothing has ever moved on its own, no camera has ever panned, nothing has
+// happened TO the player rather than because of them (#66).
+//
+// ── what is in here, and what is not ──────────────────────────────────────────────────────────
+//
+// Everything that routes through a hook, which is every verb except one:
+//
+//     cutWait · cutSay · cutChoose · cutWalkFrom · cutFace · cutFadeOut · cutFadeIn · cutPan
+//     cutSetFlag · cutFlag · cutFlagCount
+//
+// ⚠️ A core with `cutSay` and `cutChoose` but no movement would be talking heads with a prompt —
+// which is what `card-gba` already hand-rolled, and is not a cutscene (#66). `cutWalkFrom` is the
+// blocking walk, and it takes an EXPLICIT start precisely so it never has to read an actor back.
+//
+// The one verb left behind is `cutWalk`, which reads the actor's current position with
+// `entity_x`/`entity_y` and therefore genuinely requires an engine entity. `packages/cutscene.tish`
+// adds it, along with the three engine-backed defaults.
+//
+// ── what a game has to supply ─────────────────────────────────────────────────────────────────
+//
+//     cutSetMover(fn)    fn(e, x, y)              — put actor `e` at (x, y)
+//     cutSetAnim(fn)     fn(e, face, moving)      — optional; without it actors slide without animating
+//     cutSetStep(fn)     fn()                     — optional; defaults to a bare `frame()`
+//     cutSetDialog(cfg)  { say, update, active, result } — optional; without it cutSay is a no-op
+//
+// Nothing here is required for a scene to run. Every hook that is missing degrades to the least
+// surprising thing rather than to an error, because a cutscene that half-works is debuggable and one
+// that panics at the first verb is not.
+//
+// `packages/cutscene.tish` imports this file and installs the entity-backed versions of all four, so
+// every existing scene is unchanged.
+
+import { frame, fade, camera_set, camera_x, camera_y } from 'cargo:tish_agb'
+
+// ── dialogue, INJECTED ────────────────────────────────────────────────────────────────────────
+// `packages/dialog` links `packages/chipsfx`, and tish's native merge runs every linked module's
+// initialiser at boot whether or not a keeper ever speaks (#64). A game that has its own talk layer
+// — `card-gba` has `card-talk.tish` for exactly this reason — must not pay for a second one to get
+// a sequencer.
+//
+// So the four calls `cutSay`/`cutChoose` need are handed in. Without them those two verbs are no-ops
+// that return immediately; every movement, fade, camera and flag verb still works, which is the
+// point of the split.
+//
+//     cutSetDialog({ say: dialogSay, update: dialogUpdate, active: dialogActive, result: dialogResult })
+let DLG = { say: null, update: null, active: null, result: null }
+
+export function cutSetDialog(cfg) {
+  if (cfg === null) { return }
+  if (cfg.say !== null) { DLG.say = cfg.say }
+  if (cfg.update !== null) { DLG.update = cfg.update }
+  if (cfg.active !== null) { DLG.active = cfg.active }
+  if (cfg.result !== null) { DLG.result = cfg.result }
+}
+
+// Frames per row on a character sheet (idle + 4 walk).
+export let WALK: i32 = 5
+
+// The default animation driver: a 5-frames-per-row orthogonal sheet, row = facing, col 0 = idle,
+// cols 1-4 = walk.
+// ⚠️ NO DEFAULT DRIVER HERE. `packages/cutscene.tish` installs the 5-frame orthogonal one, which
+// needs `anim_play` from the game-engine crate. A core that carried it would import the crate, which
+// is the whole thing this file exists to avoid.
+
+// Which driver `cutWalk`/`cutFace` use. Held in a struct field, not a bare module scalar — a bare
+// `let` reassigned from inside a function reads back unreliably on the GBA.
+//
+// This hook is what lets a cutscene run in a game whose sheets are not the 5-frame orthogonal
+// layout. The isometric examples pack 17 frames per facing block with the "west" diagonals produced
+// by an h-flip, so the default driver would play the wrong frames entirely; they install their own
+// with `cutSetAnim`. Keeping it a hook rather than importing packages/iso here matters: native merge
+// pulls WHOLE modules, and a top-down game must not link the isometric projection through a
+// cutscene.
+let ANIM = { drive: null }
+
+// Replace the animation driver. `fn(e, face, moving)` — `face` is whatever the game's own cutscene
+// passes to `cutWalk`/`cutFace`, so its meaning is the game's to define.
+export function cutSetAnim(fn) { ANIM.drive = fn }
+
+function stepAnim(e, face, moving) {
+  // No hook installed: animate nothing rather than link a crate for a default. A scene still moves
+  // and still blocks; the actor just does not change frame.
+  if (ANIM.drive !== null) { ANIM.drive(e, face, moving) }
+}
+
+// ── who an "actor" is ─────────────────────────────────────────────────────────────────────────
+// ⚠️ This package used to REQUIRE engine entities: `cutWalk` positioned actors with
+// `set_transform(e, …)` and read their start with `entity_x/entity_y`. That quietly excluded both
+// isometric examples — `iso-town` and the isoboard SRPG example (now in the chuggie-tactics repo) draw everything with **raw sprites** and create
+// no entities at all, so not one cutscene verb could move an actor in the game this narrative layer
+// is being built for. `akari`, the only consumer, happens to use entities, which is why it never
+// showed up.
+//
+// The fix is a positioning hook, the same shape as the animation one. Default stays
+// `set_transform`, so every existing scene is unchanged.
+let ACTOR = { place: null }
+
+// `fn(e, x, y)` — put actor `e` at screen/world position (x, y). An isometric game installs one
+// that does `sprite_set_pos` plus `sprite_set_depth`, since depth is what makes iso occlusion work
+// and an entity's renderer would not know to set it.
+export function cutSetMover(fn) { ACTOR.place = fn }
+
+function placeAt(e, x, y) {
+  if (ACTOR.place !== null) { ACTOR.place(e, x, y) }
+}
+
+// ── how a frame is presented ──────────────────────────────────────────────────────────────────
+// Same story as the mover: the blocking verbs used to call `world_step()` unconditionally, which is
+// the ENGINE's per-frame pipeline. A game with no entities — both isometric examples — presents
+// with plain `frame()` and never calls `world_step` at all, so a cutscene would have been driving a
+// pipeline the game does not use.
+//
+// Default stays `world_step`, so entity games are unchanged. `cutSay` has always used bare `frame()`
+// on purpose (a standing conversation needs no AI or physics, and the heavier step was blowing the
+// frame budget and making BGM choppy) — that stays as it is.
+let STEP = { present: null }
+
+export function cutSetStep(fn) { STEP.present = fn }
+
+function present() {
+  // Defaults to a bare `frame()`, NOT `world_step()`. A game with no entities — which is the case
+  // this file is for — has no engine pipeline to step, and `world_step` is what dragged the crate in.
+  if (STEP.present !== null) { STEP.present() }
+  else { frame() }
+}
+
+// Hold `frames` frames — the world keeps stepping, so actors animate.
+export function cutWait(frames) {
+  let t = 0
+  while (t < frames) { present(); t = t + 1 }
+}
+
+// Show dialogue (`text` = a string or an array of pages) and block until the player closes it.
+// Optional `opts` are passed through to `dialogSay` (portrait, side, …).
+// Uses `frame()` (not full `world_step`) while the box is open: town AI/physics aren't needed for a
+// standing conversation, and the heavier step was blowing the frame budget → choppy BGM.
+export function cutSay(text, speaker, opts) {
+  let portrait = -1
+  let side = "left"
+  if (opts !== null) {
+    if (typeof opts !== 'undefined') {
+      if (opts.portrait !== null) { portrait = opts.portrait }
+      if (opts.side !== null) { side = opts.side }
+    }
+  }
+  if (DLG.say === null) { return }
+  DLG.say(text, { speaker: speaker, portrait: portrait, side: side })
+  while (DLG.active()) {
+    DLG.update()
+    frame()
+  }
+}
+
+// The same walk with an EXPLICIT start, which is what makes it work for actors that are not engine
+// entities: nothing here reads the actor back, it only writes through the mover hook. Interpolates
+// in integer steps — `t / frames` would truncate to 0 for the whole walk and the actor would
+// teleport on the last frame.
+export function cutWalkFrom(e, sx, sy, x, y, frames, face) {
+  let t = 0
+  while (t < frames) {
+    t = t + 1
+    placeAt(e, sx + (x - sx) * t / frames, sy + (y - sy) * t / frames)
+    stepAnim(e, face, true)
+    present()
+  }
+  placeAt(e, x, y)
+  stepAnim(e, face, false)
+  present()
+}
+
+// Turn entity `e` to a facing (idle frame) for one frame.
+export function cutFace(e, face) {
+  stepAnim(e, face, false)
+  present()
+}
+
+// ── fade ──────────────────────────────────────────────────────────────────────────────────────
+// Hardware BLDY brightness blend — one register, and it darkens every layer, sprite and the
+// backdrop together, so nothing needs to know a fade is happening.
+//
+// `packages/scene.tish` has had this since it was written, but its consumers drive the low-level
+// `dialogue_show`, NOT packages/dialog. So the games with fades and the games with the good
+// dialogue box have been disjoint. This is the join.
+//
+// FADE_MAX is the full BLDY range; going past it is a no-op, not an error.
+export let FADE_MAX: i32 = 16
+
+// Fade to black over `frames`, and stay there. Pair with `cutFadeIn`.
+export function cutFadeOut(frames) {
+  let t = 0
+  while (t < frames) {
+    t = t + 1
+    fade(t * FADE_MAX / frames)
+    present()
+  }
+  fade(FADE_MAX)
+}
+
+// Fade up from black over `frames`, ending fully lit.
+export function cutFadeIn(frames) {
+  let t = 0
+  while (t < frames) {
+    t = t + 1
+    fade(FADE_MAX - t * FADE_MAX / frames)
+    present()
+  }
+  fade(0)
+}
+
+// ── camera ────────────────────────────────────────────────────────────────────────────────────
+// Slide the camera to (x, y) over `frames`, then leave it there.
+//
+// Nothing in any narrative package could move the camera before this, which is why every cutscene
+// in the repo happens wherever the player was standing. Establishing a shot is most of what a
+// cutscene camera is for.
+//
+// ⚠️ The game's own camera follow will fight this and win. Freeze or skip the follow for the
+// duration of the pan — the same way the player component is gated while a scene runs.
+export function cutPan(x, y, frames) {
+  let sx = camera_x()
+  let sy = camera_y()
+  let t = 0
+  while (t < frames) {
+    t = t + 1
+    camera_set(sx + (x - sx) * t / frames, sy + (y - sy) * t / frames)
+    present()
+  }
+  camera_set(x, y)
+}
+
+// ── choices ───────────────────────────────────────────────────────────────────────────────────
+// Ask, block until the player picks, and RETURN the index they picked.
+//
+// `cutSay` forwarded only `portrait` and `side`, so `packages/dialog`'s `choices` / `onChoose` were
+// unreachable from a cutscene — a scene could talk but never ask. Returning the index rather than
+// taking a callback is what makes branching read normally at the call site:
+//
+//     if (cutChoose(["Take the sword?"], "Elder", { choices: ["Yes", "No"] }) === 0) { … }
+export function cutChoose(text, speaker, opts) {
+  let portrait = 0 - 1
+  let side = "left"
+  let choices = null
+  if (opts !== null) {
+    if (opts.portrait !== null) { portrait = opts.portrait }
+    if (opts.side !== null) { side = opts.side }
+    if (opts.choices !== null) { choices = opts.choices }
+  }
+  // No dialogue layer installed: report the first option, which is what a closed box reports too.
+  if (DLG.say === null) { return 0 }
+  DLG.say(text, { speaker: speaker, portrait: portrait, side: side, choices: choices })
+  while (DLG.active()) {
+    DLG.update()
+    frame()
+  }
+  let r = DLG.result()
+  // ⚠️ A choice box can close WITHOUT a selection, and then `dialogResult()` is -1. It happens when
+  // the same A press that turns the last page also closes the box before the choice list is ever
+  // shown — held input, or a scripted frame schedule. A story then reads -1, matches none of its
+  // branches, and silently takes the "neither" path: iso-story-branch ran end to end with every flag
+  // unset and looked for all the world like a broken flag store.
+  //
+  // The cursor sits on option 0 from the moment the box opens, so 0 is what a closed box chose.
+  // A caller that must distinguish "no choice offered" reads `dialogResult()` itself.
+  if (r < 0) { r = 0 }
+  return r
+}
+
+// ── story flags ───────────────────────────────────────────────────────────────────────────────
+// A named flag store, so a scene can remember what happened without every game inventing its own
+// `gameState` object (they all do today) and without widening `packages/save.tish`'s single
+// bitmask before anyone knows how many flags a story actually needs.
+//
+// Parallel arrays rather than dynamic object keys: keys built at runtime are the kind of thing that
+// lowers unpredictably, and a linear scan over a few dozen flags costs nothing at cutscene cadence.
+let flagNames = []
+let flagVals = []
+
+function flagIndex(name) {
+  let i = 0
+  while (i < flagNames.length) {
+    if (flagNames[i] === name) { return i }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+export function cutSetFlag(name, value) {
+  let i = flagIndex(name)
+  if (i >= 0) { flagVals[i] = value; return }
+  flagNames.push(name)
+  flagVals.push(value)
+}
+
+// Unset reads as 0, so `if (cutFlag("metElder") > 0)` works without seeding anything first.
+export function cutFlag(name) {
+  let i = flagIndex(name)
+  if (i < 0) { return 0 }
+  return flagVals[i]
+}
+
+export function cutFlagCount() { return flagNames.length }

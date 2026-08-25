@@ -1,0 +1,207 @@
+# Caravan Route — long explore theme (16 bars, not a 1-bar repeat).
+# Sectional A→B→bridge→A' so it can sit under gameplay and blend with scene cuts.
+deck 1
+bpm 100
+
+track Lead id lead gen gameBoyDmg * 16
+  gen type pulse duty 50 env_mode constant vol 11
+  gen vib_rate 4 vib_amt 14
+  # A — road motif
+  note 62 0 0.75 v 100
+  note 64 0.75 0.25 v 90
+  note 65 1 1 v 105
+  note 64 2 0.5 v 95
+  note 62 2.5 0.5 v 90
+  note 60 3 1 v 100
+  note 62 4 0.5 v 105
+  note 65 4.5 0.5 v 100
+  note 67 5 1 v 115
+  note 65 6 0.5 v 100
+  note 64 6.5 0.5 v 95
+  note 62 7 1 v 105
+  note 60 8 0.75 v 100
+  note 62 8.75 0.25 v 95
+  note 64 9 1 v 110
+  note 65 10 0.5 v 105
+  note 67 10.5 0.5 v 110
+  note 69 11 1 v 120
+  note 67 12 0.5 v 110
+  note 65 12.5 0.5 v 100
+  note 64 13 1 v 105
+  note 62 14 1 v 100
+  note 60 15 1 v 95
+  # B — open plain (higher)
+  note 69 16 0.5 v 110
+  note 67 16.5 0.5 v 100
+  note 65 17 0.5 v 105
+  note 64 17.5 0.5 v 95
+  note 62 18 1 v 100
+  note 64 19 1 v 105
+  note 65 20 0.75 v 115
+  note 67 20.75 0.25 v 105
+  note 69 21 1 v 120
+  note 67 22 0.5 v 110
+  note 65 22.5 0.5 v 100
+  note 64 23 1 v 105
+  note 62 24 0.5 v 100
+  note 60 24.5 0.5 v 90
+  note 62 25 0.5 v 100
+  note 64 25.5 0.5 v 105
+  note 65 26 1 v 115
+  note 67 27 1 v 110
+  note 69 28 0.5 v 120
+  note 72 28.5 0.5 v 115
+  note 69 29 1 v 120
+  note 67 30 1 v 110
+  note 65 31 1 v 105
+  # Bridge — sparse call/response
+  note 64 32 2 v 90
+  note 62 35 1 v 85
+  note 60 37 1 v 80
+  note 62 39 1 v 90
+  note 65 40 0.5 v 100
+  note 64 40.5 0.5 v 95
+  note 62 41 1 v 100
+  note 60 43 1 v 90
+  note 57 45 2 v 85
+  note 60 48 1 v 95
+  note 62 49 1 v 100
+  note 64 50 1 v 105
+  note 65 51 1 v 110
+  # A' — return with lift
+  note 62 52 0.75 v 110
+  note 64 52.75 0.25 v 100
+  note 65 53 1 v 115
+  note 67 54 0.5 v 110
+  note 65 54.5 0.5 v 105
+  note 64 55 1 v 110
+  note 62 56 0.5 v 115
+  note 65 56.5 0.5 v 110
+  note 67 57 0.5 v 120
+  note 69 57.5 0.5 v 115
+  note 72 58 1 v 125
+  note 69 59 1 v 115
+  note 67 60 0.5 v 110
+  note 65 60.5 0.5 v 105
+  note 64 61 1 v 110
+  note 62 62 1 v 105
+  note 60 63 1 v 100
+
+track Harm id harm gen gameBoyDmg * 16
+  gen type pulse duty 12_5 env_mode constant vol 5
+  note 53 0 4 v 70
+  note 55 4 4 v 65
+  note 57 8 4 v 75
+  note 55 12 4 v 70
+  note 57 16 4 v 75
+  note 60 20 4 v 80
+  note 57 24 4 v 75
+  note 55 28 4 v 70
+  note 53 32 4 v 60
+  note 52 36 4 v 55
+  note 53 40 4 v 65
+  note 55 44 4 v 70
+  note 53 48 4 v 70
+  note 55 52 4 v 75
+  note 57 56 4 v 80
+  note 55 60 4 v 75
+
+track Bass id bass gen gameBoyDmg * 16
+  gen type wave wave_shape sine vol 13
+  note 38 0 2 v 110
+  note 38 2 2 v 90
+  note 36 4 2 v 105
+  note 38 6 2 v 95
+  note 41 8 2 v 115
+  note 38 10 2 v 100
+  note 36 12 2 v 105
+  note 33 14 2 v 95
+  note 38 16 1 v 115
+  note 38 17 1 v 90
+  note 36 18 1 v 105
+  note 38 19 1 v 95
+  note 41 20 1 v 120
+  note 41 21 1 v 95
+  note 38 22 1 v 110
+  note 36 23 1 v 100
+  note 33 24 2 v 110
+  note 36 26 2 v 100
+  note 38 28 2 v 115
+  note 41 30 2 v 105
+  note 38 32 4 v 90
+  note 36 36 4 v 85
+  note 33 40 2 v 95
+  note 36 42 2 v 90
+  note 38 44 2 v 100
+  note 36 46 2 v 95
+  note 38 48 2 v 110
+  note 36 50 2 v 100
+  note 38 52 1 v 115
+  note 41 53 1 v 105
+  note 38 54 1 v 110
+  note 36 55 1 v 100
+  note 38 56 1 v 120
+  note 41 57 1 v 110
+  note 43 58 1 v 115
+  note 41 59 1 v 105
+  note 38 60 2 v 115
+  note 36 62 2 v 100
+
+track Hats id hats gen gbaDirectSound * 16
+  gen waveform triangle vol 7 bitcrush true
+  adsr a 0 d 0.04 s 0 r 0.02
+  note 80 1 0.08 v 70
+  note 80 3 0.08 v 60
+  note 80 5 0.08 v 70
+  note 80 7 0.08 v 60
+  note 80 9 0.08 v 75
+  note 80 11 0.08 v 65
+  note 80 13 0.08 v 75
+  note 80 15 0.08 v 65
+  note 80 17 0.08 v 80
+  note 80 17.5 0.06 v 50
+  note 80 19 0.08 v 75
+  note 80 21 0.08 v 80
+  note 80 21.5 0.06 v 50
+  note 80 23 0.08 v 75
+  note 80 25 0.08 v 80
+  note 80 27 0.08 v 70
+  note 80 29 0.08 v 80
+  note 80 31 0.08 v 70
+  # bridge quieter
+  note 80 35 0.08 v 45
+  note 80 39 0.08 v 40
+  note 80 43 0.08 v 50
+  note 80 47 0.08 v 45
+  note 80 49 0.08 v 70
+  note 80 51 0.08 v 60
+  note 80 53 0.08 v 75
+  note 80 55 0.08 v 65
+  note 80 57 0.08 v 80
+  note 80 57.5 0.06 v 55
+  note 80 59 0.08 v 75
+  note 80 61 0.08 v 80
+  note 80 63 0.08 v 70
+
+track Kick id kick gen gbaDirectSound * 16
+  gen waveform pulse duty 50 vol 12 bitcrush true pitch_drop -10 pitch_dec 0.07
+  adsr a 0 d 0.11 s 0 r 0.04
+  note 36 0 0.14 v 110
+  note 36 4 0.14 v 100
+  note 36 8 0.14 v 115
+  note 36 12 0.14 v 105
+  note 36 16 0.14 v 120
+  note 36 18 0.12 v 90
+  note 36 20 0.14 v 120
+  note 36 24 0.14 v 115
+  note 36 28 0.14 v 120
+  note 36 32 0.16 v 85
+  note 36 40 0.14 v 95
+  note 36 44 0.14 v 100
+  note 36 48 0.14 v 115
+  note 36 52 0.14 v 120
+  note 36 54 0.12 v 95
+  note 36 56 0.14 v 125
+  note 36 58 0.12 v 100
+  note 36 60 0.14 v 120
+  note 36 62 0.14 v 110

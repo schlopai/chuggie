@@ -1,0 +1,15 @@
+{
+ "columns": 9,
+ "image": "../Backgrounds/Tilesets/Interior/Elements.png",
+ "imagewidth": 144,
+ "imageheight": 48,
+ "margin": 0,
+ "spacing": 0,
+ "name": "Elements",
+ "tilecount": 27,
+ "tiledversion": "1.11.0",
+ "tilewidth": 16,
+ "tileheight": 16,
+ "type": "tileset",
+ "version": "1.10"
+}

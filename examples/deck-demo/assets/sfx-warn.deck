@@ -1,0 +1,12 @@
+# Short TPL sting — warning / hit (noise + PCM drop).
+deck 1
+bpm 160
+
+track Hit id hit gen gameBoyDmg
+  gen type noise noise_mode short vol 14 env_mode step
+  note 60 0 0.15 v 127
+
+track Drop id drop gen gbaDirectSound
+  gen waveform pulse duty 25 vol 14 bitcrush true pitch_drop -18 pitch_dec 0.08
+  adsr a 0 d 0.15 s 0 r 0.05
+  note 40 0 0.2 v 127

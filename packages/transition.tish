@@ -1,0 +1,377 @@
+// transition.tish — every screen transition the GBA can do, behind one function.
+//
+// A transition is the least glamorous system in a game and the first one a player notices when it
+// is wrong: a hard cut between two scenes reads as a glitch. Until now this engine had exactly one
+// — fade to black — written out three separate times (`scene.tish`, `cutscene-core.tish`, and by
+// hand in half a dozen examples), while the hardware that does wipes sat unreachable.
+//
+// THE WHOLE API IS ONE CALL. `trApply(p, len)` paints the transition at progress `p`:
+//
+//     p = 0     the scene is fully visible
+//     p = len   the scene is fully hidden
+//
+// That is deliberately direction-free. Fading OUT is ramping p up, fading IN is ramping it down,
+// and both are the same function — so an effect is written once, not twice, and cannot disagree
+// with itself about what half-closed looks like.
+//
+// Usage, stepped (the scene machine's shape — see `packages/scene`):
+//     trConfig(TR_IRIS, 24)
+//     trApply(t, 24)          // once a frame, before your present
+//     trReset()               // when the transition ends
+//
+// Usage, blocking (a cutscene's shape):
+//     trOut(24)   // ramp closed, presenting each frame
+//     …swap the scene…
+//     trIn(24)    // ramp open
+//
+// ⚠️ THREE HARDWARE LIMITS DECIDE WHICH EFFECTS CAN COEXIST WITH WHAT. Each is called out on the
+// effect that hits it, but in one place:
+//   1. BLDCNT is ONE effect for the whole screen. TR_FADE and TR_WHITE spend it, and while either
+//      is ramping, `fx_flash` and `blend_alpha` are suppressed by the engine.
+//   2. There is ONE HBlank DMA slot per frame. TR_IRIS/TR_IRIS_AT spend it, and so do a Mode 7
+//      floor and `bg_bands` parallax. The engine now logs when the iris loses that race instead of
+//      dropping a layer silently — but the fix is to pick TR_BOX for those scenes.
+//   3. The software effects paint the UI canvas, which costs REAL TILES (~600 at full coverage).
+//      See TR_RAIN.
+import {
+  fade, fade_white, mosaic,
+  win_rect, win_circle, win_off, win_out_layers,
+  ui_fill_cells, ui_clear_rect,
+  frame
+} from 'cargo:tish_agb'
+
+// ── The effects ──────────────────────────────────────────────────────────────────────────────────
+// HARDWARE — one register or one DMA. Free: nothing is redrawn, the display hardware does the work
+// as it scans out.
+export let TR_FADE: i32 = 0      // dip to black (BLDY decrease). The default, and the safe one.
+export let TR_WHITE: i32 = 1     // blow out to white (BLDY increase)
+export let TR_IRIS: i32 = 2      // circle closing on the screen centre  ⚠️ claims the HBlank DMA
+export let TR_IRIS_AT: i32 = 3   // circle closing on `trFocus(x, y)`    ⚠️ claims the HBlank DMA
+export let TR_BOX: i32 = 4       // rectangle shrinking to the focus point — the iris without the DMA
+export let TR_WIPE: i32 = 5      // a hard edge sweeping right to left
+export let TR_CURTAIN: i32 = 6   // two panels closing in from the sides
+export let TR_BARS: i32 = 7      // two full-width bands closing in from top and bottom
+export let TR_MOSAIC: i32 = 8    // pixelate into unrecognisability, then a short dip to black
+// SOFTWARE — paints the UI canvas. Costs tiles and CPU; read TR_RAIN before using either.
+export let TR_RAIN: i32 = 9      // columns of curtain falling at staggered speeds
+export let TR_CHECKER: i32 = 10  // cells filling in a scrambled order
+export let TR_COUNT: i32 = 11
+
+// Screen geometry, named so the effect maths reads as geometry rather than as magic numbers.
+let SCR_W: i32 = 240
+let SCR_H: i32 = 160
+// The radius that still covers the corners from the centre: sqrt(120² + 80²) ≈ 145.
+let IRIS_MAX: i32 = 145
+
+// The transition's whole state, as a typed struct. Every field is i32 on purpose: an untyped scalar
+// in tish is a soft-float double, and `trApply` runs on every frame of every transition.
+//   kind  the selected effect          len   the default ramp length in frames
+//   fx/fy the focus point for TR_IRIS_AT and TR_BOX
+//   paint how much of a software curtain is already on the canvas, so each frame paints only the
+//         DELTA. Repainting the whole curtain every frame is what makes a software transition cost
+//         a frame instead of a fraction of one.
+interface TrReg { kind: i32, len: i32, fx: i32, fy: i32, paint: i32, dirty: i32 }
+let TR: TrReg = { kind: 0, len: 16, fx: 120, fy: 80, paint: 0, dirty: 0 }
+
+// Choose the effect and the default ramp length (frames each way).
+export function trConfig(kind: i32, len: i32) {
+  if (kind >= 0 && kind < TR_COUNT) { TR.kind = kind }
+  if (len > 0) { TR.len = len }
+}
+
+// Where TR_IRIS_AT and TR_BOX close to — normally the player, so the screen shuts on the character
+// rather than on the middle of nowhere.
+export function trFocus(x: i32, y: i32) {
+  TR.fx = x
+  TR.fy = y
+}
+
+export function trKind(): i32 { return TR.kind }
+export function trLen(): i32 { return TR.len }
+
+// The effect's display name, for demos and debug HUDs.
+export function trName(kind: i32): string {
+  if (kind === TR_FADE) { return "fade" }
+  if (kind === TR_WHITE) { return "white" }
+  if (kind === TR_IRIS) { return "iris" }
+  if (kind === TR_IRIS_AT) { return "iris at" }
+  if (kind === TR_BOX) { return "box" }
+  if (kind === TR_WIPE) { return "wipe" }
+  if (kind === TR_CURTAIN) { return "curtain" }
+  if (kind === TR_BARS) { return "bars" }
+  if (kind === TR_MOSAIC) { return "mosaic" }
+  if (kind === TR_RAIN) { return "rain" }
+  if (kind === TR_CHECKER) { return "checker" }
+  return "?"
+}
+
+// Whether an effect paints the UI canvas (and so needs the tile reserve TR_RAIN documents).
+export function trIsSoftware(kind: i32): bool {
+  return kind === TR_RAIN || kind === TR_CHECKER
+}
+
+// Scale `p/len` onto 0..range, rounding so that p === len lands exactly on `range` — an iris that
+// stops one pixel short of closed shows a bright dot in the middle of a black screen, which is the
+// single most visible way to get a transition wrong.
+function trScale(p: i32, len: i32, range: i32): i32 {
+  if (len <= 0) { return range }
+  if (p >= len) { return range }
+  if (p <= 0) { return 0 }
+  return (p * range + len / 2) / len
+}
+
+// ── The core ─────────────────────────────────────────────────────────────────────────────────────
+// Paint the current effect at progress `p` of `len`. Call once a frame, before your present.
+//
+// Every effect clears the state the OTHER effects use before setting its own, so switching effect
+// mid-flight (or between transitions) can never leave a stale window or a stuck mosaic behind.
+export function trApply(p: i32, len: i32) {
+  let k: i32 = TR.kind
+  // Clear what this effect does not own. Cheap — these are register writes, not redraws.
+  if (k !== TR_FADE && k !== TR_MOSAIC) { fade(0) }
+  if (k !== TR_WHITE) { fade_white(0) }
+  if (k !== TR_MOSAIC) { mosaic(0, 0) }
+  if (k !== TR_IRIS && k !== TR_IRIS_AT && k !== TR_BOX && k !== TR_WIPE
+      && k !== TR_CURTAIN && k !== TR_BARS) {
+    win_off(0)
+    win_off(1)
+    win_out_layers(63)
+  }
+  if (!trIsSoftware(k) && TR.paint > 0) { trCurtainClear() }
+
+  if (k === TR_FADE) {
+    fade(trScale(p, len, 16))
+  } else if (k === TR_WHITE) {
+    fade_white(trScale(p, len, 16))
+  } else if (k === TR_IRIS) {
+    trIrisAt(120, 80, p, len)
+  } else if (k === TR_IRIS_AT) {
+    trIrisAt(TR.fx, TR.fy, p, len)
+  } else if (k === TR_BOX) {
+    // The iris without the per-scanline DMA: a rectangle shrinking on the focus point. Use this
+    // one over a Mode 7 floor or a banded layer, which already own the DMA slot.
+    win_out_layers(0)
+    let hw: i32 = SCR_W - trScale(p, len, SCR_W)
+    let hh: i32 = SCR_H - trScale(p, len, SCR_H)
+    if (hw <= 0 || hh <= 0) {
+      // Fully closed. A zero-size window is a window that is OFF on this hardware, which would show
+      // the whole screen — exactly backwards. Park it as a 1x1 in the corner instead.
+      win_rect(0, 0, 0, 0, 0)
+      win_out_layers(0)
+      win_rect(0, 0 - 4, 0 - 4, 1, 1)
+    } else {
+      let x: i32 = TR.fx - hw / 2
+      let y: i32 = TR.fy - hh / 2
+      win_rect(0, x, y, hw, hh)
+    }
+    win_off(1)
+  } else if (k === TR_WIPE) {
+    // A hard edge sweeping in from the right: the surviving scene is the strip to its left.
+    win_out_layers(0)
+    let w: i32 = SCR_W - trScale(p, len, SCR_W)
+    if (w <= 0) { win_rect(0, 0 - 4, 0 - 4, 1, 1) } else { win_rect(0, 0, 0, w, SCR_H) }
+    win_off(1)
+  } else if (k === TR_CURTAIN) {
+    // Two panels closing in from the sides — so it needs BOTH windows, one per surviving strip.
+    win_out_layers(0)
+    let w: i32 = (SCR_W - trScale(p, len, SCR_W)) / 2
+    if (w <= 0) {
+      win_rect(0, 0 - 4, 0 - 4, 1, 1)
+      win_off(1)
+    } else {
+      win_rect(0, 0, 0, w, SCR_H)
+      win_rect(1, SCR_W - w, 0, w, SCR_H)
+    }
+  } else if (k === TR_BARS) {
+    // The same, rotated: full-width bands closing from the top and the bottom.
+    win_out_layers(0)
+    let h: i32 = (SCR_H - trScale(p, len, SCR_H)) / 2
+    if (h <= 0) {
+      win_rect(0, 0 - 4, 0 - 4, 1, 1)
+      win_off(1)
+    } else {
+      win_rect(0, 0, 0, SCR_W, h)
+      win_rect(1, 0, SCR_H - h, SCR_W, h)
+    }
+  } else if (k === TR_MOSAIC) {
+    // Pixelate to 16x16 blocks — and then, over the last quarter, dip to black as well. Mosaic
+    // ALONE never hides the scene: at maximum block size the screen is still sixteen recognisable
+    // colours in a grid, so a scene swapped underneath it would visibly pop. The dip is what makes
+    // it a transition rather than an effect.
+    let m: i32 = trScale(p, len, 15)
+    mosaic(m, m)
+    let tail: i32 = len - len / 4
+    if (p > tail) { fade(trScale(p - tail, len - tail, 16)) } else { fade(0) }
+  } else if (k === TR_RAIN) {
+    trRain(p, len)
+  } else if (k === TR_CHECKER) {
+    trChecker(p, len)
+  }
+}
+
+// The circle, shared by TR_IRIS and TR_IRIS_AT. Radius runs full → 0 as p runs 0 → len.
+//
+// ⚠️ This is the one effect that spends the single HBlank DMA slot (the circle's left/right edges
+// are rewritten per scanline). A Mode 7 floor or a `bg_bands` layer claims the same slot first, and
+// the engine now logs when the iris loses — TR_BOX is the drop-in that needs no DMA.
+function trIrisAt(cx: i32, cy: i32, p: i32, len: i32) {
+  win_out_layers(0)
+  win_off(1)
+  win_circle(cx, cy, IRIS_MAX - trScale(p, len, IRIS_MAX))
+}
+
+// ── The software tier ────────────────────────────────────────────────────────────────────────────
+// These two paint an opaque curtain onto the UI canvas, because no register does a staggered fall
+// or a scattered dissolve.
+//
+// ⚠️ THEY ARE CHEAPER THAN THEY LOOK, BUT ONLY BECAUSE THE CURTAIN IS SOLID. The UI canvas shares
+// ONE tile per solid fill colour, so a fully-covered screen costs a single tile — not the 30 x 20 =
+// 600 an opaque full-screen paint implies. What does cost real tiles is the RAGGED EDGE: every cell
+// the curtain only partly covers needs its own tile. That is bounded (about two tiles per column),
+// which is why 128 reserved tiles is enough for either effect plus a HUD line.
+//
+// ⚠️ AND THEY MUST RETREAT, NOT JUST ADVANCE. The first version of this only ever painted more
+// curtain, on the assumption that a transition runs one way. It does not — `scene.tish` runs the
+// same effect backwards to open the screen again — so the curtain stayed down through the whole
+// fade-in and the scene popped into view at the end, AND every partial edge tile from the way down
+// was still allocated on the way up, which ran the tile allocator dry in about ten seconds. Both
+// effects therefore track what they have painted and CLEAR the difference when progress falls.
+//
+// ⚠️ THEY NEED A UI CANVAS THAT IS ALREADY OPEN (`ui_begin()`), and the canvas must sit over a
+// background that is NOT being rebuilt underneath it, or the curtain's tiles are re-used as map
+// tiles and the transition draws itself into the floor.
+//
+// The hardware effects above cost zero tiles and zero CPU. Reach for those first; use these two
+// when the LOOK is the point.
+let CURTAIN_COL: i32 = 0x000000   // the curtain colour, RGB24 — ⚠️ these natives take RGB, not a palette index
+let RAIN_COLS: i32 = 15           // 15 columns of 16px
+let CHECK_COLS: i32 = 15          // a 15 x 10 grid of 16px cells
+let CHECK_ROWS: i32 = 10
+// Per-column curtain height as of the last painted frame, so a frame paints (or clears) only the
+// band that actually changed. Sized to RAIN_COLS and typed — an untyped array is 28 bytes an entry.
+let RAIN_H: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+// The curtain colour, if a game wants to fall to white or to its own black.
+export function trCurtainColor(rgb: i32) { CURTAIN_COL = rgb }
+
+// Rain: every column falls, but each starts at a different time, so the curtain arrives as a ragged
+// edge rather than a sliding block. The stagger is a fixed hash of the column index — NOT a random
+// number, so a replay of the same transition looks the same, which is the rule the engine's shake
+// and particle seeds already follow.
+function trRainDelay(col: i32, len: i32): i32 {
+  return ((col * 7 + (col * col) % 5) % 6) * (len / 3) / 6
+}
+
+function trRain(p: i32, len: i32) {
+  TR.dirty = 1
+  let cw: i32 = SCR_W / RAIN_COLS
+  let c: i32 = 0
+  while (c < RAIN_COLS) {
+    let d: i32 = trRainDelay(c, len)
+    // Each column covers the screen over the frames it has left after its own delay.
+    let span: i32 = len - d
+    let q: i32 = p - d
+    let h: i32 = 0
+    if (span > 0 && q > 0) { h = trScale(q, span, SCR_H) }
+    // ⚠️ SNAP THE EDGE TO THE 8-PIXEL TILE GRID. This is the whole reason the software tier is
+    // affordable. The canvas shares one tile per solid colour, but only for cells that are FULLY
+    // covered — a cell the curtain cuts through half way needs a tile of its own. An unsnapped
+    // edge cuts through fifteen columns' worth of cells on every frame of the ramp, and that runs
+    // the tile allocator dry mid-transition (it did: "Ran out of video RAM for tiles", about a
+    // second into the fall). Snapped, the curtain is always whole cells and costs ONE tile total.
+    // Nothing is lost visually — the display is made of 8-pixel tiles either way.
+    h = (h / 8) * 8
+    let was: i32 = RAIN_H[c]
+    // Paint the column WHOLE rather than just the new band. `ui_fill_cells` skips any cell that
+    // already holds this exact solid tile, so a full repaint costs only the cells that changed —
+    // and painting whole means the column can never disagree with itself about where its edge is.
+    if (h > 0) { ui_fill_cells(c * cw, 0, cw, h, CURTAIN_COL) }
+    if (h < was) { ui_clear_rect(c * cw, h, cw, was - h) }
+    RAIN_H[c] = h
+    c = c + 1
+  }
+  TR.paint = p
+}
+
+// Checker: cells fill in a scrambled but FIXED order. The scramble is a stride through the cell
+// count — a coprime stride visits every cell exactly once, which a random pick cannot promise, and
+// a cell left unfilled at p === len is a hole the next scene shows through.
+function trChecker(p: i32, len: i32) {
+  TR.dirty = 1
+  let total: i32 = CHECK_COLS * CHECK_ROWS
+  let n: i32 = trScale(p, len, total)
+  let cw: i32 = SCR_W / CHECK_COLS
+  let ch: i32 = SCR_H / CHECK_ROWS
+  let i: i32 = TR.paint
+  // Cells added since the last frame…
+  while (i < n) {
+    let cell: i32 = (i * 47) % total   // 47 is coprime with 150, so this is a permutation
+    ui_fill_cells((cell % CHECK_COLS) * cw, (cell / CHECK_COLS) * ch, cw, ch, CURTAIN_COL)
+    i = i + 1
+  }
+  // …and cells removed since it, walking the same permutation backwards so the screen re-opens in
+  // the reverse of the order it closed.
+  while (i > n) {
+    i = i - 1
+    let cell: i32 = (i * 47) % total
+    ui_clear_rect((cell % CHECK_COLS) * cw, (cell / CHECK_COLS) * ch, cw, ch)
+  }
+  TR.paint = n
+}
+
+// Wipe the software curtain off the canvas. Called by `trReset`, and by `trApply` the moment a
+// hardware effect is selected — a curtain left on the canvas is not just a black screen, it is 600
+// tiles that never come back.
+function trCurtainClear() {
+  ui_clear_rect(0, 0, SCR_W, SCR_H)
+  let c: i32 = 0
+  while (c < RAIN_COLS) {
+    RAIN_H[c] = 0
+    c = c + 1
+  }
+  TR.paint = 0
+  TR.dirty = 0
+}
+
+// ── Teardown ─────────────────────────────────────────────────────────────────────────────────────
+// Put every register this package touches back the way it found it. Call when a transition ends —
+// `scene.tish` does it on reaching idle. Safe to call at any time, including when nothing is live.
+export function trReset() {
+  fade(0)
+  fade_white(0)
+  mosaic(0, 0)
+  win_off(0)
+  win_off(1)
+  win_out_layers(63)
+  if (TR.dirty === 1) { trCurtainClear() }
+}
+
+// ── Blocking drivers ─────────────────────────────────────────────────────────────────────────────
+// For code that runs a transition inline rather than through a state machine — a cutscene, a boot
+// sequence, a game-over. They present each frame themselves.
+//
+// ⚠️ `trOut` leaves the screen HIDDEN and every register still set: that is the point, since the
+// caller swaps the scene next. Whatever follows must reach `trIn` or `trReset`, or the game is
+// simply a black screen that still responds to input — which reads exactly like a crash.
+export function trOut(len: i32) {
+  let n: i32 = len
+  if (n <= 0) { n = TR.len }
+  let t: i32 = 0
+  while (t <= n) {
+    trApply(t, n)
+    frame()
+    t = t + 1
+  }
+}
+
+export function trIn(len: i32) {
+  let n: i32 = len
+  if (n <= 0) { n = TR.len }
+  let t: i32 = n
+  while (t >= 0) {
+    trApply(t, n)
+    frame()
+    t = t - 1
+  }
+  trReset()
+}

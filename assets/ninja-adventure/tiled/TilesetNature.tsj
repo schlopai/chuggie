@@ -1,0 +1,69 @@
+{
+ "columns": 24,
+ "image": "../Backgrounds/Tilesets/TilesetNature.png",
+ "imagewidth": 384,
+ "imageheight": 336,
+ "margin": 0,
+ "spacing": 0,
+ "name": "TilesetNature",
+ "tilecount": 504,
+ "tiledversion": "1.11.0",
+ "tilewidth": 16,
+ "tileheight": 16,
+ "type": "tileset",
+ "version": "1.10",
+ "tiles": [
+  {
+   "id": 481,
+   "objectgroup": {
+    "draworder": "index",
+    "id": 1,
+    "name": "",
+    "objects": [
+     {
+      "height": 16,
+      "width": 16,
+      "x": 0,
+      "y": 0,
+      "id": 1,
+      "name": "",
+      "rotation": 0,
+      "type": "",
+      "visible": true
+     }
+    ],
+    "opacity": 1,
+    "type": "objectgroup",
+    "visible": true,
+    "x": 0,
+    "y": 0
+   }
+  },
+  {
+   "id": 484,
+   "objectgroup": {
+    "draworder": "index",
+    "id": 2,
+    "name": "",
+    "objects": [
+     {
+      "height": 16,
+      "width": 16,
+      "x": 0,
+      "y": 0,
+      "id": 1,
+      "name": "",
+      "rotation": 0,
+      "type": "",
+      "visible": true
+     }
+    ],
+    "opacity": 1,
+    "type": "objectgroup",
+    "visible": true,
+    "x": 0,
+    "y": 0
+   }
+  }
+ ]
+}

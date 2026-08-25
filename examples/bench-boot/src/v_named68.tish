@@ -1,0 +1,26 @@
+// Variant: 68 NAMED imports from one `cargo:` crate, and nothing else.
+//
+// This is the shape `packages/engine.tish` has, reduced to just the imports. Pair it with
+// `v_star.tish`, which takes the SAME 68 functions through one namespace import. If the two cost the
+// same, the price is per-symbol binding; if the named one costs vastly more, the compiler is
+// rebuilding the crate's whole export table once per imported name — which is quadratic in
+// (names imported x names the crate exports), and is the entire reason an RPG boots in 8 seconds.
+import { log, frame } from 'cargo:tish_agb'
+import {
+  add_behaviour, anim_play, attach_grid, attach_sprite, camera_transitioning, clear_world, damage,
+  define_component, despawn, entity_on_screen, entity_sprite, entity_tag, entity_x, entity_y,
+  grid_col, grid_facing, grid_from_map, grid_interact, grid_moving, grid_row, grid_set_oneway,
+  grid_set_solid, grid_setup, grid_step, heal, health_alive, health_hp, health_max, overlaps,
+  platformer_blocked, platformer_bounce, platformer_drop, platformer_grounded, platformer_hold,
+  platformer_jump, platformer_jump_release, platformer_run, platformer_vy, platformer_walk, set_anim,
+  set_blocker, set_body, set_camera_target, set_chase, set_collider, set_despawn_offscreen,
+  set_health, set_hurt, set_lifetime, set_patrol, set_platformer, set_room_camera, set_sprite_offset,
+  set_tag, set_topdown, set_transform, set_walk, spawn, swing, tile_solid, topdown_facing,
+  topdown_interact, topdown_knockback, topdown_move, topdown_moving, topdown_snap, topdown_speed,
+  world_step
+} from 'cargo:tish_gba_game_engine'
+
+// One reference so nothing can be dropped as unused.
+log("BB named68 " + (typeof spawn) + (typeof world_step) + (typeof grid_setup) + (typeof swing) +
+  (typeof heal) + (typeof damage) + (typeof overlaps) + (typeof despawn))
+while (true) { frame() }

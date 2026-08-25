@@ -1,0 +1,23 @@
+// bench-boot FLOOR — the cost of booting a tish GBA program that imports NOTHING.
+//
+// Every other number this bench prints is only meaningful against this one: it is what a ROM pays
+// before a single line of game code runs (agb's runtime init, the heap, the tish runtime, the
+// interrupt/vblank setup). Subtracting it from the staged run's first marker is what isolates the
+// cost of ASSET REGISTRATION, which no in-game marker can measure — module init happens before a
+// game's first statement, so a `log()` at the top of main.tish can only report the total.
+//
+// This is not the bottom, though — `agb-floor/` is the same two statements written in pure agb with
+// no tish at all, and it paints on frame 1 where this paints on frame 5. Those 4 frames are the tish
+// runtime's entire startup cost, and knowing it is that small is what stops every slow boot in this
+// repo from being blamed on the language. Keep the two doing the SAME WORK; the moment they drift,
+// the subtraction stops meaning anything.
+//
+//   GBA_SHOT_LOG=1 tools/gba-shot examples/bench-boot/floor.gba /tmp/f.ppm 900
+import { log, backdrop, frame } from 'cargo:tish_agb'
+
+log("BB floor")
+backdrop(0x101018)
+frame()
+log("BB done")
+
+while (true) { frame() }

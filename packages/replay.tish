@@ -1,0 +1,251 @@
+// replay.tish — record the button stream, play it back, and get a number you can diff.
+//
+// ── WHY THIS EXISTS ───────────────────────────────────────────────────────────────────────────
+//
+// This repo's hardest testing problem is written down in two places and has no tool behind it:
+//
+//   * `docs/MEMORY.md`, "twin ROMs can't prove equality" — a screenshot at a fixed frame compares two
+//     different MOMENTS, so two builds that diverge can still match, and two that agree can still
+//     look different. The recorded advice is "diff a per-frame trace", and nothing produced one.
+//   * tish builds are NONDETERMINISTIC in ORDER (a HashMap in codegen), so "same source, same ROM"
+//     is not a safe assumption and needs checking rather than believing.
+//
+// A recording turns both into an artifact. The input stream is the only thing a player contributes;
+// if the game is a pure function of (seed, inputs) then replaying them must reproduce the run
+// exactly, and a single `replayStateSum` compared between the two passes says whether it did. When
+// it does not, you have the frame it diverged on instead of a feeling.
+//
+// The plan that asked for this noted the machinery already exists: `packages/link.tish` runs two
+// consoles in lockstep by exchanging one button word per frame. A replay is the same idea with the
+// peer replaced by a tape.
+//
+// ── THE TAPE IS RUN-LENGTH ENCODED, WHICH IS NOT AN OPTIMISATION ──────────────────────────────
+//
+// Held buttons are the overwhelmingly common case: a player holds RIGHT for two seconds, and a menu
+// sits untouched for ten. Storing one word per frame spends 3,600 entries a minute and puts a
+// two-minute recording out of reach of anything on this machine. Run-length encoding stores
+// (mask, frames) so those two seconds are ONE entry — a real recording compresses by one to two
+// orders of magnitude, and a completely idle second costs nothing at all.
+//
+// One entry is packed into a single i32 so the tape is a flat `i32[]` and can be written to SRAM
+// verbatim: **low 10 bits = the button mask, high 22 bits = the run length**. Ten bits is exactly
+// the GBA's keypad (A B SELECT START RIGHT LEFT UP DOWN R L), and 22 bits is 4 million frames, or
+// about nineteen hours — long enough that the cap is the tape's capacity, never the encoding.
+//
+//     replayInit({ capacity: 256 })
+//     replayRecord(seed)                  // start recording; remembers the seed
+//     let keys = replayTick(keys_held())  // RECORD: stores and returns what you passed
+//                                         // PLAY:   IGNORES it and returns the tape
+//     replayMix(score)                    // fold game state into the checksum, once a frame
+//     replayStop()
+//     replayPlay()                        // rewind; rngSeed is reapplied by the caller from replaySeed()
+//
+// ⚠️ `replayTick` MUST be the only place the game reads input. A single `key_pressed` elsewhere is a
+// second, unrecorded input channel, and the replay silently stops reproducing.
+
+import { rngSeed } from './rng'
+
+let MASK_BITS: i32 = 10
+let KEY_MASK: i32 = 1023          // low 10 bits: the whole GBA keypad
+let RUN_MAX: i32 = 4194303        // 2^22 - 1
+
+export let RP_IDLE: i32 = 0
+export let RP_RECORD: i32 = 1
+export let RP_PLAY: i32 = 2
+export let RP_DONE: i32 = 3       // playback ran off the end of the tape
+
+// The tape: one packed entry per run. Typed, because an untyped array is 28 bytes an element here
+// against 4 (`docs/MEMORY.md`, "never untyped arrays in tish").
+let TAPE: i32[] = []
+
+//   0 mode  1 len (entries)  2 capacity  3 cursor (entry)  4 left (frames in current run)
+//   5 seed  6 frame  7 sum  8 lastKeys  9 runFrames  10 overflow
+let R: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0 - 1, 0, 0]
+let R_MODE: i32 = 0
+let R_LEN: i32 = 1
+let R_CAP: i32 = 2
+let R_CUR: i32 = 3
+let R_LEFT: i32 = 4
+let R_SEED: i32 = 5
+let R_FRAME: i32 = 6
+let R_SUM: i32 = 7
+let R_LAST: i32 = 8
+let R_RUN: i32 = 9
+let R_OVF: i32 = 10
+
+/// Reserve the tape. `capacity` is RUNS, not frames — see the header on why those differ by orders
+/// of magnitude.
+export function replayInit(cfg) {
+  let cap: i32 = 256
+  if (cfg !== null && cfg.capacity !== null) { cap = cfg.capacity }
+  if (cap < 4) { cap = 4 }
+  // Pre-grown once, at boot, then only ever written in place: a `push` mid-run is an allocation on
+  // a frame that is already the busiest one there is.
+  let i: i32 = 0
+  while (i < cap) {
+    TAPE.push(0)
+    i = i + 1
+  }
+  R[R_CAP] = cap
+  R[R_MODE] = RP_IDLE
+  R[R_LEN] = 0
+  R[R_OVF] = 0
+}
+
+export function replayMode(): i32 { return R[R_MODE] }
+export function replayFrame(): i32 { return R[R_FRAME] }
+export function replayLen(): i32 { return R[R_LEN] }
+export function replayCapacity(): i32 { return R[R_CAP] }
+export function replaySeed(): i32 { return R[R_SEED] }
+/// 1 when the recording hit the end of the tape and stopped storing — the run kept going, so the
+/// tape is a PREFIX of it. Reported rather than hidden: a truncated tape that replays cleanly and
+/// then diverges is indistinguishable from a determinism bug.
+export function replayOverflowed(): i32 { return R[R_OVF] }
+
+/// The rolling checksum over inputs AND whatever the game folded in with `replayMix`. This is the
+/// number you diff between a record pass and a replay pass.
+export function replayStateSum(): i32 { return R[R_SUM] }
+
+function packRun(mask: i32, frames: i32): i32 {
+  return (mask & KEY_MASK) | ((frames & RUN_MAX) << MASK_BITS)
+}
+function runMask(e: i32): i32 { return e & KEY_MASK }
+function runFrames(e: i32): i32 { return (e >> MASK_BITS) & RUN_MAX }
+
+function resetCounters(seed: i32) {
+  R[R_FRAME] = 0
+  // A checksum seeded with the RUN's seed, so two runs from different seeds cannot collide even if
+  // the inputs are identical.
+  R[R_SUM] = seed & 65535
+  R[R_CUR] = 0
+  R[R_LEFT] = 0
+  R[R_LAST] = 0 - 1
+  R[R_RUN] = 0
+}
+
+/// Start recording. `seed` is stored with the tape and handed back by `replaySeed()`; the caller
+/// applies it to whichever RNG streams the run depends on.
+export function replayRecord(seed: i32) {
+  R[R_MODE] = RP_RECORD
+  R[R_LEN] = 0
+  R[R_OVF] = 0
+  R[R_SEED] = seed
+  resetCounters(seed)
+}
+
+// Close the run in progress into a tape entry.
+function flushRun() {
+  if (R[R_RUN] <= 0) { return }
+  if (R[R_LEN] >= R[R_CAP]) {
+    R[R_OVF] = 1
+    R[R_RUN] = 0
+    return
+  }
+  TAPE[R[R_LEN]] = packRun(R[R_LAST], R[R_RUN])
+  R[R_LEN] = R[R_LEN] + 1
+  R[R_RUN] = 0
+}
+
+/// Stop recording and close the tape.
+export function replayStop() {
+  if (R[R_MODE] === RP_RECORD) { flushRun() }
+  R[R_MODE] = RP_IDLE
+}
+
+/// Rewind and play. Re-seeds the RNG stream the recording was made with, so a caller that used
+/// `rng.tish` gets determinism without doing anything else; a caller with its own generator should
+/// re-seed it from `replaySeed()`.
+export function replayPlay() {
+  if (R[R_LEN] === 0) { return }
+  R[R_MODE] = RP_PLAY
+  resetCounters(R[R_SEED])
+  rngSeed(0, R[R_SEED])
+}
+
+/// ONE FRAME OF INPUT — the single seam the whole package exists for.
+///
+/// While RECORDING it stores `keys` and hands them straight back, so a game runs normally.
+/// While PLAYING it IGNORES `keys` and returns the tape's value for this frame.
+/// The return value is what the game must act on, in both modes.
+export function replayTick(keys: i32): i32 {
+  let k: i32 = keys & KEY_MASK
+
+  if (R[R_MODE] === RP_RECORD) {
+    if (R[R_LAST] === k) {
+      R[R_RUN] = R[R_RUN] + 1
+      if (R[R_RUN] >= RUN_MAX) { flushRun()  R[R_LAST] = k  R[R_RUN] = 1 }
+    } else {
+      flushRun()
+      R[R_LAST] = k
+      R[R_RUN] = 1
+    }
+  } else if (R[R_MODE] === RP_PLAY) {
+    if (R[R_LEFT] <= 0) {
+      if (R[R_CUR] >= R[R_LEN]) {
+        R[R_MODE] = RP_DONE
+        return 0
+      }
+      let e: i32 = TAPE[R[R_CUR]]
+      R[R_CUR] = R[R_CUR] + 1
+      R[R_LAST] = runMask(e)
+      R[R_LEFT] = runFrames(e)
+    }
+    R[R_LEFT] = R[R_LEFT] - 1
+    k = R[R_LAST]
+  } else {
+    return k
+  }
+
+  R[R_FRAME] = R[R_FRAME] + 1
+  // Fold the input in. Position-dependent (the frame counter is in the mix) so that the SAME keys
+  // in a DIFFERENT order produce a different sum — a checksum that ignores ordering would call two
+  // genuinely different runs equal.
+  R[R_SUM] = (Math.imul(R[R_SUM], 31) + k + Math.imul(R[R_FRAME], 7)) & 1048575
+  return k
+}
+
+/// Fold a piece of game state into the checksum — a score, a position, a unit count. Call it once a
+/// frame with whatever would differ if the run diverged.
+///
+/// ⚠️ THIS IS WHAT MAKES THE SUM WORTH ANYTHING. Inputs alone only prove the TAPE replayed; folding
+/// state in is what proves the GAME did the same thing with it.
+export function replayMix(v: i32) {
+  R[R_SUM] = (Math.imul(R[R_SUM], 33) + (v & 65535)) & 1048575
+}
+
+/// Total frames the tape covers — the sum of every run length. Cheap: one pass over the runs, not
+/// the frames.
+export function replayFrames(): i32 {
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < R[R_LEN]) {
+    n = n + runFrames(TAPE[i])
+    i = i + 1
+  }
+  return n
+}
+
+/// Read one packed run, for a caller writing the tape to SRAM or dumping it to the log.
+export function replayEntry(i: i32): i32 {
+  if (i < 0 || i >= R[R_LEN]) { return 0 }
+  return TAPE[i]
+}
+export function replayEntryMask(i: i32): i32 { return runMask(replayEntry(i)) }
+export function replayEntryFrames(i: i32): i32 { return runFrames(replayEntry(i)) }
+
+/// Load a tape from somewhere else (SRAM, a generated table). Call `replayLoadBegin`, then
+/// `replayLoadEntry` per packed run, then `replayLoadEnd(seed)`.
+export function replayLoadBegin() {
+  R[R_LEN] = 0
+  R[R_OVF] = 0
+  R[R_MODE] = RP_IDLE
+}
+export function replayLoadEntry(packed: i32) {
+  if (R[R_LEN] >= R[R_CAP]) { R[R_OVF] = 1  return }
+  TAPE[R[R_LEN]] = packed
+  R[R_LEN] = R[R_LEN] + 1
+}
+export function replayLoadEnd(seed: i32) {
+  R[R_SEED] = seed
+  resetCounters(seed)
+}

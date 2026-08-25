@@ -1,0 +1,36 @@
+[package]
+name = "tish_agb"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Low-level agb bindings exposed to tish (imported via cargo:tish_agb)"
+repository = "https://github.com/schlopai/chuggie-engine"
+
+# Linked into the generated GBA ROM crate. Exposes the tish native-module ABI
+# (`pub fn name(args: &[Value]) -> Value`); the tish compiler auto-generates the
+# registration glue for `import { … } from 'cargo:tish_agb'`.
+
+[dependencies]
+# The GBA runtime facade — same crate instance the generated program links, so the
+# `Value` types unify. Provides Value + the gba peripheral hand-off.
+tishlang_runtime_gba = { path = "../../../../tish/tish/crates/tish_runtime_gba", version = ">=0.1" }
+agb = { path = "../../../agb/agb" }
+
+# ── save media ───────────────────────────────────────────────────────────────
+# SRAM (32 KiB, the traditional cart) is the DEFAULT and has no feature of its own.
+# That is deliberate: Cargo features are additive and unified across the whole
+# dependency graph, so a `save-sram` feature would be re-enabled by
+# tish-gba-game-engine's own dependency on this crate whatever an example asked for.
+#
+#   (no feature)      32 KiB battery-backed SRAM   — SRAM_Vnnn
+#   save-flash-512k   64 KiB flash                 — FLASH512_Vnnn
+#   save-flash-1m    128 KiB flash                 — FLASH1M_Vnnn, the late-GBA-era size
+#
+# Select from an example's package.json — no `default-features` juggling needed:
+#   "tish_agb": { "path": "...", "features": ["save-flash-1m"] }
+#
+# See crates/tish-agb/src/save_media.rs for why the choice is build-time at all.
+[features]
+default = []
+save-flash-512k = []
+save-flash-1m = []

@@ -1,0 +1,24 @@
+// Isolate an E0369 seen in the topdown RPG port: outer never-assigned `secret` snapped to _capt; body local `secret`
+// must shadow the alias (compare local f64, not secret_capt == f64).
+import { log, vblank } from 'cargo:tish_agb'
+
+let secret = 9
+
+function uwSecret() {
+  return 4
+}
+
+function onPush() {
+  let secret = uwSecret()
+  if (secret === 4) { log("shutter") }
+  if (secret === 5) { log("stairs") }
+  return secret
+}
+
+log("r=" + onPush())
+let f: i32 = 0
+while (f < 130) {
+  vblank()
+  f = f + 1
+}
+log("repro-654-capt-shadow done")

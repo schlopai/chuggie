@@ -1,0 +1,666 @@
+// pinball — a real table: per-pixel walls, a ball integrated in fixed point, and two flippers that
+// actually swing.
+//
+// ── WHY THE ENGINE'S RIGID BODIES ARE NOT USED ────────────────────────────────────────────────
+//
+// `set_dynamic` + `world_step` is this repo's disc physics (it is what `examples/golf` and
+// `examples/soccer` are built on) and it is the wrong tool here, for two reasons found by trying:
+//
+//   1. **A dynamic disc has no gravity.** Gravity exists only inside `platformer_system`, as a
+//      constant, for AABB bodies. A ball would need it applied by hand anyway.
+//   2. **The disc physics collides against the TILE grid, not the terrain.** A table built as a
+//      `.tmj` is therefore a 16px staircase — and a pinball table is nothing but slopes and curves,
+//      so every bounce would come off a step at the wrong angle. Worse, a flipper cannot rotate:
+//      tiles do not.
+//
+// So the table is the per-pixel `terrain_*` layer — the same subsystem `examples/warheads` uses for
+// destructible planets, here holding a static hand-drawn table — and the ball is integrated here in
+// Q8 fixed point against `terrain_solid`. That buys arbitrary geometry: curves, funnels, and a
+// flipper at any angle.
+//
+// ── THE STEP IS INLINE, AND THAT IS NOT A STYLE CHOICE ────────────────────────────────────────
+//
+// A tish function that touches module state is a boxed call at ~117 ticks plus ~28 an argument
+// (`docs/perf-rules.md`). The ball step runs several substeps per frame and each substep asks the
+// terrain several questions, so every one of those would be paid four or five times over. The whole
+// simulation is therefore written inline in the `while` loop, which is neither lowered nor charged —
+// `examples/warheads` reaches the same conclusion in the same words.
+//
+// ── SUBSTEPPING, BECAUSE A FAST BALL TUNNELS ──────────────────────────────────────────────────
+//
+// The ball reaches ~5 px/frame. A single move of 5px starting outside a 4px wall ends outside it on
+// the other side, having never been inside it — the classic tunnelling bug, and in a pinball table
+// it means the ball leaves through the wall and is gone. The move is split so no substep is longer
+// than a pixel, which is the only speed at which a per-pixel world can be trusted.
+
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { ball8 } from 'sheet8:../assets/ball.png'
+import { flipper } from 'sheet32:../assets/flipper.png'
+import {
+  backdrop, terrain_new, terrain_palette, terrain_disc, terrain_solid, terrain_clear,
+  sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_visible, sprite_set_hud,
+  sprite_set_flip, ui_begin, ui_text, ui_rect, ui_clear_rect, ui_reserve_tiles,
+  frame, keys_held, keys_edge, audio_defer, log, ticks
+} from 'cargo:tish_agb'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+import { chipBlip, chipPop, chipCoin, chipHit, chipChime } from '../../../packages/chipsfx'
+
+// ── the table ────────────────────────────────────────────────────────────────────────────────
+let TW: i32 = 240
+let TH: i32 = 160
+
+let M_WALL: i32 = 1
+let M_BUMP: i32 = 2
+let M_SLING: i32 = 3
+
+let BALL_R: i32 = 4          // world pixels
+let DRAIN_Y: i32 = 154       // below this, between the flippers, the ball is gone
+
+// Bumpers: centre and radius, and they are BOTH terrain (so the ball collides with them for free)
+// and a list here (so a hit can be detected and scored). Keeping one truth in two places is a bug
+// waiting to happen, so the terrain is stamped FROM this list at boot and never edited after.
+let BUMP_X: i32[] = [70, 118, 166]
+let BUMP_Y: i32[] = [56, 40, 56]
+let BUMP_R: i32 = 11
+
+// Flipper pivots. The gap between the two tips at rest is the drain, and it is 28px against an 8px
+// ball — wide enough to be a real threat, narrow enough that a centred ball does not simply fall
+// through without touching anything.
+let FLP_LX: i32 = 72
+let FLP_RX: i32 = 144
+let FLP_Y: i32 = 132
+let FLP_LEN: i32 = 21
+let FLP_HALFW: i32 = 3
+
+// The flipper's tip offset per sweep frame, in whole pixels, for the LEFT flipper; the right one
+// mirrors x. These are the same five angles `scripts/gen_pinball.py` draws (30 deg down to -32 up),
+// so the segment the ball collides against is the segment the sprite shows. Keep them in step.
+let FTIP_X: i32[] = [18, 20, 21, 20, 18]
+let FTIP_Y: i32[] = [10, 5, 0, 0 - 6, 0 - 11]
+let FLIP_FRAMES: i32 = 5
+
+// ── physics constants, all Q8 (256 = 1 pixel or 1.0) ─────────────────────────────────────────
+// Tuned by watching, then by the numbers below them: a ball that never reaches the top bumpers is a
+// table nobody can play, and one that never comes down is not pinball.
+let GRAV: i32 = 30           // ~0.12 px/frame^2
+let VMAX: i32 = 2048         // 8 px/frame — the speed the substep count is sized for. High enough
+                             // that a launch clears the lane with margin instead of by luck.
+let E_WALL: i32 = 190        // restitution against the table, Q8. Below ~160 the ball dies on the
+                             // first wall; above ~215 it never settles and the table feels like a
+                             // screensaver.
+let E_BUMP: i32 = 256
+let BUMP_KICK: i32 = 640     // 2.5 px/frame straight out of a bumper — the pop that makes it a table
+let FLIP_KICK: i32 = 1000    // added along the normal when a RISING flipper catches the ball
+let DAMP: i32 = 255          // per-frame drag, Q8. Not friction: this is what stops a ball trapped
+                             // in a corner from buzzing there for ever.
+                             // ⚠️ 254 was too much. It is charged EVERY frame, so over the ~45 frame
+                             // climb up the plunger lane it compounded to a third of the launch
+                             // speed and the ball could not reach the top of the table at all.
+
+// ── ball state, and everything else that mutates per frame ───────────────────────────────────
+// One typed array, not a set of module scalars: a mutable module-level scalar lowers to a boxed
+// VmRef and this is the hottest data in the ROM.
+//   0 px  1 py  2 vx  3 vy  (all Q8)
+//   4 state  5 score  6 balls  7 plunger  8 flipL  9 flipR  10 t  11 human  12 shownScore
+//   13 shownBalls  14 dbg  15 lastBump
+let B: i32[] = [0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0 - 1, 0 - 1, 0, 0 - 1, 0]
+let P_X: i32 = 0
+let P_Y: i32 = 1
+let P_VX: i32 = 2
+let P_VY: i32 = 3
+let P_ST: i32 = 4
+let P_SCORE: i32 = 5
+let P_BALLS: i32 = 6
+let P_PLUNGE: i32 = 7
+let P_FL: i32 = 8
+let P_FR: i32 = 9
+let P_T: i32 = 10
+let P_HUMAN: i32 = 11
+let P_SHOWNS: i32 = 12
+let P_SHOWNB: i32 = 13
+let P_DBG: i32 = 14
+let P_LASTB: i32 = 15
+let P_STUCK: i32 = 16
+
+// States
+let ST_READY: i32 = 0        // parked in the plunger lane, waiting for a launch
+let ST_PLAY: i32 = 1
+let ST_DRAIN: i32 = 2        // a short pause so a drained ball is seen to drain
+let ST_OVER: i32 = 3
+
+// The flipper sweep, Q8: 0 = fully down, 256 = fully up.
+let FLIP_UP_RATE: i32 = 72   // ~3.5 frames to raise. A flipper that snaps in one frame can pass
+                             // straight THROUGH the ball between two samples of its position.
+let FLIP_DN_RATE: i32 = 40
+
+// The 8 sampling directions used to find a surface normal, Q8 unit vectors. Precomputed because
+// each one would otherwise be a sin/cos per sample per collision.
+let NDX: i32[] = [256, 181, 0, 0 - 181, 0 - 256, 0 - 181, 0, 181]
+let NDY: i32[] = [0, 181, 256, 181, 0, 0 - 181, 0 - 256, 0 - 181]
+
+let SPR_BALL: i32 = 0
+let SPR_FL: i32 = 0
+let SPR_FR: i32 = 0
+
+// ── integer square root ──────────────────────────────────────────────────────────────────────
+// Needed to normalise a surface normal. Bit-by-bit, no division and no float: on ARM7TDMI a `/` is
+// a software routine and `Math.sqrt` on an f64 is worse (`docs/MEMORY.md`, "no divide instruction").
+function isqrt(n: i32): i32 {
+  if (n <= 0) { return 0 }
+  let rem: i32 = n
+  let root: i32 = 0
+  let bit: i32 = 1073741824
+  while (bit > n) { bit = bit >> 2 }
+  while (bit !== 0) {
+    let t: i32 = root + bit
+    if (rem >= t) {
+      rem = rem - t
+      root = (root >> 1) + bit
+    } else {
+      root = root >> 1
+    }
+    bit = bit >> 2
+  }
+  return root
+}
+
+// ── drawing the table ────────────────────────────────────────────────────────────────────────
+// A stroke: a run of discs from one point to another. `terrain_disc` is the ONLY primitive the
+// terrain layer has (that and a generated planet), so every wall, rail and funnel on this table is
+// a line of overlapping circles — which also gives every wall a rounded cap, and a rounded cap is
+// what keeps a ball from catching on the end of one.
+//
+// Boot-time only, so the ~117-tick call cost this file avoids everywhere else does not matter here.
+function stroke(x0: i32, y0: i32, x1: i32, y1: i32, r: i32, mat: i32) {
+  let dx: i32 = x1 - x0
+  let dy: i32 = y1 - y0
+  let adx: i32 = dx
+  if (adx < 0) { adx = 0 - adx }
+  let ady: i32 = dy
+  if (ady < 0) { ady = 0 - ady }
+  let n: i32 = adx
+  if (ady > n) { n = ady }
+  n = (n / 2) + 1
+  let i: i32 = 0
+  while (i <= n) {
+    terrain_disc(x0 + (Math.imul(dx, i) / n), y0 + (Math.imul(dy, i) / n), r, mat)
+    i = i + 1
+  }
+}
+
+function buildTable() {
+  terrain_clear()
+  // Outer shell. The bottom is deliberately OPEN — that hole is the drain, and it is the only way
+  // to lose.
+  stroke(10, 18, 236, 18, 5, M_WALL)          // ceiling, all the way across
+  stroke(10, 18, 10, 120, 5, M_WALL)          // left wall
+  // The plunger lane. Its inner wall is ALSO the playfield's right wall — one wall, not two — and
+  // it stops at y=52 so that the top of the lane is a doorway into the table.
+  stroke(206, 150, 206, 100, 4, M_WALL)
+  stroke(236, 158, 236, 30, 4, M_WALL)        // lane's outer wall (the screen edge)
+  // ⚠️ THE LANE NEEDS A FLOOR. Without it the lane's bottom is simply the drain, so a ball that
+  // does not quite clear the top falls back down and is lost having never been in play — which is
+  // exactly what the first build did, three balls in a row, before a shot was ever taken.
+  stroke(206, 154, 236, 154, 4, M_WALL)
+  // ⚠️ THE DEFLECTOR IS THE WHOLE REASON A LAUNCHED BALL EVER ENTERS THE TABLE. A ball goes up the
+  // lane travelling straight up; a flat ceiling sends it straight back down the lane it came from,
+  // for ever. The first build's "guide curve" was worse than useless — it sloped the wrong way and
+  // SEALED the lane, so the ball climbed to y=62, fell back, and settled on the floor with the game
+  // logged as in-play and nothing on the table ever touched. This diagonal turns the ball's upward
+  // speed into leftward speed and posts it through the doorway above the inner wall.
+  //
+  // ⚠️ AND THE DOORWAY IS 40 PIXELS TALL, WHICH LOOKS LIKE FAR TOO MUCH AND IS NOT. The inner wall
+  // stops at y=100 and the deflector starts at y=40, so the whole span between them is open. Two
+  // narrower versions both failed, and they failed differently:
+  //   * exit at y=44 — a 98px climb needing 4.6 px/frame before damping, so whether a ball reached
+  //     the table at all came down to the charge roll: 14% of 6,000 frames in play, and the first
+  //     1,200 produced none.
+  //   * exit at y=72 with a 12px doorway — the deflector turned the ball left correctly (a traced
+  //     vx of -471) and it then hit the TOP OF THE INNER WALL, four pixels below, and came straight
+  //     back. Zero play in 6,000 frames.
+  // A ball is 8px across and arrives at whatever height its own speed took it to; the opening has to
+  // be big enough to swallow that spread rather than a slot it has to be threaded through.
+  //
+  // ⚠️ IT ALSO HAS TO TUCK UP UNDER THE CEILING. At y=64 the deflector met the outer wall in a V,
+  // and a ball that landed on its UPPER face just sat in that corner — the ball search logged three
+  // nudges at (227,48) in one game. Run close enough to the ceiling and there is no room above it
+  // for a ball to rest in: the pocket is not made shallower, it stops existing.
+  stroke(236, 44, 208, 24, 4, M_WALL)
+  stroke(200, 18, 224, 26, 5, M_WALL)
+  stroke(224, 26, 236, 44, 5, M_WALL)
+  // The funnels down to the flippers. These are what aim a falling ball at a flipper instead of at
+  // the drain, and their angle is most of the table's difficulty.
+  // ⚠️ THE FUNNEL MUST END *AT* THE FLIPPER'S PIVOT, NOT NEAR IT. The first build ended these 4px
+  // inboard and 2px above the pivots, which left a notch between the funnel's rounded cap and the
+  // flipper's base — 6px wide, just under the 7px it takes to admit the ball, except that a ball
+  // arriving fast compresses into it. Traced: the ball sat at (143,121) jittering for 4,000 frames.
+  // Overlapping the two by 2px means there is no notch to fall into at all.
+  stroke(10, 104, 70, 132, 5, M_SLING)
+  stroke(200, 104, 146, 132, 5, M_SLING)
+  // Bumpers, stamped from the same list the hit test reads.
+  let i: i32 = 0
+  while (i < 3) {
+    terrain_disc(BUMP_X[i], BUMP_Y[i], BUMP_R, M_BUMP)
+    i = i + 1
+  }
+}
+
+// ── HUD ──────────────────────────────────────────────────────────────────────────────────────
+let NUMS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+function numStr(n: i32) {
+  if (n <= 0) { return "0" }
+  let s = ""
+  let v: i32 = n
+  while (v > 0) {
+    s = NUMS[v % 10] + s
+    v = (v / 10) | 0
+  }
+  return s
+}
+
+// The score sits in the plunger lane's dead space at the top right, which is the only part of a
+// pinball table nothing ever travels through.
+function paintHud() {
+  ui_clear_rect(0, 0, 240, 16)
+  ui_text(small, 4, 3, "SCORE " + numStr(B[P_SCORE]), 0xF8F0C0)
+  ui_text(small, 150, 3, "BALL " + numStr(B[P_BALLS]), 0xC0D8F8)
+  if (B[P_ST] === ST_OVER) { ui_text(small, 84, 3, "GAME OVER", 0xF87070) }
+}
+
+// ── boot ─────────────────────────────────────────────────────────────────────────────────────
+backdrop(0x080A14)
+ui_reserve_tiles(160)
+ui_begin()
+
+terrain_new(TW, TH)
+terrain_palette(M_WALL, 0x8090B8)
+terrain_palette(M_BUMP, 0xF0B040)
+terrain_palette(M_SLING, 0xB060C0)
+buildTable()
+
+SPR_BALL = sprite_new(ball8)
+SPR_FL = sprite_new(flipper)
+SPR_FR = sprite_new(flipper)
+sprite_set_hud(SPR_BALL, 1)
+sprite_set_hud(SPR_FL, 1)
+sprite_set_hud(SPR_FR, 1)
+sprite_set_flip(SPR_FR, 1)
+
+rngSeed(5, 20260814)
+
+// Park the ball in the plunger lane.
+B[P_X] = 221 << 8
+B[P_Y] = 142 << 8
+B[P_VX] = 0
+B[P_VY] = 0
+B[P_ST] = ST_READY
+paintHud()
+log("PINBALL boot")
+
+while (true) {
+  B[P_T] = B[P_T] + 1
+  let held: i32 = keys_held()
+  let edge: i32 = keys_edge()
+  if (edge === 48) {
+    B[P_DBG] = 1 - B[P_DBG]
+  } else if (edge > 0) {
+    B[P_HUMAN] = 1
+  }
+
+  // ── input, real or attract ───────────────────────────────────────────────────────────────
+  // The attract player presses the same buttons a human does: flip when the ball is low and on my
+  // side, hold the plunger, and let go. Anything it can reach, a player can.
+  let wantL: i32 = 0
+  let wantR: i32 = 0
+  let wantPlunge: i32 = 0
+  if (B[P_HUMAN] === 1) {
+    if ((held & 512) > 0 || (held & 32) > 0) { wantR = 1 }     // RIGHT or R
+    if ((held & 256) > 0 || (held & 16) > 0) { wantL = 1 }     // LEFT or L
+    if ((held & 1) > 0) { wantPlunge = 1 }
+  } else {
+    let bx: i32 = B[P_X] >> 8
+    let by: i32 = B[P_Y] >> 8
+    if (B[P_ST] === ST_READY) {
+      // Charge for a while, then release: a full-power launch every time would send every ball on
+      // the identical path, and the attract table would play the same game for ever.
+      // 150..255 of 255, not 40..63. The first attract player released at a fifth of full power:
+      // the ball peaked at y=53, five pixels short of the deflector at y=44, dropped back down the
+      // lane and sat on the floor — for every ball, so the table was never once touched.
+      if (B[P_PLUNGE] < 150 + rngBelow(5, 105)) { wantPlunge = 1 }
+    }
+    // ⚠️ TAP, DO NOT HOLD. Holding a flipper up is what turned the funnel notch into a sealed
+    // pocket: the raised flipper was the lid. A real player taps, and a duty cycle of 8 frames on
+    // and 8 off both looks like play and keeps unsticking anything that lands on a flipper.
+    if (by > 96 && ((B[P_T] >> 3) & 1) === 0) {
+      if (bx < 108) { wantL = 1 }
+      if (bx >= 108) { wantR = 1 }
+    }
+  }
+
+  // ── flippers ─────────────────────────────────────────────────────────────────────────────
+  let flPrev: i32 = B[P_FL]
+  let frPrev: i32 = B[P_FR]
+  if (wantL === 1) { B[P_FL] = B[P_FL] + FLIP_UP_RATE } else { B[P_FL] = B[P_FL] - FLIP_DN_RATE }
+  if (wantR === 1) { B[P_FR] = B[P_FR] + FLIP_UP_RATE } else { B[P_FR] = B[P_FR] - FLIP_DN_RATE }
+  if (B[P_FL] > 256) { B[P_FL] = 256 }
+  if (B[P_FL] < 0) { B[P_FL] = 0 }
+  if (B[P_FR] > 256) { B[P_FR] = 256 }
+  if (B[P_FR] < 0) { B[P_FR] = 0 }
+
+  let flFrame: i32 = (Math.imul(B[P_FL], FLIP_FRAMES - 1) + 128) >> 8
+  let frFrame: i32 = (Math.imul(B[P_FR], FLIP_FRAMES - 1) + 128) >> 8
+
+  // ── the plunger ──────────────────────────────────────────────────────────────────────────
+  if (B[P_ST] === ST_READY) {
+    if (wantPlunge === 1) {
+      B[P_PLUNGE] = B[P_PLUNGE] + 6
+      if (B[P_PLUNGE] > 255) { B[P_PLUNGE] = 255 }
+    } else if (B[P_PLUNGE] > 0) {
+      // Sized from the climb it has to make, not by feel: the lane is ~120px tall, and
+      // h = v^2/2g at g=0.117 px/frame^2 needs v >= 5.3 px/frame just to arrive with nothing left.
+      // A full plunger is 6.1, which clears the curve and still has speed to enter the table.
+      B[P_VY] = 0 - (1600 + ((Math.imul(B[P_PLUNGE], 112)) >> 6))
+      B[P_VX] = 0
+      B[P_PLUNGE] = 0
+      B[P_ST] = ST_PLAY
+      chipBlip()
+    }
+  }
+
+  // ── integrate ────────────────────────────────────────────────────────────────────────────
+  if (B[P_ST] === ST_PLAY) {
+    B[P_VY] = B[P_VY] + GRAV
+    B[P_VX] = (Math.imul(B[P_VX], DAMP)) >> 8
+    B[P_VY] = (Math.imul(B[P_VY], DAMP)) >> 8
+    if (B[P_VX] > VMAX) { B[P_VX] = VMAX }
+    if (B[P_VX] < 0 - VMAX) { B[P_VX] = 0 - VMAX }
+    if (B[P_VY] > VMAX) { B[P_VY] = VMAX }
+    if (B[P_VY] < 0 - VMAX) { B[P_VY] = 0 - VMAX }
+
+    // Substeps: never move more than a pixel at a time — see the header.
+    let ax: i32 = B[P_VX]
+    if (ax < 0) { ax = 0 - ax }
+    let ay: i32 = B[P_VY]
+    if (ay < 0) { ay = 0 - ay }
+    let big: i32 = ax
+    if (ay > big) { big = ay }
+    let steps: i32 = (big >> 8) + 1
+    let sdx: i32 = B[P_VX] / steps
+    let sdy: i32 = B[P_VY] / steps
+
+    let s: i32 = 0
+    while (s < steps) {
+      s = s + 1
+      B[P_X] = B[P_X] + sdx
+      B[P_Y] = B[P_Y] + sdy
+      let cx: i32 = B[P_X] >> 8
+      let cy: i32 = B[P_Y] >> 8
+
+      // Cheap probe first: four points on the rim. The full eight-direction sweep that finds the
+      // normal is TEN more terrain reads, and paying it on every substep of every frame — rather
+      // than only when something is actually touching — was the difference between a third of a
+      // frame and a whole one.
+      let touch: i32 = 0
+      if (terrain_solid(cx + BALL_R, cy) === 1) { touch = 1 }
+      if (terrain_solid(cx - BALL_R, cy) === 1) { touch = 1 }
+      if (terrain_solid(cx, cy + BALL_R) === 1) { touch = 1 }
+      if (terrain_solid(cx, cy - BALL_R) === 1) { touch = 1 }
+
+      if (touch === 1) {
+        // The normal is the direction that has the LEAST solid around it: sum the unit vectors
+        // pointing at every solid sample and negate. Eight samples is enough to tell a wall from a
+        // corner, and a corner is the case a two-sample normal gets wrong.
+        let nx: i32 = 0
+        let ny: i32 = 0
+        let k: i32 = 0
+        while (k < 8) {
+          let sx: i32 = cx + ((Math.imul(NDX[k], BALL_R + 1)) >> 8)
+          let sy: i32 = cy + ((Math.imul(NDY[k], BALL_R + 1)) >> 8)
+          if (terrain_solid(sx, sy) === 1) {
+            nx = nx - NDX[k]
+            ny = ny - NDY[k]
+          }
+          k = k + 1
+        }
+        let mag: i32 = isqrt(Math.imul(nx, nx) + Math.imul(ny, ny))
+        if (mag < 16) {
+          // Buried: every direction is solid, so there is no normal to speak of. Shove it back the
+          // way it came rather than picking a random direction — this is the state a ball ends up
+          // in if it ever does tunnel, and without this it stays there for ever.
+          nx = 0 - B[P_VX]
+          ny = 0 - B[P_VY]
+          mag = isqrt(Math.imul(nx, nx) + Math.imul(ny, ny))
+          if (mag < 1) { mag = 1 }
+        }
+        nx = (nx << 8) / mag
+        ny = (ny << 8) / mag
+
+        // Which surface? A bumper both scores and kicks; everything else just bounces.
+        let e: i32 = E_WALL
+        let kick: i32 = 0
+        let bi: i32 = 0
+        while (bi < 3) {
+          let ddx: i32 = cx - BUMP_X[bi]
+          let ddy: i32 = cy - BUMP_Y[bi]
+          let rr: i32 = BUMP_R + BALL_R + 2
+          if (Math.imul(ddx, ddx) + Math.imul(ddy, ddy) <= Math.imul(rr, rr)) {
+            e = E_BUMP
+            kick = BUMP_KICK
+            // One score per CONTACT, not per substep: a ball resting on a bumper would otherwise
+            // bank a hundred thousand points a second.
+            if (B[P_LASTB] !== bi) {
+              B[P_LASTB] = bi
+              B[P_SCORE] = B[P_SCORE] + 100
+              chipPop()
+            }
+          }
+          bi = bi + 1
+        }
+        if (kick === 0) { B[P_LASTB] = 0 - 1 }
+
+        let dot: i32 = (Math.imul(B[P_VX], nx) + Math.imul(B[P_VY], ny)) >> 8
+        if (dot < 0) {
+          let f: i32 = (Math.imul(256 + e, dot)) >> 8
+          B[P_VX] = B[P_VX] - ((Math.imul(f, nx)) >> 8)
+          B[P_VY] = B[P_VY] - ((Math.imul(f, ny)) >> 8)
+        }
+        if (kick > 0) {
+          B[P_VX] = B[P_VX] + ((Math.imul(kick, nx)) >> 8)
+          B[P_VY] = B[P_VY] + ((Math.imul(kick, ny)) >> 8)
+        }
+        // Push clear along the normal, or the next substep starts inside the wall and reflects
+        // again — which reads as the ball sticking and vibrating.
+        let push: i32 = 0
+        while (push < 5 && terrain_solid(B[P_X] >> 8, B[P_Y] >> 8) === 1) {
+          B[P_X] = B[P_X] + nx
+          B[P_Y] = B[P_Y] + ny
+          push = push + 1
+        }
+        B[P_X] = B[P_X] + (nx >> 1)
+        B[P_Y] = B[P_Y] + (ny >> 1)
+        s = steps
+      }
+    }
+
+    // ── the flippers, as capsules ──────────────────────────────────────────────────────────
+    // Analytic, not terrain: a flipper that was stamped into the terrain would have to be carved
+    // and restamped every frame it moved, and the ball would collide with a shape one frame stale.
+    // The distance from a point to a segment is the same test the sprite is drawn from — a run of
+    // circles along that segment — so what you see is exactly what you hit.
+    let fi: i32 = 0
+    while (fi < 2) {
+      let pvx: i32 = FLP_LX
+      let sweep: i32 = B[P_FL]
+      let prev: i32 = flPrev
+      let fr: i32 = flFrame
+      let sgn: i32 = 1
+      if (fi === 1) {
+        pvx = FLP_RX
+        sweep = B[P_FR]
+        prev = frPrev
+        fr = frFrame
+        sgn = 0 - 1
+      }
+      let tipx: i32 = pvx + Math.imul(sgn, FTIP_X[fr])
+      let tipy: i32 = FLP_Y + FTIP_Y[fr]
+      let cx2: i32 = B[P_X] >> 8
+      let cy2: i32 = B[P_Y] >> 8
+      // Bounding check before the arithmetic: most frames the ball is nowhere near a flipper, and
+      // this is two subtractions against one multiply-and-divide.
+      let bdx: i32 = cx2 - pvx
+      let bdy: i32 = cy2 - FLP_Y
+      let reach: i32 = FLP_LEN + BALL_R + FLP_HALFW + 2
+      if (Math.imul(bdx, bdx) + Math.imul(bdy, bdy) <= Math.imul(reach, reach)) {
+        let ex: i32 = tipx - pvx
+        let ey: i32 = tipy - FLP_Y
+        let ee: i32 = Math.imul(ex, ex) + Math.imul(ey, ey)
+        let tq: i32 = 0
+        if (ee > 0) {
+          tq = (Math.imul(Math.imul(bdx, ex) + Math.imul(bdy, ey), 256)) / ee
+        }
+        if (tq < 0) { tq = 0 }
+        if (tq > 256) { tq = 256 }
+        let qx: i32 = pvx + ((Math.imul(ex, tq)) >> 8)
+        let qy: i32 = FLP_Y + ((Math.imul(ey, tq)) >> 8)
+        let ddx2: i32 = cx2 - qx
+        let ddy2: i32 = cy2 - qy
+        let d2: i32 = Math.imul(ddx2, ddx2) + Math.imul(ddy2, ddy2)
+        let hitr: i32 = BALL_R + FLP_HALFW
+        if (d2 <= Math.imul(hitr, hitr)) {
+          let dm: i32 = isqrt(d2)
+          if (dm < 1) {
+            // Dead centre on the segment: push straight up, which is the only direction a flipper
+            // ever wants to send a ball it has swallowed.
+            ddx2 = 0
+            ddy2 = 0 - 1
+            dm = 1
+          }
+          let fnx: i32 = (ddx2 << 8) / dm
+          let fny: i32 = (ddy2 << 8) / dm
+          let dot2: i32 = (Math.imul(B[P_VX], fnx) + Math.imul(B[P_VY], fny)) >> 8
+          if (dot2 < 0) {
+            let f2: i32 = (Math.imul(256 + 200, dot2)) >> 8
+            B[P_VX] = B[P_VX] - ((Math.imul(f2, fnx)) >> 8)
+            B[P_VY] = B[P_VY] - ((Math.imul(f2, fny)) >> 8)
+          }
+          // A RISING flipper adds its own speed, and adds more of it further from the pivot — which
+          // is why a tip shot goes further than a hit at the base, exactly as on a real table.
+          if (sweep > prev) {
+            let power: i32 = (Math.imul(FLIP_KICK, 64 + tq)) >> 8
+            B[P_VX] = B[P_VX] + ((Math.imul(power, fnx)) >> 8)
+            B[P_VY] = B[P_VY] + ((Math.imul(power, fny)) >> 8)
+            chipHit()
+          }
+          // Out of the flipper, so the next frame does not start inside it.
+          let pu: i32 = hitr - dm + 1
+          B[P_X] = B[P_X] + Math.imul(fnx, pu)
+          B[P_Y] = B[P_Y] + Math.imul(fny, pu)
+        }
+      }
+      fi = fi + 1
+    }
+
+    // ── drain ──────────────────────────────────────────────────────────────────────────────
+    // ── ball search ────────────────────────────────────────────────────────────────────────
+    // Every real table has one, for the same reason this does: a ball CAN come to rest somewhere
+    // its designer did not think of, and a pinball machine that has quietly stopped is
+    // indistinguishable from a crashed one. If the ball is slow for two seconds, nudge it; if that
+    // does not work either, give up and drain it rather than sit there for ever.
+    let spd: i32 = B[P_VX]
+    if (spd < 0) { spd = 0 - spd }
+    let spdy: i32 = B[P_VY]
+    if (spdy < 0) { spdy = 0 - spdy }
+    if (spd + spdy < 150) {
+      B[P_STUCK] = B[P_STUCK] + 1
+      if (B[P_STUCK] === 120) {
+        B[P_VX] = 420 - Math.imul(rngBelow(5, 2), 840)
+        B[P_VY] = 0 - 620
+        chipBlip()
+        log("PINBALL nudge at " + (B[P_X] >> 8) + "," + (B[P_Y] >> 8))
+      }
+      if (B[P_STUCK] > 300) {
+        B[P_STUCK] = 0
+        B[P_Y] = (DRAIN_Y + 2) << 8
+        B[P_X] = 100 << 8
+        log("PINBALL stuck, draining")
+      }
+    } else {
+      B[P_STUCK] = 0
+    }
+
+    // A shot that did not clear the lane rolls back to the plunger, exactly as on a real table.
+    // Without this a weak plunge is unrecoverable: the ball rests on the lane floor in ST_PLAY, no
+    // input does anything, and the ROM is over without a single drain to end it.
+    let lx: i32 = B[P_X] >> 8
+    let lvy: i32 = B[P_VY]
+    if (lvy < 0) { lvy = 0 - lvy }
+    let lvx: i32 = B[P_VX]
+    if (lvx < 0) { lvx = 0 - lvx }
+    if (lx > 208 && (B[P_Y] >> 8) > 138 && lvy < 90 && lvx < 90) {
+      B[P_X] = 221 << 8
+      B[P_Y] = 142 << 8
+      B[P_VX] = 0
+      B[P_VY] = 0
+      B[P_PLUNGE] = 0
+      B[P_ST] = ST_READY
+    }
+
+    // The drain is the gap between the flippers, and NOTHING ELSE — a ball in the plunger lane is
+    // over the same y and is not lost.
+    if ((B[P_Y] >> 8) > DRAIN_Y && (B[P_X] >> 8) < 206) {
+      B[P_BALLS] = B[P_BALLS] - 1
+      B[P_ST] = ST_DRAIN
+      B[P_T] = 0
+      chipChime()
+      log("PINBALL drain score=" + B[P_SCORE] + " balls=" + B[P_BALLS])
+    }
+  }
+
+  if (B[P_ST] === ST_DRAIN && B[P_T] > 50) {
+    if (B[P_BALLS] <= 0) {
+      B[P_ST] = ST_OVER
+      B[P_T] = 0
+    } else {
+      B[P_X] = 221 << 8
+      B[P_Y] = 142 << 8
+      B[P_VX] = 0
+      B[P_VY] = 0
+      B[P_PLUNGE] = 0
+      B[P_ST] = ST_READY
+    }
+  }
+  if (B[P_ST] === ST_OVER && B[P_T] > 180) {
+    // A finished game restarts, so the ROM is never a dead screen and a soak run keeps exercising
+    // the reset rather than sitting on a game-over card.
+    B[P_SCORE] = 0
+    B[P_BALLS] = 3
+    B[P_X] = 221 << 8
+    B[P_Y] = 142 << 8
+    B[P_VX] = 0
+    B[P_VY] = 0
+    B[P_PLUNGE] = 0
+    B[P_ST] = ST_READY
+  }
+
+  // ── present ────────────────────────────────────────────────────────────────────────────────
+  sprite_set_pos(SPR_BALL, (B[P_X] >> 8) - BALL_R, (B[P_Y] >> 8) - BALL_R)
+  sprite_set_visible(SPR_BALL, 1)
+  sprite_set_frame(SPR_FL, flFrame)
+  sprite_set_frame(SPR_FR, frFrame)
+  // The sprite's pivot is at (5,16) of its 32x32 cell (`scripts/gen_pinball.py`), and the right
+  // flipper is the same cell flipped, so its pivot mirrors to (26,16).
+  sprite_set_pos(SPR_FL, FLP_LX - 5, FLP_Y - 16)
+  sprite_set_pos(SPR_FR, FLP_RX - 26, FLP_Y - 16)
+  sprite_set_visible(SPR_FL, 1)
+  sprite_set_visible(SPR_FR, 1)
+
+  if (B[P_SHOWNS] !== B[P_SCORE] || B[P_SHOWNB] !== B[P_BALLS]) {
+    B[P_SHOWNS] = B[P_SCORE]
+    B[P_SHOWNB] = B[P_BALLS]
+    audio_defer(1)
+    paintHud()
+    audio_defer(0)
+  }
+
+  frame()
+}

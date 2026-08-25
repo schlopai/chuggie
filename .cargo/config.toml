@@ -1,0 +1,39 @@
+# GBA target defaults for every crate built in this workspace.
+#
+# NOTE on host/target split: proc-macro crates build for the host automatically,
+# and the host-side LDtk asset importer is consumed as a [build-dependencies]
+# entry (also built for host). Neither should be a plain workspace member that
+# `cargo build` compiles for thumbv4t. See CONTRACT.md "Workspace host/target split".
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+
+[build]
+target = "thumbv4t-none-eabi"
+
+[target.thumbv4t-none-eabi]
+runner = ["mgba-qt", "-C", "logToStdout=1", "-C", "logLevel.gba.debug=127"]
+rustflags = [
+    "-Clink-arg=-Tgba.ld",
+    "-Ctarget-cpu=arm7tdmi",
+    "-Cforce-frame-pointers=yes",
+]
+
+[target.armv4t-none-eabi]
+runner = ["mgba-qt", "-C", "logToStdout=1", "-C", "logLevel.gba.debug=127"]
+rustflags = [
+    "-Clink-arg=-Tgba.ld",
+    "-Ctarget-cpu=arm7tdmi",
+    "-Cforce-frame-pointers=yes",
+]
+
+# Build every example against OUR agb fork, so fixes can be made here and filed upstream.
+#
+# It lives in the cargo config rather than in a manifest because the example ROMs are built from a
+# STANDALONE crate that tish generates (`.tish/gba/<name>/Cargo.toml`, from a fixed template), so
+# there is nowhere in a checked-in manifest to put a `[patch]`. Cargo reads config from every
+# ancestor of the build directory, and those build directories all live under this repo.
+#
+# Fork: https://github.com/spacedevin/agb (branch `chuggie`) — expected as a sibling checkout of this repo.
+[patch.crates-io]
+agb = { path = "../agb/agb" }

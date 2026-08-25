@@ -1,0 +1,98 @@
+// Isolate a large SRPG example's pattern: one hot FunDecl names ~40 sibling fns.
+// Assert: entry keeps VmRef (`let f = f_ref.clone()`), not Value extract;
+// mGBA survives ≥120 frames without stack-overflow panic.
+import { log, vblank } from 'cargo:tish_agb'
+
+function f0() { return 0 }
+function f1() { return 1 }
+function f2() { return 2 }
+function f3() { return 3 }
+function f4() { return 4 }
+function f5() { return 5 }
+function f6() { return 6 }
+function f7() { return 7 }
+function f8() { return 8 }
+function f9() { return 9 }
+function f10() { return 10 }
+function f11() { return 11 }
+function f12() { return 12 }
+function f13() { return 13 }
+function f14() { return 14 }
+function f15() { return 15 }
+function f16() { return 16 }
+function f17() { return 17 }
+function f18() { return 18 }
+function f19() { return 19 }
+function f20() { return 20 }
+function f21() { return 21 }
+function f22() { return 22 }
+function f23() { return 23 }
+function f24() { return 24 }
+function f25() { return 25 }
+function f26() { return 26 }
+function f27() { return 27 }
+function f28() { return 28 }
+function f29() { return 29 }
+function f30() { return 30 }
+function f31() { return 31 }
+function f32() { return 32 }
+function f33() { return 33 }
+function f34() { return 34 }
+function f35() { return 35 }
+function f36() { return 36 }
+function f37() { return 37 }
+function f38() { return 38 }
+function f39() { return 39 }
+
+function tick(k) {
+  let s = 0
+  s = s + f0()
+  s = s + f1()
+  s = s + f2()
+  s = s + f3()
+  s = s + f4()
+  s = s + f5()
+  s = s + f6()
+  s = s + f7()
+  s = s + f8()
+  s = s + f9()
+  s = s + f10()
+  s = s + f11()
+  s = s + f12()
+  s = s + f13()
+  s = s + f14()
+  s = s + f15()
+  s = s + f16()
+  s = s + f17()
+  s = s + f18()
+  s = s + f19()
+  s = s + f20()
+  s = s + f21()
+  s = s + f22()
+  s = s + f23()
+  s = s + f24()
+  s = s + f25()
+  s = s + f26()
+  s = s + f27()
+  s = s + f28()
+  s = s + f29()
+  s = s + f30()
+  s = s + f31()
+  s = s + f32()
+  s = s + f33()
+  s = s + f34()
+  s = s + f35()
+  s = s + f36()
+  s = s + f37()
+  s = s + f38()
+  s = s + f39()
+  log("tick " + k + " " + s)
+}
+
+let frame: i32 = 0
+while (frame < 130) {
+  tick(frame)
+  vblank()
+  frame = frame + 1
+}
+log("repro-654-sibling-stack done")

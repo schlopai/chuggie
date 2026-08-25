@@ -1,0 +1,9 @@
+// Bench target: engine + full ui (control for package pull-in).
+import { log, frame } from 'cargo:tish_agb'
+import { create } from '../../../packages/engine'
+import { uiInit, uiRender } from '../../../packages/ui'
+
+log("bench-build ui typeof uiInit=" + (typeof uiInit) + " create=" + (typeof create))
+uiInit({})
+uiRender({ dir: "col", children: [{ text: "ok", color: "text" }] })
+while (true) { frame() }

@@ -1,0 +1,250 @@
+// roguelike — a dungeon generated on the cartridge, from a seed, and checkable against Python.
+//
+// ── What it is the acceptance test for ────────────────────────────────────────────────────────
+//
+// **`packages/rng.tish` and the determinism stack.** This is the only thing in the repo where
+// "the same seed gives the same level" is checkable end to end, and it is checkable because
+// `scripts/procgen/` reproduces the generator in Python bit-for-bit: the verifier re-derives every
+// level here and diffs the cartridge's own report against it, headlessly, over a hundred seeds.
+//
+// That matters more than it sounds. A procedural generator is the one kind of code where looking at
+// the output tells you almost nothing — a broken dungeon and a good one are both "some rooms" — and
+// where a bug can be seed-dependent, so it reproduces for one player and not the next. An oracle
+// turns that into a diff.
+//
+// It also pins two things the RNG's own header warns about, which nothing else exercises:
+//   - the f64 exact-integer rule: every LCG intermediate stays under 2^53, or the streams part
+//     company after a few thousand draws
+//   - stream INDEPENDENCE: the dungeon draws on stream 0 and nothing else may, or a cosmetic change
+//     elsewhere silently moves the level
+//
+// ── Why the map is not a .tmj ─────────────────────────────────────────────
+//
+// Every hand-authored map in this repo is a Tiled `.tmj`, and that rule is not negotiable for maps
+// a person drew. A roguelike's map is not one — it does not exist until the run starts. Baking N
+// variants would make it a shuffle with a visible period, which is a different game.
+//
+// What is still authored is the VOCABULARY: the two tiles are cropped from the vendored pack by
+// `scripts/gen_roguelike.py`. This ROM decides which authored tile goes in which cell, and nothing
+// else.
+//
+// ── Controls ──────────────────────────────────────────────────────────────
+// D-pad walks. It descends by itself, so a soak generates level after level.
+
+import { tiles16 } from 'background:../assets/tiles16.png'
+import { hero16 } from 'sheet:../assets/hero16.png'
+import {
+  frame, log, backdrop, hud_text, key_held, key_pressed, heap_free,
+  sprite_new, sprite_set_frame, bg_clear
+} from 'cargo:tish_agb'
+import {
+  spawn, set_transform, set_collider, set_topdown, topdown_move, attach_sprite,
+  set_sprite_offset, set_camera_target, world_step, entity_count, entity_x, entity_y,
+  grid_from_gids, flow_goal, set_seek, clear_seek, seek_arrived, topdown_speed
+} from 'cargo:tish_gba_game_engine'
+import {
+  dungeonInit, dungeonGen, dungeonUpload, dungeonSetCollider, dungeonFloors, dungeonRooms,
+  dungeonRoomCX, dungeonRoomCY, dungeonRoomX, dungeonRoomY, dungeonRoomW, dungeonRoomH
+} from '../../../packages/dungeon'
+
+let DW: i32 = 40
+let DH: i32 = 26
+let TILE: i32 = 16
+let DEPTH: i32 = 3
+
+// Frame order is scripts/gen_roguelike.py's TILES list.
+let GID_FLOOR: i32 = 0
+let GID_WALL: i32 = 1
+let TS_COLS: i32 = 2
+
+let player: i32 = 0 - 1
+let level: i32 = 0
+// The walker's current objective: a room index, and the shared flow field it steers on.
+let FIELD: i32 = 0
+let STRIDE: i32 = 4
+let target: i32 = 0
+let manual: i32 = 0
+let seed: i32 = 0
+let lastHud: i32 = 0 - 1
+
+/// Build one level. Everything here happens ONCE per descent, behind the tear-down, never on a
+/// played frame.
+function descend(s: i32) {
+  seed = s
+  level = level + 1
+  dungeonGen(seed, DEPTH)
+  // Reported BEFORE the paint, while TILES still holds WALL/FLOOR classes rather than gids — this
+  // is the number the Python oracle computes, and comparing gids would compare the art instead.
+  let floors: i32 = dungeonFloors()
+  let rooms: i32 = dungeonRooms()
+  log("RL LEVEL " + level + " seed=" + seed + " rooms=" + rooms + " floors=" + floors)
+  // The first room's centre, so the oracle can check placement and not just the cell count.
+  log("RL ROOM0 x=" + dungeonRoomX(0) + " y=" + dungeonRoomY(0)
+    + " w=" + dungeonRoomW(0) + " h=" + dungeonRoomH(0))
+
+  // ⚠️ Tear down, then let a frame commit, then build. agb does not return a background's tiles
+  // until a frame boundary, so without the frame the old map and the new one are both held at the
+  // moment the new one is allocated — which is how `examples/golf` leaked ~2 KB per hole.
+  bg_clear()
+  frame()
+  // The upload lives in the package because the map array must not cross a module boundary — an
+  // exported typed array is boxed, and passing one costs ~54 ticks PER ELEMENT besides.
+  dungeonUpload(tiles16, TS_COLS, GID_WALL, GID_FLOOR, 0)
+
+  // ⚠️ CENTRE THE BOX IN THE CELL, don't drop it on the corner.
+  //
+  // A transform is the collider's TOP-LEFT, so a 12x12 box placed at `cell * 16` has its centre at
+  // +6,+6 — two pixels off the 16px lane's centre, in both axes, for the whole walk. That is enough
+  // for the box to clip the corner of a doorway it is otherwise entitled to walk through: the
+  // walker crossed two rooms and then wedged at px=52.79, py=244 for the rest of the level while
+  // the flow field still reported a five-cell route to the goal. `(TILE - 12) / 2` puts the box
+  // centre exactly on the lane.
+  set_transform(player, dungeonRoomCX(0) * TILE + 4, dungeonRoomCY(0) * TILE + 4)
+  // Re-aim the walker at the new dungeon. The field is computed from the CURRENT solid grid, which
+  // `dungeonUpload` has just refilled through `grid_from_gids`, so this must come after the upload.
+  target = 1
+  if (target >= dungeonRooms()) { target = 0 }
+  flow_goal(FIELD, dungeonRoomCX(target), dungeonRoomCY(target))
+  set_seek(player, FIELD, 8, STRIDE, 6)
+  log("HEAP " + heap_free())
+}
+
+backdrop(0)
+
+dungeonInit(DW, DH)
+// packages/dungeon no longer imports the engine crate (schlopai/chuggie-engine#68), so the game supplies
+// the collision sink. A raw-sprite game would pass its own, or none.
+dungeonSetCollider(grid_from_gids)
+
+player = spawn()
+// ⚠️ 8x8 IN A 16px LANE, NOT 12x12. A 12px box leaves 2px of slack a side, and the walker does not
+// stay perfectly lane-centred — a diagonal step around a corner leaves a fractional offset that
+// never washes out. It then clips the corner of a doorway it is entitled to walk through and wedges
+// there: measured at px=52.79, py=244 for the rest of the level while the flow field still reported
+// a five-cell route. Half a cell gives 4px a side, which absorbs that drift.
+set_collider(player, 8, 8)
+set_topdown(player)
+// ⚠️ A SEEK WITH NO SPEED DOES NOT MOVE. `set_seek` steers a topdown body; it does not give it one.
+// Without this the walker sat exactly where it spawned, `seek_arrived` fired on the first frame
+// (it was already inside the arrive radius), and the objective advanced while nothing walked.
+topdown_speed(player, 1)
+let pspr: i32 = sprite_new(hero16)
+sprite_set_frame(pspr, 0)
+attach_sprite(player, pspr)
+set_sprite_offset(player, 0 - 4, 0 - 4)
+set_camera_target(player)
+
+// ── The oracle sweep ────────────────────────────────────────────────────────
+//
+// Report the shape of 48 dungeons so the verifier can diff every one against the Python oracle,
+// rather than the two levels a soak happens to reach.
+//
+// ⚠️ ONE PER FRAME, in the game loop — NOT a loop at module scope. The first version generated all
+// 48 back to back at boot and took about fifty frames each: nearly three seconds of black screen
+// before the first painted frame, and a 1,400-frame verify run that never reached the game loop at
+// all, so five later assertions failed for want of a ROM that had started. Generation touches no
+// VRAM and allocates nothing, so spreading it costs nothing but the frames it already needed.
+let SWEEP_N: i32 = 16
+let sweepLeft: i32 = SWEEP_N
+let rebuild: i32 = 0
+
+// A fixed boot seed, so a soak is reproducible. Each descent derives the next from it by a fixed
+// step rather than by drawing — a draw here would consume from the same stream the dungeon uses and
+// make the level depend on how many times anyone had descended.
+descend(1000)
+
+let t: i32 = 0
+while (true) {
+  t = t + 1
+
+  if (sweepLeft > 0) {
+    let ss: i32 = 1000 + (SWEEP_N - sweepLeft) * 137
+    dungeonGen(ss, DEPTH)
+    log("RL SWEEP seed=" + ss + " rooms=" + dungeonRooms() + " floors=" + dungeonFloors()
+      + " r0x=" + dungeonRoomX(0) + " r0y=" + dungeonRoomY(0)
+      + " r0w=" + dungeonRoomW(0) + " r0h=" + dungeonRoomH(0))
+    sweepLeft = sweepLeft - 1
+    // ⚠️ The sweep leaves the generator holding the LAST swept dungeon, which is not the one on
+    // screen. The played level has to be regenerated — but NOT in this frame. `descend` calls
+    // `frame()` itself, and doing that in the same iteration as a `dungeonGen` panicked the runtime
+    // with a RefCell double-borrow (tish_core/src/vmref.rs:86) at exactly this point, every run.
+    // Deferring it one frame separates the two.
+    if (sweepLeft === 0) {
+      log("RL SWEEP DONE")
+      rebuild = 1
+    }
+  } else if (rebuild === 1) {
+    rebuild = 0
+    // ⚠️ THE COPY IS LOAD-BEARING AGAIN — DO NOT INLINE IT.
+    //
+    // `descend(seed)` passes a module variable to a function whose FIRST statement is `seed = s`.
+    // That held a read borrow across the `value_call` and panicked the runtime:
+    //
+    //     panicked at tish_core/src/vmref.rs:86: RefCell already borrowed
+    //
+    // (tishlang/tish#665). The copy was removed here once the upstream fix `0158b5c2e` landed — but
+    // that fix is NOT on the toolchain's current branch (it went with the "core tish must stay
+    // untouched" revert, `ad68e6388`), so the ROM crashed on the first descent after the sweep and
+    // every screenshot past frame ~20 was the agb crash card. Copying to a local first is the fix
+    // that belongs in this repo rather than in the compiler.
+    let sCopy: i32 = seed
+    descend(sCopy)
+    level = level - 1
+  }
+
+  // ── movement ──────────────────────────────────────────────────────────────
+  // ⚠️ THE AUTO-WALK USED TO BE A BLIND SQUARE: forty frames right, forty down, forty left, forty
+  // up, regardless of the map. In a dungeon of rooms and corridors that grinds into the first wall
+  // it meets and stays there, which is exactly what "the AI cannot follow a pathway" looks like. It
+  // never had a pathfinder because there wasn't one; there is now.
+  //
+  // `flow_goal` builds ONE field outward from the objective and `set_seek` steers the entity down
+  // it, both native. Re-aimed on arrival and on every descent.
+  let dx: i32 = 0
+  let dy: i32 = 0
+  if (key_held(5) === 1) { dx = 0 - 1 }
+  if (key_held(4) === 1) { dx = 1 }
+  if (key_held(6) === 1) { dy = 0 - 1 }
+  if (key_held(7) === 1) { dy = 1 }
+
+  if (dx !== 0 || dy !== 0) {
+    // A human takes over: drop the standing order, or the field would fight the d-pad.
+    if (manual === 0) {
+      manual = 1
+      clear_seek(player)
+    }
+    topdown_move(player, dx, dy)
+  } else {
+    if (manual === 1) {
+      manual = 0
+      flow_goal(FIELD, dungeonRoomCX(target), dungeonRoomCY(target))
+      set_seek(player, FIELD, 8, STRIDE, 6)
+    }
+    // Arrived: pick the next room and re-aim. Walking room to room is what proves the collision
+    // grid and the art agree — a wall one cell off strands the walker instead of looking fine.
+    if (seek_arrived(player) === 1) {
+      target = target + 1
+      if (target >= dungeonRooms()) { target = 0 }
+      flow_goal(FIELD, dungeonRoomCX(target), dungeonRoomCY(target))
+      set_seek(player, FIELD, 8, STRIDE, 6)
+      log("RL ARRIVED next=" + target + " cx=" + dungeonRoomCX(target)
+        + " cy=" + dungeonRoomCY(target))
+    }
+  }
+
+  // Descend on a timer, so one run exercises many generations rather than one.
+  if (t % 420 === 0) { descend(seed + 137) }
+
+  if (level !== lastHud) {
+    hud_text(0, 4, 4, "DEPTH " + level)
+    lastHud = level
+  }
+
+  if ((t & 511) === 0) {
+    log("RL TELE t=" + t + " level=" + level + " ENT " + entity_count()
+      + " px=" + entity_x(player) + " py=" + entity_y(player))
+    log("HEAP " + heap_free())
+  }
+
+  world_step()
+}

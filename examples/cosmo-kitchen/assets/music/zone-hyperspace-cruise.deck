@@ -1,0 +1,160 @@
+# Hyperspace Cruise - overworld
+# Pedal drone + planing thirds. Slow glide.
+deck 1
+bpm 100
+
+track Pad id pad gen gameBoyDmg * 16
+  gen type pulse duty 25 env_mode constant vol 6
+  gen vib_rate 2 vib_amt 18
+  note 53 0 3.95 v 60
+  note 53 4 3.95 v 65
+  note 53 8 3.95 v 70
+  note 53 12 3.95 v 75
+  note 53 16 3.95 v 80
+  note 53 20 3.95 v 60
+  note 53 24 3.95 v 65
+  note 53 28 3.95 v 70
+  note 55 32 3.95 v 75
+  note 55 36 3.95 v 80
+  note 57 40 3.95 v 60
+  note 57 44 3.95 v 65
+  note 53 48 3.95 v 70
+  note 52 52 3.95 v 75
+  note 53 56 3.95 v 80
+  note 53 60 3.95 v 60
+
+track Lead id lead gen gameBoyDmg * 16
+  gen type pulse duty 50 env_mode constant vol 10
+  gen vib_rate 3 vib_amt 20
+  note 63 0 3.5 v 85
+  note 67 1.5 2 v 70
+  note 64 4 3.5 v 85
+  note 68 5.5 2 v 70
+  note 65 8 3.5 v 85
+  note 69 9.5 2 v 70
+  note 66 12 3.5 v 85
+  note 70 13.5 2 v 70
+  note 67 16 3.5 v 85
+  note 71 17.5 2 v 70
+  note 63 20 3.5 v 85
+  note 67 21.5 2 v 70
+  note 64 24 3.5 v 85
+  note 68 25.5 2 v 70
+  note 65 28 3.5 v 85
+  note 69 29.5 2 v 70
+  note 68 32 1 v 95
+  note 72 33.5 1 v 90
+  note 70 35 0.9 v 100
+  note 69 36 1 v 95
+  note 73 37.5 1 v 90
+  note 71 39 0.9 v 100
+  note 65 40 1 v 95
+  note 69 41.5 1 v 90
+  note 67 43 0.9 v 100
+  note 66 44 1 v 95
+  note 70 45.5 1 v 90
+  note 68 47 0.9 v 100
+  note 67 48 1 v 95
+  note 71 49.5 1 v 90
+  note 69 51 0.9 v 100
+  note 68 52 1 v 95
+  note 72 53.5 1 v 90
+  note 70 55 0.9 v 100
+  note 69 56 1 v 95
+  note 73 57.5 1 v 90
+  note 71 59 0.9 v 100
+  note 65 60 1 v 95
+  note 69 61.5 1 v 90
+  note 67 63 0.9 v 100
+
+track Bass id bass gen gameBoyDmg * 16
+  gen type wave wave_shape sine vol 14
+  note 39 0 4 v 110
+  note 39 4 4 v 110
+  note 39 8 4 v 110
+  note 39 12 4 v 110
+  note 39 16 4 v 110
+  note 39 20 4 v 110
+  note 39 24 4 v 110
+  note 39 28 4 v 110
+  note 41 32 4 v 110
+  note 41 36 4 v 110
+  note 43 40 4 v 110
+  note 43 44 4 v 110
+  note 39 48 4 v 110
+  note 38 52 4 v 110
+  note 39 56 4 v 110
+  note 39 60 4 v 110
+
+track Kick id kick gen gbaDirectSound * 16
+  gen waveform pulse duty 50 vol 14 bitcrush true pitch_drop -7 pitch_dec 0.06
+  adsr a 0 d 0.1 s 0 r 0.03
+  note 34 0 0.14 v 115
+  note 34 2 0.14 v 110
+  note 34 4 0.14 v 115
+  note 34 6 0.14 v 110
+  note 34 8 0.14 v 115
+  note 34 10 0.14 v 110
+  note 34 12 0.14 v 115
+  note 34 14 0.14 v 110
+  note 34 16 0.14 v 115
+  note 34 18 0.14 v 110
+  note 34 20 0.14 v 115
+  note 34 22 0.14 v 110
+  note 34 24 0.14 v 115
+  note 34 26 0.14 v 110
+  note 34 28 0.14 v 115
+  note 34 30 0.14 v 110
+  note 34 32 0.14 v 115
+  note 34 34 0.14 v 110
+  note 34 36 0.14 v 115
+  note 34 38 0.14 v 110
+  note 34 40 0.14 v 115
+  note 34 42 0.14 v 110
+  note 34 44 0.14 v 115
+  note 34 46 0.14 v 110
+  note 34 48 0.14 v 115
+  note 34 50 0.14 v 110
+  note 34 52 0.14 v 115
+  note 34 54 0.14 v 110
+  note 34 56 0.14 v 115
+  note 34 58 0.14 v 110
+  note 34 60 0.14 v 115
+  note 34 62 0.14 v 110
+
+track Hats id hats gen gbaDirectSound * 16
+  gen waveform sine vol 5 bitcrush true
+  adsr a 0 d 0.04 s 0 r 0.02
+  note 84 0.75 0.1 v 50
+  note 79 2.75 0.12 v 45
+  note 84 4.75 0.1 v 50
+  note 79 6.75 0.12 v 45
+  note 84 8.75 0.1 v 50
+  note 79 10.75 0.12 v 45
+  note 84 12.75 0.1 v 50
+  note 79 14.75 0.12 v 45
+  note 84 16.75 0.1 v 50
+  note 79 18.75 0.12 v 45
+  note 84 20.75 0.1 v 50
+  note 79 22.75 0.12 v 45
+  note 84 24.75 0.1 v 50
+  note 79 26.75 0.12 v 45
+  note 84 28.75 0.1 v 50
+  note 79 30.75 0.12 v 45
+  note 84 32.75 0.1 v 50
+  note 79 34.75 0.12 v 45
+  note 84 36.75 0.1 v 50
+  note 79 38.75 0.12 v 45
+  note 84 40.75 0.1 v 50
+  note 79 42.75 0.12 v 45
+  note 84 44.75 0.1 v 50
+  note 79 46.75 0.12 v 45
+  note 84 48.75 0.1 v 50
+  note 79 50.75 0.12 v 45
+  note 84 52.75 0.1 v 50
+  note 79 54.75 0.12 v 45
+  note 84 56.75 0.1 v 50
+  note 79 58.75 0.12 v 45
+  note 84 60.75 0.1 v 50
+  note 79 62.75 0.12 v 45
+

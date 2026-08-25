@@ -1,0 +1,180 @@
+// chiptune — a browser for the `.chip` format: pick a track, watch it play, see what it costs.
+//
+// ⚠️ THIS USED TO SHOW NOTHING. It played two songs over a flat `backdrop()` colour, which meant the
+// screenshot was a single colour and — worse — you could not tell what `.chip` was doing. The whole
+// argument for the format lived in the README, where a ROM cannot make it. The argument is:
+//
+//     akari's two themes as recorded WAV : 1.09 MB, mixed every frame, can underrun
+//     the same two themes as `.chip`     : 6.7 KB of note data, zero per-frame CPU, cannot underrun
+//
+// That is a 160x saving and a per-frame cost of nothing, because the PSG's four hardware channels
+// oscillate on their own — `chip_play` writes registers and walks away. Storing sheet music instead
+// of a recording. Now the ROM says so, on screen, next to the track it is playing.
+//
+// Controls: UP/DOWN pick a track · A play · B stop · START toggles the auto-advance attract mode.
+import { frame, backdrop, log, key_pressed, hud_text, chip_play, chip_stop, chip_playing, chip_note, chip_row, chip_rows } from 'cargo:tish_agb'
+import { townSong } from 'chip:../../akari/assets/audio/town.chip'
+import { dungeonSong } from 'chip:../../akari/assets/audio/dungeon.chip'
+import { scaleSong } from 'chip:../assets/scale.chip'
+
+// Buttons (see `button_of` in tish-agb): A 0 · B 1 · START 3 · UP 6 · DOWN 7.
+let BTN_A: i32 = 0
+let BTN_B: i32 = 1
+let BTN_START: i32 = 3
+let BTN_UP: i32 = 6
+let BTN_DOWN: i32 = 7
+
+let N: i32 = 3
+let sel: i32 = 0
+let playing: i32 = 0 - 1        // which track `chip_play` was last given, or -1
+let attract: i32 = 1            // auto-advance when left alone, so it demos itself
+let t: i32 = 0
+let ATTRACT_FRAMES: i32 = 1500  // ~25s
+
+// Per-track backdrop, so the screen changes with the music even at a glance.
+let BG_TOWN: i32 = 0x2a4a2a       // green — Willow Vale
+let BG_DUNGEON: i32 = 0x201828    // violet-black — Hollow Shrine
+let BG_SCALE: i32 = 0x1c2c44      // blue — the bare scale
+
+// Byte counts are the real file sizes of the .chip assets (see assets/ATTRIBUTION and the README
+// table). They are shown on screen because "6.7 KB instead of 1.09 MB" is the entire point, and a
+// number nobody sees persuades nobody.
+function bgOf(i: i32): i32 {
+  if (i === 0) { return BG_TOWN }
+  if (i === 1) { return BG_DUNGEON }
+  return BG_SCALE
+}
+
+function titleOf(i: i32) {
+  if (i === 0) { return "WILLOW VALE" }
+  if (i === 1) { return "HOLLOW SHRINE" }
+  return "SCALE TEST"
+}
+
+function bytesOf(i: i32) {
+  if (i === 0) { return "3064 B" }
+  if (i === 1) { return "3655 B" }
+  return "517 B"
+}
+
+function play(i: i32) {
+  playing = i
+  t = 0
+  lastNote[0] = 0 - 1 lastNote[1] = 0 - 1 lastNote[2] = 0 - 1 lastNote[3] = 0 - 1
+  backdrop(bgOf(i))
+  log("CHIP " + titleOf(i))
+  if (i === 0) { chip_play(townSong) }
+  else if (i === 1) { chip_play(dungeonSong) }
+  else { chip_play(scaleSong) }
+}
+
+// The whole screen is redrawn only when something changes — `hud_text` re-lays-out a slot whenever
+// the string differs, so writing the same line every frame is pure waste (docs/perf-rules.md §5).
+let lastSel: i32 = 0 - 1
+let lastPlaying: i32 = 0 - 2
+let lastAttract: i32 = 0 - 1
+
+function draw() {
+  if (sel === lastSel && playing === lastPlaying && attract === lastAttract) { return }
+  lastSel = sel
+  lastPlaying = playing
+  lastAttract = attract
+
+  hud_text(0, 8, 6, "CHIP TRACKS")
+  let i: i32 = 0
+  while (i < N) {
+    // "> " marks the cursor, "*" marks what is actually sounding — they are not always the same,
+    // because you can browse while a track keeps playing.
+    let mark = "  "
+    if (i === sel) { mark = "> " }
+    let note = " "
+    if (i === playing) { note = "*" }
+    hud_text(1 + i, 8, 28 + i * 12, mark + note + " " + titleOf(i) + "   " + bytesOf(i))
+    i = i + 1
+  }
+  hud_text(5, 8, 112, "4 HW VOICES - 0 CPU/FRAME")
+  hud_text(6, 8, 124, "AS WAV: 1.09 MB")
+  if (attract === 1) {
+    hud_text(7, 8, 138, "A PLAY  B STOP  START AUTO ON")
+  } else {
+    hud_text(7, 8, 138, "A PLAY  B STOP  START AUTO OFF")
+  }
+}
+
+// ── the live channel view ─────────────────────────────────────────────────────
+// This is the thing the format could not previously show: four hardware voices, each sounding one
+// note, driven by `chip_play` writing registers and walking away. The sequencer always knew which
+// note each channel was on — it just had no way to say so, so `chip_note` was added to tish-agb
+// alongside `chip_row`/`chip_rows` for the playhead.
+let CH_NAME: string[] = ["SQ1", "SQ2", "WAV", "NSE"]
+let NOTE_NAME: string[] = ["C ", "C#", "D ", "D#", "E ", "F ", "F#", "G ", "G#", "A ", "A#", "B "]
+
+// MIDI note -> "A#4", or "--" for silence. `% 12` and `/ 12` are the one place a division is worth
+// it here: this runs at most four times a frame and only when a note actually changes.
+function noteName(n: i32) {
+  if (n <= 0) { return "-- " }
+  let oct: i32 = (n / 12) | 0
+  return NOTE_NAME[n - oct * 12] + (oct - 1)
+}
+
+// A bar whose length tracks pitch, so the four voices read as music at a glance rather than numbers.
+function bar(n: i32) {
+  if (n <= 0) { return "" }
+  let w: i32 = (n - 24) / 6
+  if (w < 1) { w = 1 }
+  if (w > 12) { w = 12 }
+  let s = ""
+  let i: i32 = 0
+  while (i < w) { s = s + "#" i = i + 1 }
+  return s
+}
+
+let lastNote: i32[] = [0 - 1, 0 - 1, 0 - 1, 0 - 1]
+
+function drawChannels() {
+  let c: i32 = 0
+  while (c < 4) {
+    let n: i32 = chip_note(c)
+    if (n !== lastNote[c]) {
+      lastNote[c] = n
+      hud_text(8 + c, 8, 66 + c * 11, CH_NAME[c] + " " + noteName(n) + " " + bar(n))
+    }
+    c = c + 1
+  }
+}
+
+play(0)
+
+while (true) {
+  frame()
+  t = t + 1
+
+  if (key_pressed(BTN_UP) > 0) {
+    sel = sel - 1
+    if (sel < 0) { sel = N - 1 }
+  }
+  if (key_pressed(BTN_DOWN) > 0) {
+    sel = sel + 1
+    if (sel >= N) { sel = 0 }
+  }
+  if (key_pressed(BTN_A) > 0) { play(sel) }
+  if (key_pressed(BTN_B) > 0) {
+    chip_stop()
+    playing = 0 - 1
+  }
+  if (key_pressed(BTN_START) > 0) {
+    attract = 1 - attract
+    t = 0
+  }
+
+  // Attract mode: walk the list on its own, so the ROM demonstrates itself with nobody holding it.
+  if (attract === 1 && t > ATTRACT_FRAMES) {
+    let next: i32 = playing + 1
+    if (next >= N || playing < 0) { next = 0 }
+    sel = next
+    play(next)
+  }
+
+  draw()
+  drawChannels()
+}

@@ -1,0 +1,243 @@
+// Sunnyside de-risk 2 (examples/sunnyside/SPEC.md §ladder): runtime autotiling.
+//
+// The atlas carries a 16-entry gid table per terrain material, indexed by the
+// orthogonal neighbour mask (U=1 D=2 L=4 R=8, bit set = same terrain, off-map
+// counts as same — the tables are LEARNED from the pack's own GameMaker room
+// by scripts/gen_sunnyside_pack.py).  This ROM generates a little island from
+// a seed, autotiles it in tish, and hands the finished grid to the hardware
+// in ONE tilemap_stream call — the dungeon.tish discipline: no per-cell
+// native crossings, working array separate from the UPLOAD copy (tish#663).
+//
+// D-pad walks (engine camera streams the map), A regenerates with a new seed.
+import { world } from 'bgtiles:../../../assets/sunnyside/baked/world_tiles.png'
+import { player } from 'sheet6432:../../../assets/sunnyside/baked/char_player.png'
+import {
+  frame, log, backdrop, hud_text, heap_free, key_pressed, bg_clear, input_x, input_y,
+  sprite_new, sprite_set_frame, sprite_set_flip, tilemap_stream,
+} from 'cargo:tish_agb'
+import {
+  spawn, set_transform, set_collider, set_topdown, topdown_speed, topdown_moving, topdown_move,
+  topdown_facing, attach_sprite, set_sprite_offset, set_camera_target, world_step,
+  grid_from_gids,
+} from 'cargo:tish_gba_game_engine'
+import {
+  ATLAS_COLS, GID_SEA, GID_GRASS, GID_PATH,
+  GRASS_MASK_GID, PATH_MASK_GID,
+} from '../../sunnyside/src/data_world.tish'
+import { ANIM_PLAYER_START, ANIM_PLAYER_LEN } from '../../sunnyside/src/data_anim.tish'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+
+let W: i32 = 48
+let H: i32 = 32
+let TILE: i32 = 16
+let BTN_A: i32 = 0
+let RNGS: i32 = 0
+
+// terrain ids
+let T_SEA: i32 = 0
+let T_GRASS: i32 = 1
+let T_PATH: i32 = 2
+
+// Working terrain grid and the UPLOAD copy handed to natives (never the same
+// array — a typed module array passed to a native turns every later read
+// boxed, tishlang/tish#663).
+let TERR: i32[] = []
+let UPLOAD: i32[] = []
+let fillI: i32 = 0
+while (fillI < 1536) { TERR.push(0); UPLOAD.push(0); fillI = fillI + 1 }
+
+// Local copies of the cross-module mask tables: 16 boxed reads once, then
+// every per-cell read during paint stays on the typed local path.
+let GRASS_G: i32[] = []
+let PATH_G: i32[] = []
+let cpI: i32 = 0
+while (cpI < 20) {
+  GRASS_G.push(GRASS_MASK_GID[cpI])
+  PATH_G.push(PATH_MASK_GID[cpI])
+  cpI = cpI + 1
+}
+// Sea is solid — and so is every grass-lip tile, because lips are painted ON
+// sea cells (the fringe hangs over the water; you still can't walk there).
+let SOLIDG: i32[] = []
+SOLIDG.push(GID_SEA)
+let sgI: i32 = 1
+while (sgI < 20) {
+  if (GRASS_G[sgI] !== GID_SEA) { SOLIDG.push(GRASS_G[sgI]) }
+  sgI = sgI + 1
+}
+
+function generate(seed: i32) {
+  rngSeed(RNGS, seed)
+  let i: i32 = 0
+  let cells: i32 = W * H
+  while (i < cells) { TERR[i] = T_SEA; i = i + 1 }
+  // island: a grass rectangle with rng-roughened border
+  let y: i32 = 3
+  while (y < H - 3) {
+    let x: i32 = 3
+    while (x < W - 3) {
+      let edge: i32 = 0
+      if (x === 3 || x === W - 4 || y === 3 || y === H - 4) { edge = 1 }
+      if (edge === 0 || rngBelow(RNGS, 100) < 55) { TERR[y * W + x] = T_GRASS }
+      x = x + 1
+    }
+    y = y + 1
+  }
+  // pond: random walk from the middle
+  let px: i32 = W / 2
+  let py: i32 = H / 2
+  let step: i32 = 0
+  while (step < 90) {
+    TERR[py * W + px] = T_SEA
+    let d: i32 = rngBelow(RNGS, 4)
+    if (d === 0 && px > 5) { px = px - 1 }
+    if (d === 1 && px < W - 6) { px = px + 1 }
+    if (d === 2 && py > 5) { py = py - 1 }
+    if (d === 3 && py < H - 6) { py = py + 1 }
+    step = step + 1
+  }
+  // path: a wavy horizontal road across the island
+  let ry: i32 = H / 2 + 4
+  let rx: i32 = 4
+  while (rx < W - 4) {
+    if (TERR[ry * W + rx] === T_GRASS) { TERR[ry * W + rx] = T_PATH }
+    if (TERR[(ry + 1) * W + rx] === T_GRASS) { TERR[(ry + 1) * W + rx] = T_PATH }
+    let wob: i32 = rngBelow(RNGS, 3)
+    if (wob === 0 && ry > 6) { ry = ry - 1 }
+    if (wob === 2 && ry < H - 7) { ry = ry + 1 }
+    rx = rx + 1
+  }
+}
+
+/// Autotile TERR into UPLOAD and hand it over in one call each.
+///
+/// The neighbour reads are INLINE, not through maskAt/terrAt helpers: a call
+/// that touches module state is boxed (~117 ticks a read plus call cost), and
+/// 1,536 cells x 9 helper calls measured out at 260 frames of black screen.
+/// Inlined, the paint is a handful of frames.
+function upload() {
+  let y: i32 = 0
+  while (y < H) {
+    let x: i32 = 0
+    while (x < W) {
+      let i: i32 = y * W + x
+      let t: i32 = TERR[i]
+      let g: i32 = GID_SEA
+      // Sunnyside's transition model (see the baker): a material cell is
+      // plain fill; the NEIGHBOURING cell carries a mostly-transparent lip
+      // overlay.  Lip tables are indexed by which orthogonal neighbours ARE
+      // the material (U=1 D=2 L=4 R=8), with diagonal-only touches at
+      // 16..19 (TL,TR,BL,BR).  Off-map is sea.
+      if (t === T_PATH) {
+        g = GID_PATH
+      } else {
+        let m: i32 = 0
+        if (t === T_SEA) {
+          // grass lips hang over the water
+          if (y > 0 && TERR[i - W] > 0) { m = m + 1 }
+          if (y < H - 1 && TERR[i + W] > 0) { m = m + 2 }
+          if (x > 0 && TERR[i - 1] > 0) { m = m + 4 }
+          if (x < W - 1 && TERR[i + 1] > 0) { m = m + 8 }
+          if (m === 0) {
+            if (x > 0 && y > 0 && TERR[i - W - 1] > 0) { m = 16 }
+            else if (x < W - 1 && y > 0 && TERR[i - W + 1] > 0) { m = 17 }
+            else if (x > 0 && y < H - 1 && TERR[i + W - 1] > 0) { m = 18 }
+            else if (x < W - 1 && y < H - 1 && TERR[i + W + 1] > 0) { m = 19 }
+          }
+          g = GID_SEA
+          if (m > 0) { g = GRASS_G[m] }
+        } else {
+          // grass cell: path lips spill onto the grass
+          if (y > 0 && TERR[i - W] === T_PATH) { m = m + 1 }
+          if (y < H - 1 && TERR[i + W] === T_PATH) { m = m + 2 }
+          if (x > 0 && TERR[i - 1] === T_PATH) { m = m + 4 }
+          if (x < W - 1 && TERR[i + 1] === T_PATH) { m = m + 8 }
+          if (m === 0) {
+            if (x > 0 && y > 0 && TERR[i - W - 1] === T_PATH) { m = 16 }
+            else if (x < W - 1 && y > 0 && TERR[i - W + 1] === T_PATH) { m = 17 }
+            else if (x > 0 && y < H - 1 && TERR[i + W - 1] === T_PATH) { m = 18 }
+            else if (x < W - 1 && y < H - 1 && TERR[i + W + 1] === T_PATH) { m = 19 }
+          }
+          g = GID_GRASS
+          if (m > 0) { g = PATH_G[m] }
+        }
+      }
+      UPLOAD[i] = g
+      x = x + 1
+    }
+    y = y + 1
+  }
+  tilemap_stream(world, ATLAS_COLS, W, H, UPLOAD, 3)
+  grid_from_gids(W, H, UPLOAD, SOLIDG)
+}
+
+/// Count land cells BEFORE painting — the oracle-diffable summary.
+function landCells(): i32 {
+  let n: i32 = 0
+  let i: i32 = 0
+  let cells: i32 = W * H
+  while (i < cells) {
+    if (TERR[i] > 0) { n = n + 1 }
+    i = i + 1
+  }
+  return n
+}
+
+backdrop(0x2090e8)
+hud_text(0, 4, 4, "SUNNYSIDE TERRAIN")
+
+let seed: i32 = 1
+let hero: i32 = spawn()
+set_collider(hero, 8, 8)
+set_topdown(hero)
+topdown_speed(hero, 2)
+let heroSpr: i32 = sprite_new(player, 0)
+attach_sprite(hero, heroSpr)
+// the 64px frame is asymmetric (tool swings reach right), so the body is
+// NOT at the frame centre: flipping the frame moves it 18px. The offset
+// compensates per facing — see the flip block in the loop.
+set_sprite_offset(hero, 0 - 19, 0 - 21)
+set_camera_target(hero)
+
+function rebuild(s: i32) {
+  bg_clear()
+  frame()
+  generate(s)
+  log("TERRAIN seed=" + s + " land=" + landCells())
+  upload()
+  log("UPLOAD done")
+  set_transform(hero, (W / 2 + 6) * TILE + 4, (H / 2 + 5) * TILE + 4)
+  log("HEAP " + heap_free())
+}
+rebuild(seed)
+
+let tick: i32 = 0
+let cell: i32 = 0
+while (true) {
+  if (key_pressed(BTN_A) > 0) {
+    seed = seed + 1
+    rebuild(seed)
+  }
+  tick = tick + 1
+  if (tick >= 3) {
+    tick = 0
+    cell = cell + 1
+  }
+  // set_topdown gives the body; topdown_move each frame is what walks it
+  topdown_move(hero, input_x(), input_y())
+  let act: i32 = 0
+  if (topdown_moving(hero) > 0) { act = 1 }
+  let len: i32 = ANIM_PLAYER_LEN[act]
+  sprite_set_frame(heroSpr, ANIM_PLAYER_START[act] + (cell % len))
+  if (topdown_facing(hero) === 2) {
+    sprite_set_flip(heroSpr, 1)
+    set_sprite_offset(hero, 0 - 37, 0 - 21)
+  }
+  if (topdown_facing(hero) === 3) {
+    sprite_set_flip(heroSpr, 0)
+    set_sprite_offset(hero, 0 - 19, 0 - 21)
+  }
+  // world_step() commits the frame itself — an extra frame() here would pump
+  // the input twice per loop and eat every key_pressed edge.
+  world_step()
+}

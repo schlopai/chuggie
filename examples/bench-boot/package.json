@@ -1,0 +1,29 @@
+{
+  "name": "bench-boot",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\" && for v in floor v_font v_sheets v_scenes v_native v_named68 v_ui v_dialog v_engine v_packages; do tish build \"src/$v.tish\" --target gba -o \"$v.gba\" || exit 1; done",
+    "bench": "./run.sh",
+    "agb-floor": "cd agb-floor && cargo build --release && agb-gbafix target/thumbv4t-none-eabi/release/agb_floor -o agb-floor.gba",
+    "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
+    "clean": "rm -rf .tish \"$npm_package_name.gba\" floor.gba v_*.gba"
+  },
+  "devDependencies": {
+    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_game_engine": {
+        "path": "../../crates/tish-gba-game-engine"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
+    }
+  },
+  "description": "A benchmark testing the performance of the boot subsystem."
+}

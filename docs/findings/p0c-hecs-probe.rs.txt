@@ -1,0 +1,49 @@
+#![no_std]
+#![no_main]
+#![allow(unused)]
+
+//! P0c gate — exercise hecs's core API (spawn / query / component access) on the
+//! GBA target to prove the ECS the framework wants actually links no_std here.
+
+extern crate alloc;
+
+use hecs::World;
+
+#[derive(Clone, Copy)]
+struct Pos {
+    x: i32,
+    y: i32,
+}
+
+#[derive(Clone, Copy)]
+struct Vel {
+    dx: i32,
+    dy: i32,
+}
+
+fn step() -> i32 {
+    let mut world = World::new();
+    world.spawn((Pos { x: 0, y: 0 }, Vel { dx: 1, dy: 2 }));
+    world.spawn((Pos { x: 10, y: 10 },));
+
+    // movement system
+    for (_e, (pos, vel)) in world.query_mut::<(&mut Pos, &Vel)>() {
+        pos.x += vel.dx;
+        pos.y += vel.dy;
+    }
+
+    // read back
+    let mut sum = 0;
+    for (_e, pos) in world.query::<&Pos>().iter() {
+        sum += pos.x + pos.y;
+    }
+    sum
+}
+
+#[agb::entry]
+fn agb_main(_gba: agb::Gba) -> ! {
+    agb::println!("p0-hecs: sum = {}", step());
+    loop {
+        agb::halt();
+    }
+}

@@ -1,0 +1,10 @@
+m5x7 — pixel font by Daniel Linssen
+
+  https://managore.itch.io/m5x7
+
+Free to use with attribution.
+Author asks: use font size 16, 32, 48, etc. (native bake size is 16).
+Same family as m3x6 — the “5×7” is the glyph grid, not the point size.
+
+Vendored as m5x7.ttf from the upstream TTF release.
+Bake at **16px** (`font:…/m5x7.ttf@16`).

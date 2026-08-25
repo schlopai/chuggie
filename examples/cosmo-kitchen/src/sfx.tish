@@ -1,0 +1,129 @@
+// Cosmo Kitchen SFX — each call has a distinct envelope / pitch / noise colour.
+// Tonal → ch2 (or ch1 for bells), percussion → ch4. Leave melody ch1 alone under BGM
+// unless the cue is meant to punch through (order bell / timer).
+import { psg_square, psg_slide, psg_noise, chip_borrow } from 'cargo:tish_agb'
+
+let C3: i32 = 48
+let G3: i32 = 55
+let C4: i32 = 60
+let E4: i32 = 64
+let G4: i32 = 67
+let Bb4: i32 = 70
+let C5: i32 = 72
+let E5: i32 = 76
+let G5: i32 = 79
+let Bb5: i32 = 82
+let C6: i32 = 84
+let E6: i32 = 88
+let G6: i32 = 91
+
+let TINY: i32 = 3
+let VERY_SHORT: i32 = 4
+let SHORT: i32 = 10
+let MEDIUM: i32 = 18
+let LONG: i32 = 28
+let XL: i32 = 40
+
+/// Fire / grill — bright airy hiss (wide LFSR).
+export function sfxSizzle() {
+  chip_borrow(4, MEDIUM)
+  psg_noise(9, 1, 26, 1, 0, 0)
+}
+
+/// Knife chop — hard narrow metallic click.
+export function sfxChop() {
+  chip_borrow(4, SHORT)
+  psg_noise(14, 4, 12, 6, 0, 1)
+}
+
+/// Heal / pour — slow rising soft square (ladle scoop).
+export function sfxLadle() {
+  chip_borrow(2, LONG)
+  psg_slide(E4, 2, 8, 2, 36, 4, 2, 0)
+}
+
+/// Magic windup — stepped microwave beeps (duty 12.5, no sweep).
+export function sfxMicrowave() {
+  chip_borrow(2, XL)
+  psg_square(2, C5, 0, 9, 1, 12)
+}
+
+/// Turn / shop open — high order-up bell on ch1.
+export function sfxOrderBell() {
+  chip_borrow(1, MEDIUM)
+  psg_square(1, G6, 2, 13, 2, 32)
+}
+
+/// Card select — mid tick then tiny noise scrape.
+export function sfxCardFlip() {
+  chip_borrow(2, TINY)
+  psg_square(2, Bb4, 1, 7, 6, 6)
+  chip_borrow(4, TINY)
+  psg_noise(10, 3, 8, 5, 0, 0)
+}
+
+/// Crit / perfect plate — fast upward pop.
+export function sfxPop() {
+  chip_borrow(2, SHORT)
+  psg_slide(G5, 2, 13, 5, 14, 1, 3, 0)
+}
+
+/// Poison / soda — low loose fizz.
+export function sfxFizz() {
+  chip_borrow(4, LONG)
+  psg_noise(6, 0, 30, 2, 0, 0)
+}
+
+/// Law break — piercing high whistle (no noise).
+export function sfxWhistle() {
+  chip_borrow(2, MEDIUM)
+  psg_square(2, G6, 0, 12, 1, 24)
+}
+
+/// Freeze / ice — narrow low thump.
+export function sfxFridge() {
+  chip_borrow(4, MEDIUM)
+  psg_noise(15, 6, 18, 7, 0, 1)
+}
+
+/// Steam vent — long airy whoosh (distinct from sizzle: longer, quieter start).
+export function sfxSteam() {
+  chip_borrow(4, XL)
+  psg_noise(7, 2, 36, 4, 0, 0)
+}
+
+/// Glass / plate clink — short high duty-50 ping.
+export function sfxClink() {
+  chip_borrow(2, VERY_SHORT)
+  psg_square(2, E6, 2, 11, 5, 8)
+}
+
+/// Spatula scrape — falling mid noise.
+export function sfxSpatula() {
+  chip_borrow(4, MEDIUM)
+  psg_noise(12, 3, 22, 3, 0, 1)
+}
+
+/// Kitchen timer — two mid beeps.
+export function sfxTimer() {
+  chip_borrow(2, SHORT)
+  psg_square(2, E5, 1, 10, 2, 10)
+}
+
+/// Grease fire — harsh short burst (narrow + high vol).
+export function sfxGreaseFire() {
+  chip_borrow(4, SHORT)
+  psg_noise(13, 2, 14, 1, 0, 1)
+}
+
+/// Bubbling pot — low slow noise burble.
+export function sfxBubbling() {
+  chip_borrow(4, LONG)
+  psg_noise(14, 5, 28, 5, 0, 0)
+}
+
+/// Spoon motif sting (tonal brand hit).
+export function sfxSpoon() {
+  chip_borrow(2, MEDIUM)
+  psg_square(2, C5, 2, 11, 3, 8)
+}

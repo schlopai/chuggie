@@ -1,0 +1,562 @@
+{
+  "source": "assets/ninja-adventure/FX/Attack/SlashCurved/SpriteSheet.png",
+  "sheet_px": [
+    128,
+    32
+  ],
+  "frame_px": 32,
+  "n_frames": 4,
+  "scale": 1,
+  "place": {
+    "offset": [
+      16,
+      16
+    ],
+    "note": "Hero body is 32\u00d732 at (16,16) in the 64 cell. FX frames are 32\u00d732. Paste FX at (16,16) on top. No other transform."
+  },
+  "note": "128\u00d732 sheet = 4\u00d732px frames. gen_akari reads frames[dir][frame] only. Do not invent offsets.",
+  "blade": {
+    "sprite": "assets/ninja-adventure/Items/Weapons/Katana/SpriteInHand.png",
+    "handle": [
+      2,
+      1
+    ],
+    "idle_angle": 180,
+    "follow_angle": {
+      "DN": 0,
+      "UP": 180,
+      "LF": -90,
+      "RT": 90
+    }
+  },
+  "hands_catalog": "assets/ninja-adventure/catalog/ninja_green_hands.json",
+  "sheet_frames": [
+    {
+      "i": 0,
+      "bbox_sheet": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "size": [
+        32,
+        32
+      ],
+      "opaque_px": 58
+    },
+    {
+      "i": 1,
+      "bbox_sheet": [
+        32,
+        0,
+        64,
+        32
+      ],
+      "size": [
+        32,
+        32
+      ],
+      "opaque_px": 129
+    },
+    {
+      "i": 2,
+      "bbox_sheet": [
+        64,
+        0,
+        96,
+        32
+      ],
+      "size": [
+        32,
+        32
+      ],
+      "opaque_px": 112
+    },
+    {
+      "i": 3,
+      "bbox_sheet": [
+        96,
+        0,
+        128,
+        32
+      ],
+      "size": [
+        32,
+        32
+      ],
+      "opaque_px": 39
+    }
+  ],
+  "playback": [
+    {
+      "id": "start",
+      "frame_i": 0,
+      "attack_col": 1
+    },
+    {
+      "id": "peak",
+      "frame_i": 1,
+      "attack_col": 2
+    },
+    {
+      "id": "fade",
+      "frame_i": 2,
+      "attack_col": 3
+    }
+  ],
+  "frames": {
+    "DN": [
+      {
+        "frame": 0,
+        "grip": [
+          10,
+          10
+        ],
+        "blade": {
+          "grip": [
+            10,
+            10
+          ],
+          "angle": 180,
+          "hand": "hand0"
+        },
+        "fx": null
+      },
+      {
+        "frame": 1,
+        "grip": null,
+        "blade": null,
+        "fx": {
+          "id": "start",
+          "frame_i": 0,
+          "bbox_sheet": [
+            0,
+            0,
+            32,
+            32
+          ],
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            16,
+            16
+          ],
+          "rotate": 0,
+          "flip_h": false
+        }
+      },
+      {
+        "frame": 2,
+        "grip": [
+          12,
+          19
+        ],
+        "blade": {
+          "grip": [
+            12,
+            19
+          ],
+          "angle": 0,
+          "hand": "hand0"
+        },
+        "fx": {
+          "id": "peak",
+          "frame_i": 1,
+          "bbox_sheet": [
+            32,
+            0,
+            64,
+            32
+          ],
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            16,
+            16
+          ],
+          "rotate": 0,
+          "flip_h": false
+        }
+      },
+      {
+        "frame": 3,
+        "grip": [
+          12,
+          19
+        ],
+        "blade": {
+          "grip": [
+            12,
+            19
+          ],
+          "angle": 0,
+          "hand": "hand0"
+        },
+        "fx": {
+          "id": "fade",
+          "frame_i": 2,
+          "bbox_sheet": [
+            64,
+            0,
+            96,
+            32
+          ],
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            16,
+            16
+          ],
+          "rotate": 0,
+          "flip_h": false
+        }
+      }
+    ],
+    "UP": [
+      {
+        "frame": 0,
+        "grip": [
+          24,
+          10
+        ],
+        "blade": {
+          "grip": [
+            24,
+            10
+          ],
+          "angle": 180,
+          "hand": "hand0"
+        },
+        "fx": null
+      },
+      {
+        "frame": 1,
+        "grip": null,
+        "blade": null,
+        "fx": {
+          "id": "start",
+          "frame_i": 0,
+          "bbox_sheet": [
+            0,
+            0,
+            32,
+            32
+          ],
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            16,
+            16
+          ],
+          "rotate": 0,
+          "flip_h": false
+        }
+      },
+      {
+        "frame": 2,
+        "grip": [
+          8,
+          22
+        ],
+        "blade": {
+          "grip": [
+            8,
+            22
+          ],
+          "angle": 180,
+          "hand": "hand0"
+        },
+        "fx": {
+          "id": "peak",
+          "frame_i": 1,
+          "bbox_sheet": [
+            32,
+            0,
+            64,
+            32
+          ],
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            16,
+            16
+          ],
+          "rotate": 0,
+          "flip_h": false
+        }
+      },
+      {
+        "frame": 3,
+        "grip": [
+          8,
+          22
+        ],
+        "blade": {
+          "grip": [
+            8,
+            22
+          ],
+          "angle": 180,
+          "hand": "hand0"
+        },
+        "fx": {
+          "id": "fade",
+          "frame_i": 2,
+          "bbox_sheet": [
+            64,
+            0,
+            96,
+            32
+          ],
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            16,
+            16
+          ],
+          "rotate": 0,
+          "flip_h": false
+        }
+      }
+    ],
+    "LF": [
+      {
+        "frame": 0,
+        "grip": [
+          18,
+          20
+        ],
+        "blade": {
+          "grip": [
+            18,
+            20
+          ],
+          "angle": 180,
+          "hand": "hand0"
+        },
+        "fx": null
+      },
+      {
+        "frame": 1,
+        "grip": null,
+        "blade": null,
+        "fx": {
+          "id": "start",
+          "frame_i": 0,
+          "bbox_sheet": [
+            0,
+            0,
+            32,
+            32
+          ],
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            16,
+            16
+          ],
+          "rotate": 0,
+          "flip_h": false
+        }
+      },
+      {
+        "frame": 2,
+        "grip": [
+          8,
+          20
+        ],
+        "blade": {
+          "grip": [
+            8,
+            20
+          ],
+          "angle": -90,
+          "hand": "hand0"
+        },
+        "fx": {
+          "id": "peak",
+          "frame_i": 1,
+          "bbox_sheet": [
+            32,
+            0,
+            64,
+            32
+          ],
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            16,
+            16
+          ],
+          "rotate": 0,
+          "flip_h": false
+        }
+      },
+      {
+        "frame": 3,
+        "grip": [
+          8,
+          20
+        ],
+        "blade": {
+          "grip": [
+            8,
+            20
+          ],
+          "angle": -90,
+          "hand": "hand0"
+        },
+        "fx": {
+          "id": "fade",
+          "frame_i": 2,
+          "bbox_sheet": [
+            64,
+            0,
+            96,
+            32
+          ],
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            16,
+            16
+          ],
+          "rotate": 0,
+          "flip_h": false
+        }
+      }
+    ],
+    "RT": [
+      {
+        "frame": 0,
+        "grip": [
+          12,
+          20
+        ],
+        "blade": {
+          "grip": [
+            12,
+            20
+          ],
+          "angle": 180,
+          "hand": "hand0"
+        },
+        "fx": null
+      },
+      {
+        "frame": 1,
+        "grip": null,
+        "blade": null,
+        "fx": {
+          "id": "start",
+          "frame_i": 0,
+          "bbox_sheet": [
+            0,
+            0,
+            32,
+            32
+          ],
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            16,
+            16
+          ],
+          "rotate": 0,
+          "flip_h": false
+        }
+      },
+      {
+        "frame": 2,
+        "grip": [
+          24,
+          20
+        ],
+        "blade": {
+          "grip": [
+            24,
+            20
+          ],
+          "angle": 90,
+          "hand": "hand1"
+        },
+        "fx": {
+          "id": "peak",
+          "frame_i": 1,
+          "bbox_sheet": [
+            32,
+            0,
+            64,
+            32
+          ],
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            16,
+            16
+          ],
+          "rotate": 0,
+          "flip_h": false
+        }
+      },
+      {
+        "frame": 3,
+        "grip": [
+          24,
+          20
+        ],
+        "blade": {
+          "grip": [
+            24,
+            20
+          ],
+          "angle": 90,
+          "hand": "hand1"
+        },
+        "fx": {
+          "id": "fade",
+          "frame_i": 2,
+          "bbox_sheet": [
+            64,
+            0,
+            96,
+            32
+          ],
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            16,
+            16
+          ],
+          "rotate": 0,
+          "flip_h": false
+        }
+      }
+    ]
+  }
+}

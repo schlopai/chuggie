@@ -1,0 +1,114 @@
+# Iron Colossus — boss theme (4 bars). Heavy arp, stomping bass, noise, dual PCM.
+deck 1
+bpm 160
+
+track Lead id lead gen gameBoyDmg * 4
+  gen type pulse duty 12_5 env_mode constant vol 14
+  gen arp_rate 12 arp_semis 12
+  note 55 0 0.5 v 127
+  note 55 0.5 0.5 v 110
+  note 58 1 0.5 v 127
+  note 55 1.5 0.5 v 115
+  note 60 2 0.5 v 127
+  note 58 2.5 0.5 v 110
+  note 55 3 1 v 120
+  note 53 4 0.5 v 127
+  note 55 4.5 0.5 v 115
+  note 58 5 0.5 v 127
+  note 60 5.5 0.5 v 120
+  note 63 6 0.5 v 127
+  note 60 6.5 0.5 v 110
+  note 58 7 1 v 120
+  note 55 8 0.5 v 127
+  note 58 8.5 0.5 v 115
+  note 60 9 0.5 v 127
+  note 63 9.5 0.5 v 120
+  note 65 10 0.5 v 127
+  note 63 10.5 0.5 v 115
+  note 60 11 1 v 120
+  note 58 12 0.5 v 127
+  note 55 12.5 0.5 v 110
+  note 53 13 0.5 v 115
+  note 55 13.5 0.5 v 120
+  note 58 14 1 v 127
+  note 55 15 1 v 120
+
+track Bass id bass gen gameBoyDmg * 4
+  gen type wave wave_shape square vol 15
+  note 31 0 0.5 v 127
+  note 31 0.5 0.5 v 90
+  note 31 1 0.5 v 120
+  note 34 1.5 0.5 v 110
+  note 36 2 0.5 v 127
+  note 36 2.5 0.5 v 90
+  note 34 3 1 v 115
+  note 29 4 0.5 v 127
+  note 29 4.5 0.5 v 90
+  note 31 5 0.5 v 120
+  note 34 5.5 0.5 v 110
+  note 36 6 0.5 v 127
+  note 34 6.5 0.5 v 100
+  note 31 7 1 v 115
+  note 31 8 0.5 v 127
+  note 31 8.5 0.5 v 90
+  note 34 9 0.5 v 120
+  note 36 9.5 0.5 v 115
+  note 38 10 0.5 v 127
+  note 36 10.5 0.5 v 100
+  note 34 11 1 v 115
+  note 29 12 0.5 v 120
+  note 31 12.5 0.5 v 110
+  note 28 13 1 v 115
+  note 31 14 1 v 127
+  note 31 15 1 v 110
+
+track Snare id snare gen gameBoyDmg * 4
+  gen type noise noise_mode short vol 13 env_mode step env_step 1
+  note 60 0.5 0.1 v 110
+  note 60 1.5 0.1 v 100
+  note 60 2.5 0.1 v 110
+  note 60 3.5 0.15 v 127
+  note 60 4.5 0.1 v 110
+  note 60 5.5 0.1 v 100
+  note 60 6.5 0.1 v 110
+  note 60 7.5 0.15 v 127
+  note 60 8.5 0.1 v 110
+  note 60 9.5 0.1 v 100
+  note 60 10.5 0.1 v 110
+  note 60 11.5 0.15 v 127
+  note 60 12.5 0.1 v 110
+  note 60 13.5 0.1 v 100
+  note 60 14.5 0.1 v 115
+  note 60 15.5 0.15 v 127
+
+track Kick id kick gen gbaDirectSound * 4
+  gen waveform pulse duty 50 vol 15 bitcrush true pitch_drop -16 pitch_dec 0.04
+  adsr a 0 d 0.08 s 0 r 0.03
+  note 32 0 0.1 v 127
+  note 32 1 0.1 v 120
+  note 32 2 0.1 v 127
+  note 32 3 0.1 v 115
+  note 32 4 0.1 v 127
+  note 32 5 0.1 v 120
+  note 32 6 0.1 v 127
+  note 32 7 0.1 v 120
+  note 32 8 0.1 v 127
+  note 32 9 0.1 v 120
+  note 32 10 0.1 v 127
+  note 32 11 0.1 v 115
+  note 32 12 0.1 v 127
+  note 32 13 0.1 v 120
+  note 32 14 0.1 v 127
+  note 32 15 0.1 v 127
+
+track Stab id stab gen gbaDirectSound * 4
+  gen waveform sawtooth vol 12 bitcrush true pitch_drop -8 pitch_dec 0.06
+  adsr a 0 d 0.12 s 2 r 0.08
+  note 43 1.75 0.18 v 115
+  note 46 3.75 0.2 v 120
+  note 43 5.75 0.18 v 115
+  note 48 7.5 0.3 v 127
+  note 43 9.75 0.18 v 115
+  note 46 11.75 0.2 v 120
+  note 50 13.75 0.22 v 125
+  note 43 15.5 0.35 v 127

@@ -1,0 +1,5036 @@
+[
+ {
+  "file": "Backgrounds/Tilesets/Interior/Elements.png",
+  "name": "Interior Elements (misc props)",
+  "dims": [
+   144,
+   48
+  ],
+  "tile_size": 16,
+  "grid": [
+   9,
+   3
+  ],
+  "theme": "small miscellaneous interior props (wall pilaster, cushions/barrels, boxes)",
+  "palette": "orange brick + grey/dark objects + green objects, on an olive-green backdrop",
+  "autotile": {
+   "has_autotile": false,
+   "terrains": [],
+   "note": "Grab-bag of individual props; no terrain blobs."
+  },
+  "regions": [
+   {
+    "area": "cols 0-1 rows 0-2",
+    "content": "orange brick wall pilaster / column with central vertical seam (2 wide x 3 tall)",
+    "tags": [
+     "wall",
+     "pillar",
+     "brick",
+     "orange"
+    ]
+   },
+   {
+    "area": "cols 2-4 rows 0-1",
+    "content": "grey rounded cushions / benches / logs (two stacked 3x1 objects, actually spanning cols 2-4, not just 3-4)",
+    "tags": [
+     "cushion",
+     "bench",
+     "grey",
+     "prop"
+    ]
+   },
+   {
+    "area": "cols 5-6 rows 0-2",
+    "content": "large dark grey object(s) \u2014 pair of barrels or a padded couch/seat",
+    "tags": [
+     "barrel",
+     "couch",
+     "dark",
+     "prop"
+    ]
+   },
+   {
+    "area": "cols 7-8 rows 0-1",
+    "content": "green box/cushion with horizontal seams (7,0) and green rounded pouch/slime with dark eyes (8,0)",
+    "tags": [
+     "box",
+     "green",
+     "prop"
+    ]
+   }
+  ],
+  "furniture": [
+   {
+    "name": "orange brick wall pilaster / column",
+    "region": "cols 0-1 rows 0-2"
+   },
+   {
+    "name": "grey cushion / bench (upper)",
+    "region": "cols 2-4 rows 0-0"
+   },
+   {
+    "name": "grey cushion / bench (lower)",
+    "region": "cols 2-4 rows 1-1"
+   },
+   {
+    "name": "dark barrels / padded couch",
+    "region": "cols 5-6 rows 0-2"
+   },
+   {
+    "name": "green box / cushion",
+    "region": "cols 7-8 rows 0-0"
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "orange brick pilaster top-left tile"
+   },
+   {
+    "col": 7,
+    "row": 0,
+    "gid": 8,
+    "what": "green seamed box / cushion"
+   },
+   {
+    "col": 8,
+    "row": 0,
+    "gid": 9,
+    "what": "green rounded pouch / slime prop with dark eyes"
+   },
+   {
+    "col": 2,
+    "row": 0,
+    "gid": 3,
+    "what": "left edge of the grey rounded cushion/bench/log object; the object is 3 tiles wide (cols 2-4), not 2 (cols 3-4) as the tile grid first suggested"
+   }
+  ],
+  "map_building_use": "Sprinkle these single props into finished interiors: stand the orange brick pilaster against a wall as a column, place grey cushions/barrels or the couch as seating, and drop the green box/pouch as clutter or a container.",
+  "description": "A tiny grab-bag sheet (9x3 tiles) of loose interior props over an olive backdrop: an orange brick wall pilaster on the left, a set of grey rounded cushions/benches (actually 3 tiles wide, cols 2-4) and larger dark barrel-or-couch objects in the middle, and a green seamed box plus a green pouch/slime-like object on the right. No autotiling \u2014 each item is placed individually as decoration.",
+  "coverage": {
+   "occupied": 20,
+   "documented": 20,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/Interior/TilesetInterior.png",
+  "name": "Interior Pipes / Ornate Tubing",
+  "dims": [
+   256,
+   320
+  ],
+  "tile_size": 16,
+  "grid": [
+   16,
+   20
+  ],
+  "theme": "interior decoration \u2014 connective pipes / ornate wall tubing that link into rectangular loops",
+  "palette": "four palettes arranged in quadrants: cream/tan (top-left), orange (top-right), brown/dark (bottom-left), green (bottom-right)",
+  "autotile": {
+   "has_autotile": false,
+   "terrains": [],
+   "note": "Not a floor/wall terrain blob. Pieces are connective pipe/tube segments (rounded corners, straight runs, T-junctions, crosses, end caps) that JOIN like an autotile set to form frames and manifolds, but they are decorative overlays, not walkable terrain. Assemble loops by hand using matching-palette corner + straight + junction tiles."
+  },
+  "regions": [
+   {
+    "area": "cols 0-7 rows 0-9",
+    "content": "cream/tan pipe & tube segment set: outer rounded-corner frame, straight horizontal/vertical runs, inner branching manifold, T and cross junctions, end caps",
+    "tags": [
+     "pipes",
+     "tubing",
+     "decoration",
+     "cream",
+     "connective"
+    ]
+   },
+   {
+    "area": "cols 8-15 rows 0-9",
+    "content": "orange pipe & tube segment set (same layout as cream block, recolored)",
+    "tags": [
+     "pipes",
+     "tubing",
+     "decoration",
+     "orange",
+     "connective"
+    ]
+   },
+   {
+    "area": "cols 0-7 rows 10-19",
+    "content": "brown/dark pipe & tube segment set (same layout, recolored); includes a grate/vent tile",
+    "tags": [
+     "pipes",
+     "tubing",
+     "decoration",
+     "dark",
+     "brown",
+     "connective"
+    ]
+   },
+   {
+    "area": "cols 8-15 rows 10-19",
+    "content": "green pipe & tube segment set (same layout, recolored); includes a grate/vent tile",
+    "tags": [
+     "pipes",
+     "tubing",
+     "decoration",
+     "green",
+     "connective"
+    ]
+   }
+  ],
+  "furniture": [],
+  "notable_tiles": [
+   {
+    "col": 5,
+    "row": 11,
+    "gid": 182,
+    "what": "white-striped grate / floor vent (dark-brown palette); approximate position"
+   },
+   {
+    "col": 13,
+    "row": 11,
+    "gid": 190,
+    "what": "white-striped grate / floor vent (green palette); approximate position"
+   }
+  ],
+  "map_building_use": "Use on a decoration/overlay layer above floors and walls to suggest plumbing, ducting, or ornate room trim. Pick one palette per room, then chain corner + straight + junction tiles to draw a connected loop; drop the grate tile where a vent is wanted.",
+  "description": "A decorative connective-pipe (or ornate tubing/trim) tileset presented in four color palettes filling the four quadrants of the sheet: cream, orange, dark-brown, and green. Each palette repeats the same kit of rounded corners, straight runs, T/cross junctions, and end caps that snap together into rectangular frames and branching manifolds. Two grate/vent tiles sit in the lower half. These are overlay props, not autotiling terrain, though the segments interlock like one.",
+  "coverage": {
+   "occupied": 262,
+   "documented": 262,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/Interior/TilesetInteriorFloor.png",
+  "name": "Interior Floors & Walled Rooms",
+  "dims": [
+   352,
+   272
+  ],
+  "tile_size": 16,
+  "grid": [
+   22,
+   17
+  ],
+  "theme": "indoor floors and walled-room wall sets for building interior rooms",
+  "palette": "cream/tan brick, orange brick, ornate gold, green ornate, plain tan floor, dark cobblestone",
+  "autotile": {
+   "has_autotile": true,
+   "terrains": [
+    {
+     "material": "cream/tan brick wall",
+     "region": "cols 0-9 rows 0-4",
+     "kind": "walled-room-3x3",
+     "notes": "Verified cream_brick (large cols 4-8) + cream_brick_sm (cols 0-3) wangsets in autotile.json; masks from WallSimple cream_wall."
+    },
+    {
+     "material": "orange brick wall",
+     "region": "cols 0-9 rows 6-10",
+     "kind": "walled-room-3x3",
+     "notes": "Verified orange_brick + orange_brick_sm wangsets (cream + row offset 6)."
+    },
+    {
+     "material": "gold ornate carpet",
+     "region": "cols 15-20 rows 0-4",
+     "kind": "carpet-frame",
+     "notes": "Verified gold_ornate carpet-frame wangset (cols 15-19 rows 0-3) in autotile.json."
+    },
+    {
+     "material": "green ornate wall",
+     "region": "cols 15-20 rows 6-11",
+     "kind": "walled-room-3x3",
+     "notes": "Verified green_ornate carpet-frame wangset (cols 15-19 rows 6-9) in autotile.json."
+    },
+    {
+     "material": "tan plank/tile floor",
+     "region": "cols 0-9 rows 12-16",
+     "kind": "3x3",
+     "notes": "Verified tan_plank 3x3 wangset at cols 0-2 rows 12-14; cols 3+ are fill variants."
+    },
+    {
+     "material": "dark cobblestone floor",
+     "region": "cols 11-20 rows 12-16",
+     "kind": "3x3",
+     "notes": "Verified dark_cobble 3x3 island at cols 11-13 rows 12-14; fill 2x2 bond (16-17,13-14). Indexed: catalog/tilemaps/TilesetInteriorFloor_dark_cobble_indexes.png."
+    }
+   ],
+   "note": "Left half = tan + orange brick walled-room wall sets over plain tan floor; right half = ornate gold and green walled-room/carpet blocks over dark cobble. Verified wangsets in autotile.json: dark_cobble, tan_plank, cream_brick(+_sm), orange_brick(+_sm), gold_ornate, green_ornate. Indexed grids under catalog/tilemaps/."
+  },
+  "regions": [
+   {
+    "area": "cols 11-14 rows 0-3",
+    "content": "small tan/gold ornate floor-or-ceiling motif tiles (4-tile medallions)",
+    "tags": [
+     "ornate",
+     "gold",
+     "motif",
+     "carpet"
+    ]
+   },
+   {
+    "area": "cols 15-20 rows 0-4",
+    "content": "large gold ornate rug / walled medallion: decorative border framing a central medallion floor",
+    "tags": [
+     "rug",
+     "carpet",
+     "gold",
+     "ornate",
+     "medallion"
+    ]
+   },
+   {
+    "area": "cols 11-14 rows 6-9",
+    "content": "small green ornate floor motif tiles",
+    "tags": [
+     "ornate",
+     "green",
+     "motif",
+     "carpet"
+    ]
+   },
+   {
+    "area": "cols 0-9 rows 0-4",
+    "content": "cream/tan brick walled-room wall set",
+    "tags": [
+     "wall",
+     "brick",
+     "tan",
+     "walled-room"
+    ]
+   },
+   {
+    "area": "cols 0-9 rows 6-10",
+    "content": "orange brick walled-room wall set",
+    "tags": [
+     "wall",
+     "brick",
+     "orange",
+     "walled-room"
+    ]
+   },
+   {
+    "area": "cols 0-9 rows 12-16",
+    "content": "plain tan plank/tile floor fill",
+    "tags": [
+     "floor",
+     "tan",
+     "interior"
+    ]
+   },
+   {
+    "area": "cols 11-20 rows 12-16",
+    "content": "dark cobblestone floor fill",
+    "tags": [
+     "floor",
+     "dark",
+     "cobblestone",
+     "dungeon"
+    ]
+   },
+   {
+    "area": "col 10 rows 2-3",
+    "content": "extra cream/tan brick wall fill tiles, a one-column overflow of the tan brick wall block (cols 0-9 rows 0-4) spilling into col 10",
+    "tags": [
+     "wall",
+     "brick",
+     "tan",
+     "overflow"
+    ]
+   },
+   {
+    "area": "col 10 rows 8-9",
+    "content": "extra orange brick wall fill tiles, a one-column overflow of the orange brick wall block (cols 0-9 rows 6-10) spilling into col 10",
+    "tags": [
+     "wall",
+     "brick",
+     "orange",
+     "overflow"
+    ]
+   },
+   {
+    "area": "col 10 rows 14-15",
+    "content": "extra tan plank/tile floor fill tiles, a one-column overflow of the tan floor block (cols 0-9 rows 12-16) spilling into col 10",
+    "tags": [
+     "floor",
+     "tan",
+     "overflow"
+    ]
+   },
+   {
+    "area": "col 21 rows 2-3",
+    "content": "extra gold ornate motif/rug fill tiles, a one-column overflow of the large gold rug block (cols 15-20 rows 0-4) spilling into col 21",
+    "tags": [
+     "rug",
+     "carpet",
+     "gold",
+     "ornate",
+     "overflow"
+    ]
+   },
+   {
+    "area": "col 21 rows 8-9",
+    "content": "extra green ornate motif fill tiles, a one-column overflow of the green walled-room/rug block (cols 15-20 rows 6-11) spilling into col 21",
+    "tags": [
+     "rug",
+     "carpet",
+     "green",
+     "ornate",
+     "overflow"
+    ]
+   },
+   {
+    "area": "col 21 rows 14-15",
+    "content": "extra dark cobblestone floor fill tiles, a one-column overflow of the dark cobblestone floor block (cols 11-20 rows 12-16) spilling into col 21",
+    "tags": [
+     "floor",
+     "dark",
+     "cobblestone",
+     "overflow"
+    ]
+   }
+  ],
+  "furniture": [
+   {
+    "name": "large gold ornate rug / medallion carpet",
+    "region": "cols 15-20 rows 0-4"
+   },
+   {
+    "name": "green ornate rug / medallion carpet",
+    "region": "cols 15-20 rows 6-11"
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 12,
+    "row": 5,
+    "gid": 123,
+    "what": "small accent decal (sparkle/cloud/cobweb) between the gold and orange blocks"
+   },
+   {
+    "col": 13,
+    "row": 5,
+    "gid": 124,
+    "what": "accent decal (sparkle/cobweb)"
+   },
+   {
+    "col": 14,
+    "row": 5,
+    "gid": 125,
+    "what": "accent decal (sparkle/star)"
+   },
+   {
+    "col": 12,
+    "row": 11,
+    "gid": 255,
+    "what": "accent decal (sparkle/cobweb) between green and dark blocks"
+   },
+   {
+    "col": 13,
+    "row": 11,
+    "gid": 256,
+    "what": "accent decal (sparkle/cobweb)"
+   },
+   {
+    "col": 14,
+    "row": 11,
+    "gid": 257,
+    "what": "accent decal (sparkle/star)"
+   },
+   {
+    "col": 0,
+    "row": 5,
+    "gid": 111,
+    "what": "tall glow/light-shaft decal (tan palette): two brick merlons at top over a bright white radial glow beneath, sitting in the seam between the tan wall block (rows 0-4) and the orange wall block (rows 6-10) at the left edge, col 0"
+   },
+   {
+    "col": 0,
+    "row": 11,
+    "gid": 243,
+    "what": "tall glow/light-shaft decal (orange palette recolor of the tile at (0,5)): brick merlons over a bright white radial glow, sitting between the orange wall block (rows 6-10) and the tan floor block (rows 12-16) at the left edge, col 0"
+   },
+   {
+    "col": 11,
+    "row": 4,
+    "gid": 100,
+    "what": "small tan carved rune/glyph decal (H-shaped symbol) on a standalone tile, just right of the gold ornate motif block (cols 11-14 rows 0-3)"
+   },
+   {
+    "col": 11,
+    "row": 5,
+    "gid": 122,
+    "what": "solid flat brown/tan color-fill swatch tile (no pattern), left of the sparkle decals at cols 12-14 row 5"
+   },
+   {
+    "col": 11,
+    "row": 10,
+    "gid": 232,
+    "what": "small green carved rune/glyph decal (H-shaped symbol), mirroring the tan glyph at (11,4), just right of the green ornate motif block (cols 11-14 rows 6-9)"
+   },
+   {
+    "col": 11,
+    "row": 11,
+    "gid": 254,
+    "what": "solid flat dark-green color-fill swatch tile (no pattern), mirroring the brown fill at (11,5), left of the sparkle decals at cols 12-14 row 11"
+   }
+  ],
+  "map_building_use": "Build the room shell from a walled-room wall set (tan or orange bricks, or the ornate gold/green borders), fill the interior with the matching floor terrain (plain tan planks or dark cobble), then drop an ornate rug/medallion carpet in the room center and scatter the small sparkle/cobweb decals for detail.",
+  "description": "The primary interior floor-and-wall sheet. The left half holds two brick walled-room wall sets (cream/tan and orange) plus a plain tan plank floor for filling rooms. The right half holds ornate gold and green medallion carpets/walled blocks over a dark cobblestone floor for cellars or grand halls. A few small sparkle/cobweb accent decals sit in the gaps between palette blocks. A handful of extra overflow tiles (col 10 and col 21) continue the brick/floor/rug/cobble blocks one column further; a tall glow/light-shaft decal sits at the far-left column between each pair of stacked wall blocks; and small carved-rune glyph tiles plus flat color-fill swatches sit just right of the small gold/green ornate motif blocks.",
+  "coverage": {
+   "occupied": 294,
+   "documented": 294,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/Interior/TilesetWallSimple.png",
+  "name": "Simple Walls",
+  "dims": [
+   160,
+   176
+  ],
+  "tile_size": 16,
+  "grid": [
+   10,
+   11
+  ],
+  "theme": "simple square interior wall frames with a decorative center medallion, in four palettes",
+  "palette": "cream/tan, orange, brown/dark, green \u2014 one palette per quadrant",
+  "autotile": {
+   "has_autotile": true,
+   "terrains": [
+    {
+     "material": "cream/tan wall",
+     "region": "cols 0-4 rows 0-4",
+     "kind": "walled-room-3x3",
+     "notes": "Verified cream_wall wangset in autotile.json (dual inner/outer corners)."
+    },
+    {
+     "material": "orange wall",
+     "region": "cols 5-9 rows 0-4",
+     "kind": "walled-room-3x3",
+     "notes": "Verified orange_wall wangset (same layout as cream)."
+    },
+    {
+     "material": "brown/dark wall",
+     "region": "cols 0-4 rows 6-10",
+     "kind": "walled-room-3x3",
+     "notes": "Verified brown_wall wangset; block also includes a grate/vent tile on the left edge."
+    },
+    {
+     "material": "green wall",
+     "region": "cols 5-9 rows 6-10",
+     "kind": "walled-room-3x3",
+     "notes": "Verified green_wall wangset; block also includes a grate/vent tile on the left edge."
+    }
+   ],
+   "note": "Four palettes with verified wangsets in autotile.json: cream_wall, orange_wall, brown_wall, green_wall. Smooth mid-edges for straight runs, jamb tiles for doorway notches, dual corner masks for map-edge boxes. Indexed: catalog/tilemaps/TilesetWallSimple_indexes.png."
+  },
+  "regions": [
+   {
+    "area": "cols 0-4 rows 0-4",
+    "content": "cream/tan square wall frame + centered ring medallion",
+    "tags": [
+     "wall",
+     "tan",
+     "walled-room"
+    ]
+   },
+   {
+    "area": "cols 5-9 rows 0-4",
+    "content": "orange square wall frame + centered ring medallion",
+    "tags": [
+     "wall",
+     "orange",
+     "walled-room"
+    ]
+   },
+   {
+    "area": "cols 0-4 rows 6-10",
+    "content": "brown/dark square wall frame + centered spiral medallion + grate",
+    "tags": [
+     "wall",
+     "dark",
+     "walled-room"
+    ]
+   },
+   {
+    "area": "cols 5-9 rows 6-10",
+    "content": "green square wall frame + centered spiral medallion + grate",
+    "tags": [
+     "wall",
+     "green",
+     "walled-room"
+    ]
+   },
+   {
+    "area": "cols 0-9 row 5",
+    "content": "solid flat near-black teal-grey color-fill tile (RGB approx 20,27,27), byte-identical across all 10 columns \u2014 a plain divider/void filler strip separating the tan/orange wall quadrants (rows 0-4) from the dark/green wall quadrants (rows 6-10)",
+    "tags": [
+     "divider",
+     "fill",
+     "shadow",
+     "void",
+     "filler"
+    ]
+   }
+  ],
+  "furniture": [
+   {
+    "name": "round floor medallion / rug (tan, target ring)",
+    "region": "cols 2-3 rows 1-2"
+   },
+   {
+    "name": "round floor medallion / rug (orange, target ring)",
+    "region": "cols 7-8 rows 1-2"
+   },
+   {
+    "name": "round floor medallion / rug (dark, spiral)",
+    "region": "cols 2-3 rows 7-8"
+   },
+   {
+    "name": "round floor medallion / rug (green, spiral)",
+    "region": "cols 7-8 rows 7-8"
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 1,
+    "row": 7,
+    "gid": 72,
+    "what": "white-striped grate / floor vent (dark palette)"
+   },
+   {
+    "col": 6,
+    "row": 7,
+    "gid": 77,
+    "what": "white-striped grate / floor vent (green palette)"
+   },
+   {
+    "col": 3,
+    "row": 2,
+    "gid": 24,
+    "what": "tan ring-medallion center tile"
+   },
+   {
+    "col": 8,
+    "row": 2,
+    "gid": 29,
+    "what": "orange ring-medallion center tile"
+   },
+   {
+    "col": 0,
+    "row": 5,
+    "gid": 51,
+    "what": "solid flat color-fill tile (near-black teal, RGB ~20,27,27); the same flat fill repeats unchanged across cols 0-9 row 5 as a divider strip between the two wall-frame rows"
+   }
+  ],
+  "map_building_use": "Fastest way to box in a small interior room: pick a palette, lay the four corner tiles and edge runs as a rectangle, then optionally place the matching round medallion (rug/seal) in the room center and a grate tile on the floor. Good for closets, cells, and shrine rooms.",
+  "description": "A compact simple-wall sheet: four rounded square wall frames, one per quadrant, in cream/tan, orange, dark-brown, and green. Each frame is a walled-room set (corners plus edge runs) with a decorative round medallion at its center \u2014 a target ring in the tan/orange versions and a spiral in the dark/green versions. The two lower (dark and green) blocks each add a small striped grate/vent tile. A single flat, uniform dark teal-black color-fill tile repeats across the whole of row 5 (cols 0-9), forming a plain divider/void strip between the upper (tan/orange) and lower (dark/green) wall-frame quadrants.",
+  "coverage": {
+   "occupied": 92,
+   "documented": 92,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/Pipes.png",
+  "name": "Pipes",
+  "dims": [
+   240,
+   48
+  ],
+  "tile_size": 16,
+  "grid": [
+   15,
+   3
+  ],
+  "theme": "Connectable segmented pipe/tube props in 3 color variants (reads as segmented pipe-worms)",
+  "palette": "Three variants of five columns each: orange/tan (cols 0-4), silver-gray (cols 5-9), olive-green (cols 10-14). Dark outlines with small black accents (valve/eye and bolt marks).",
+  "autotile": {
+   "has_autotile": true,
+   "terrains": [
+    {
+     "material": "pipe / segmented tube",
+     "region": "cols 0-4 rows 0-2 (orange), cols 5-9 (gray), cols 10-14 (green)",
+     "kind": "modular segment/junction set (straight, ring-elbow, end-cap) \u2014 NOT a Godot 47-blob",
+     "notes": "Connectable like a wang set only in the loose sense: pieces snap end-to-end and form rings. Each color variant is one 5-col x 3-row kit: a vertical straight run in col 0 ending in a rounded end-cap/valve at the bottom (row 2), a horizontal straight run across row 0 (cols 1-4) with a rounded head/end, and two 2x2 rounded pipe rings (cols 1-2 and cols 3-4, rows 1-2) whose corner tiles act as elbows. Hand-place; there is no corner-match blob covering all 47 cases."
+    }
+   ],
+   "note": "NOT a wangset \u2014 modular segment/junction kit (straight, ring-elbow, end-cap) in 3 colors. Hand-place; no Godot 47-blob / Tiled terrain."
+  },
+  "regions": [
+   {
+    "area": "cols 0-4 rows 0-2",
+    "content": "Orange/tan pipe kit: vertical run + end-cap (col 0), horizontal run with head (row 0 cols 1-4), and two 2x2 pipe rings (rows 1-2).",
+    "tags": [
+     "pipe",
+     "orange",
+     "autotile-ish",
+     "kit"
+    ]
+   },
+   {
+    "area": "cols 5-9 rows 0-2",
+    "content": "Silver-gray pipe kit, same piece layout as the orange kit.",
+    "tags": [
+     "pipe",
+     "gray",
+     "kit"
+    ]
+   },
+   {
+    "area": "cols 10-14 rows 0-2",
+    "content": "Olive-green pipe kit, same piece layout as the orange kit.",
+    "tags": [
+     "pipe",
+     "green",
+     "kit"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "orange vertical straight, top segment"
+   },
+   {
+    "col": 0,
+    "row": 2,
+    "gid": 31,
+    "what": "orange vertical end-cap / valve head (rounded, black accent)"
+   },
+   {
+    "col": 1,
+    "row": 0,
+    "gid": 2,
+    "what": "orange horizontal straight, left segment"
+   },
+   {
+    "col": 4,
+    "row": 0,
+    "gid": 5,
+    "what": "orange horizontal head / right end-cap"
+   },
+   {
+    "col": 1,
+    "row": 1,
+    "gid": 17,
+    "what": "orange pipe ring top-left elbow (ring A, cols 1-2 rows 1-2)"
+   },
+   {
+    "col": 2,
+    "row": 1,
+    "gid": 18,
+    "what": "orange pipe ring top-right elbow (ring A)"
+   },
+   {
+    "col": 1,
+    "row": 2,
+    "gid": 32,
+    "what": "orange pipe ring bottom-left elbow (ring A)"
+   },
+   {
+    "col": 2,
+    "row": 2,
+    "gid": 33,
+    "what": "orange pipe ring bottom-right elbow (ring A)"
+   },
+   {
+    "col": 3,
+    "row": 1,
+    "gid": 19,
+    "what": "orange pipe ring top-left elbow (ring B, cols 3-4 rows 1-2)"
+   },
+   {
+    "col": 5,
+    "row": 2,
+    "gid": 36,
+    "what": "gray vertical end-cap / valve head (gray kit start col 5)"
+   },
+   {
+    "col": 10,
+    "row": 2,
+    "gid": 41,
+    "what": "green vertical end-cap / valve head (green kit start col 10)"
+   }
+  ],
+  "map_building_use": "Decorative pipe/tube runs for dungeons, sewers, factories or as segmented-creature bodies. Chain the horizontal (row 0) and vertical (col 0) straight pieces end-to-end and cap the ends with the rounded valve/head tile; assemble the 2x2 ring blocks for junctions/loops. Pick one of the three color variants per run: orange = cols 0-4, gray = cols 5-9, green = cols 10-14. gid = row*15 + col + 1; the gray and green kits are the orange gids shifted by +5 and +10 columns.",
+  "description": "A modular pipe/tube construction set in three color variants (orange, silver-gray, olive-green), each a self-contained 5-column by 3-row kit. Every kit provides a vertical straight run with a rounded end-cap/valve head, a horizontal straight run with a matching head, and two 2x2 rounded pipe rings whose corners serve as elbows. The pieces read visually as segmented pipe-worms and snap together end-to-end, but this is a hand-placed segment/junction kit, not a Godot 47-blob corner-match autotile.",
+  "coverage": {
+   "occupied": 42,
+   "documented": 42,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetDesert.png",
+  "name": "TilesetDesert",
+  "dims": [
+   320,
+   192
+  ],
+  "tile_size": 16,
+  "grid": [
+   20,
+   12
+  ],
+  "theme": "desert ruins / oasis (sandstone buildings, palms, statues, water)",
+  "palette": "warm sand and tan sandstone with white cap-rims and brick coursing; green palm/dome foliage; light-blue oasis water; accents of red/yellow/blue market cloth, bone-white statues",
+  "autotile": {
+   "has_autotile": true,
+   "terrains": [
+    {
+     "material": "sandstone ruin wall",
+     "region": "cols 6-19 rows 0-5",
+     "kind": "wall-kit (edges-only)",
+     "notes": "Modular temple/ruin wall building set rather than a flat terrain blob: brick-coursed wall faces with white cap-rim tops, straight runs, L corners (visible cols 10-13), battlements, barred windows and dark doorways. Tiles snap together to enclose rooms/courtyards. NOT a ground autotile - the sand ground itself uses the plain floor tileset."
+    }
+   ],
+   "note": "Sandstone ruin wall is a modular wall-kit (edges/corners/battlements), NOT a ground 47-blob wangset. Sand ground itself uses TilesetFloor."
+  },
+  "regions": [
+   {
+    "area": "cols 0-2 rows 0-4",
+    "content": "small green-domed turrets (3-wide: cols 0-2) with a center dark doorway (1,2) flanked by oval windows (0,2 and 2,2); a slender free-standing stone post with a rounded white finial cap stands at col2 rows3-4, between this turret cluster and the taller tower",
+    "tags": [
+     "building",
+     "tower",
+     "dome"
+    ]
+   },
+   {
+    "area": "cols 3-5 rows 0-5",
+    "content": "taller 2-wide green-domed tower with doorway; body continues rows3-4 with two oval windows (3,3 and 5,3) flanking a stepped doorway with ladder rails at (4,4); row5 begins a third, smaller green dome (cols4-5) that continues down into the market fragment area (cols2-5 rows6-11)",
+    "tags": [
+     "building",
+     "tower",
+     "dome"
+    ]
+   },
+   {
+    "area": "cols 0-1 rows 3-5",
+    "content": "round stone well/fountain basin, continuing down into its stone pedestal/base courses at row5",
+    "tags": [
+     "well",
+     "fountain",
+     "object"
+    ]
+   },
+   {
+    "area": "cols 6-19 rows 0-5",
+    "content": "sandstone ruin wall kit: faces, corners, battlements, barred windows, dark doorways",
+    "tags": [
+     "wall",
+     "ruin",
+     "building",
+     "autotile"
+    ]
+   },
+   {
+    "area": "cols 6-9 rows 3-8",
+    "content": "stepped wall with balustrade + blue banners + round tiled bath/pool",
+    "tags": [
+     "wall",
+     "bath",
+     "pool",
+     "banner"
+    ]
+   },
+   {
+    "area": "cols 10-13 rows 4-11",
+    "content": "palm/date tree grove (canopies + trunks, several sizes)",
+    "tags": [
+     "palm",
+     "tree",
+     "foliage"
+    ]
+   },
+   {
+    "area": "cols 14-16 rows 4-11",
+    "content": "large sandstone keep/tower: battlements, arrow-slit windows, bottom gate/portcullis",
+    "tags": [
+     "building",
+     "keep",
+     "tower",
+     "gate"
+    ]
+   },
+   {
+    "area": "cols 17-19 rows 7-10",
+    "content": "oasis water pool (irregular light-blue blob)",
+    "tags": [
+     "water",
+     "oasis",
+     "pool"
+    ]
+   },
+   {
+    "area": "cols 0-1 rows 6-11",
+    "content": "carved stone idols: sun-face statue (with water) and large sphinx/lion statue",
+    "tags": [
+     "statue",
+     "idol",
+     "object"
+    ]
+   },
+   {
+    "area": "cols 2-5 rows 6-11",
+    "content": "brick building fragment + green tents/awnings + market stalls (red/yellow/blue cloth) + treasure chests",
+    "tags": [
+     "building",
+     "tent",
+     "market",
+     "stall",
+     "chest"
+    ]
+   },
+   {
+    "area": "cols 16-19 rows 10-11",
+    "content": "desert debris: bones/skulls, pottery shards, treasure map",
+    "tags": [
+     "bones",
+     "debris",
+     "prop"
+    ]
+   },
+   {
+    "area": "cols 6-9 rows 9-11",
+    "content": "green tent/awning canopy with support posts (cols 6-7 rows 9-10), a second treasure chest with a gold/yellow lid (7,11) pairing with the red-lidded chest at (6,11), a brown rubble/basket mound (8,9), and leafy green bushes/shrubbery (cols 8-9 rows 9-11)",
+    "tags": [
+     "tent",
+     "chest",
+     "bush",
+     "debris"
+    ]
+   },
+   {
+    "area": "cols 17-19 row 6",
+    "content": "wall-to-ground foundation trim row directly beneath the sandstone wall kit and above the oasis pool: sloped/tapered wall base at (17,6), a small dark barred window set into the wall at (18,6), and a plain wall base with a minor step notch at (19,6)",
+    "tags": [
+     "wall",
+     "foundation",
+     "transition"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "small green-domed turret top"
+   },
+   {
+    "col": 4,
+    "row": 2,
+    "gid": 45,
+    "what": "green-domed tower doorway (dark)"
+   },
+   {
+    "col": 0,
+    "row": 3,
+    "gid": 61,
+    "what": "stone well/fountain basin"
+   },
+   {
+    "col": 0,
+    "row": 6,
+    "gid": 121,
+    "what": "carved sun-face idol statue"
+   },
+   {
+    "col": 0,
+    "row": 9,
+    "gid": 181,
+    "what": "large sphinx/lion statue"
+   },
+   {
+    "col": 7,
+    "row": 0,
+    "gid": 8,
+    "what": "sandstone wall top with battlement"
+   },
+   {
+    "col": 7,
+    "row": 1,
+    "gid": 28,
+    "what": "barred window in wall"
+   },
+   {
+    "col": 6,
+    "row": 2,
+    "gid": 47,
+    "what": "dark doorway in wall"
+   },
+   {
+    "col": 16,
+    "row": 3,
+    "gid": 77,
+    "what": "green curtain/door"
+   },
+   {
+    "col": 8,
+    "row": 7,
+    "gid": 149,
+    "what": "round tiled bath/pool (blue water)"
+   },
+   {
+    "col": 11,
+    "row": 4,
+    "gid": 92,
+    "what": "palm tree canopy"
+   },
+   {
+    "col": 11,
+    "row": 6,
+    "gid": 132,
+    "what": "palm tree trunk"
+   },
+   {
+    "col": 15,
+    "row": 4,
+    "gid": 96,
+    "what": "keep battlement top"
+   },
+   {
+    "col": 15,
+    "row": 9,
+    "gid": 196,
+    "what": "keep gate/portcullis (bottom)"
+   },
+   {
+    "col": 18,
+    "row": 8,
+    "gid": 179,
+    "what": "oasis water pool (center)"
+   },
+   {
+    "col": 3,
+    "row": 8,
+    "gid": 164,
+    "what": "green market tent/awning"
+   },
+   {
+    "col": 3,
+    "row": 10,
+    "gid": 204,
+    "what": "market stall with red cloth"
+   },
+   {
+    "col": 4,
+    "row": 10,
+    "gid": 205,
+    "what": "market stall with yellow cloth"
+   },
+   {
+    "col": 6,
+    "row": 11,
+    "gid": 227,
+    "what": "treasure chest"
+   },
+   {
+    "col": 17,
+    "row": 11,
+    "gid": 238,
+    "what": "scattered bones/skull debris"
+   }
+  ],
+  "map_building_use": "Mostly an object/building layer over plain sand ground (from the floor tileset). Assemble ruins and towers from the sandstone wall kit (cols 6-19 rows 0-5): straight faces between corner tiles, battlements on top, doorways/windows punched in. Drop the keep, green-domed turrets and statues as large multi-tile set pieces. Scatter palm trees, tents, market stalls, chests and bone debris for dressing. Paint the oasis pool and round bath as water features. Doorways and gates are natural warp/entrance points.",
+  "description": "A dense desert-ruins theme sheet built around a modular sandstone wall kit (faces, corners, battlements, barred windows, dark doorways) for constructing temples, keeps and courtyards. It adds large set pieces - green-domed turrets, a battlemented keep, sun-face and sphinx statues, a well - plus an oasis pool, a tiled bath, a palm-tree grove, market tents/stalls, treasure chests and scattered bones. Used chiefly on the object/building layer above plain sand ground.",
+  "coverage": {
+   "occupied": 228,
+   "documented": 228,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetDungeon.png",
+  "name": "TilesetDungeon",
+  "dims": [
+   192,
+   64
+  ],
+  "tile_size": 16,
+  "grid": [
+   12,
+   4
+  ],
+  "theme": "Dungeon interior props & puzzle objects: crates, chests, storage shelves, orbs on pedestals, colored switches, gem/crystal blocks, cushions",
+  "palette": "warm wood browns, grey stone pedestals, vivid gem colors (blue, white, red/orange, gold), red cushion accents",
+  "autotile": {
+   "has_autotile": false,
+   "terrains": []
+  },
+  "structures": [
+   {
+    "name": "Orb pedestals / altars",
+    "region": "cols 2-7 rows 2-3",
+    "door_tiles": [],
+    "parts": [
+     "grey stone pedestal with glowing white light/altar (2,2)",
+     "empty grey orb (3,2)",
+     "blue orb (4,2)",
+     "white orb (5,2)",
+     "red orb (6,2)",
+     "amber orb (7,2)",
+     "grey pedestal with dark hole (2,3)"
+    ]
+   },
+   {
+    "name": "Switch pedestals (red/blue buttons)",
+    "region": "cols 3-6 row 3",
+    "door_tiles": [],
+    "parts": [
+     "tall pedestal red button (3,3)",
+     "tall pedestal blue button (4,3)",
+     "short pedestal red (5,3)",
+     "short pedestal blue (6,3) - puzzle switches"
+    ]
+   },
+   {
+    "name": "Storage / containers",
+    "region": "cols 0-5 rows 0-1",
+    "door_tiles": [],
+    "parts": [
+     "locked wooden container with keyhole (0,0),(1,0)",
+     "round red cushions (0,1),(1,1)",
+     "open wooden crates (2,1),(3,1)",
+     "crate of white bottles/potions (4,1)",
+     "dark-slot storage shelf / wine rack (5,1)"
+    ]
+   },
+   {
+    "name": "Gem / crystal blocks",
+    "region": "cols 0-1 rows 2-3",
+    "door_tiles": [],
+    "parts": [
+     "blue ice/gem block (0,2)",
+     "white gem block (1,2)",
+     "orange gem block (0,3)",
+     "gold gem block (1,3)"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "locked wooden container with keyhole"
+   },
+   {
+    "col": 1,
+    "row": 0,
+    "gid": 2,
+    "what": "locked container variant"
+   },
+   {
+    "col": 0,
+    "row": 1,
+    "gid": 13,
+    "what": "round red cushion / meditation mat"
+   },
+   {
+    "col": 4,
+    "row": 1,
+    "gid": 17,
+    "what": "crate of white bottles/potions"
+   },
+   {
+    "col": 5,
+    "row": 1,
+    "gid": 18,
+    "what": "storage shelf / wine rack (dark slots)"
+   },
+   {
+    "col": 2,
+    "row": 2,
+    "gid": 27,
+    "what": "altar / pedestal with glowing white light"
+   },
+   {
+    "col": 4,
+    "row": 2,
+    "gid": 29,
+    "what": "blue orb on pedestal"
+   },
+   {
+    "col": 5,
+    "row": 2,
+    "gid": 30,
+    "what": "white orb on pedestal"
+   },
+   {
+    "col": 6,
+    "row": 2,
+    "gid": 31,
+    "what": "red orb on pedestal"
+   },
+   {
+    "col": 7,
+    "row": 2,
+    "gid": 32,
+    "what": "amber orb on pedestal"
+   },
+   {
+    "col": 3,
+    "row": 3,
+    "gid": 40,
+    "what": "RED switch pedestal"
+   },
+   {
+    "col": 4,
+    "row": 3,
+    "gid": 41,
+    "what": "BLUE switch pedestal"
+   },
+   {
+    "col": 0,
+    "row": 2,
+    "gid": 25,
+    "what": "blue gem/ice block"
+   },
+   {
+    "col": 1,
+    "row": 3,
+    "gid": 38,
+    "what": "gold gem block"
+   },
+   {
+    "col": 7,
+    "row": 3,
+    "gid": 44,
+    "what": "grey stone helmet/shell prop"
+   },
+   {
+    "col": 8,
+    "row": 3,
+    "gid": 45,
+    "what": "grey stone block/crate"
+   }
+  ],
+  "map_building_use": "Decorate dungeon rooms and puzzle chambers: place orb pedestals and red/blue switches as lever/button puzzles, gem blocks as pushable or collectible objects, crates/shelves/cushions as room filler, and the keyhole container as a locked chest. This sheet has no walls, floors or doors - pair it with a separate wall/floor tileset for room geometry.",
+  "description": "A tiny 12x4 prop sheet of dungeon-room objects rather than architecture. Row 0-1 hold containers (keyhole-locked chest, open crates, a bottle crate, a wine-rack shelf) and red cushions; rows 2-3 hold colored orbs on stone pedestals, a glowing altar, red/blue switch pedestals, and blue/white/orange/gold gem blocks, plus a stone helmet and block. There are no autotile walls, floors, or doorways here - it is purely interactive/decorative furniture keyed by the gids above.",
+  "coverage": {
+   "occupied": 25,
+   "documented": 25,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetElement.png",
+  "name": "TilesetElement",
+  "dims": [
+   256,
+   240
+  ],
+  "tile_size": 16,
+  "grid": [
+   16,
+   15
+  ],
+  "theme": "Interior furniture and mixed decorative props (indoor decoration set)",
+  "palette": "Warm wood browns and oranges dominate; pale beige straw, muted reds (banners/curtains), leaf greens (potted plants), teal accents, cool grays (stone/metal doors), whites, and black (piano). Transparent background.",
+  "autotile": {
+   "has_autotile": false,
+   "terrains": [
+    {
+     "material": "straw/hay mat",
+     "region": "cols 12-15 rows 4-6 (irregular: (12,4) is NOT part of the mat)",
+     "kind": "fill texture (not a 47-blob)",
+     "notes": "Large tileable straw/hay bedding mat with fringed edges. (12,5) is the top-left corner (fringe on top+left); (13,4)-(15,4) the top fringe row; (13,5)-(15,5)/(13,6)-(15,6) fill; bottom row has bottom fringe. (12,4) is a SEPARATE white glove/mitt prop, not mat. Hand-place as a rug/stable-floor patch, not a corner-match autotile."
+    }
+   ]
+  },
+  "regions": [
+   {
+    "area": "cols 0-5 rows 0-6",
+    "content": "Assorted small containers and props: barrels, pots, crates, chests (open/closed), sacks/bags, wood/log piles, small stools, and a few critter/statue props.",
+    "tags": [
+     "props",
+     "containers",
+     "barrels",
+     "crates",
+     "chests"
+    ]
+   },
+   {
+    "area": "cols 6-10 rows 0-3",
+    "content": "Kitchen/hearth cluster: oven/furnace, cauldron pots, round bread/donut food items, round dark mirror/frame, and scattered scroll/paper props.",
+    "tags": [
+     "kitchen",
+     "oven",
+     "food",
+     "mirror"
+    ]
+   },
+   {
+    "area": "cols 11-14 rows 1-3",
+    "content": "Long multi-tile furniture: horizontal benches/shelves and a legged table spanning several columns.",
+    "tags": [
+     "furniture",
+     "table",
+     "bench",
+     "multi-tile"
+    ]
+   },
+   {
+    "area": "cols 12-15 rows 4-6",
+    "content": "Large straw/hay mat fill with fringed edges (stable/barn bedding, floor rug); (12,4) is a separate white glove prop.",
+    "tags": [
+     "straw",
+     "hay",
+     "floor-fill",
+     "rug"
+    ]
+   },
+   {
+    "area": "cols 0-5 rows 7-10",
+    "content": "Cabinets, dressers and drawers, small wall shelves, a black stool, and green potted plants/small tree.",
+    "tags": [
+     "furniture",
+     "dresser",
+     "shelf",
+     "plants"
+    ]
+   },
+   {
+    "area": "cols 6-11 rows 7-8",
+    "content": "Wooden bookshelves and dressers with colorful books and stacked items (2-tile-wide bookcases), cols 6-7 and cols 8-9; cols 10-11 rows 7-8 is a matching plain/empty bookshelf variant with no books on the shelves (same orange-top frame, bare brown shelf slats). Previously cols 10-11 were undocumented.",
+    "tags": [
+     "bookshelf",
+     "furniture",
+     "multi-tile"
+    ]
+   },
+   {
+    "area": "cols 6-10 rows 9-13",
+    "content": "Red hanging banners/curtains and drapes (two 2-tile-wide drape variants at cols 7-8 and cols 9-10, row 9); white and orange window curtains below. (6,9) is a small tan storage box/parcel with a brown cross-strap band (not a curtain, but grouped in this cluster); (6,10) is a flat book/tablet prop with a blue-teal cover lying on its side. Previously (6,9), (6,10) and (10,9) were undocumented.",
+    "tags": [
+     "banner",
+     "curtain",
+     "decor",
+     "wall"
+    ]
+   },
+   {
+    "area": "cols 0-4 row 11",
+    "content": "Long black piano/keyboard laid out horizontally across five tiles.",
+    "tags": [
+     "piano",
+     "furniture",
+     "multi-tile"
+    ]
+   },
+   {
+    "area": "cols 6-9 rows 11-13",
+    "content": "Door variants shown as 2-tall panels: white, orange/wood, and gray/metal doors.",
+    "tags": [
+     "door",
+     "wall",
+     "multi-tile"
+    ]
+   },
+   {
+    "area": "col 15 rows 0-3",
+    "content": "Sparse misc column: a small standing figure/statue, white crown/spike props, and a small colored trinket.",
+    "tags": [
+     "misc",
+     "filler"
+    ]
+   },
+   {
+    "area": "cols 1-5 row 11",
+    "content": "Prison/cage furniture: (1,11) a small single-cell wooden animal cage; (2,11)-(4,11) a long 3-wide jail-bar wall segment (vertical metal bars on a wood frame); (5,11) the cage's right end-cap. Previously undocumented.",
+    "tags": [
+     "jail",
+     "cage",
+     "prison",
+     "bars",
+     "multi-tile"
+    ]
+   },
+   {
+    "area": "cols 0-5 rows 3-4",
+    "content": "Wheeled cargo carts/wagons: (0,3)-(1,4) a 2x2 wooden handcart loaded with orange barrels/crates, pull-shafts on the left, spoked wheel visible at the base; (2,3)-(3,4) the same cart loaded with a covered/tarped sack (purple/white cloth bundle) instead of barrels; (4,4)-(5,4) a wheel-less stacked barrel/basket pile (goods stand without a cart). Previously missed \u2014 corrects the \"no cart in the pack\" gap noted in scene_recipes/village_square.json.",
+    "tags": [
+     "cart",
+     "wagon",
+     "wheeled",
+     "goods",
+     "multi-tile",
+     "basket"
+    ]
+   },
+   {
+    "area": "cols 6-7 row 4",
+    "content": "Two free-standing lamp/torch props on wood posts, to the right of the barrel/basket goods pile at (4,4)-(5,4): (6,4) a tall wood post topped with a small dark round lamp head (street-lamp / hitching-post style); (7,4) a shorter forked stand holding a dark oval lamp/torch head. Previously undocumented.",
+    "tags": [
+     "lamp",
+     "torch",
+     "post",
+     "prop"
+    ]
+   },
+   {
+    "area": "cols 11-14 row 0",
+    "content": "Misc single-tile props on the top row, above the long bench/table cluster (cols 11-14 rows 1-3): (11,0) a small tan/beige standing humanoid figure or doll (plainer color variant of the (15,0) statue); (12,0) a large orange rounded hood/drape shape with a dark base (cloak, poncho, or domed jar lid); (13,0) a gray zigzag hook or post-cap fixture with an orange band; (14,0) a single-tile side table topped with a red tablecloth, distinct from the long multi-tile table below. Previously undocumented.",
+    "tags": [
+     "misc",
+     "filler",
+     "prop"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 15,
+    "row": 0,
+    "gid": 16,
+    "what": "small standing figure / statue prop"
+   },
+   {
+    "col": 13,
+    "row": 4,
+    "gid": 78,
+    "what": "straw/hay mat top fringe (fill block cols 12-15 rows 4-6; (12,5) is the actual corner tile)"
+   },
+   {
+    "col": 7,
+    "row": 7,
+    "gid": 120,
+    "what": "wooden bookshelf with books (2-tile-wide bookcase, cols 7-8)"
+   },
+   {
+    "col": 9,
+    "row": 8,
+    "gid": 138,
+    "what": "bookshelf with colorful books (cols 9-10)"
+   },
+   {
+    "col": 7,
+    "row": 9,
+    "gid": 152,
+    "what": "red hanging banner/curtain segment"
+   },
+   {
+    "col": 0,
+    "row": 11,
+    "gid": 177,
+    "what": "black piano keyboard, left end (long piano cols 0-4)"
+   },
+   {
+    "col": 7,
+    "row": 11,
+    "gid": 184,
+    "what": "white door, top panel (2-tall door variant)"
+   },
+   {
+    "col": 8,
+    "row": 11,
+    "gid": 185,
+    "what": "orange/wood door, top panel"
+   },
+   {
+    "col": 9,
+    "row": 11,
+    "gid": 186,
+    "what": "gray/metal door, top panel"
+   },
+   {
+    "col": 4,
+    "row": 4,
+    "gid": 69,
+    "what": "open treasure/storage chest prop"
+   },
+   {
+    "col": 1,
+    "row": 11,
+    "gid": 178,
+    "what": "small single-cell wooden animal cage"
+   },
+   {
+    "col": 2,
+    "row": 11,
+    "gid": 179,
+    "what": "jail-bar wall segment, left (cols 2-4 = one 3-wide barred wall)"
+   },
+   {
+    "col": 5,
+    "row": 11,
+    "gid": 182,
+    "what": "jail-bar cage right end-cap"
+   },
+   {
+    "col": 0,
+    "row": 3,
+    "gid": 49,
+    "what": "wheeled cart w/ barrels, top-left (2x2 prop, cols 0-1 rows 3-4)"
+   },
+   {
+    "col": 2,
+    "row": 3,
+    "gid": 51,
+    "what": "wheeled cart w/ covered sack load, top-left (2x2 prop, cols 2-3 rows 3-4)"
+   },
+   {
+    "col": 4,
+    "row": 4,
+    "gid": 69,
+    "what": "stacked barrel/basket goods pile, no wheels (2-wide, cols 4-5 row 4)"
+   },
+   {
+    "col": 6,
+    "row": 4,
+    "gid": 70,
+    "what": "wood lamp-post prop, tall (dark round head)"
+   },
+   {
+    "col": 7,
+    "row": 4,
+    "gid": 71,
+    "what": "wood torch/lamp stand, short (dark oval head)"
+   },
+   {
+    "col": 11,
+    "row": 0,
+    "gid": 12,
+    "what": "small tan standing humanoid figure/doll prop"
+   },
+   {
+    "col": 12,
+    "row": 0,
+    "gid": 13,
+    "what": "large orange rounded hood/drape shape prop"
+   },
+   {
+    "col": 13,
+    "row": 0,
+    "gid": 14,
+    "what": "gray zigzag hook/post-cap fixture prop"
+   },
+   {
+    "col": 14,
+    "row": 0,
+    "gid": 15,
+    "what": "single-tile side table with red tablecloth"
+   },
+   {
+    "col": 11,
+    "row": 7,
+    "gid": 156,
+    "what": "plain/empty bookshelf top, no books (matches col10)"
+   },
+   {
+    "col": 11,
+    "row": 8,
+    "gid": 172,
+    "what": "plain/empty bookshelf shelves, no books (matches col10)"
+   },
+   {
+    "col": 6,
+    "row": 9,
+    "gid": 137,
+    "what": "small tan storage box/parcel with cross-strap band"
+   },
+   {
+    "col": 6,
+    "row": 10,
+    "gid": 153,
+    "what": "flat book/tablet prop, blue-teal cover"
+   },
+   {
+    "col": 10,
+    "row": 9,
+    "gid": 141,
+    "what": "red curtain drape, right block (2-wide, cols 9-10)"
+   }
+  ],
+  "map_building_use": "Furniture and clutter layer for interiors: houses, shops, inns, kitchens, libraries and stables. Place bookshelves, dressers, tables, barrels, crates and chests as collidable object tiles above a floor layer; lay the straw mat as a stable/barn floor patch; use the multi-tile piano, benches, banners and 2-tall doors as set-piece decorations. Not a terrain autotile \u2014 everything is hand-placed props. The jail-bar cluster (cols 1-5 row 11) works as a dungeon cell wall or animal pen \u2014 pair with TilesetDungeon for a full prison room. Use the wheeled carts (cols 0-3 rows 3-4) as a market stall / trade-post prop next to a house or shop \u2014 this is the pack's only cart/wagon asset.",
+  "description": "A dense indoor decoration set of furniture and props rendered in warm wood tones. It supplies containers (barrels, crates, chests, sacks), seating and surfaces (chairs, stools, benches, tables, dressers, bookshelves), a hearth/kitchen cluster with food, a black piano, red banners and curtains, potted plants, and 2-tall door variants (white/wood/gray). A large fringed straw/hay mat (cols 12-15 rows 4-6) doubles as a stable or barn floor patch. Despite the 'Element' name it is decorative interior furnishing, not an elemental terrain set. Also includes an undocumented jail/cage cluster (cols 1-5 row 11): a small single-cell animal cage plus a long 3-wide barred jail wall \u2014 usable for a dungeon cell, animal pen, or prison interior. Two wheeled 2x2 cargo carts (cols 0-3 rows 3-4 \u2014 one barrel-loaded, one with a covered sack) plus a wheel-less stacked-basket goods pile (cols 4-5 row 4) supply market/trade-post dressing.",
+  "coverage": {
+   "occupied": 146,
+   "documented": 146,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetField.png",
+  "name": "TilesetField",
+  "dims": [
+   80,
+   240
+  ],
+  "tile_size": 16,
+  "grid": [
+   5,
+   15
+  ],
+  "theme": "field/meadow ground blocks - 5 color variants, simple island autotiles",
+  "palette": [
+   "orange tilled soil",
+   "yellow-green grass",
+   "dark-green grass",
+   "pink/salmon ground",
+   "off-white snow"
+  ],
+  "autotile": {
+   "has_autotile": true,
+   "terrains": [
+    {
+     "material": "orange tilled soil / clay",
+     "region": "cols 0-2 rows 0-2",
+     "kind": "3x3",
+     "notes": "Verified orange_soil 3x3 wangset; fill tiles (3,0)(4,0)."
+    },
+    {
+     "material": "light yellow-green grass (spring)",
+     "region": "cols 0-2 rows 3-5",
+     "kind": "3x3",
+     "notes": "Verified spring_grass 3x3 wangset; fill (3,3)(4,3)."
+    },
+    {
+     "material": "dark green grass (summer)",
+     "region": "cols 0-2 rows 6-8",
+     "kind": "3x3",
+     "notes": "Verified summer_grass 3x3 wangset; fill (3,6)(4,6)."
+    },
+    {
+     "material": "pink/salmon ground (autumn/cherry)",
+     "region": "cols 0-2 rows 9-11",
+     "kind": "3x3",
+     "notes": "Verified autumn_ground 3x3 wangset; fill (3,9)(4,9)."
+    },
+    {
+     "material": "off-white snow",
+     "region": "cols 0-2 rows 12-14",
+     "kind": "3x3",
+     "notes": "Verified field_snow 3x3 wangset; fill (3,12)(4,12)."
+    }
+   ],
+   "note": "Five stacked 3x3 field islands. Verified wangsets in autotile.json: orange_soil, spring_grass, summer_grass, autumn_ground, field_snow. Indexed: catalog/tilemaps/TilesetField_indexes.png."
+  },
+  "regions": [
+   {
+    "area": "cols 0-4 rows 0-2",
+    "content": "orange soil island (3x3) + 2 plain fill tiles",
+    "tags": [
+     "field",
+     "soil",
+     "orange",
+     "ground"
+    ]
+   },
+   {
+    "area": "cols 0-4 rows 3-5",
+    "content": "light-green grass island + fill",
+    "tags": [
+     "field",
+     "grass",
+     "spring",
+     "ground"
+    ]
+   },
+   {
+    "area": "cols 0-4 rows 6-8",
+    "content": "dark-green grass island + fill",
+    "tags": [
+     "field",
+     "grass",
+     "summer",
+     "ground"
+    ]
+   },
+   {
+    "area": "cols 0-4 rows 9-11",
+    "content": "pink ground island + fill",
+    "tags": [
+     "field",
+     "pink",
+     "autumn",
+     "ground"
+    ]
+   },
+   {
+    "area": "cols 0-4 rows 12-14",
+    "content": "snow/white island + fill",
+    "tags": [
+     "field",
+     "snow",
+     "winter",
+     "ground"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 3,
+    "row": 0,
+    "gid": 4,
+    "what": "solid orange-soil fill tile"
+   },
+   {
+    "col": 3,
+    "row": 3,
+    "gid": 19,
+    "what": "solid light-green grass fill tile"
+   },
+   {
+    "col": 3,
+    "row": 6,
+    "gid": 34,
+    "what": "solid dark-green grass fill tile"
+   },
+   {
+    "col": 3,
+    "row": 9,
+    "gid": 49,
+    "what": "solid pink-ground fill tile"
+   },
+   {
+    "col": 3,
+    "row": 12,
+    "gid": 64,
+    "what": "solid snow fill tile"
+   },
+   {
+    "col": 1,
+    "row": 2,
+    "gid": 12,
+    "what": "orange-soil bottom fringe/skirt edge (transition down)"
+   }
+  ],
+  "map_building_use": "Large flat GROUND fills. Each 3-tile block is a rounded island (top+side edges, grassy bottom fringe) plus 2 clean interior fill tiles - use the fill tiles to carpet big field/meadow areas and the island edges to round off patch borders. Five color variants let you swap seasons/biomes without changing layout.",
+  "description": "Five stacked field-ground materials (orange soil, light-green grass, dark-green grass, pink ground, snow), each a simple rounded 3x3 island with a grassy bottom fringe and two solid interior fill tiles at cols 3-4. Simpler than the 47-blob floors - meant for quickly carpeting large meadow/field regions with clean edges.",
+  "coverage": {
+   "occupied": 65,
+   "documented": 65,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetFloor.png",
+  "name": "TilesetFloor",
+  "dims": [
+   352,
+   417
+  ],
+  "tile_size": 16,
+  "grid": [
+   22,
+   26
+  ],
+  "theme": "multi-biome ground terrain autotiles (8 materials, all 47-blob)",
+  "palette": [
+   "orange-tan sand",
+   "salmon/pink sand",
+   "green grass",
+   "brown dirt",
+   "off-white snow",
+   "dark mud/soil",
+   "ice-blue",
+   "orange clay"
+  ],
+  "autotile": {
+   "has_autotile": true,
+   "terrains": [
+    {
+     "material": "tan/sand (light-cream fill over orange-tan base)",
+     "region": "cols 0-10 rows 0-6",
+     "kind": "47-blob",
+     "notes": "blob body rows 0-4; row 4-5 has decor (twig, pebble, sand speckle); center-surrounded tile shows a small floor-panel motif"
+    },
+    {
+     "material": "pink/salmon sand (light-pink fill over pink base)",
+     "region": "cols 11-21 rows 0-6",
+     "kind": "47-blob",
+     "notes": "exact palette-swap of the tan block, same decor tiles at cols 11-12 rows 4-5"
+    },
+    {
+     "material": "dirt-over-grass (brown dirt fill over green grass)",
+     "region": "cols 0-10 rows 7-12",
+     "kind": "47-blob",
+     "notes": "CANONICAL reference block; full mask->tile table in catalog/autotile.json. Solid dirt (1,8) gid178, plain grass (0,12) gid265, pebble decor (1,11) gid244"
+    },
+    {
+     "material": "dirt-over-grass variant (darker dirt, richer/thicker green grass border)",
+     "region": "cols 11-21 rows 7-13",
+     "kind": "47-blob",
+     "notes": "second dirt/grass blob; deeper green edges than the col 0-10 block, use for a distinct grass biome; blob has a narrow one-column protrusion into col 21 at rows 9-10 (edge fill tiles, same material)"
+    },
+    {
+     "material": "snow/off-white floor (white fill, pale-gray edge)",
+     "region": "cols 0-10 rows 14-20",
+     "kind": "47-blob",
+     "notes": "decor rows 18-20: branch, pebble, and green grass-on-snow tufts (0,20)(2,20); blob has a narrow one-column protrusion into col 10 at rows 16-17 (edge/corner fill tiles, same material)"
+    },
+    {
+     "material": "dark mud/soil (dark-brown fill over tan base)",
+     "region": "cols 11-21 rows 14-20",
+     "kind": "47-blob",
+     "notes": "decor at (11,18) branch, (13,18) pebble; blob has a narrow one-column protrusion into col 21 at rows 16-17 (edge fill tiles, same material)"
+    },
+    {
+     "material": "ice-blue floor (light-blue fill over white base, white flower/foam specks)",
+     "region": "cols 0-10 rows 21-25",
+     "kind": "47-blob",
+     "notes": "reads as frozen/ice or a blue flower field; blob has a narrow one-column protrusion into col 10 at rows 23-24 (edge fill tiles, same material)"
+    },
+    {
+     "material": "orange clay floor (orange fill over white base, white flower specks)",
+     "region": "cols 11-21 rows 21-25",
+     "kind": "47-blob",
+     "notes": "reads as autumn/clay or an orange flower field; mirrors the ice-blue block"
+    }
+   ],
+   "note": "All 8 materials have verified 47-blob wangsets in autotile.json (Godot match-corners; dirt_grass is canonical). Indexed: catalog/tilemaps/TilesetFloor_dirt_grass_indexes.png."
+  },
+  "regions": [
+   {
+    "area": "cols 0-10 rows 0-6",
+    "content": "tan/sand 47-blob + sand decor row",
+    "tags": [
+     "autotile",
+     "sand",
+     "desert",
+     "ground"
+    ]
+   },
+   {
+    "area": "cols 11-21 rows 0-6",
+    "content": "pink sand 47-blob + decor",
+    "tags": [
+     "autotile",
+     "sand",
+     "pink",
+     "ground"
+    ]
+   },
+   {
+    "area": "cols 0-10 rows 7-12",
+    "content": "dirt-over-grass 47-blob (canonical, see autotile.json)",
+    "tags": [
+     "autotile",
+     "dirt",
+     "grass",
+     "path",
+     "ground"
+    ]
+   },
+   {
+    "area": "cols 11-21 rows 7-13",
+    "content": "dirt-over-grass 47-blob variant (deeper green) (protrudes one column to col 21 at rows 9-10)",
+    "tags": [
+     "autotile",
+     "dirt",
+     "grass",
+     "ground"
+    ]
+   },
+   {
+    "area": "cols 0-9 rows 12-13",
+    "content": "plain grass + orange-flower & grass-tuft decor tiles",
+    "tags": [
+     "grass",
+     "flowers",
+     "decor"
+    ]
+   },
+   {
+    "area": "cols 0-10 rows 14-20",
+    "content": "snow/white 47-blob + snow decor (protrudes one column to col 10 at rows 16-17)",
+    "tags": [
+     "autotile",
+     "snow",
+     "ground"
+    ]
+   },
+   {
+    "area": "cols 11-21 rows 14-20",
+    "content": "dark mud/soil 47-blob + decor (protrudes one column to col 21 at rows 16-17)",
+    "tags": [
+     "autotile",
+     "mud",
+     "soil",
+     "ground"
+    ]
+   },
+   {
+    "area": "cols 0-10 rows 21-25",
+    "content": "ice-blue 47-blob (flower/foam specks) (protrudes one column to col 10 at rows 23-24)",
+    "tags": [
+     "autotile",
+     "ice",
+     "blue",
+     "ground"
+    ]
+   },
+   {
+    "area": "cols 11-21 rows 21-25",
+    "content": "orange clay 47-blob (flower specks)",
+    "tags": [
+     "autotile",
+     "orange",
+     "clay",
+     "ground"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 1,
+    "row": 8,
+    "gid": 178,
+    "what": "solid dirt fill tile (fully surrounded) - use to fill dirt interiors"
+   },
+   {
+    "col": 0,
+    "row": 12,
+    "gid": 265,
+    "what": "plain grass fill tile (isolated) - default grass ground"
+   },
+   {
+    "col": 1,
+    "row": 11,
+    "gid": 244,
+    "what": "dirt with pebble decor"
+   },
+   {
+    "col": 0,
+    "row": 4,
+    "gid": 89,
+    "what": "sand decor: fallen twig/branch"
+   },
+   {
+    "col": 1,
+    "row": 4,
+    "gid": 90,
+    "what": "sand decor: pale pebble/egg"
+   },
+   {
+    "col": 1,
+    "row": 13,
+    "gid": 288,
+    "what": "grass with orange flower cluster"
+   },
+   {
+    "col": 13,
+    "row": 18,
+    "gid": 410,
+    "what": "dark-mud with pebble decor"
+   },
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "isolated tan-sand patch (single-tile island)"
+   },
+   {
+    "col": 11,
+    "row": 0,
+    "gid": 243,
+    "what": "isolated pink-sand patch (single-tile island)"
+   }
+  ],
+  "map_building_use": "Primary GROUND layer sheet. Pick one of the 8 materials and paint it as a Tiled terrain (Godot match-corners 47-blob); use the canonical dirt-over-grass block (cols 0-10 rows 7-12) with catalog/autotile.json for the reference mask table, and mirror that mask->tile mapping onto the other 7 blocks which share the identical internal layout.",
+  "description": "The main floor/terrain sheet: eight complete 47-blob autotile materials laid out in a left column (tan sand, dirt/grass, snow, ice-blue) and a right column (pink sand, dirt/grass variant, dark mud, orange clay). Each blob is ~11 tiles wide x 5-6 tall and includes edge, outer/inner corner and fully-surrounded cases plus a few decor tiles (twigs, pebbles, flowers). Use it for every biome's base ground; the dirt block is the documented reference in autotile.json.",
+  "coverage": {
+   "occupied": 458,
+   "documented": 458,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetFloorB.png",
+  "name": "TilesetFloorB",
+  "dims": [
+   176,
+   112
+  ],
+  "tile_size": 16,
+  "grid": [
+   11,
+   7
+  ],
+  "theme": "pale cloud / fluffy soft-white floor autotile",
+  "palette": [
+   "off-white/lavender fill",
+   "light-blue scalloped edge"
+  ],
+  "autotile": {
+   "has_autotile": true,
+   "terrains": [
+    {
+     "material": "pale cloud / soft-white floor (lavender-white fill, light-blue bumpy cloud edge)",
+     "region": "cols 4-10 rows 0-5",
+     "kind": "47-blob",
+     "notes": "Verified cloud wangset in autotile.json (stamped from dirt_grass at origin 4,0). Also cloud_island for cols 0-2."
+    }
+   ],
+   "note": "Verified wangsets: cloud (47-blob stamp at cols 4-10, partial ~27/47 masks \u2014 sheet is narrower than Floor) and cloud_island (3x3 at cols 0-2). Ignore hatch placeholder at (0,6)."
+  },
+  "regions": [
+   {
+    "area": "cols 0-2 rows 0-3",
+    "content": "3-wide rounded cloud island (simple blob: rows 0-2 body, row 3 bottom strip)",
+    "tags": [
+     "autotile",
+     "cloud",
+     "island"
+    ]
+   },
+   {
+    "area": "col 3 rows 0-3",
+    "content": "1-wide vertical cloud strip (top/mid/bottom) + tiny diamond dot at (3,3)",
+    "tags": [
+     "autotile",
+     "narrow",
+     "strip"
+    ]
+   },
+   {
+    "area": "cols 4-10 rows 0-5",
+    "content": "full 47-blob with inner corners and corner-join cases",
+    "tags": [
+     "autotile",
+     "47-blob",
+     "cloud"
+    ]
+   },
+   {
+    "area": "cols 0-0 rows 5-6",
+    "content": "Blue diagonal-hatch placeholder/collision marker tile. Correction: the actual hatch tile sits at (0,5), not (0,6) as originally logged \u2014 (0,6) is empty/transparent (no tile drawn there).",
+    "tags": [
+     "placeholder",
+     "meta"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "cloud island top-left corner"
+   },
+   {
+    "col": 3,
+    "row": 3,
+    "gid": 37,
+    "what": "single small cloud dot (smallest island tile)"
+   },
+   {
+    "col": 0,
+    "row": 6,
+    "gid": 67,
+    "what": "diagonal-hatch placeholder / not-a-tile marker (do not place) (note: verified pixel content is actually at (0,5); (0,6) itself is transparent/empty)"
+   },
+   {
+    "col": 0,
+    "row": 5,
+    "gid": 56,
+    "what": "diagonal-hatch placeholder / not-a-tile marker (do not place) \u2014 corrected location, see (0,6) note"
+   }
+  ],
+  "map_building_use": "Secondary GROUND or OVERHEAD layer for cloud platforms, fog patches, or a fluffy pale floor. Paint as a 47-blob terrain using the cols 4-10 block; the cols 0-3 island/strip tiles are handy for isolated single-width cloud bridges. Ignore the hatch tile at (0,6).",
+  "description": "A small single-material autotile of a pale lavender-white surface with a light-blue scalloped (cloud-like) border. Provides a full match-corners-and-sides 47-blob plus a compact rounded island and a one-tile-wide strip for thin shapes. Best read as clouds/soft platforms; contains one hatched placeholder tile at (0,6).",
+  "coverage": {
+   "occupied": 48,
+   "documented": 48,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetFloorDetail.png",
+  "name": "TilesetFloorDetail",
+  "dims": [
+   256,
+   80
+  ],
+  "tile_size": 16,
+  "grid": [
+   16,
+   5
+  ],
+  "theme": "single-tile ground scatter decorations (rocks, plants, props)",
+  "palette": [
+   "orange/brown props",
+   "green foliage",
+   "snow-frosted foliage",
+   "blue berries"
+  ],
+  "autotile": {
+   "has_autotile": false,
+   "terrains": []
+  },
+  "regions": [
+   {
+    "area": "cols 0-15 row 0",
+    "content": "misc scatter props: starburst/splat, orange gravel, sparkle, seeds, stones, twigs, forked branches, roots, tan blocks, blue ripple, pumpkin, gourd/carrot, skull, bone, acorn",
+    "tags": [
+     "decor",
+     "props",
+     "rocks",
+     "objects"
+    ]
+   },
+   {
+    "area": "cols 0-0 row 1",
+    "content": "blue berries / blueberry pebble scatter",
+    "tags": [
+     "decor",
+     "berries"
+    ]
+   },
+   {
+    "area": "cols 0-7 row 2",
+    "content": "green plants: grass tuft, leaves, short grass, fern sprout, red mushrooms, clover, bush",
+    "tags": [
+     "decor",
+     "plants",
+     "green",
+     "grass"
+    ]
+   },
+   {
+    "area": "cols 0-7 row 3",
+    "content": "snow-frosted copies of the row-2 plants (winter variants)",
+    "tags": [
+     "decor",
+     "plants",
+     "snow",
+     "frosted"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 5,
+    "row": 0,
+    "gid": 6,
+    "what": "curved fallen twig/branch"
+   },
+   {
+    "col": 11,
+    "row": 0,
+    "gid": 12,
+    "what": "orange pumpkin/pot prop"
+   },
+   {
+    "col": 12,
+    "row": 0,
+    "gid": 13,
+    "what": "orange gourd/carrot prop"
+   },
+   {
+    "col": 13,
+    "row": 0,
+    "gid": 14,
+    "what": "white skull prop"
+   },
+   {
+    "col": 14,
+    "row": 0,
+    "gid": 15,
+    "what": "white bone prop"
+   },
+   {
+    "col": 15,
+    "row": 0,
+    "gid": 16,
+    "what": "brown acorn/nut prop"
+   },
+   {
+    "col": 5,
+    "row": 2,
+    "gid": 38,
+    "what": "red-and-white mushroom cluster"
+   },
+   {
+    "col": 6,
+    "row": 2,
+    "gid": 39,
+    "what": "clover / small plant"
+   },
+   {
+    "col": 0,
+    "row": 2,
+    "gid": 33,
+    "what": "green grass tuft (scatter over ground)"
+   },
+   {
+    "col": 0,
+    "row": 3,
+    "gid": 49,
+    "what": "snow-frosted grass tuft"
+   }
+  ],
+  "map_building_use": "DETAIL/overlay layer only. Sprinkle single 16x16 props on top of a painted ground layer to break up flat terrain - stones, twigs, mushrooms, flowers, pumpkins, plus snow-frosted plant variants for winter maps. None of these tile/connect; place them individually.",
+  "description": "A compact decoration sheet of 16x16 scatter objects on transparent background. Row 0 is small props (rocks, twigs, roots, pumpkin, gourd, skull, bone, acorn); row 1 has blue berries; rows 2-3 are matching green and snow-frosted plant clusters (grass, fern, mushroom, clover, bush). Purely decorative overlay content, no autotiling.",
+  "coverage": {
+   "occupied": 33,
+   "documented": 33,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetHole.png",
+  "name": "TilesetHole",
+  "dims": [
+   176,
+   80
+  ],
+  "tile_size": 16,
+  "grid": [
+   11,
+   5
+  ],
+  "theme": "pits / holes / chasms (impassable void)",
+  "palette": "near-black dark-teal void interior; rust/brown rim edges; grey rubble pebbles along the lip",
+  "autotile": {
+   "has_autotile": true,
+   "terrains": [
+    {
+     "material": "pit / hole",
+     "region": "cols 0-10 rows 0-4",
+     "kind": "47-blob",
+     "notes": "Verified hole wangset \u2014 full 47-blob. Indexed: catalog/tilemaps/TilesetHole_indexes.png."
+    }
+   ],
+   "note": "Verified hole 47-blob wangset in autotile.json (stamped from dirt_grass; full 47/47 masks). Fill = dark void."
+  },
+  "regions": [
+   {
+    "area": "cols 0-3 rows 0-3",
+    "content": "closed rectangular pit (all four rims + corners + void fill)",
+    "tags": [
+     "pit",
+     "void",
+     "edges",
+     "corners"
+    ]
+   },
+   {
+    "area": "cols 4-8 rows 0-4",
+    "content": "pit inner-corner / concave-rim cases",
+    "tags": [
+     "pit",
+     "inner-corner"
+    ]
+   },
+   {
+    "area": "cols 9-10 rows 0-3",
+    "content": "pit diagonal double-corner cases",
+    "tags": [
+     "pit",
+     "diagonal-corner"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "pit top-left rim corner"
+   },
+   {
+    "col": 1,
+    "row": 0,
+    "gid": 2,
+    "what": "pit top rim (straight edge)"
+   },
+   {
+    "col": 1,
+    "row": 1,
+    "gid": 13,
+    "what": "pit void interior (dark fill)"
+   },
+   {
+    "col": 1,
+    "row": 3,
+    "gid": 35,
+    "what": "pit bottom rim with rubble"
+   },
+   {
+    "col": 6,
+    "row": 2,
+    "gid": 29,
+    "what": "pit inner-corner rim peak"
+   }
+  ],
+  "map_building_use": "Collision/hazard layer. Paint a hole into a solid floor and let the autotiler wrap the rust rim around the opening (straight edges, outer corners at the ends, inner corners where it wraps). The dark interior tiles are impassable/fall tiles; use them for chasms, trap pits or gaps the player must go around or jump.",
+  "description": "A compact single-material 47-blob autotile for pits and holes. A closed rectangle block supplies all straight rims and outer corners around a dark void, while additional columns give the inner-corner and diagonal-corner cases needed to carve holes of any shape. Rust-brown lips and grey rubble sell the drop; the near-black interior is the impassable fall zone.",
+  "coverage": {
+   "occupied": 47,
+   "documented": 47,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetHouse.png",
+  "name": "TilesetHouse",
+  "dims": [
+   528,
+   368
+  ],
+  "tile_size": 16,
+  "grid": [
+   33,
+   23
+  ],
+  "theme": "Overworld buildings grab-bag: village houses, dojo, cabins, ovens, igloos, torii/gates, statues, fences & walls, plus interior furniture props",
+  "palette": "warm oranges & reds (roofs), tan/beige plaster walls, brown timber, grey stone, white ice (igloos), teal accents",
+  "autotile": {
+   "has_autotile": false,
+   "terrains": [
+    {
+     "material": "tan fortress wall",
+     "region": "cols 9-15 rows 8-9",
+     "kind": "modular-wall",
+     "notes": "crenellated stone rampart: row 8 = battlement tops (with gaps), row 9 = wall body. Edge/corner pieces, not a 47-blob."
+    },
+    {
+     "material": "wooden palisade fence",
+     "region": "cols 9-15 rows 4-7",
+     "kind": "modular-fence",
+     "notes": "pointed-top log palisade wall segments + gap/gate pieces (rows 4-5); rows 6-7 are the lower cross-rail/gate transition pieces (short posts, T-junctions, small hinge/latch fragments) that lead down into the fortress wall at rows 8-9"
+    },
+    {
+     "material": "teal picket fence",
+     "region": "cols 9-13 rows 10-12",
+     "kind": "modular-fence",
+     "notes": "dark blue-grey picket fence forming an enclosure; center arch GATE at (11,12) gid 408"
+    },
+    {
+     "material": "light log fence",
+     "region": "cols 9-13 rows 15-21",
+     "kind": "modular-fence",
+     "notes": "horizontal-plank ranch fence rows 16-18 (row 15 is a lead-in/gap tile row above it); grey-stained variant at cols 9-13 rows 19-21"
+    }
+   ]
+  },
+  "regions": [
+   {
+    "area": "cols 0-8 rows 15-22",
+    "content": "Idol/statue display row, tan variant rows 15-18 with a weathered grey/mossy duplicate set directly below at rows 19-22 (same statues, cooler grey palette). Column by column: col0 stone pedestal pillar; col1 big round bear/golem-face idol (documented centerpiece, offering bowl arms); col2 a second matching big round-face idol plus a woven crate/basket prop at its foot (row18/22); col3-4 a two-tile-wide seated idol clutching a blue gem (rows15-16, documented at (3,16)) with a separate wide-mouthed frog/toad statue directly beneath it (rows17-18); col5 a round-face idol in an offering pose (rows15-16) over a hooded ninja/mask statue clutching a coiled rope or shell (rows17-18); col6 another big round-face idol (rows15-16) over a standing full-body ninja figure in dark garb (rows17-18); col7 a raccoon-dog/tanuki statue (rows15-16) over a plain wooden pedestal/barrel base (rows17-18); col8 a potted coral/bonsai ornament (rows15-16) over a snow-capped urn/barrel (rows17-18). Grey rows19-22 repeat this exact column layout in weathered stone colors.",
+    "tags": [
+     "statue",
+     "idol",
+     "decor",
+     "landmark"
+    ]
+   },
+   {
+    "area": "cols 14-21 rows 10-20",
+    "content": "Market/storage shelving strip beneath the fences and fortress wall. Cols14-15: wooden racks/shelves holding cups and bowls, kegs/barrels, a cut log stump, a coiled rope, cloth sacks and potted herbs. Cols16-18 rows10-13 (below the raised storehouse, see structures): rows10-11 stacked round wicker/barrel lids, row12 open/empty barrels, row13 barrels full of produce - fish, cabbage, apples; rows14-17 a long wooden table/bench on legs; rows18-20 diagonal wood-plank flooring/wall boards. Cols19-21 rows14-17 (the gap between the giant tree-stump tower above and the small shed below): crates of fruit/vegetables, a woven basket, a strapped travel chest, ceramic jars, and a long bench with folded cloth on top.",
+    "tags": [
+     "furniture",
+     "market",
+     "storage",
+     "food",
+     "props"
+    ]
+   },
+   {
+    "area": "cols 29-32 rows 8-19",
+    "content": "Right-side shrine/market clutter shelf, mirroring the cols14-21 strip. Rows8-9: a food bowl, a dark empty cauldron, a mossy round boulder, a chest with a small gourd on the lid. Rows10-12: a large tan round boulder/idol face with an open mouth (2 tiles wide, cols29-30) plus small side dishes and a dark jar. Rows13-14: a weathered mossy/green version of the same boulder-face idol (cols29-30) beside a tall pale urn with a dark mouth (cols31-32). Rows15-19: a blue-grey rounded statue, an orange flame/leaf ornament, a bench with folded cloth, small lantern-post and hut-roof shaped ornaments, a coiled rope, a bulging sack, and horizontal/vertical wood-plank bench and flooring pieces closing out the strip.",
+    "tags": [
+     "statue",
+     "market",
+     "storage",
+     "props",
+     "shrine"
+    ]
+   }
+  ],
+  "structures": [
+   {
+    "name": "House A (orange gable roof)",
+    "region": "cols 0-3 rows 0-2",
+    "door_tiles": [
+     {
+      "col": 1,
+      "row": 2,
+      "gid": 68
+     }
+    ],
+    "parts": [
+     "roof rows 0-1",
+     "plaster wall row 2 with windows at (0,2),(2,2)"
+    ]
+   },
+   {
+    "name": "House B (beige big roof / 'dojo' house)",
+    "region": "cols 4-7 rows 0-2",
+    "door_tiles": [
+     {
+      "col": 5,
+      "row": 2,
+      "gid": 72
+     }
+    ],
+    "parts": [
+     "wide beige roof rows 0-1",
+     "stone/brick wall row 2, brick texture at (7,2)"
+    ]
+   },
+   {
+    "name": "House C (orange roof, dup of A)",
+    "region": "cols 8-11 rows 0-2",
+    "door_tiles": [
+     {
+      "col": 9,
+      "row": 2,
+      "gid": 76
+     }
+    ],
+    "parts": [
+     "roof rows 0-1",
+     "wall row 2 with windows"
+    ]
+   },
+   {
+    "name": "House D (red tile roof)",
+    "region": "cols 12-15 rows 0-2",
+    "door_tiles": [
+     {
+      "col": 13,
+      "row": 2,
+      "gid": 80
+     }
+    ],
+    "parts": [
+     "red tiled roof rows 0-1",
+     "pink-trim wall row 2 with windows"
+    ]
+   },
+   {
+    "name": "House E (teal/slate roof)",
+    "region": "cols 16-18 rows 0-2",
+    "door_tiles": [
+     {
+      "col": 17,
+      "row": 2,
+      "gid": 84
+     }
+    ],
+    "parts": [
+     "slate roof rows 0-1",
+     "round red emblem/sign at (17,1) gid 51",
+     "orange lattice windows (16,2),(18,2)"
+    ]
+   },
+   {
+    "name": "Tavern / bar counter (green awning)",
+    "region": "cols 19-22 rows 0-2",
+    "door_tiles": [
+     {
+      "col": 21,
+      "row": 2,
+      "gid": 88
+     }
+    ],
+    "parts": [
+     "green awning rows 0-1",
+     "lit window (20,1) gid 54",
+     "bar counter with barrels & stools row 2"
+    ]
+   },
+   {
+    "name": "Round bread oven / kiln (large)",
+    "region": "cols 23-25 rows 0-3",
+    "door_tiles": [
+     {
+      "col": 24,
+      "row": 2,
+      "gid": 91
+     }
+    ],
+    "parts": [
+     "tan dome with orange coals rows 0-1",
+     "dark mouth (24,2)",
+     "glowing hearth/fire (25,2) gid 92"
+    ]
+   },
+   {
+    "name": "House H (orange, iso perspective)",
+    "region": "cols 26-28 rows 0-2",
+    "door_tiles": [
+     {
+      "col": 27,
+      "row": 2,
+      "gid": 94
+     }
+    ],
+    "parts": [
+     "angled orange roof/walls",
+     "lattice windows (26,2),(28,2)"
+    ]
+   },
+   {
+    "name": "House I (brown timber storehouse)",
+    "region": "cols 29-32 rows 0-3",
+    "door_tiles": [
+     {
+      "col": 30,
+      "row": 3,
+      "gid": 130
+     }
+    ],
+    "parts": [
+     "brown plank walls rows 0-2",
+     "diamond window (32,2) gid 99"
+    ]
+   },
+   {
+    "name": "Torii gate (red)",
+    "region": "cols 0-2 rows 5-7",
+    "door_tiles": [],
+    "parts": [
+     "red Japanese torii archway; walk-through, no door",
+     "top beam (1,5) gid 167, beam overhangs slightly into col0 and the pillar bases bleed a few pixels into col0 as well"
+    ]
+   },
+   {
+    "name": "Cave / mine entrance",
+    "region": "cols 0-2 rows 8-9",
+    "door_tiles": [
+     {
+      "col": 1,
+      "row": 9,
+      "gid": 299
+     }
+    ],
+    "parts": [
+     "orange-brown rock face with dark cave mouth"
+    ]
+   },
+   {
+    "name": "Thatch dome hut",
+    "region": "cols 3-5 rows 8-9",
+    "door_tiles": [
+     {
+      "col": 4,
+      "row": 9,
+      "gid": 302
+     }
+    ],
+    "parts": [
+     "brown straw/thatch dome, dark doorway"
+    ]
+   },
+   {
+    "name": "Igloo A",
+    "region": "cols 0-2 rows 11-13",
+    "door_tiles": [
+     {
+      "col": 1,
+      "row": 13,
+      "gid": 431
+     }
+    ],
+    "parts": [
+     "smooth white snow dome, dark tunnel entrance"
+    ]
+   },
+   {
+    "name": "Igloo B",
+    "region": "cols 3-5 rows 11-13",
+    "door_tiles": [
+     {
+      "col": 4,
+      "row": 13,
+      "gid": 434
+     }
+    ],
+    "parts": [
+     "white dome variant, dark entrance"
+    ]
+   },
+   {
+    "name": "Igloo C (ice-brick)",
+    "region": "cols 6-8 rows 11-13",
+    "door_tiles": [
+     {
+      "col": 7,
+      "row": 13,
+      "gid": 437
+     }
+    ],
+    "parts": [
+     "blue ice-brick dome, dark entrance"
+    ]
+   },
+   {
+    "name": "Longhouse / A-frame cabin 1 (orange roof)",
+    "region": "cols 25-28 rows 7-13",
+    "door_tiles": [
+     {
+      "col": 26,
+      "row": 13,
+      "gid": 456
+     }
+    ],
+    "parts": [
+     "tall orange A-frame roof rows 7-10 with round vents (26,7)(26,8)(26,9)",
+     "timber wall rows 10-13",
+     "windows (26,10) gid 357, (26,12) gid 423"
+    ]
+   },
+   {
+    "name": "A-frame cabin 2 (brown/dark)",
+    "region": "cols 25-28 rows 14-18",
+    "door_tiles": [
+     {
+      "col": 26,
+      "row": 18,
+      "gid": 621
+     }
+    ],
+    "parts": [
+     "steep brown timber A-frame",
+     "window (26,17) gid 588",
+     "two small chest/crate props at its foot (25,19) gid 653, (26,19) gid 654"
+    ]
+   },
+   {
+    "name": "Small shed / house corner",
+    "region": "cols 19-21 rows 18-22",
+    "door_tiles": [
+     {
+      "col": 20,
+      "row": 21,
+      "gid": 714
+     }
+    ],
+    "parts": [
+     "brown wall, window (20,19) gid 648, (20,20) gid 681",
+     "dark doorway"
+    ]
+   },
+   {
+    "name": "Round oven / kiln (small, right)",
+    "region": "cols 29-31 rows 4-7",
+    "door_tiles": [
+     {
+      "col": 30,
+      "row": 6,
+      "gid": 229
+     }
+    ],
+    "parts": [
+     "round furry ear-shapes at row 4 top the tan dome oven with dark mouth below"
+    ]
+   },
+   {
+    "name": "Wooden arch / gate (brown)",
+    "region": "cols 22-24 rows 6-8",
+    "door_tiles": [],
+    "parts": [
+     "brown timber gateway arch, walk-through opening around (23,7)"
+    ]
+   },
+   {
+    "name": "Stone gateway arch (grey)",
+    "region": "cols 29-31 rows 20-22",
+    "door_tiles": [],
+    "parts": [
+     "grey horseshoe stone arch / cave gate, walk-through passage"
+    ]
+   },
+   {
+    "name": "Cellar double-door (dark arch)",
+    "region": "cols 0-2 row 4",
+    "door_tiles": [],
+    "parts": [
+     "wide black arched double-door opening with an orange plank frame, sits just above the torii gate; walk-through/cellar-style entrance, no visible door leaf"
+    ]
+   },
+   {
+    "name": "Fortress gate tower (corner post)",
+    "region": "cols 8-9 rows 3-9",
+    "door_tiles": [],
+    "parts": [
+     "top: orange door-frame arch (row3) matching House D's wall trim",
+     "orange-trimmed plank cladding rows4-5 (continues the palisade fence dressing)",
+     "framed lookout window rows6-7",
+     "tan brick base rows8-9 (continues the tan fortress wall terrain)",
+     "acts as the left corner post/tower tying the palisade fence + fortress wall run together"
+    ]
+   },
+   {
+    "name": "Raised storehouse (granary on stilts)",
+    "region": "cols 16-18 rows 3-9",
+    "door_tiles": [],
+    "parts": [
+     "angled wood lean-to roof rows3-5",
+     "large ornate orange-framed storage chest/shrine box rows6-8",
+     "stilt legs with a short ladder/steps rows9-10 leading to the ground",
+     "sits directly above the barrel/basket market shelf (see regions)"
+    ]
+   },
+   {
+    "name": "Timber storehouse B (tall warehouse)",
+    "region": "cols 22-24 rows 3-19",
+    "door_tiles": [
+     {
+      "col": 22,
+      "row": 15,
+      "gid": 518
+     }
+    ],
+    "parts": [
+     "brown plank wall with orange horizontal trim bands rows3-5 (above the documented wooden arch/gate at rows6-8)",
+     "more plank wall + decorative orange dot/garland trim bands rows9-14",
+     "dark arch doorway (22,15), lattice gate windows (23,15)(24,15)",
+     "orange/tan door-frame pillars rows16-19 with a ladder prop at col24 rows16-18 (documented separately)"
+    ]
+   },
+   {
+    "name": "Round dome silo cluster",
+    "region": "cols 25-28 rows 3-6",
+    "door_tiles": [],
+    "parts": [
+     "large tan-orange domed silo/oven top rows3-4 spanning cols26-28, sitting on a brown cylindrical body rows4-5",
+     "small loose props at row6: a plank door fragment, an orange starburst/flower ornament, a barrel with a dark empty mouth, a mirrored plank fragment",
+     "col25/col28 edges are a plain orange plank wall segment flanking the silo, matching the tavern/oven wall style above"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 1,
+    "row": 2,
+    "gid": 68,
+    "what": "DOOR - House A"
+   },
+   {
+    "col": 5,
+    "row": 2,
+    "gid": 72,
+    "what": "DOOR - House B"
+   },
+   {
+    "col": 9,
+    "row": 2,
+    "gid": 76,
+    "what": "DOOR - House C"
+   },
+   {
+    "col": 13,
+    "row": 2,
+    "gid": 80,
+    "what": "DOOR - House D"
+   },
+   {
+    "col": 17,
+    "row": 2,
+    "gid": 84,
+    "what": "DOOR - House E"
+   },
+   {
+    "col": 21,
+    "row": 2,
+    "gid": 88,
+    "what": "DOOR/opening - tavern"
+   },
+   {
+    "col": 24,
+    "row": 2,
+    "gid": 91,
+    "what": "OVEN mouth (large kiln)"
+   },
+   {
+    "col": 27,
+    "row": 2,
+    "gid": 94,
+    "what": "DOOR - House H"
+   },
+   {
+    "col": 30,
+    "row": 3,
+    "gid": 130,
+    "what": "DOOR - House I"
+   },
+   {
+    "col": 1,
+    "row": 9,
+    "gid": 299,
+    "what": "DOOR - cave/mine mouth"
+   },
+   {
+    "col": 4,
+    "row": 9,
+    "gid": 302,
+    "what": "DOOR - thatch hut"
+   },
+   {
+    "col": 1,
+    "row": 13,
+    "gid": 431,
+    "what": "DOOR - igloo A"
+   },
+   {
+    "col": 4,
+    "row": 13,
+    "gid": 434,
+    "what": "DOOR - igloo B"
+   },
+   {
+    "col": 7,
+    "row": 13,
+    "gid": 437,
+    "what": "DOOR - igloo C"
+   },
+   {
+    "col": 26,
+    "row": 13,
+    "gid": 456,
+    "what": "DOOR - longhouse cabin 1"
+   },
+   {
+    "col": 26,
+    "row": 18,
+    "gid": 621,
+    "what": "DOOR - cabin 2"
+   },
+   {
+    "col": 20,
+    "row": 21,
+    "gid": 714,
+    "what": "DOOR - small shed"
+   },
+   {
+    "col": 30,
+    "row": 6,
+    "gid": 229,
+    "what": "OVEN mouth (small kiln)"
+   },
+   {
+    "col": 11,
+    "row": 12,
+    "gid": 408,
+    "what": "GATE - teal fence archway"
+   },
+   {
+    "col": 0,
+    "row": 3,
+    "gid": 100,
+    "what": "wooden shutter/window prop"
+   },
+   {
+    "col": 1,
+    "row": 3,
+    "gid": 101,
+    "what": "barred (jail) window"
+   },
+   {
+    "col": 2,
+    "row": 3,
+    "gid": 102,
+    "what": "closed orange plank door prop"
+   },
+   {
+    "col": 4,
+    "row": 4,
+    "gid": 137,
+    "what": "'DOJO' red sign (spans cols 4-5, right half at (5,4))"
+   },
+   {
+    "col": 6,
+    "row": 4,
+    "gid": 139,
+    "what": "katana on weapon rack (spans cols 6-7, right half at (7,4))"
+   },
+   {
+    "col": 19,
+    "row": 9,
+    "gid": 317,
+    "what": "giant tree-stump / log tower, cols 19-21 rows 3-13 (tree-ring top rows3-4, trunk rows5-8, narrower upper trunk rows9-13 with a hanging heart-jar (21,12) and mask-jar (21,13))"
+   },
+   {
+    "col": 1,
+    "row": 16,
+    "gid": 530,
+    "what": "tan stone idol/statue (cols 0-1 rows 15-18); grey variant rows 19-22"
+   },
+   {
+    "col": 3,
+    "row": 16,
+    "gid": 532,
+    "what": "tan idol statue with blue gem"
+   },
+   {
+    "col": 24,
+    "row": 17,
+    "gid": 586,
+    "what": "wooden ladder (cols 24 rows 16-18)"
+   },
+   {
+    "col": 22,
+    "row": 20,
+    "gid": 683,
+    "what": "colored wall banners/tapestries row (cols 22-28 rows 20-21): red/green/brown/purple/yellow crests"
+   },
+   {
+    "col": 14,
+    "row": 17,
+    "gid": 576,
+    "what": "chicken"
+   },
+   {
+    "col": 14,
+    "row": 18,
+    "gid": 609,
+    "what": "firewood bundle"
+   },
+   {
+    "col": 0,
+    "row": 10,
+    "gid": 331,
+    "what": "small wooden 3-legged stool/bench prop"
+   },
+   {
+    "col": 0,
+    "row": 14,
+    "gid": 463,
+    "what": "loose prop shelf: white round pearl/snowball"
+   },
+   {
+    "col": 1,
+    "row": 14,
+    "gid": 464,
+    "what": "loose prop shelf: grey crescent/moon-stone"
+   },
+   {
+    "col": 2,
+    "row": 14,
+    "gid": 465,
+    "what": "loose prop shelf: dark red domed keg/treasure chest"
+   },
+   {
+    "col": 3,
+    "row": 3,
+    "gid": 103,
+    "what": "small ornate tan-framed window shutter prop"
+   },
+   {
+    "col": 4,
+    "row": 3,
+    "gid": 104,
+    "what": "wooden bench/stool prop"
+   },
+   {
+    "col": 5,
+    "row": 3,
+    "gid": 105,
+    "what": "small plus/cross emblem tile (latch or grave marker)"
+   },
+   {
+    "col": 3,
+    "row": 4,
+    "gid": 136,
+    "what": "red shrine offertory box (twin lidded boxes)"
+   },
+   {
+    "col": 6,
+    "row": 3,
+    "gid": 106,
+    "what": "red round oni-face shield/emblem"
+   },
+   {
+    "col": 7,
+    "row": 3,
+    "gid": 107,
+    "what": "brown chest/cabinet prop"
+   },
+   {
+    "col": 25,
+    "row": 19,
+    "gid": 653,
+    "what": "small wooden chest prop (foot of A-frame cabin 2)"
+   },
+   {
+    "col": 26,
+    "row": 19,
+    "gid": 654,
+    "what": "small wooden chest prop (foot of A-frame cabin 2)"
+   }
+  ],
+  "map_building_use": "The primary building library for towns: drop House A-I along streets, use the torii/arches and fences to enclose yards, and place igloos/caves/ovens/statues as biome landmarks. The raised storehouse, timber storehouse B, and round dome silo cluster (cols 16-28) round out a market/granary district, backed by two long market-shelf strips (cols 14-21 and cols 29-32) full of barrels, baskets and jars for dressing shop interiors. Every listed door_tile is a warp candidate into an interior map.",
+  "description": "A large 33x23 mixed 'buildings + props' atlas. The top strip (rows 0-4) holds nine complete facade houses (orange, red-tile, slate, dojo-beige, iso-orange, timber) each with one ground-floor door, plus a tavern counter and two round ovens. Lower rows add torii/stone/wood gateway arches, a cave, thatch hut, three igloos, two big A-frame longhouse cabins, a giant tree-stump tower, a raised granary storehouse, a second tall timber warehouse, a round dome silo cluster, tan & grey idol statue galleries (8 columns wide, doubled in a weathered grey palette), modular fortress walls / palisade / picket / log fences, and two long market-shelf strips of barrels, baskets, jars, sacks and tables. Doors are the dark rectangular tiles at wall level; all are flagged above for warps.",
+  "coverage": {
+   "occupied": 648,
+   "documented": 648,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetLogic.png",
+  "name": "TilesetLogic",
+  "dims": [
+   128,
+   160
+  ],
+  "tile_size": 16,
+  "grid": [
+   8,
+   10
+  ],
+  "theme": "Puzzle/logic markers and keyed props, color-coded across 8 columns",
+  "palette": "8-color coded set, one color per column: col0 blue, col1 green, col2 pale yellow, col3 orange, col4 red, col5 purple/mauve, col6 dark gray, col7 white. Black outlines on a transparent background.",
+  "autotile": {
+   "has_autotile": false,
+   "terrains": []
+  },
+  "regions": [
+   {
+    "area": "cols 0-7 row 0",
+    "content": "Solid color blocks (one flat color per column) \u2014 colored floor/marker/team tiles.",
+    "tags": [
+     "color-block",
+     "marker",
+     "floor"
+    ]
+   },
+   {
+    "area": "cols 0-7 row 1",
+    "content": "Keys, one per color \u2014 matched to same-color locks/chests.",
+    "tags": [
+     "key",
+     "puzzle",
+     "item"
+    ]
+   },
+   {
+    "area": "cols 0-7 row 2",
+    "content": "Oval lock / keyhole plates (rounded lock face with rectangular hole), one per color.",
+    "tags": [
+     "lock",
+     "keyhole",
+     "puzzle",
+     "gate"
+    ]
+   },
+   {
+    "area": "cols 0-7 row 3",
+    "content": "Treasure chests, one per color (lid + lock + slats).",
+    "tags": [
+     "chest",
+     "reward",
+     "puzzle"
+    ]
+   },
+   {
+    "area": "cols 0-7 row 4",
+    "content": "Question-mark '?' markers, one per color \u2014 hint/mystery labels.",
+    "tags": [
+     "marker",
+     "hint",
+     "symbol"
+    ]
+   },
+   {
+    "area": "cols 0-7 row 5",
+    "content": "'X' markers, one per color \u2014 target/forbidden labels.",
+    "tags": [
+     "marker",
+     "target",
+     "symbol"
+    ]
+   },
+   {
+    "area": "cols 0-7 row 6",
+    "content": "Letter 'A' markers, one per color.",
+    "tags": [
+     "marker",
+     "label",
+     "letter"
+    ]
+   },
+   {
+    "area": "cols 0-7 row 7",
+    "content": "Letter 'B' markers, one per color.",
+    "tags": [
+     "marker",
+     "label",
+     "letter"
+    ]
+   },
+   {
+    "area": "cols 0-7 row 8",
+    "content": "Letter 'C' markers, one per color.",
+    "tags": [
+     "marker",
+     "label",
+     "letter"
+    ]
+   },
+   {
+    "area": "cols 0-7 row 9",
+    "content": "Letter 'D' markers, one per color.",
+    "tags": [
+     "marker",
+     "label",
+     "letter"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "blue solid color block (color-coded floor/marker)"
+   },
+   {
+    "col": 4,
+    "row": 0,
+    "gid": 5,
+    "what": "red solid color block"
+   },
+   {
+    "col": 0,
+    "row": 1,
+    "gid": 9,
+    "what": "blue key (opens blue lock/chest)"
+   },
+   {
+    "col": 4,
+    "row": 1,
+    "gid": 13,
+    "what": "red key"
+   },
+   {
+    "col": 0,
+    "row": 2,
+    "gid": 17,
+    "what": "blue oval lock / keyhole plate (locked gate marker)"
+   },
+   {
+    "col": 4,
+    "row": 2,
+    "gid": 21,
+    "what": "red oval lock / keyhole plate"
+   },
+   {
+    "col": 0,
+    "row": 3,
+    "gid": 25,
+    "what": "blue treasure chest"
+   },
+   {
+    "col": 4,
+    "row": 3,
+    "gid": 29,
+    "what": "red treasure chest"
+   },
+   {
+    "col": 0,
+    "row": 4,
+    "gid": 33,
+    "what": "blue '?' hint marker"
+   },
+   {
+    "col": 0,
+    "row": 5,
+    "gid": 41,
+    "what": "blue 'X' marker"
+   },
+   {
+    "col": 0,
+    "row": 6,
+    "gid": 49,
+    "what": "blue 'A' label marker"
+   },
+   {
+    "col": 0,
+    "row": 7,
+    "gid": 57,
+    "what": "blue 'B' label marker"
+   },
+   {
+    "col": 0,
+    "row": 8,
+    "gid": 65,
+    "what": "blue 'C' label marker"
+   },
+   {
+    "col": 0,
+    "row": 9,
+    "gid": 73,
+    "what": "blue 'D' label marker"
+   }
+  ],
+  "map_building_use": "Puzzle-design toolkit rather than terrain. Use color-coded key + lock + chest triples (same column color) to gate rooms and reward exploration; drop '?' / 'X' / 'A'-'D' symbol tiles and solid color blocks as switch/pressure-plate stand-ins, sequence steps, floor buttons, or design annotations that pair to trigger logic in code. gid = row*8 + col + 1; column index selects the color, row selects the symbol type.",
+  "description": "A color-coded puzzle/logic marker set arranged as 8 color columns by 10 symbol rows. Each color (blue, green, yellow, orange, red, purple, gray, white) provides a matching solid block, key, oval lock/keyhole, and treasure chest (rows 0-3), plus '?', 'X', and the letters A-D (rows 4-9). It is meant for building keyed-door puzzles, colored switch/plate logic, and labeling map positions, so tiles are placed and wired up in gameplay code rather than forming terrain.",
+  "coverage": {
+   "occupied": 80,
+   "documented": 80,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetNature.png",
+  "name": "TilesetNature",
+  "dims": [
+   384,
+   336
+  ],
+  "tile_size": 16,
+  "grid": [
+   24,
+   21
+  ],
+  "theme": "nature props: trees, rock/boulder formations, bushes, flowers, crystals, mushrooms, stumps, pond",
+  "palette": [
+   "green foliage",
+   "brown/tan bark & rock",
+   "gray stone",
+   "pink cherry blossom",
+   "white snow",
+   "orange autumn",
+   "blue water/crystal"
+  ],
+  "autotile": {
+   "has_autotile": false,
+   "terrains": [
+    {
+     "material": "boulder/rock clusters",
+     "region": "cols 12-23 rows 5-18",
+     "kind": "edges-only",
+     "notes": "NOT a paint-terrain: brown (upper) and gray (lower) boulder piles are pre-composed multi-tile props with baked edges/shading; place as whole objects, not autotiled"
+    }
+   ]
+  },
+  "regions": [
+   {
+    "area": "cols 0-11 rows 0-7",
+    "content": "tree canopies + trunks: green leafy, bare brown/dead, and white snow-laden trees (2x2/2x3 each)",
+    "tags": [
+     "trees",
+     "overhead",
+     "canopy"
+    ]
+   },
+   {
+    "area": "cols 12-23 rows 0-4",
+    "content": "more tree tops: white snow, pink cherry-blossom, and bright green trees",
+    "tags": [
+     "trees",
+     "overhead",
+     "cherry",
+     "snow"
+    ]
+   },
+   {
+    "area": "cols 0-5 rows 8-9",
+    "content": "tree stumps, standing dead trunk/log, saplings",
+    "tags": [
+     "stump",
+     "trunk",
+     "prop"
+    ]
+   },
+   {
+    "area": "cols 6-11 rows 8-11",
+    "content": "small bushes, shrubs and grass tufts",
+    "tags": [
+     "bush",
+     "shrub",
+     "detail"
+    ]
+   },
+   {
+    "area": "cols 0-2 rows 10-11",
+    "content": "flowers: sunflower, clover, orange berries/blooms",
+    "tags": [
+     "flowers",
+     "detail"
+    ]
+   },
+   {
+    "area": "cols 0-2 rows 12-13",
+    "content": "small pond/water + white rock/snowball",
+    "tags": [
+     "water",
+     "pond",
+     "rock"
+    ]
+   },
+   {
+    "area": "cols 3-11 rows 12-13",
+    "content": "loose rocks, stones and pebble clusters",
+    "tags": [
+     "rocks",
+     "stones",
+     "detail"
+    ]
+   },
+   {
+    "area": "cols 0-3 rows 14-17",
+    "content": "colored crystal/gem formations (orange, blue, purple, green)",
+    "tags": [
+     "crystal",
+     "gem",
+     "prop"
+    ]
+   },
+   {
+    "area": "cols 4-11 rows 14-17",
+    "content": "mushroom clusters and berry bushes (brown/orange/pink)",
+    "tags": [
+     "mushroom",
+     "berry",
+     "detail"
+    ]
+   },
+   {
+    "area": "cols 12-14 rows 8-18",
+    "content": "vertical wooden post / standing dead trunk (totem-like)",
+    "tags": [
+     "post",
+     "trunk",
+     "prop"
+    ]
+   },
+   {
+    "area": "cols 15-23 rows 5-13",
+    "content": "large brown boulder / rock formations (multi-tile)",
+    "tags": [
+     "boulder",
+     "rock",
+     "collision",
+     "prop"
+    ]
+   },
+   {
+    "area": "cols 15-23 rows 14-19",
+    "content": "large gray boulder / rock formations (multi-tile) + scattered rubble",
+    "tags": [
+     "boulder",
+     "rock",
+     "gray",
+     "collision"
+    ]
+   },
+   {
+    "area": "cols 0-11 rows 18-20",
+    "content": "four full tree canopies: pink cherry, green, white snow, orange autumn (3x3 each)",
+    "tags": [
+     "trees",
+     "overhead",
+     "canopy",
+     "seasonal"
+    ]
+   },
+   {
+    "area": "cols 3-5 rows 10-11",
+    "content": "Bush/flower transition cluster bridging the flower tiles (cols 0-2 rows 10-11) and the bush/shrub cluster (cols 6-11 rows 8-11): row 10 has three rounded yellow-green shrub/bush tiles (same style as the bushes at cols 6-11); row 11 has (3,11) an orange-red rose/poppy bloom and (4,11)-(5,11) a pair of green fern / wheat-blade plants with vertical veined leaves. Previously undocumented.",
+    "tags": [
+     "bush",
+     "shrub",
+     "flowers",
+     "fern",
+     "detail"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "green leafy tree canopy (top-left corner tile)"
+   },
+   {
+    "col": 4,
+    "row": 0,
+    "gid": 5,
+    "what": "bare/dead brown tree canopy"
+   },
+   {
+    "col": 8,
+    "row": 0,
+    "gid": 9,
+    "what": "white snow-laden tree top"
+   },
+   {
+    "col": 14,
+    "row": 0,
+    "gid": 15,
+    "what": "pink cherry-blossom tree top"
+   },
+   {
+    "col": 0,
+    "row": 8,
+    "gid": 193,
+    "what": "tree stump top (cut log)"
+   },
+   {
+    "col": 0,
+    "row": 11,
+    "gid": 265,
+    "what": "sunflower"
+   },
+   {
+    "col": 1,
+    "row": 11,
+    "gid": 266,
+    "what": "clover / shamrock"
+   },
+   {
+    "col": 0,
+    "row": 12,
+    "gid": 289,
+    "what": "small pond / water pool"
+   },
+   {
+    "col": 2,
+    "row": 14,
+    "gid": 339,
+    "what": "blue crystal formation"
+   },
+   {
+    "col": 5,
+    "row": 14,
+    "gid": 342,
+    "what": "mushroom cluster"
+   },
+   {
+    "col": 17,
+    "row": 10,
+    "gid": 258,
+    "what": "large brown boulder (center of formation)"
+   },
+   {
+    "col": 16,
+    "row": 14,
+    "gid": 353,
+    "what": "large gray boulder (center of formation)"
+   },
+   {
+    "col": 13,
+    "row": 17,
+    "gid": 422,
+    "what": "standing wooden post / dead trunk base"
+   },
+   {
+    "col": 0,
+    "row": 18,
+    "gid": 433,
+    "what": "full pink cherry tree canopy (top-left of 3x3)"
+   },
+   {
+    "col": 3,
+    "row": 18,
+    "gid": 436,
+    "what": "full green tree canopy (top-left of 3x3)"
+   },
+   {
+    "col": 6,
+    "row": 18,
+    "gid": 439,
+    "what": "full white snow tree canopy (top-left of 3x3)"
+   },
+   {
+    "col": 9,
+    "row": 18,
+    "gid": 442,
+    "what": "full orange autumn tree canopy (top-left of 3x3)"
+   },
+   {
+    "col": 4,
+    "row": 10,
+    "gid": 220,
+    "what": "rounded yellow-green bush/shrub"
+   },
+   {
+    "col": 3,
+    "row": 11,
+    "gid": 244,
+    "what": "orange-red rose/poppy bloom"
+   },
+   {
+    "col": 5,
+    "row": 11,
+    "gid": 246,
+    "what": "green fern/wheat-blade plant"
+   }
+  ],
+  "map_building_use": "OVERHEAD/object layer (and a bit of detail). Place tree canopies and boulders as whole multi-tile props above the player for depth; trunks/stumps and boulders double as collision. Use flowers, mushrooms, crystals, bushes and the pond as accent detail on top of the ground layer. This sheet does NOT autotile - stamp objects as composed groups.",
+  "description": "The big nature-props sheet. The left/upper area holds tree canopies and trunks in green, bare-brown, snow-white, pink-cherry and orange-autumn variants (both 2x2 and full 3x3 forms at the bottom). The right half is dominated by large brown-then-gray boulder/rock formations meant to be placed as whole objects. Scattered between are bushes, flowers, mushrooms, colored crystals, tree stumps, a small pond and a standing wooden post - all decorative props, not autotiles.",
+  "coverage": {
+   "occupied": 383,
+   "documented": 383,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetRelief.png",
+  "name": "TilesetRelief",
+  "dims": [
+   320,
+   192
+  ],
+  "tile_size": 16,
+  "grid": [
+   20,
+   12
+  ],
+  "theme": "cliffs / elevation / plateaus (two-tier terrain walls)",
+  "palette": "green (grassy highland cliff) upper set and tan/sand (canyon/desert cliff) lower set; pale walkable plateau tops; olive-green vertical wall striations; light-blue waterfall accent",
+  "autotile": {
+   "has_autotile": true,
+   "terrains": [
+    {
+     "material": "grass/highland cliff",
+     "region": "cols 0-11 rows 0-4",
+     "kind": "cliff-wall-set (edges-only)",
+     "notes": "Directional plateau+wall set, NOT a flat 47-blob. cols 0-3 rows 0-2 = a small plateau (pale walkable top, left/right side walls, front cliff face with grassy foot). cols 4-6 & 8-11 = wide front-facing cliff walls (green vertical striations) with corners. col 7 rows 0-3 = a light-blue WATERFALL running down the face into a base pool. rows 3-4 hold inner-corner notches, peninsulas and 1-wide connector columns."
+    },
+    {
+     "material": "sand/canyon cliff",
+     "region": "cols 0-11 rows 5-9",
+     "kind": "cliff-wall-set (edges-only)",
+     "notes": "Identical plateau+wall arrangement in tan/orange for deserts and canyons. col 7 rows 5-7 is a smooth light-tan RAMP/slope band (walkable access down the cliff) in place of the green set's waterfall. rows 8-9 = inner-corner and connector pieces."
+    }
+   ],
+   "note": "Cliff-wall sets (grass highland + sand canyon) are directional plateau/wall kits with waterfall, NOT flat 47-blob wangsets. Hand-place / recipe-driven."
+  },
+  "regions": [
+   {
+    "area": "cols 0-3 rows 0-2",
+    "content": "green plateau block: pale walkable top + side walls + front cliff face",
+    "tags": [
+     "cliff",
+     "plateau",
+     "top",
+     "walkable"
+    ]
+   },
+   {
+    "area": "cols 4-11 rows 0-2",
+    "content": "green front-facing cliff walls (straight + corner variants)",
+    "tags": [
+     "cliff",
+     "wall",
+     "green"
+    ]
+   },
+   {
+    "area": "col 7 rows 0-3",
+    "content": "green-cliff waterfall (top / mid / base pool)",
+    "tags": [
+     "waterfall",
+     "water",
+     "accent"
+    ]
+   },
+   {
+    "area": "cols 0-6 rows 3-4",
+    "content": "green inner-corner notches, peninsulas and 1-wide connector columns",
+    "tags": [
+     "cliff",
+     "inner-corner",
+     "connector"
+    ]
+   },
+   {
+    "area": "cols 0-3 rows 5-7",
+    "content": "tan/sand plateau block: walkable top + side walls + front face",
+    "tags": [
+     "cliff",
+     "plateau",
+     "desert",
+     "walkable"
+    ]
+   },
+   {
+    "area": "cols 4-11 rows 5-7",
+    "content": "tan front-facing cliff walls (straight + corner variants)",
+    "tags": [
+     "cliff",
+     "wall",
+     "tan"
+    ]
+   },
+   {
+    "area": "col 7 rows 5-7",
+    "content": "tan-cliff ramp/slope (walkable access band)",
+    "tags": [
+     "ramp",
+     "slope",
+     "access"
+    ]
+   },
+   {
+    "area": "cols 0-6 rows 8-9",
+    "content": "tan inner-corner and connector pieces",
+    "tags": [
+     "cliff",
+     "inner-corner",
+     "connector"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "green plateau top-left corner (grass rim)"
+   },
+   {
+    "col": 1,
+    "row": 1,
+    "gid": 22,
+    "what": "green plateau flat walkable top surface"
+   },
+   {
+    "col": 5,
+    "row": 1,
+    "gid": 27,
+    "what": "green cliff front wall (face)"
+   },
+   {
+    "col": 5,
+    "row": 2,
+    "gid": 46,
+    "what": "green cliff wall base/foot"
+   },
+   {
+    "col": 7,
+    "row": 0,
+    "gid": 8,
+    "what": "green waterfall top"
+   },
+   {
+    "col": 7,
+    "row": 3,
+    "gid": 68,
+    "what": "green waterfall base pool"
+   },
+   {
+    "col": 4,
+    "row": 3,
+    "gid": 65,
+    "what": "green cliff inner-corner notch"
+   },
+   {
+    "col": 0,
+    "row": 5,
+    "gid": 101,
+    "what": "tan plateau top-left corner"
+   },
+   {
+    "col": 1,
+    "row": 6,
+    "gid": 122,
+    "what": "tan plateau flat walkable top surface"
+   },
+   {
+    "col": 5,
+    "row": 6,
+    "gid": 126,
+    "what": "tan cliff front wall (face)"
+   },
+   {
+    "col": 7,
+    "row": 5,
+    "gid": 108,
+    "what": "tan cliff ramp/slope (access band)"
+   }
+  ],
+  "map_building_use": "Elevation/collision layer. Build two-tier maps: paint the pale plateau tops as the raised walkable floor, then wrap the edges with front-facing cliff-wall tiles (corners at the ends, straight faces between) so the drop reads correctly. Place waterfalls (green col 7) or ramps (tan col 7) where the player transitions or where water spills. Cliff faces are non-walkable collision; ramps are the passable link between tiers.",
+  "description": "A cliff/elevation tileset providing two full plateau-and-wall sets, one grassy-green highland and one tan desert/canyon. Each set has a pale walkable plateau top, left/right side walls, front-facing cliff faces with corners, plus inner-corner and 1-wide connector pieces. The green set includes a three-tile waterfall and the tan set a smooth ramp/slope, used to link the upper and lower terrain tiers.",
+  "coverage": {
+   "occupied": 98,
+   "documented": 98,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetReliefDetail.png",
+  "name": "TilesetReliefDetail",
+  "dims": [
+   192,
+   192
+  ],
+  "tile_size": 16,
+  "grid": [
+   12,
+   12
+  ],
+  "theme": "cliff detail / decoration overlays (caves, ladders, boulders, props)",
+  "palette": "green mossy rock and tan/desert rock variants; orange wooden ladders/planks; white snow-capped rock; dark cave voids; grey pebbles",
+  "autotile": {
+   "has_autotile": false,
+   "terrains": []
+  },
+  "regions": [
+   {
+    "area": "col 0 rows 0-5",
+    "content": "scattered small details: pebbles, green bushes/moss, tiny orange rocks",
+    "tags": [
+     "decoration",
+     "pebble",
+     "bush",
+     "scatter"
+    ]
+   },
+   {
+    "area": "cols 1-2 rows 0-2",
+    "content": "green-cliff detail: cave alcove/hole, carved skull motif, orange rope/plank ledge, cobblestone face",
+    "tags": [
+     "cave",
+     "skull",
+     "ledge",
+     "green"
+    ]
+   },
+   {
+    "area": "cols 4-5 rows 0-2",
+    "content": "snow-capped grey boulders, snow steps/ledges, snow chunks",
+    "tags": [
+     "snow",
+     "boulder",
+     "rock"
+    ]
+   },
+   {
+    "area": "col 3 rows 0-5",
+    "content": "vertical ladders: grey/wood (rows 0-2) and orange (rows 3-5)",
+    "tags": [
+     "ladder",
+     "climb"
+    ]
+   },
+   {
+    "area": "cols 1-2 rows 3-5",
+    "content": "tan/desert-cliff detail: cave alcove, skull motif, rope ledge, cobblestone face",
+    "tags": [
+     "cave",
+     "skull",
+     "ledge",
+     "tan"
+    ]
+   },
+   {
+    "area": "cols 4-5 rows 3-5",
+    "content": "tan/desert boulders and small rock clusters",
+    "tags": [
+     "boulder",
+     "rock",
+     "desert"
+    ]
+   },
+   {
+    "area": "col 0 row 6",
+    "content": "small wooden crate/step",
+    "tags": [
+     "wood",
+     "prop"
+    ]
+   },
+   {
+    "area": "cols 0-2 rows 7-9",
+    "content": "large GREEN mossy-rock cave entrance (dark mouth + wooden sign/ledge)",
+    "tags": [
+     "cave",
+     "entrance",
+     "green",
+     "object"
+    ]
+   },
+   {
+    "area": "cols 3-5 rows 7-9",
+    "content": "large TAN/desert-rock cave entrance (dark mouth + wooden sign/ledge)",
+    "tags": [
+     "cave",
+     "entrance",
+     "tan",
+     "object"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 1,
+    "row": 0,
+    "gid": 2,
+    "what": "green cliff cave alcove/hole"
+   },
+   {
+    "col": 2,
+    "row": 0,
+    "gid": 3,
+    "what": "carved skull motif (green cliff)"
+   },
+   {
+    "col": 3,
+    "row": 0,
+    "gid": 4,
+    "what": "grey/wood ladder top"
+   },
+   {
+    "col": 4,
+    "row": 0,
+    "gid": 5,
+    "what": "snow-capped boulder"
+   },
+   {
+    "col": 5,
+    "row": 0,
+    "gid": 6,
+    "what": "snow steps/ledge"
+   },
+   {
+    "col": 0,
+    "row": 1,
+    "gid": 13,
+    "what": "green bush/moss clump"
+   },
+   {
+    "col": 3,
+    "row": 3,
+    "gid": 40,
+    "what": "orange ladder segment"
+   },
+   {
+    "col": 1,
+    "row": 3,
+    "gid": 38,
+    "what": "tan cliff cave alcove/hole"
+   },
+   {
+    "col": 4,
+    "row": 4,
+    "gid": 53,
+    "what": "tan/desert boulder"
+   },
+   {
+    "col": 0,
+    "row": 7,
+    "gid": 85,
+    "what": "large green cave entrance (top-left of 3x3)"
+   },
+   {
+    "col": 3,
+    "row": 7,
+    "gid": 88,
+    "what": "large tan cave entrance (top-left of 3x3)"
+   }
+  ],
+  "map_building_use": "Overlay/object layer above the TilesetRelief cliffs. Drop cave entrances against a cliff face to make a walkable dark doorway (pair with a warp/trigger). Lay ladders vertically over a cliff wall as a climb route. Scatter boulders, bushes, snow rocks and skull/rope ledge tiles to break up bare cliff faces. Purely decorative/prop tiles; not a terrain autotile.",
+  "description": "A companion decoration sheet for TilesetRelief holding cliff dressing rather than terrain. It provides two large 3x3 cave entrances (green mossy and tan desert), climbable grey and orange ladders, snow-capped and desert boulders, carved skull motifs, rope/plank ledges, bushes and pebbles. Everything is placed on an overlay layer to add depth and points of interest to otherwise plain cliff walls.",
+  "coverage": {
+   "occupied": 51,
+   "documented": 51,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetTowers.png",
+  "name": "TilesetTowers",
+  "dims": [
+   384,
+   96
+  ],
+  "tile_size": 16,
+  "grid": [
+   24,
+   6
+  ],
+  "theme": "Natural rock spires / stone 'tower' formations and crystal outcrops - decorative landmark objects, NOT enterable buildings",
+  "palette": "sandstone orange & tan, weathered grey stone, moss-green overgrowth, red coral & green/gold crystal accents",
+  "autotile": {
+   "has_autotile": false,
+   "terrains": []
+  },
+  "structures": [
+   {
+    "name": "Rock spire / arch tower - orange (sandstone) family",
+    "region": "cols 0-11 rows 0-1",
+    "door_tiles": [],
+    "parts": [
+     "six 2x2 craggy spire variants; several have a see-through ARCH window opening at row 1 (e.g. (0,1)/(1,1))",
+     "orange & mossy-orange color variants"
+    ]
+   },
+   {
+    "name": "Rock spire / arch tower - grey stone family",
+    "region": "cols 0-11 rows 2-3",
+    "door_tiles": [],
+    "parts": [
+     "same six spire shapes recolored weathered grey; arch openings at row 3"
+    ]
+   },
+   {
+    "name": "Rock spire on mound (full pieces)",
+    "region": "cols 0-11 rows 4-5",
+    "door_tiles": [],
+    "parts": [
+     "spire crown (row 4) over a rounded sandy boulder base (row 5); orange & grey variants"
+    ]
+   },
+   {
+    "name": "Totem / face rock pillars",
+    "region": "cols 12-23 rows 0-1",
+    "door_tiles": [],
+    "parts": [
+     "tan pillar with orange leaf crown (row 0) and two dark eye-holes (row 1); mossy-green variants cols 18-23"
+    ]
+   },
+   {
+    "name": "Saplings & coral clusters",
+    "region": "cols 12-23 rows 2-3",
+    "door_tiles": [],
+    "parts": [
+     "green leaf saplings on tan stalk (cols 12-17)",
+     "red/orange coral or flame bushes (cols 18-23)"
+    ]
+   },
+   {
+    "name": "Small towers & crystal outcrops",
+    "region": "cols 12-23 rows 4-5",
+    "door_tiles": [],
+    "parts": [
+     "cream tower with brown cap & two dark window slots at (14,5)",
+     "tan pillar",
+     "green/gold CRYSTAL clusters emerging from mossy rock (cols 18-23)"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 0,
+    "row": 1,
+    "gid": 25,
+    "what": "arch/window opening in orange rock spire (see-through)"
+   },
+   {
+    "col": 1,
+    "row": 1,
+    "gid": 26,
+    "what": "arch opening right half"
+   },
+   {
+    "col": 0,
+    "row": 3,
+    "gid": 73,
+    "what": "arch opening in grey stone spire"
+   },
+   {
+    "col": 14,
+    "row": 5,
+    "gid": 135,
+    "what": "small cream tower with two dark window slots (only door-like feature in sheet)"
+   },
+   {
+    "col": 18,
+    "row": 5,
+    "gid": 139,
+    "what": "green/gold crystal cluster (color variants at cols 18-23)"
+   },
+   {
+    "col": 18,
+    "row": 2,
+    "gid": 91,
+    "what": "red coral / flame bush"
+   },
+   {
+    "col": 12,
+    "row": 0,
+    "gid": 13,
+    "what": "totem/face rock pillar (tan); grey/mossy variants across the row"
+   }
+  ],
+  "map_building_use": "Scatter as terrain landmarks - rock pillars/arches to break up canyons, ruins fields or coastlines; crystal clusters and coral for magical/cave dressing; totem rocks as waypoint markers. These are obstacles/scenery, not warp buildings; the only opening tiles are the spire arches and the (14,5) window tower, none of which are functional doors.",
+  "description": "A 24x6 sheet of natural stone-spire 'towers' rather than architecture. It is organized as 2x2 units: two full rows of six craggy spire variants (orange sandstone then weathered grey), some with see-through arch openings, followed by full spires on rounded bases. The right half holds totem/face rock pillars, leafy saplings, red coral bushes and green/gold crystal outcrops. Use it purely as decorative landmark scenery - there are no enterable doors, only the arch gaps and one small window-slot tower flagged above.",
+  "coverage": {
+   "occupied": 144,
+   "documented": 144,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetVillageAbandoned.png",
+  "name": "TilesetVillageAbandoned",
+  "dims": [
+   320,
+   192
+  ],
+  "tile_size": 16,
+  "grid": [
+   20,
+   12
+  ],
+  "theme": "Abandoned/overgrown village: mossy ruined houses, big weathered timber buildings, graves, dead stumps, heavy foliage. (Tileset used by the demo village map.)",
+  "palette": "moss green over sun-bleached tan stone, weathered brown timber, faded orange accents, black cavity doorways",
+  "autotile": {
+   "has_autotile": false,
+   "terrains": [
+    {
+     "material": "moss/foliage overgrowth",
+     "region": "scattered cols 6-10 rows 3-11",
+     "kind": "decorative-clusters",
+     "notes": "green bush/shrub clusters used to bury ruins; hand-placed blobs, not a 47-tile autotile"
+    }
+   ]
+  },
+  "regions": [
+   {
+    "area": "cols 0-1 rows 3-5",
+    "content": "Large moss-covered rock formation with a weathered wood plank bench/seat embedded in the stone: rounded lichen-capped boulder top (row 3) over a flat tan bench slab (row 4) on a mossy rocky base/legs (row 5)."
+   },
+   {
+    "area": "cols 2 rows 3-5",
+    "content": "Tall mossy stone pillar/column, full height (cap row 3 through base row 5); cap tile also flagged as notable (2,3) gid 63."
+   },
+   {
+    "area": "cols 3 rows 3-5",
+    "content": "Medium free-standing mossy boulder/rock, rounded lichen-covered stone, stacked rows 3-5."
+   },
+   {
+    "area": "cols 4 rows 3-4",
+    "content": "Moss-covered broken stump with rotten orange wood exposed through cracks in the moss cap."
+   },
+   {
+    "area": "cols 4-5 row 5",
+    "content": "Small round leafy bush clusters (single-tile shrub variants), one per column."
+   },
+   {
+    "area": "cols 0-3 rows 6-8",
+    "content": "Large tri-lobed tree canopy (wide bushy top split into 3 rounded lobes spanning cols 0-3) with an orange-brown root/trunk base peeking out at the bottom center (row 8)."
+   },
+   {
+    "area": "cols 0-3 rows 9-11",
+    "content": "Second large tri-lobed tree canopy, identical silhouette to the cols 0-3 rows 6-8 tree, but with a yellow-olive root/trunk base color variant (row 11)."
+   },
+   {
+    "area": "cols 4-5 rows 6-7",
+    "content": "Round single-lobe tree canopy (bushy circular top) cols 4-5 rows 6-7, orange roots peeking out at its base."
+   },
+   {
+    "area": "cols 4-5 row 8",
+    "content": "Loose orange root/branch debris chunks, unattached decorative rubble sitting below the cols 4-5 rows 6-7 tree canopy."
+   },
+   {
+    "area": "cols 4-5 rows 9-10",
+    "content": "Second round single-lobe tree canopy, same silhouette as cols 4-5 rows 6-7 but with yellow-olive roots at its base."
+   },
+   {
+    "area": "cols 4-5 row 11",
+    "content": "Loose yellow-olive root/branch debris chunks, unattached rubble below the cols 4-5 rows 9-10 tree canopy."
+   },
+   {
+    "area": "cols 11 rows 6-11",
+    "content": "Vertical decorative moss/vine-covered trunk column filling the gap between the two big timber houses: mossy tree-trunk strip rows 6-8, gap row 9, small mossy boulder cluster row 10, round orange coiled-rope/shield decorative tile row 11."
+   },
+   {
+    "area": "cols 14-15 row 5",
+    "content": "Gap row between the wooden watch-platform ladder and the big A-frame house roof: mossy roof overhang tile (14,5) and a final descending ladder rung continuing the (15,2)-(15,4) ladder down to (15,5)."
+   },
+   {
+    "area": "cols 17-19 rows 3-4",
+    "content": "Upper mossy overgrown roof/foliage of the big timber house ruin (tan wood peeking through moss), directly above its cols 16-19 rows 5-11 body and below the raised stilt hut at cols 17-19 rows 0-2."
+   }
+  ],
+  "structures": [
+   {
+    "name": "Ruined stone house (mossy)",
+    "region": "cols 0-3 rows 0-2",
+    "door_tiles": [
+     {
+      "col": 1,
+      "row": 2,
+      "gid": 42
+     }
+    ],
+    "parts": [
+     "overgrown stone roof rows 0-1",
+     "broken window/hole (0,1)",
+     "large black doorway (1,2)"
+    ]
+   },
+   {
+    "name": "Ruined orange house",
+    "region": "cols 4-5 rows 0-2",
+    "door_tiles": [
+     {
+      "col": 5,
+      "row": 2,
+      "gid": 46
+     }
+    ],
+    "parts": [
+     "collapsed orange roof rows 0-1",
+     "doorway with worn steps (5,2)"
+    ]
+   },
+   {
+    "name": "Graveyard marker",
+    "region": "cols 6-10 rows 0-2",
+    "door_tiles": [],
+    "parts": [
+     "broken wooden fence wall/rail spanning cols 6-10 row 1",
+     "wooden CROSS grave at (9,0) gid 10 / (9,1)",
+     "second wooden cross grave marker (6,0)/(6,1)",
+     "third wooden cross grave marker (7,0)/(7,1) with a mossy stone urn beside it",
+     "tan/mossy ground strip beneath the fence, cols 6-10 row 2"
+    ]
+   },
+   {
+    "name": "Ruined 2-storey wooden house",
+    "region": "cols 11-13 rows 0-5",
+    "door_tiles": [
+     {
+      "col": 12,
+      "row": 2,
+      "gid": 53
+     },
+     {
+      "col": 12,
+      "row": 5,
+      "gid": 113
+     }
+    ],
+    "parts": [
+     "mossy roof + barred window (12,1) gid 33",
+     "upper doorway (12,2)",
+     "lower window (12,4) gid 93",
+     "ground doorway with frame (12,5)"
+    ]
+   },
+   {
+    "name": "Wooden watch-platform / bridge",
+    "region": "cols 14-16 rows 0-4",
+    "door_tiles": [],
+    "parts": [
+     "overgrown wooden deck rows 0-1",
+     "descending ladder/steps (15,2),(15,3),(15,4)"
+    ]
+   },
+   {
+    "name": "Raised stilt hut",
+    "region": "cols 17-19 rows 0-2",
+    "door_tiles": [],
+    "parts": [
+     "small orange hut body rows 0-1 with dark window (17,1)",
+     "support stilts (17,2),(19,2)"
+    ]
+   },
+   {
+    "name": "Big timber house (A-frame, mossy roof)",
+    "region": "cols 12-15 rows 6-10",
+    "door_tiles": [
+     {
+      "col": 13,
+      "row": 10,
+      "gid": 214
+     },
+     {
+      "col": 14,
+      "row": 10,
+      "gid": 215
+     }
+    ],
+    "parts": [
+     "large brown A-frame with moss-covered roof",
+     "paned windows (13,9) gid 194,(14,9) gid 195",
+     "black doorway (13,10) + panelled door leaf (14,10)"
+    ]
+   },
+   {
+    "name": "Big timber house (overgrown ruin, right)",
+    "region": "cols 16-19 rows 3-11",
+    "door_tiles": [],
+    "parts": [
+     "moss-buried upper roof/foliage cols 17-19 rows 3-4",
+     "huge moss-swallowed A-frame with decorative roof vents (17,6)(18,6)(17,7)",
+     "paned windows (17,8) gid 178,(18,8) gid 179",
+     "ground floor buried in foliage (no clear door)"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 1,
+    "row": 2,
+    "gid": 42,
+    "what": "DOOR - ruined stone house"
+   },
+   {
+    "col": 5,
+    "row": 2,
+    "gid": 46,
+    "what": "DOOR - ruined orange house"
+   },
+   {
+    "col": 12,
+    "row": 2,
+    "gid": 53,
+    "what": "DOOR - wooden ruin (upper)"
+   },
+   {
+    "col": 12,
+    "row": 5,
+    "gid": 113,
+    "what": "DOOR - wooden ruin (ground)"
+   },
+   {
+    "col": 13,
+    "row": 10,
+    "gid": 214,
+    "what": "DOOR - big timber house"
+   },
+   {
+    "col": 9,
+    "row": 0,
+    "gid": 10,
+    "what": "grave CROSS marker"
+   },
+   {
+    "col": 12,
+    "row": 1,
+    "gid": 33,
+    "what": "barred window"
+   },
+   {
+    "col": 5,
+    "row": 0,
+    "gid": 6,
+    "what": "dead/hollow orange tree stump (also hollow stump with hole spanning cols 5 rows 3-4, gid 86)"
+   },
+   {
+    "col": 2,
+    "row": 3,
+    "gid": 63,
+    "what": "tall mossy stone pillar/column"
+   },
+   {
+    "col": 18,
+    "row": 11,
+    "gid": 239,
+    "what": "bookshelf with colored books (cols 18-19 row 11)"
+   },
+   {
+    "col": 12,
+    "row": 11,
+    "gid": 233,
+    "what": "small critters row (frog/salamander/slime) cols 12-15 row 11 - decorative"
+   }
+  ],
+  "map_building_use": "Build a deserted/haunted village: the ruined stone & orange houses and the two big overgrown timber houses are the main structures; scatter the cross grave, dead stumps, mossy pillars and bush clusters to overgrow the streets. This is the sheet the demo village map draws from, so keep its gids stable.",
+  "description": "A compact 20x12 abandoned-village set. It contains two small ruins (stone and orange) with dark doorways, a multi-storey wooden ruin with two stacked doorways, and two large moss-covered A-frame timber houses (one with a clear ground door, one a buried facade). Supporting pieces are a cross grave marker, a stilt hut, a wooden watch-platform with ladder, dead/hollow stumps, mossy pillars, a book-filled shelf, and lots of overgrowth foliage. Doorways are the solid-black tiles at wall level, all flagged for warps. The left side (cols 0-5, rows 3-11) is a dense natural cluster of mossy rock/bench props, stone pillars, boulders, broken stumps, leaf bushes, two large tri-lobed trees and two round trees (each with loose root/branch debris beneath), and the graveyard fence (cols 6-10 rows 0-2) has three wooden cross markers. A decorative moss/vine trunk column fills the gap between the two big timber houses at col 11.",
+  "coverage": {
+   "occupied": 234,
+   "documented": 234,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/TilesetWater.png",
+  "name": "TilesetWater",
+  "dims": [
+   448,
+   272
+  ],
+  "tile_size": 16,
+  "grid": [
+   28,
+   17
+  ],
+  "theme": "water / ponds / rivers / docks (multi-biome water edges)",
+  "palette": "cyan water body with white foam rims; edge terrains in sand-orange, grass-green, dirt-brown; ice variant in pale white/light-blue with diagonal sparkle; magic variant in mauve/purple; wood dock in warm orange",
+  "autotile": {
+   "has_autotile": true,
+   "terrains": [
+    {
+     "material": "sand/beach-edged water",
+     "region": "cols 0-9 rows 0-4",
+     "kind": "47-blob",
+     "notes": "Verified sand_water wangset (origin 0,0), 47/47 masks."
+    },
+    {
+     "material": "grass-edged water",
+     "region": "cols 0-10 rows 6-10",
+     "kind": "47-blob",
+     "notes": "Verified grass_water wangset (origin 0,6), 47/47 masks."
+    },
+    {
+     "material": "ice / frozen water",
+     "region": "cols 13-21 rows 0-4",
+     "kind": "47-blob",
+     "notes": "Verified ice_water wangset (origin 13,0), 47/47 masks."
+    },
+    {
+     "material": "magic / mauve water (dirt-edged)",
+     "region": "cols 13-21 rows 6-11",
+     "kind": "47-blob",
+     "notes": "Verified magic_water wangset (origin 13,6), 47/47 masks."
+    }
+   ],
+   "note": "Verified wangsets: sand_water, grass_water, ice_water, magic_water \u2014 each a full 47-blob stamped from dirt_grass. Indexed grids under catalog/tilemaps/TilesetWater_*_indexes.png."
+  },
+  "regions": [
+   {
+    "area": "cols 0-9 rows 0-4",
+    "content": "sand/beach-edged water autotile blob",
+    "tags": [
+     "water",
+     "autotile",
+     "beach",
+     "sand"
+    ]
+   },
+   {
+    "area": "col 11 rows 0-4",
+    "content": "open deep-water surface strip (sparkle at row1, lily pad row3, fish ripple row4)",
+    "tags": [
+     "water",
+     "deep",
+     "lilypad",
+     "decoration"
+    ]
+   },
+   {
+    "area": "col 12 row 0",
+    "content": "loose rock/boulder sitting in water",
+    "tags": [
+     "rock",
+     "object"
+    ]
+   },
+   {
+    "area": "cols 13-22 rows 0-4",
+    "content": "ice/frozen water autotile blob + vertical ice-fall strip (col22)",
+    "tags": [
+     "water",
+     "ice",
+     "autotile",
+     "waterfall"
+    ]
+   },
+   {
+    "area": "cols 23-27 rows 0-1",
+    "content": "decorative props: rock (23,0), koi fish (24,0), wooden raft/boat (25-27,0), bucket (25,1)",
+    "tags": [
+     "object",
+     "boat",
+     "fish",
+     "prop"
+    ]
+   },
+   {
+    "area": "cols 0-10 rows 6-10",
+    "content": "grass-edged water autotile blob",
+    "tags": [
+     "water",
+     "autotile",
+     "grass",
+     "pond"
+    ]
+   },
+   {
+    "area": "cols 13-21 rows 6-11",
+    "content": "magic/mauve dirt-edged water autotile blob",
+    "tags": [
+     "water",
+     "autotile",
+     "magic",
+     "purple"
+    ]
+   },
+   {
+    "area": "cols 0-10 rows 12-16",
+    "content": "wooden dock/bridge plank field (horizontal boards); dock props (barrel/jug/crate) at row 16 cols 0-3",
+    "tags": [
+     "wood",
+     "dock",
+     "bridge",
+     "walkable"
+    ]
+   },
+   {
+    "area": "col 0 row 5",
+    "content": "isolated solid sand-colored ground-fill swatch (flat, unpatterned), sitting alone directly below the sand-edged water blob; matches the blob's sand rim color, likely a flood-fill/reference tile",
+    "tags": [
+     "sand",
+     "swatch",
+     "fill"
+    ]
+   },
+   {
+    "area": "col 0 row 11",
+    "content": "isolated solid grass-green ground-fill swatch, sitting alone directly below the grass-edged water blob; matches the blob's grass rim color, likely a flood-fill/reference tile",
+    "tags": [
+     "grass",
+     "swatch",
+     "fill"
+    ]
+   },
+   {
+    "area": "col 10 rows 2-3",
+    "content": "extra sand-edged water blob corner/peninsula variant tiles spilling one column past the main cols 0-9 block (same brown-rimmed circular pattern as the blob)",
+    "tags": [
+     "water",
+     "autotile",
+     "sand"
+    ]
+   },
+   {
+    "area": "col 13 row 5",
+    "content": "isolated solid white/pale-ice ground-fill swatch, sitting alone directly below the ice/frozen water blob; matches the blob's pale rim color, likely a flood-fill/reference tile",
+    "tags": [
+     "ice",
+     "swatch",
+     "fill"
+    ]
+   },
+   {
+    "area": "cols 22-23 rows 6-9",
+    "content": "extra magic/mauve water blob corner variant tiles spilling past the main col21 edge: col22 continues the lattice pattern rows 6-9 (analogous to the ice blob's col22 waterfall-strip column), while col23 rows 8-9 add a ring-corner tile plus a solid mauve center-fill swatch",
+    "tags": [
+     "water",
+     "autotile",
+     "magic"
+    ]
+   },
+   {
+    "area": "col 23 rows 2-3",
+    "content": "extra ice/frozen water blob corner variant tiles spilling one column past the main cols 13-22 block (same pale foam-ring pattern as the blob)",
+    "tags": [
+     "water",
+     "autotile",
+     "ice"
+    ]
+   },
+   {
+    "area": "col 24 rows 2-4",
+    "content": "a second open deep-water surface strip mirroring col 11 (diagonal sparkle at row2, lily pad at row3, fish ripple at row4), positioned between the ice blob and the raft/prop cluster",
+    "tags": [
+     "water",
+     "deep",
+     "lilypad",
+     "decoration"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "sand-water isolated rounded pond corner (top-left)"
+   },
+   {
+    "col": 7,
+    "row": 1,
+    "gid": 36,
+    "what": "sand-water deep/dotted fill (fully-surrounded center)"
+   },
+   {
+    "col": 11,
+    "row": 0,
+    "gid": 12,
+    "what": "open deep-water surface tile"
+   },
+   {
+    "col": 11,
+    "row": 3,
+    "gid": 96,
+    "what": "lily pad on open water"
+   },
+   {
+    "col": 11,
+    "row": 4,
+    "gid": 125,
+    "what": "fish ripple on open water"
+   },
+   {
+    "col": 12,
+    "row": 0,
+    "gid": 13,
+    "what": "loose rock/boulder in water"
+   },
+   {
+    "col": 17,
+    "row": 1,
+    "gid": 46,
+    "what": "ice-water blob center fill"
+   },
+   {
+    "col": 22,
+    "row": 1,
+    "gid": 51,
+    "what": "vertical ice-fall / waterfall strip"
+   },
+   {
+    "col": 24,
+    "row": 0,
+    "gid": 25,
+    "what": "koi fish decoration"
+   },
+   {
+    "col": 25,
+    "row": 0,
+    "gid": 26,
+    "what": "wooden raft/boat (spans cols 25-27)"
+   },
+   {
+    "col": 25,
+    "row": 1,
+    "gid": 54,
+    "what": "wooden bucket prop"
+   },
+   {
+    "col": 7,
+    "row": 7,
+    "gid": 204,
+    "what": "grass-water blob center fill"
+   },
+   {
+    "col": 18,
+    "row": 7,
+    "gid": 215,
+    "what": "magic/mauve water blob center fill"
+   },
+   {
+    "col": 2,
+    "row": 13,
+    "gid": 367,
+    "what": "wooden dock/bridge plank (interior board)"
+   },
+   {
+    "col": 1,
+    "row": 16,
+    "gid": 450,
+    "what": "dock prop (barrel/jug/crate cluster)"
+   }
+  ],
+  "map_building_use": "Ground/water layer. Paint the water body then let the terrain autotiler pick edge/corner tiles from the matching material blob (sand, grass, ice, or magic). Use the open-water strip (col 11) tiles as scattered surface variety plus lily pads/fish. Lay the wooden dock planks (rows 12-16) on an object/overlay layer for walkable bridges and piers across the water. Boats, buckets and rocks are single-tile object-layer props.",
+  "description": "A multi-biome water tileset: four complete 47-blob water autotiles (sand-edged, grass-edged, ice, and magic/mauve) plus open deep-water surface tiles with lily pads and fish. It also carries a wooden dock/bridge plank field and decorative props (boat, bucket, rocks, koi). Each water material tiles seamlessly against its own edge terrain, so ponds, rivers and coastlines are built by painting the body and autotiling the rim.",
+  "coverage": {
+   "occupied": 258,
+   "documented": 258,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/tileset_bed.png",
+  "name": "Beds & Bedroom Furniture",
+  "dims": [
+   224,
+   192
+  ],
+  "tile_size": 16,
+  "grid": [
+   14,
+   12
+  ],
+  "theme": "bedroom furniture \u2014 beds in several colors, mattresses, wooden storage & railings, stone floor",
+  "palette": "wood frames with tan / green / red / blue blankets, white gold-quilted mattress, grey stone",
+  "autotile": {
+   "has_autotile": true,
+   "terrains": [
+    {
+     "material": "grey stone slab floor",
+     "region": "cols 0-6 rows 9-11",
+     "kind": "3x3",
+     "notes": "Verified stone_slab 3x3 wangset at cols 0-2 rows 9-11; fill variants cols 3-5."
+    }
+   ],
+   "note": "Only the bottom-left stone block autotiles (verified stone_slab 3x3 wangset). Every bed and wooden item is a fixed multi-tile object placed as-is."
+  },
+  "regions": [
+   {
+    "area": "cols 0-13 rows 0-2",
+    "content": "top band of beds: tan blankets on left, green blankets on right",
+    "tags": [
+     "beds",
+     "furniture"
+    ]
+   },
+   {
+    "area": "cols 0-13 rows 3-5",
+    "content": "middle band of beds: red blankets on left, blue blankets on right",
+    "tags": [
+     "beds",
+     "furniture"
+    ]
+   },
+   {
+    "area": "cols 0-6 rows 6-8",
+    "content": "white gold-quilted bare mattresses (single and large)",
+    "tags": [
+     "mattress",
+     "quilt",
+     "furniture"
+    ]
+   },
+   {
+    "area": "cols 7-13 rows 6-8",
+    "content": "wooden storage & railings: crate/chest, drawer cabinet, fence/gate rails",
+    "tags": [
+     "wood",
+     "shelf",
+     "fence",
+     "furniture"
+    ]
+   },
+   {
+    "area": "cols 0-6 rows 9-11",
+    "content": "grey stone slab floor (autotiles)",
+    "tags": [
+     "floor",
+     "stone",
+     "autotile"
+    ]
+   }
+  ],
+  "furniture": [
+   {
+    "name": "tan bed (single, wood frame + white pillow)",
+    "region": "cols 0-1 rows 0-2"
+   },
+   {
+    "name": "tan beds (pair / double)",
+    "region": "cols 2-5 rows 0-2"
+   },
+   {
+    "name": "green bed (single)",
+    "region": "cols 7-8 rows 0-2"
+   },
+   {
+    "name": "green bed (single)",
+    "region": "cols 10-11 rows 0-2"
+   },
+   {
+    "name": "green bed (narrow / against wall)",
+    "region": "cols 12-12 rows 0-1"
+   },
+   {
+    "name": "red bed (single)",
+    "region": "cols 0-1 rows 3-5"
+   },
+   {
+    "name": "red beds (pair / double)",
+    "region": "cols 2-5 rows 3-5"
+   },
+   {
+    "name": "blue bed (single)",
+    "region": "cols 7-8 rows 3-5"
+   },
+   {
+    "name": "blue bed (single)",
+    "region": "cols 10-11 rows 3-5"
+   },
+   {
+    "name": "blue bed (narrow / against wall)",
+    "region": "cols 12-12 rows 3-5"
+   },
+   {
+    "name": "white gold-quilted mattress (single, no frame)",
+    "region": "cols 0-1 rows 6-8"
+   },
+   {
+    "name": "white gold-quilted mattress (large)",
+    "region": "cols 2-5 rows 6-8"
+   },
+   {
+    "name": "wooden crate / chest (vertical planks)",
+    "region": "cols 7-8 rows 6-8"
+   },
+   {
+    "name": "wooden drawer cabinet / shelf",
+    "region": "cols 10-11 rows 6-8"
+   },
+   {
+    "name": "wooden fence / railing / gate",
+    "region": "cols 12-13 rows 6-8"
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "tan bed headboard + pillow (top-left of first bed)"
+   },
+   {
+    "col": 0,
+    "row": 3,
+    "gid": 43,
+    "what": "red bed headboard + pillow"
+   },
+   {
+    "col": 7,
+    "row": 0,
+    "gid": 106,
+    "what": "green bed headboard + pillow"
+   },
+   {
+    "col": 7,
+    "row": 3,
+    "gid": 148,
+    "what": "blue bed headboard + pillow"
+   },
+   {
+    "col": 0,
+    "row": 9,
+    "gid": 267,
+    "what": "grey stone slab floor corner (autotile start)"
+   }
+  ],
+  "map_building_use": "Furnish bedrooms and inns: each bed is a 2-wide x 3-tall object (headboard/pillow row, blanket row, footboard row) \u2014 pick a blanket color per NPC. Line up beds in a row for a dormitory, add wooden crates/drawer cabinets against walls and wooden railings to partition space, and lay the grey stone floor beneath as an autotiling surface.",
+  "description": "A bedroom furniture sheet. Rows 0-5 hold rows of beds \u2014 tan and green across the top band, red and blue across the middle band \u2014 each a 2x3 wood-framed object with a pillow, blanket, and footboard. Rows 6-8 add bare white gold-quilted mattresses on the left and wooden storage (crate/chest, drawer cabinet) plus fence/railing pieces on the right. The bottom-left block (cols 0-6 rows 9-11) is a grey stone slab floor that autotiles.",
+  "coverage": {
+   "occupied": 126,
+   "documented": 126,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ },
+ {
+  "file": "Backgrounds/Tilesets/tileset_camp.png",
+  "name": "tileset_camp",
+  "dims": [
+   368,
+   144
+  ],
+  "tile_size": 16,
+  "grid": [
+   23,
+   9
+  ],
+  "theme": "Campsite / war-camp: canvas tents, campfires & stone fire rings, logs, barrels, crates, cooking gear, hay, rope, training dummy",
+  "palette": "tan canvas, warm brown timber & logs, orange firelight, grey stone rings, straw yellow, red flame",
+  "autotile": {
+   "has_autotile": false,
+   "terrains": [
+    {
+     "material": "canvas / cloth panels",
+     "region": "cols 0-3 rows 3-4",
+     "kind": "modular-cloth",
+     "notes": "folded tent-canvas & tarp pieces used to extend tent walls; hand-tiled, not a 47-blob"
+    }
+   ]
+  },
+  "regions": [
+   {
+    "area": "cols 0-3 rows 1-2",
+    "content": "Lumber/log pile variants below the row-0 log-bundle: standing wood post (0,1)-(0,2); fallen cut log with a round tree-ring end cap lying horizontal (1,2)-(2,2); tall 2-tile stacked log bundle variant (3,1)-(3,2)."
+   },
+   {
+    "area": "cols 0 rows 5-6",
+    "content": "Weathered wooden fence post / support beam, upright, 2 tiles tall."
+   },
+   {
+    "area": "cols 1-2 rows 5-6",
+    "content": "Large cut tree-stump slice (top-down view, concentric rings), drawn as one big 2x2 graphic across cols 1-2 rows 5-6; top-left cell is also flagged as notable tile (1,5) gid 116."
+   },
+   {
+    "area": "cols 3 rows 5-6",
+    "content": "Two small tree-stump / cut-log cross-section icons stacked in col 3 (variant caps, smaller than the big stump at cols 1-2)."
+   },
+   {
+    "area": "cols 3 row 7",
+    "content": "Short bench/plank end-piece fragment, a separate shorter companion to the long bench at cols 0-2 row 7."
+   },
+   {
+    "area": "cols 3 row 8",
+    "content": "Small isolated straw/hay tuft, a separate smaller companion to the hay bundle at cols 0-2 row 8."
+   },
+   {
+    "area": "cols 4 rows 3-4",
+    "content": "Camp food supplies: round bread loaf (4,3) and a cured meat/ham chunk (4,4)."
+   },
+   {
+    "area": "cols 4 row 5",
+    "content": "Tall narrow wooden crate/post variant with vertical slats, standing alone above the big storage crate."
+   },
+   {
+    "area": "cols 4-5 rows 6-8",
+    "content": "Tall wooden storage crate/basket, slatted lid at row 6 down through the crate body to its base at row 8; same crate as notable tile (4,7) gid 162 (cols 4-5)."
+   },
+   {
+    "area": "cols 5 row 5",
+    "content": "Wooden mallet/stamp tool, short handle with a block head."
+   },
+   {
+    "area": "cols 6 rows 5-6",
+    "content": "Signpost/pole with a grey tool (axe or hook) hanging from it; post continues down to row 6. Same post as notable tile (6,5) gid 167."
+   },
+   {
+    "area": "cols 7 rows 5-6",
+    "content": "Training dummy/scarecrow on a wooden post; post base continues down to row 6. Same dummy as notable tile (7,5) gid 168."
+   },
+   {
+    "area": "cols 8-9 rows 5-6",
+    "content": "Large torn canvas/tarp scrap, tan cloth with pale worn/torn patches, drawn as one 2x2 piece across cols 8-9 rows 5-6."
+   },
+   {
+    "area": "cols 6-9 rows 7-8",
+    "content": "Camp storage cluster: wooden barrel/cask viewed from above (6,7)-(6,8); bound wood plank/crate lid (7,7); angled cut log chunk (7,8); round stump-slice/wooden shield (8,7); small dirt/mud clump (8,8); short wooden keg (9,7); tan grain/flour sack (9,8)."
+   },
+   {
+    "area": "cols 10-11 rows 7-8",
+    "content": "Coiled rope/lasso loop (same rope as notable tile (10,7) gid 240) extending right into col 11, plus a second tan coiled-rope ring at (11,8); faint rope-tip overflow at (10,8)."
+   },
+   {
+    "area": "cols 12 row 7",
+    "content": "Grey glass flask/potion bottle."
+   },
+   {
+    "area": "cols 12 row 8",
+    "content": "Small dirt/mud clump."
+   },
+   {
+    "area": "cols 13 rows 0-2",
+    "content": "Broken wood plank/kindling debris fragments (13,0)-(13,1) and a woven wicker basket-weave texture fragment (13,2), scattered beside the pavilion's left outer wall."
+   },
+   {
+    "area": "cols 13 row 7",
+    "content": "Candle standing in a small metal holder/lantern base."
+   },
+   {
+    "area": "cols 13 row 8",
+    "content": "Small dirt/mud clump variant, beside the pavilion's left outer wall."
+   }
+  ],
+  "structures": [
+   {
+    "name": "Small tent 1 (peaked canvas)",
+    "region": "cols 4-6 rows 0-2",
+    "door_tiles": [
+     {
+      "col": 5,
+      "row": 2,
+      "gid": 52
+     }
+    ],
+    "parts": [
+     "wooden-trimmed peak row 0",
+     "tan canvas rows 1-2",
+     "dark tent-flap entrance (5,2)"
+    ]
+   },
+   {
+    "name": "Small tent 2",
+    "region": "cols 7-9 rows 0-2",
+    "door_tiles": [
+     {
+      "col": 8,
+      "row": 2,
+      "gid": 55
+     }
+    ],
+    "parts": [
+     "peaked canvas tent",
+     "dark flap entrance (8,2)"
+    ]
+   },
+   {
+    "name": "Small tent 3",
+    "region": "cols 10-12 rows 0-2",
+    "door_tiles": [
+     {
+      "col": 11,
+      "row": 2,
+      "gid": 58
+     }
+    ],
+    "parts": [
+     "peaked canvas tent",
+     "dark flap entrance (11,2)"
+    ]
+   },
+   {
+    "name": "Large pavilion / command tent",
+    "region": "cols 14-22 rows 0-8",
+    "door_tiles": [
+     {
+      "col": 18,
+      "row": 8,
+      "gid": 203
+     }
+    ],
+    "parts": [
+     "brown wooden ridge frame rows 0-1 with center banner notch (18,0)/(19,0)",
+     "big walkable tan canvas interior rows 2-7",
+     "arched entrance flap at bottom center (18,8)"
+    ]
+   },
+   {
+    "name": "Campfire with spit",
+    "region": "cols 8-9 rows 3-4",
+    "door_tiles": [],
+    "parts": [
+     "red flames over wood (8,3),(9,3)",
+     "wooden cooking-rack frame (8,4),(9,4)"
+    ]
+   },
+   {
+    "name": "Stone fire ring / pit",
+    "region": "cols 10-13 rows 3-6",
+    "door_tiles": [],
+    "parts": [
+     "grey stones around logs/sand; unlit fire-pit variants"
+    ]
+   }
+  ],
+  "notable_tiles": [
+   {
+    "col": 5,
+    "row": 2,
+    "gid": 52,
+    "what": "TENT ENTRANCE - tent 1"
+   },
+   {
+    "col": 8,
+    "row": 2,
+    "gid": 55,
+    "what": "TENT ENTRANCE - tent 2"
+   },
+   {
+    "col": 11,
+    "row": 2,
+    "gid": 58,
+    "what": "TENT ENTRANCE - tent 3"
+   },
+   {
+    "col": 18,
+    "row": 8,
+    "gid": 203,
+    "what": "TENT ENTRANCE - large pavilion (bottom center)"
+   },
+   {
+    "col": 8,
+    "row": 3,
+    "gid": 78,
+    "what": "campfire flames (with (9,3) gid 79)"
+   },
+   {
+    "col": 10,
+    "row": 3,
+    "gid": 80,
+    "what": "stone fire ring / pit"
+   },
+   {
+    "col": 0,
+    "row": 0,
+    "gid": 1,
+    "what": "stacked log bundle (lumber) - variants cols 0-3 row 0"
+   },
+   {
+    "col": 1,
+    "row": 5,
+    "gid": 116,
+    "what": "cut tree stump (top view, rings)"
+   },
+   {
+    "col": 4,
+    "row": 7,
+    "gid": 162,
+    "what": "wooden barrels & storage crates (cols 4-5 rows 7-8)"
+   },
+   {
+    "col": 7,
+    "row": 5,
+    "gid": 168,
+    "what": "training dummy / scarecrow on post"
+   },
+   {
+    "col": 6,
+    "row": 5,
+    "gid": 167,
+    "what": "signpost / pole with hook"
+   },
+   {
+    "col": 10,
+    "row": 7,
+    "gid": 240,
+    "what": "coiled rope / lasso"
+   },
+   {
+    "col": 0,
+    "row": 7,
+    "gid": 162,
+    "what": "long wooden bench/plank (cols 0-2 row 7)"
+   },
+   {
+    "col": 0,
+    "row": 8,
+    "gid": 185,
+    "what": "straw/hay bundles (cols 0-2 row 8)"
+   },
+   {
+    "col": 6,
+    "row": 3,
+    "gid": 76,
+    "what": "green cauldron/pot & pans (cooking gear cols 5-7 rows 3-4)"
+   }
+  ],
+  "map_building_use": "Assemble a military or hunter camp: place the three small tents as sleeping quarters (each flap is a warp/interaction tile) and the large pavilion as the command tent (enter at bottom-center (18,8)); ring the clearing with campfires/stone fire pits, barrels, crates, log piles, hay, and a training dummy. Tent entrances are the flagged dark tiles.",
+  "description": "A 23x9 camp set. The left/top holds three identical 3x3 peaked canvas tents, each with a dark flap entrance, plus a large 9x9 pavilion/command tent whose walkable interior opens at a bottom-center arch (18,8). The rest is camp dressing: campfires with cooking spits, grey stone fire rings, log bundles and stumps, barrels, crates and storage chests, folded canvas/tarps, cooking pots and pans, hay bundles, coiled rope, benches and a training-dummy post. All four tent entrances are flagged above for warps. Cols 0-3 rows 1-8 are a dense lumber/woodpile corner (standing posts, cut logs, stumps, crates, hay); cols 4-9 rows 3-8 mix food supplies, cooking gear, a signpost, the training dummy, a torn tarp scrap and a storage cluster of barrels/sacks; cols 10-13 rows 7-8 add a coiled rope, a flask, a candle and dirt clumps beside the pavilion, with loose kindling debris at cols 13 rows 0-2.",
+  "coverage": {
+   "occupied": 193,
+   "documented": 193,
+   "missing_count": 0,
+   "missing_cells": [],
+   "complete": true
+  }
+ }
+]

@@ -1,0 +1,51 @@
+// Dark Hero — an animation-state showcase built on the platformer engine, using the CC0 "DARK - Hero"
+// pack. One combined 64x64 sheet holds every clip; the Hero component (see components.tish) drives all
+// ten states from physics + input + tile probes.
+//
+// Controls: d-pad move · A jump (hold = higher). Run into a wall's edge while falling to GRAB the
+// ledge; A / Up climbs up, Down drops off. Stomp the spike orb from above to pop it; touch its side
+// and you take a hit. At 0 HP the death animation plays and you respawn.
+//
+// On boot the hero spawns slightly in the air, so it Falls and Lands with no input — then it's yours.
+import { tileset } from 'background:../assets/tileset.png'
+import { heroSheet } from 'sheet64:../assets/hero.png'
+import { hazardSheet } from 'sheet:../assets/hazard.png'
+import { heartSheet } from 'sheet:../assets/heart.png'
+import { sprite_new } from 'cargo:tish_agb'
+import { mount, create, loadStreamMap, setupHearts, step } from '../../../packages/engine'
+import { level } from './maps'
+import * as components from './components'
+import { Hero, Hazard, TAG_PLAYER } from './components'
+
+mount(components)
+loadStreamMap(level, tileset)
+
+// Hero: 64x64 art drawn over a 16x16 hitbox (offset centres it, feet on the box bottom).
+let hero = create()
+let spawnX = level.spawnCol * 16
+let spawnY = level.spawnRow * 16
+hero.setPos(spawnX, spawnY)
+hero.setSprite(sprite_new(heroSheet))
+hero.spriteOffset(-24, -47)
+hero.platformer(16, 16)
+hero.setHealth(6)
+hero.setTag(TAG_PLAYER)
+hero.behave(Hero, { spawnX: spawnX, spawnY: spawnY })
+hero.follow()
+
+setupHearts(heartSheet, 3, 8, 8, 12)
+
+// Spike-orb hazards patrol their platforms (native `tick` AI), hurt on contact, pop when stomped.
+let hi: i32 = 0
+while (hi < level.hazardCols.length) {
+  let z = create()
+  z.setPos(level.hazardCols[hi] * 16, level.hazardRows[hi] * 16)
+  z.setSprite(sprite_new(hazardSheet))
+  z.platformer(16, 16)
+  z.setHealth(1)
+  z.patrol(2)          // NATIVE walk + turn at walls/ledges; 2 = mirror the sprite when walking left
+  z.behave(Hazard, {}) // only `onCollide` now — a tish `tick` is billed per ON-SCREEN entity
+  hi = hi + 1
+}
+
+while (true) { step() }

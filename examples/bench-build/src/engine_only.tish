@@ -1,0 +1,7 @@
+// Bench target: packages/engine WITHOUT ui.tish / dialog.tish (scene_hooks only).
+import { log, frame } from 'cargo:tish_agb'
+import { create, loadScene } from '../../../packages/engine'
+
+log("bench-build engine typeof create=" + (typeof create))
+log("bench-build engine typeof loadScene=" + (typeof loadScene))
+while (true) { frame() }

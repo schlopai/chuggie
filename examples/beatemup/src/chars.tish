@@ -1,0 +1,75 @@
+// The roster's frame data.
+//
+// Four characters out of one table, exactly as in examples/versus: the sheets share a fixed 24-pose
+// layout (scripts/fighter_art.py), so what makes a character is numbers. What differs from the
+// versus tables is what the numbers are FOR — a brawler's enemies exist to be knocked over, so they
+// hit slowly and telegraph, and the player's light attack is fast and chains.
+import {
+  MV_L, MV_H, MV_AIR, MV_SPECIAL, MV_GRAB,
+  BTN_ATTACK, BTN_JUMP, BTN_HEAVY, BTN_GRAB,
+  beatemupDefChar, beatemupDefMove, beatemupDefBox, beatemupDefCost, beatemupDefFxCell,
+} from '../../../packages/beatemup'
+import { F_ATK1, F_ATK2, F_ATK3, F_LOW_ATK, F_FX_FIRST, FX_DX, FX_DY } from './frames'
+
+export let C_HERO: i32 = 0
+export let C_NINJA: i32 = 1
+export let C_BRUISER: i32 = 2
+export let C_BOSS: i32 = 3
+
+export function defineRoster(heroArt: i32, ninjaArt: i32, bruiserArt: i32, bossArt: i32) {
+  // ── the player ─────────────────────────────────────────────────────────────────────────────────
+  //                 chr     sheet  hp  walkX walkY  jumpVz  grav halfW tall score
+  beatemupDefChar(C_HERO, heroArt, 64,   470,  330, 0 - 880,  56,   11,   40,    0)
+
+  // Light: fast, and it CHAINS — press it again as one connects and the next comes out, with the
+  // third knocking down. The chain lives in the engine (A_CHAIN); this is just the first link.
+  beatemupDefMove(C_HERO, MV_L, F_ATK1, 3, 3, 3, 7, 6, 0, BTN_ATTACK)
+  beatemupDefBox (C_HERO, MV_L, 6, 36, 28, 26, 22, 190, 3)
+
+  // Heavy: slow enough to be walked around, and it puts them on the floor.
+  beatemupDefMove(C_HERO, MV_H, F_ATK2, 3, 8, 4, 16, 13, 1, BTN_HEAVY)
+  beatemupDefBox (C_HERO, MV_H, 4, 40, 40, 34, 30, 420, 7)
+
+  // Jump attack: the safe opener, because nothing on the ground can reach it.
+  beatemupDefMove(C_HERO, MV_AIR, F_ATK3, 3, 4, 8, 6, 11, 1, BTN_ATTACK | BTN_HEAVY)
+  beatemupDefBox (C_HERO, MV_AIR, 2, 30, 40, 34, 26, 300, 6)
+
+  // The panic move: hits on BOTH sides, cannot be blocked out of, and costs health to use. That
+  // cost is the whole design — it is the answer to being surrounded, and it must never be free.
+  beatemupDefMove(C_HERO, MV_SPECIAL, F_ATK3, 3, 5, 6, 20, 14, 1, BTN_ATTACK | BTN_HEAVY)
+  beatemupDefBox (C_HERO, MV_SPECIAL, 0, 44, 40, 42, 30, 520, 10)
+  beatemupDefCost(C_HERO, MV_SPECIAL, 6)
+
+  // The grab. ⚠️ There is NO grab animation in these packs — 24 poses and none of them is a hold —
+  // so it borrows the heavy swing and reads as a shoulder throw: no reach at all, but it always
+  // knocks down and it hits hardest. That is the honest version of a grab on this art.
+  beatemupDefMove(C_HERO, MV_GRAB, F_ATK2, 3, 4, 3, 14, 18, 1, BTN_GRAB)
+  beatemupDefBox (C_HERO, MV_GRAB, 2, 40, 20, 34, 34, 700, 11)
+
+  // ── the gang ───────────────────────────────────────────────────────────────────────────────────
+  // Each is one line of physics and one attack. They differ in the three numbers a player can feel:
+  // how fast they close, how hard they hit, and how much they take.
+  gangster(C_NINJA,   ninjaArt,   16, 390, 300,  5, 22, 100)   // quick, fragile, closes fast
+  gangster(C_BRUISER, bruiserArt, 30, 270, 220,  9, 30, 200)   // slow, heavy, soaks a chain
+  gangster(C_BOSS,    bossArt,    56, 320, 250, 12, 36, 500)   // the wave-three problem
+
+  // Which neighbouring cell each attack pose's overhang lives in, straight from the generator.
+  let c: i32 = 0
+  while (c < 4) {
+    let k: i32 = 0
+    while (k < 10) {
+      beatemupDefFxCell(c, F_FX_FIRST + k, FX_DX[c * 10 + k], FX_DY[c * 10 + k])
+      k = k + 1
+    }
+    c = c + 1
+  }
+}
+
+function gangster(chr: i32, sheet: i32, hp: i32, walkX: i32, walkY: i32,
+                  dmg: i32, reach: i32, score: i32) {
+  beatemupDefChar(chr, sheet, hp, walkX, walkY, 0 - 800, 56, 11, 38, score)
+  // Startup 12 is deliberately slow: an enemy attack you cannot see coming is not difficulty, it is
+  // noise. Twelve frames is a fifth of a second — long enough to walk out of, short enough to punish.
+  beatemupDefMove(chr, MV_L, F_ATK1, 3, 14, 4, 18, dmg, 0, BTN_ATTACK)
+  beatemupDefBox (chr, MV_L, 4, 36, reach, 28, 14, 240, 4)
+}

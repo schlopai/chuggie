@@ -1,0 +1,323 @@
+# Test on every push/PR; on a green main, cut a PRERELEASE carrying the npm tarball.
+#
+# Promoting that prerelease to a full release is what fires npm-release.yml and crates-release.yml.
+# The two-step exists so a release is never published by the same run that decided to make one —
+# there is a human between "CI is green" and "this is on npm forever".
+#
+# Layout note: the crates carry `../../../../tish/tish/crates/...` path deps on the compiler repo
+# and .cargo/config.toml patches agb to `../agb/agb`, mirroring the local checkout layout. Every
+# job therefore reproduces that tree inside the workspace:
+#   $GITHUB_WORKSPACE/chuggie/chuggie-engine + $GITHUB_WORKSPACE/chuggie/agb
+#   $GITHUB_WORKSPACE/tish/tish
+# (screenshot.yml does the same — keep the two in step.)
+
+name: CI (test, prerelease)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Host-target crate tests. Fast, and the only job that gates on every PR path. ──────────────
+  crates:
+    name: Cargo tests (host)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Reproduce the local sibling layout exactly: the crates carry
+      # `../../../../tish/tish/crates/...` path deps and .cargo/config.toml patches agb to
+      # `../agb/agb`, so the tree must look like
+      #   $GITHUB_WORKSPACE/chuggie/chuggie-engine + $GITHUB_WORKSPACE/chuggie/agb
+      #   $GITHUB_WORKSPACE/tish/tish
+      - uses: actions/checkout@v4
+        with:
+          path: chuggie/chuggie-engine
+      - uses: actions/checkout@v4
+        with:
+          repository: spacedevin/agb
+          ref: chuggie
+          path: chuggie/agb
+      - uses: actions/checkout@v4
+        with:
+          repository: tishlang/tish
+          path: tish/tish
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: chuggie/chuggie-engine/crates/tish-gba-scenepack
+      # freetype-sys in scenepack's host dependency tree links the system freetype.
+      - name: Install freetype
+        run: sudo apt-get update && sudo apt-get install -y libfreetype6-dev pkg-config
+
+      # Only scenepack builds for the host — the rest are thumbv4t-none-eabi only and are covered by
+      # the ROM job below. This is where the shared .deck conformance corpus runs: corpus_bakes and
+      # gba_profile_is_honest prove this bake still agrees with @spacedevin/deck and that the `gba`
+      # profile's reject list is honest rather than aspirational.
+      - name: Test tish_gba_scenepack
+        working-directory: chuggie/chuggie-engine/crates/tish-gba-scenepack
+        run: cargo test --locked
+
+      - name: rustfmt (all crates)
+        working-directory: chuggie/chuggie-engine
+        run: |
+          for c in tish-agb tish-agb-sio tish-gba-game-engine tish-gba-scenepack; do
+            (cd "crates/$c" && cargo fmt --check) || { echo "::error::cargo fmt --check failed for $c"; exit 1; }
+          done
+
+      - name: clippy tish_gba_scenepack (host)
+        working-directory: chuggie/chuggie-engine/crates/tish-gba-scenepack
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check and clippy the other crates (thumbv4t, no link)
+        working-directory: chuggie/chuggie-engine
+        run: |
+          # rust-toolchain.toml pins the nightly (never float it — a fresh nightly means fresh
+          # lints and a red CI that local checkouts cannot reproduce); this installs that pin.
+          rustup toolchain install
+          for c in tish-agb tish-agb-sio tish-gba-game-engine; do
+            echo "::group::cargo clippy $c"
+            # -Z build-std: the GBA target has no prebuilt std/core, same as a real ROM build.
+            # clippy subsumes check: it fails on the same compile errors plus lint warnings.
+            (cd "crates/$c" && cargo clippy --target thumbv4t-none-eabi \
+              -Z build-std=core,alloc -- -D warnings 2>&1) || { echo "::error::cargo clippy failed for $c"; exit 1; }
+            echo "::endgroup::"
+          done
+
+  # ── A real ROM, built the way a game is built. Proves the toolchain + agb linkage still work. ──
+  rom:
+    name: Build a ROM
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: chuggie/chuggie-engine
+      - uses: actions/checkout@v4
+        with:
+          repository: tishlang/tish
+          path: tish/tish
+      - uses: actions/checkout@v4
+        with:
+          repository: spacedevin/agb
+          ref: chuggie
+          path: chuggie/agb
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            tish/tish
+      # freetype-sys in the host-side asset bake links the system freetype.
+      - name: Install freetype
+        run: sudo apt-get update && sudo apt-get install -y libfreetype6-dev pkg-config
+      - name: Install agb-gbafix (ELF -> .gba)
+        run: cargo install --locked agb-gbafix
+      - name: Build the tish compiler
+        working-directory: tish/tish
+        run: cargo build --release -p tishlang
+      - name: Build grid-demo
+        working-directory: chuggie/chuggie-engine/examples/grid-demo
+        env:
+          TISH: ${{ github.workspace }}/tish/tish/target/release/tish
+        run: |
+          "$TISH" build src/main.tish --target gba -o grid-demo.gba
+          ls -l grid-demo.gba
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grid-demo-rom
+          path: chuggie/chuggie-engine/examples/grid-demo/grid-demo.gba
+          if-no-files-found: error
+
+  # ── The example verifiers: build a ROM, emulate it, and assert on what came out. ──────────────
+  #
+  # These are the real regression net — they FFT captured audio against the bpm the `.deck` file was
+  # authored at and diff rendered frames against golden PNGs, so a parse or lowering regression is
+  # caught as a wrong-sounding or wrong-looking ROM rather than a passing unit test.
+  #
+  # Matrixed one job per example with fail-fast:false, because a single ROM build is ~2 minutes and
+  # running 50 of them serially is hours. The list is DISCOVERED, not hand-maintained — a new
+  # verify.sh is picked up without editing this file.
+  verify:
+    name: verify ${{ matrix.example }}
+    needs: [crates, discover]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ${{ fromJSON(needs.discover.outputs.examples) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: chuggie/chuggie-engine
+      - uses: actions/checkout@v4
+        with:
+          repository: tishlang/tish
+          path: tish/tish
+      - uses: actions/checkout@v4
+        with:
+          repository: spacedevin/agb
+          ref: chuggie
+          path: chuggie/agb
+      - name: Install libmgba + tooling the verifiers use
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmgba-dev imagemagick python3-numpy python3-pil libfreetype6-dev pkg-config
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            tish/tish
+      - run: cargo install --locked agb-gbafix
+      # Several verifiers call tools/gba-shot (and gba-link) directly; the binaries are
+      # gitignored, so build them from source here (same flags scripts/screenshot.sh uses).
+      - name: Build the gba-shot/gba-link helper tools
+        working-directory: chuggie/chuggie-engine
+        run: |
+          cc tools/gba-shot.c -o tools/gba-shot -lmgba -lm
+          cc tools/gba-link.c -o tools/gba-link -lmgba -lm
+      - name: Build the tish compiler
+        working-directory: tish/tish
+        run: cargo build --release -p tishlang
+      - name: Run the verifier
+        working-directory: chuggie/chuggie-engine/examples/${{ matrix.example }}
+        env:
+          TISH: ${{ github.workspace }}/tish/tish/target/release/tish
+        run: |
+          # Some verifiers build through `npm run build`, which invokes a bare `tish`.
+          export PATH="$(dirname "$TISH"):$PATH"
+          ./verify.sh
+
+  discover:
+    name: Discover verifiers
+    runs-on: ubuntu-latest
+    outputs:
+      examples: ${{ steps.list.outputs.examples }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          # Every examples/<name>/verify.sh, as a JSON array for the matrix above.
+          list=$(find examples -mindepth 2 -maxdepth 2 -name verify.sh -type f \
+                 | sed 's#examples/##; s#/verify.sh##' | sort | jq -R . | jq -sc .)
+          echo "examples=$list" >> "$GITHUB_OUTPUT"
+          echo "Found $(echo "$list" | jq 'length') verifiers"
+
+  # ── The examples index is GENERATED, so it cannot drift from the examples it lists. ──────────────
+  # Fails on two things: an example with no README.md (nobody can find an undocumented example, and
+  # the index is built from those READMEs), and a stale examples/README.md (someone edited an
+  # example's README without re-running the generator).
+  #
+  # A MISSING SCREENSHOT IS NOT A FAILURE HERE — it needs a built ROM and an emulator, which is the
+  # `verify` job's territory, not a docs check. The generator lists the ones without a screenshot in
+  # the index itself so the gap stays visible instead of silently absent.
+  examples_index:
+    name: Examples index
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check examples/README.md is current
+        run: python3 scripts/gen_examples_readme.py --check
+
+  # ── Would this land a release? Runs on PRs so a bad commit type is caught before merge. ───────
+  release_check:
+    name: Release check (semantic-release dry-run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: "24" }
+      - name: Dry-run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx --yes -p semantic-release@25 -p @semantic-release/commit-analyzer@13 \
+            -p @semantic-release/release-notes-generator@14 -p @semantic-release/npm@13 \
+            -p @semantic-release/github@12 \
+            semantic-release --dry-run --extends ./.releaserc.json 2>&1 | tee release-check.log
+          if grep -q "There are no relevant changes" release-check.log; then
+            echo "::notice::No release would be cut from these commits."
+          fi
+
+  # ── Green main → prerelease. Promote it by hand to publish. ───────────────────────────────────
+  release:
+    name: Prerelease
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [crates, rom, verify, release_check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: "24" }
+
+      - name: Decide the next version
+        id: ver
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx --yes -p semantic-release@25 -p @semantic-release/commit-analyzer@13 \
+            -p @semantic-release/release-notes-generator@14 -p @semantic-release/npm@13 \
+            -p @semantic-release/github@12 \
+            semantic-release --dry-run --extends ./.releaserc.json 2>&1 | tee release.log || true
+          V=$(grep -oE 'next release version is [0-9]+\.[0-9]+\.[0-9]+' release.log | tail -1 | awk '{print $NF}')
+          if [ -z "$V" ]; then
+            echo "::notice::No release-triggering commits — nothing to prerelease."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$V" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The licence gate. crates.io has no delete — only yank — and npm unpublish is a 72-hour
+      # window, so an artifact published under the wrong licence is effectively permanent. The repo
+      # currently has NO LICENSE file while every crate claims "MIT OR Apache-2.0"; refuse to build a
+      # release artifact until those two agree. (This is not hypothetical: @spacedevin/deck shipped
+      # two versions under the wrong licence and both had to be yanked.)
+      - name: Refuse to package without a licence
+        if: steps.ver.outputs.skip != 'true'
+        run: |
+          if [ ! -f LICENSE ] && [ ! -f LICENSE.md ] && [ ! -f LICENSE.txt ]; then
+            echo "::error::No LICENSE file at the repo root, but crates/*/Cargo.toml and packages/package.json declare \"MIT OR Apache-2.0\". Add the LICENSE file, or correct the declarations, before anything is published."
+            exit 1
+          fi
+
+      - name: Stamp the version and pack the engine package
+        if: steps.ver.outputs.skip != 'true'
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          node -e '
+            const fs = require("fs"), p = "packages/package.json";
+            const j = JSON.parse(fs.readFileSync(p, "utf8"));
+            j.version = process.argv[1];
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+          ' "$V"
+          (cd packages && npm pack)
+          mv packages/tish-gba-*.tgz tish-gba-npm-package.tgz
+          ls -l tish-gba-npm-package.tgz
+
+      - name: Create the prerelease
+        if: steps.ver.outputs.skip != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          if gh release view "v$V" >/dev/null 2>&1; then
+            echo "Release v$V already exists — uploading the tarball to it."
+            gh release upload "v$V" tish-gba-npm-package.tgz --clobber
+          else
+            gh release create "v$V" tish-gba-npm-package.tgz \
+              --title "v$V" --prerelease --generate-notes
+          fi

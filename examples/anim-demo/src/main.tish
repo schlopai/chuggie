@@ -1,0 +1,16 @@
+// Sprite-sheet animation: a `sheet:` import splits the 64x16 PNG into four 16x16
+// frames; the engine's Anim system cycles them. Move with the d-pad.
+import { walker } from 'sheet:../assets/walker.png'
+import { sprite_new } from 'cargo:tish_agb'
+import { mount, create, step } from '../../../packages/engine'
+import * as components from './components'
+import { Walker } from './components'
+
+mount(components)
+
+let hero = create()
+hero.setPos(104, 72)
+hero.setSprite(sprite_new(walker))
+hero.behave(Walker, {})
+
+while (true) { step() }

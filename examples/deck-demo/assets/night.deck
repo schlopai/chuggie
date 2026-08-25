@@ -1,0 +1,42 @@
+# Quiet Watch — night / camp theme (4 bars). Soft duty, slow bass, sparse PCM chime.
+deck 1
+bpm 68
+
+track Lead id lead gen gameBoyDmg * 4
+  gen type pulse duty 75 env_mode adsr vol 9
+  gen attack 0.1 decay 0.4 sustain 8 release 0.6
+  gen vib_rate 2 vib_amt 14
+  note 67 0 1.5 v 90
+  note 65 2 1 v 80
+  note 64 4 1.5 v 95
+  note 62 6 1 v 85
+  note 60 8 2 v 90
+  note 62 10 1 v 80
+  note 64 12 1.5 v 95
+  note 67 14 2 v 100
+
+track Echo id echo gen gameBoyDmg * 4
+  gen type pulse duty 12_5 env_mode step vol 5 env_step 5
+  note 67 0.5 1 v 50
+  note 65 2.5 0.75 v 45
+  note 64 4.5 1 v 55
+  note 62 6.5 0.75 v 45
+  note 60 8.5 1.5 v 50
+  note 62 10.5 0.75 v 45
+  note 64 12.5 1 v 55
+  note 67 14.5 1.5 v 60
+
+track Bass id bass gen gameBoyDmg * 4
+  gen type wave wave_shape sine vol 11
+  note 36 0 4 v 90
+  note 35 4 4 v 85
+  note 33 8 4 v 90
+  note 36 12 4 v 100
+
+track Chime id chime gen gbaDirectSound * 4
+  gen waveform sine vol 8 bitcrush true
+  adsr a 0 d 0.6 s 0 r 0.4
+  note 84 1 0.8 v 70
+  note 79 5 0.8 v 65
+  note 81 9 0.8 v 70
+  note 84 13 1 v 80

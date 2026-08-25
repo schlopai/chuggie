@@ -1,0 +1,75 @@
+// Unit and building stat tables for warforge.
+//
+// Flat parallel `i32[]` columns indexed by kind — the same shape as the roster itself. A table of
+// objects would box every field, and these are read on every train, every arm and every HUD repaint.
+//
+// Every value here is a game-balance number and nothing else; the rules that consume them live in
+// packages/rts.tish and in the engine's native `set_soldier`.
+
+// ── Unit kinds ───────────────────────────────────────────────────────────────
+export let K_PEASANT: i32 = 0
+export let K_FOOTMAN: i32 = 1
+export let K_ARCHER: i32 = 2
+export let K_HERO: i32 = 3
+export let K_GRUNT: i32 = 4
+export let K_RAIDER: i32 = 5
+export let K_CHIEF: i32 = 6
+export let K_COUNT: i32 = 7
+
+//                          peas foot arch hero grunt raid chief
+export let U_HP: i32[] =      [ 18,  40,  26,  90,  34,  24, 220]
+export let U_RANGE: i32[] =   [ 12,  15,  56,  17,  15,  15,  20]
+export let U_DMG: i32[] =     [  1,   5,   4,   9,   4,   3,  11]
+export let U_COOL: i32[] =    [ 40,  26,  34,  22,  28,  30,  30]
+export let U_SIGHT: i32[] =   [  4,   4,   5,   6,   4,   4,   5]
+export let U_GOLD: i32[] =    [ 40,  60, 100,   0,   0,   0,   0]
+export let U_WOOD: i32[] =    [  0,  10,  30,   0,   0,   0,   0]
+export let U_FOOD: i32[] =    [  1,   1,   1,   0,   0,   0,   0]
+export let U_TRAIN: i32[] =   [180, 260, 320,   0,   0,   0,   0] // frames
+
+// The archer is the reason `set_soldier` takes a range in PIXELS rather than cells: 56px is three
+// and a half tiles, which is a real standoff advantage without being a sniper on a 240px screen.
+
+// ── Building kinds ───────────────────────────────────────────────────────────
+export let B_HALL: i32 = 0
+export let B_FARM: i32 = 1
+export let B_BARRACKS: i32 = 2
+export let B_CAMP: i32 = 3
+export let B_KEEP: i32 = 4      // the hall, upgraded
+export let B_TOWER: i32 = 5     // shoots, via a pooled static defender
+export let B_SMITH: i32 = 6     // weapon / armour upgrades
+export let B_COUNT: i32 = 7
+
+// Every building is 2x2 CELLS (32x32px). At 16px cells a 3x3 building is 48px — a fifth of the
+// screen width — and the reference idiom puts a house at about 32px.
+export let B_W: i32[] = [2, 2, 2, 2, 2, 2, 2]
+export let B_H: i32[] = [2, 2, 2, 2, 2, 2, 2]
+export let B_HP: i32[] = [400, 120, 250, 300, 700, 220, 260]
+export let B_GOLD: i32[] = [0, 60, 120, 0, 300, 100, 160]
+export let B_WOOD: i32[] = [0, 40, 80, 0, 180, 60, 100]
+// A farm's food is what it ADDS to the cap; everything else adds none.
+export let B_FOOD: i32[] = [6, 4, 0, 0, 8, 0, 0]
+
+// Build time in frames, and what a tower becomes when it is finished: a tower is not a passive
+// rect, it is a POOLED UNIT armed at the tower's cell with no move order. That reuses `set_soldier`
+// wholesale rather than teaching the combat system about buildings.
+export let B_BUILD: i32[] = [0, 240, 420, 0, 600, 300, 420]
+export let TOWER_HP: i32 = 160
+export let TOWER_RANGE: i32 = 64
+export let TOWER_DMG: i32 = 6
+export let TOWER_COOL: i32 = 40
+
+// ── Hero progression ─────────────────────────────────────────────────────────
+// XP thresholds per level. The hero is the campaign's through-line — it is the only thing that
+// survives a mission, which is what makes this a campaign rather than three skirmishes.
+export let HERO_XP: i32[] = [0, 12, 30, 56, 92]
+export let HERO_MAX_LV: i32 = 4
+
+export function heroHp(level: i32): i32 { return 90 + level * 26 }
+export function heroDmg(level: i32): i32 { return 9 + level * 3 }
+
+export function heroLevelFor(xp: i32): i32 {
+  let lv: i32 = 0
+  while (lv < HERO_MAX_LV && xp >= HERO_XP[lv + 1]) { lv = lv + 1 }
+  return lv
+}

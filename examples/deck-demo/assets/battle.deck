@@ -1,0 +1,121 @@
+# Iron Gate — battle theme (4 bars, loops).
+# Dual-engine: arpeggiated pulse lead, dark wave bass, noise hats, PCM stabs + kick.
+deck 1
+bpm 148
+
+track Lead id lead gen gameBoyDmg * 4
+  gen type pulse duty 25 env_mode constant vol 13
+  gen arp_rate 10 arp_semis 7
+  note 60 0 0.25 v 120
+  note 60 0.5 0.25 v 110
+  note 63 1 0.25 v 120
+  note 65 1.5 0.25 v 115
+  note 67 2 0.5 v 127
+  note 65 2.5 0.25 v 110
+  note 63 3 0.25 v 105
+  note 60 3.5 0.25 v 115
+  note 62 4 0.25 v 120
+  note 65 4.5 0.25 v 115
+  note 67 5 0.25 v 125
+  note 70 5.5 0.25 v 120
+  note 72 6 0.5 v 127
+  note 70 6.5 0.25 v 110
+  note 67 7 0.5 v 115
+  note 60 8 0.25 v 120
+  note 63 8.5 0.25 v 115
+  note 65 9 0.25 v 120
+  note 67 9.5 0.25 v 125
+  note 68 10 0.5 v 127
+  note 67 10.5 0.25 v 110
+  note 65 11 0.5 v 115
+  note 63 12 0.25 v 120
+  note 60 12.5 0.25 v 110
+  note 58 13 0.5 v 115
+  note 60 14 1 v 127
+  note 55 15 1 v 100
+
+track Bass id bass gen gameBoyDmg * 4
+  gen type wave wave_shape square vol 14
+  note 36 0 0.5 v 127
+  note 36 0.5 0.5 v 90
+  note 36 1 0.5 v 120
+  note 39 1.5 0.5 v 110
+  note 41 2 0.5 v 127
+  note 41 2.5 0.5 v 90
+  note 39 3 0.5 v 115
+  note 36 3.5 0.5 v 100
+  note 38 4 0.5 v 127
+  note 38 4.5 0.5 v 90
+  note 41 5 0.5 v 120
+  note 43 5.5 0.5 v 115
+  note 44 6 0.5 v 127
+  note 43 6.5 0.5 v 100
+  note 41 7 1 v 110
+  note 36 8 0.5 v 127
+  note 36 8.5 0.5 v 90
+  note 39 9 0.5 v 120
+  note 41 9.5 0.5 v 115
+  note 43 10 0.5 v 127
+  note 41 10.5 0.5 v 100
+  note 39 11 1 v 110
+  note 34 12 0.5 v 120
+  note 36 12.5 0.5 v 110
+  note 31 13 1 v 115
+  note 36 14 1 v 127
+  note 36 15 1 v 100
+
+track Noise id drums gen gameBoyDmg * 4
+  gen type noise noise_mode short vol 11 env_mode step
+  note 72 0.5 0.08 v 90
+  note 72 1.5 0.08 v 80
+  note 60 2 0.1 v 120
+  note 72 2.5 0.08 v 85
+  note 72 3.5 0.08 v 90
+  note 72 4.5 0.08 v 85
+  note 60 5 0.1 v 115
+  note 72 5.5 0.08 v 80
+  note 72 6.5 0.08 v 90
+  note 60 7 0.12 v 127
+  note 72 8.5 0.08 v 90
+  note 72 9.5 0.08 v 80
+  note 60 10 0.1 v 120
+  note 72 10.5 0.08 v 85
+  note 72 11.5 0.08 v 90
+  note 60 12 0.1 v 115
+  note 72 13 0.08 v 100
+  note 60 14 0.12 v 127
+  note 72 15 0.08 v 110
+  note 60 15.5 0.1 v 100
+
+track Kick id kick gen gbaDirectSound * 4
+  gen waveform pulse duty 50 vol 15 bitcrush true pitch_drop -14 pitch_dec 0.05
+  adsr a 0 d 0.1 s 0 r 0.03
+  note 34 0 0.12 v 127
+  note 34 1 0.12 v 110
+  note 34 2 0.12 v 127
+  note 34 3 0.12 v 110
+  note 34 4 0.12 v 127
+  note 34 5 0.12 v 110
+  note 34 6 0.12 v 127
+  note 34 7 0.12 v 120
+  note 34 8 0.12 v 127
+  note 34 9 0.12 v 110
+  note 34 10 0.12 v 127
+  note 34 11 0.12 v 110
+  note 34 12 0.12 v 127
+  note 34 13 0.12 v 110
+  note 34 14 0.12 v 127
+  note 34 15 0.12 v 120
+
+track Stab id stab gen gbaDirectSound * 4
+  gen waveform sawtooth vol 11 bitcrush true
+  adsr a 0 d 0.15 s 4 r 0.1
+  gen pitch_drop -5 pitch_dec 0.08
+  note 48 1.75 0.2 v 110
+  note 51 3.75 0.2 v 115
+  note 48 5.75 0.2 v 110
+  note 55 7.5 0.35 v 127
+  note 48 9.75 0.2 v 110
+  note 51 11.75 0.2 v 115
+  note 53 13.75 0.25 v 120
+  note 48 15.5 0.4 v 127

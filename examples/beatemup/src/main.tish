@@ -1,0 +1,357 @@
+// BEATEMUP — a Final Fight-shaped brawler for the Game Boy Advance.
+//
+// Controls
+//   A  attack — press it again as one lands and it CHAINS; the third link knocks down
+//   B  jump. Attack in the air for a jump kick, which nothing on the ground can reach
+//   L  heavy — slow, and it puts them on the floor
+//   R  grab — no reach at all, always knocks down, hits hardest
+//   A+L  panic move — hits both sides at once and costs you health for the privilege
+//   ↑ / ↓  walk up and down the road (the depth axis).  → →  run.  START advances.
+//
+// ── The road is the game ─────────────────────────────────────────────────────────────────────────
+// Everything here that is not in a side-scroller comes from one number: a character's Y is where it
+// stands ACROSS the street, and that decides where it draws, what order it draws in, and whether a
+// punch can reach it. `packages/beatemup.tish` has the full account; the thing to know here is that
+// the walkable band is only 38 rows deep, so the whole layout — HUD at the top, treeline, then road
+// — exists to make those 38 rows legible.
+//
+// ── Waves, and why the walls close ───────────────────────────────────────────────────────────────
+// A brawler is a corridor of rooms. The camera locks to an arena, a wave spawns, and the right-hand
+// wall does not open until the wave is dead. Without the lock the correct way to play is to walk
+// right forever, and the game has no encounters at all.
+import {
+  frame, keys_edge, keys_held, key_pressed, backdrop, camera_set,
+  ui_begin, ui_clear_rect,
+  sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_visible, sprite_set_hud,
+  sprite_set_depth,
+} from 'cargo:tish_agb'
+import { heroArt } from 'sheet64:../assets/hero.png'
+import { ninjaArt } from 'sheet64:../assets/hero2.png'
+import { bruiserArt } from 'sheet64:../assets/hero3.png'
+import { bossArt } from 'sheet64:../assets/warrior.png'
+import { hitArt } from 'sheet32:../assets/hit.png'
+import { shadowArt } from 'sheet:../assets/shadow.png'
+import { digitArt } from 'sheet:../assets/digits.png'
+import { stageAtlas } from 'background:../assets/stage.png'
+import { big } from 'font:../../../assets/fonts/kenney-high-square.ttf@16'
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import * as bu from '../../../packages/beatemup'
+import * as motion from '../../../packages/motion'
+import { parallaxLayer } from '../../../packages/parallax'
+import { defineRoster, C_HERO, C_NINJA, C_BRUISER, C_BOSS } from './chars'
+import { LANE_TOP, LANE_BOTTOM, NAME_HERO,
+         ATLAS_COLS, GRID_W, GRID_H, MUL_FAR, MUL_MID, MUL_NEAR,
+         LAYER_FAR, LAYER_MID, LAYER_NEAR } from './frames'
+import * as hud from './hud'
+import { BUILD_ID } from './buildid'
+
+// ── the level ────────────────────────────────────────────────────────────────────────────────────
+// Three arenas, one screen each. The backdrop is a 256px wrapping image so it repeats as you walk —
+// which is what every arcade brawler did, for the same reason.
+let ARENAS: i32 = 3
+let ARENA_W: i32 = 240
+let LEVEL_W: i32 = ARENAS * ARENA_W
+
+// Which characters each wave sends, three at a time. -1 ends the wave.
+let WAVE: i32[] = [
+  C_NINJA, C_NINJA, 0 - 1, 0 - 1, 0 - 1, 0 - 1,
+  C_NINJA, C_BRUISER, C_NINJA, C_BRUISER, 0 - 1, 0 - 1,
+  C_BRUISER, C_NINJA, C_BOSS, C_NINJA, C_BRUISER, 0 - 1,
+]
+let WAVE_STRIDE: i32 = 6
+
+let M_TITLE: i32 = 0
+let M_PLAY: i32 = 1
+let M_CLEARED: i32 = 2
+let M_DEAD: i32 = 3
+let M_WIN: i32 = 4
+
+let mode: i32 = M_TITLE
+let modeT: i32 = 0
+let arena: i32 = 0
+let spawned: i32 = 0          // how far into this arena's wave list we have got
+let camX: i32 = 0
+let shake: i32 = 0
+let hitT: i32 = 0
+let frameNo: i32 = 0
+let hudDirty: i32 = 1
+
+// Three sprites per actor — body, attack overlay, shadow — plus one impact burst and eight digits.
+// That is 21 sprites; the four 64x64 bodies and four overlays are 16 KB of the 32 KB sprite VRAM,
+// which is why the engine caps at four actors.
+let BODY: i32[] = [0, 0, 0, 0]
+let SHADOW: i32[] = [0, 0, 0, 0]
+let hitSpr: i32 = 0
+
+// ── boot ─────────────────────────────────────────────────────────────────────────────────────────
+backdrop(0x120c18)
+// ⚠️ NEAR FIRST. All three backdrops share priority 3 — sprites are at 2 — and two backgrounds on
+// the same priority break the tie by CREATION ORDER, with the first one drawn in front. Build them
+// near-to-far or the road ends up behind the sky.
+const BG_NEAR: i32 = parallaxLayer(stageAtlas, ATLAS_COLS, GRID_W, GRID_H, LAYER_NEAR, 3, MUL_NEAR, 0)
+const BG_MID: i32 = parallaxLayer(stageAtlas, ATLAS_COLS, GRID_W, GRID_H, LAYER_MID, 3, MUL_MID, 0)
+const BG_FAR: i32 = parallaxLayer(stageAtlas, ATLAS_COLS, GRID_W, GRID_H, LAYER_FAR, 3, MUL_FAR, 0)
+ui_begin()
+defineRoster(heroArt, ninjaArt, bruiserArt, bossArt)
+bu.beatemupSetRoad(LANE_TOP, LANE_BOTTOM)
+motion.motionInit()
+
+function sheetOf(c: i32): i32 {
+  if (c === C_HERO) { return heroArt }
+  if (c === C_NINJA) { return ninjaArt }
+  if (c === C_BRUISER) { return bruiserArt }
+  return bossArt
+}
+
+let s: i32 = 0
+while (s < 4) {
+  BODY[s] = sprite_new(sheetOf(s))
+  SHADOW[s] = sprite_new(shadowArt)
+  sprite_set_visible(BODY[s], 0)
+  sprite_set_visible(SHADOW[s], 0)
+  s = s + 1
+}
+hitSpr = sprite_new(hitArt)
+sprite_set_visible(hitSpr, 0)
+// ONE attack overlay for the whole cast — see beatemupSetFxSprite on why four of them was a crash.
+const FXSPR: i32 = sprite_new(sheetOf(0))
+sprite_set_visible(FXSPR, 0)
+bu.beatemupSetFxSprite(FXSPR)
+
+let d0: i32 = sprite_new(digitArt)
+let d1: i32 = sprite_new(digitArt)
+let d2: i32 = sprite_new(digitArt)
+let d3: i32 = sprite_new(digitArt)
+let d4: i32 = sprite_new(digitArt)
+let d5: i32 = sprite_new(digitArt)
+let d6: i32 = sprite_new(digitArt)
+let d7: i32 = sprite_new(digitArt)
+sprite_set_hud(d0, 1)
+sprite_set_hud(d1, 1)
+sprite_set_hud(d2, 1)
+sprite_set_hud(d3, 1)
+sprite_set_hud(d4, 1)
+sprite_set_hud(d5, 1)
+sprite_set_hud(d6, 1)
+sprite_set_hud(d7, 1)
+
+// ── modes ────────────────────────────────────────────────────────────────────────────────────────
+function enterTitle() {
+  bu.beatemupClear()
+  hud.hudClear()
+  hideDigits()
+  mode = M_TITLE
+  modeT = 0
+  camX = 0
+  camera_set(0, 0)
+  hud.hudBanner(big, "BEAT 'EM UP")
+  hud.hudSubtitle(small, "PRESS START")
+}
+
+function hideDigits() {
+  sprite_set_visible(d0, 0)
+  sprite_set_visible(d1, 0)
+  sprite_set_visible(d2, 0)
+  sprite_set_visible(d3, 0)
+  sprite_set_visible(d4, 0)
+  sprite_set_visible(d5, 0)
+  sprite_set_visible(d6, 0)
+  sprite_set_visible(d7, 0)
+}
+
+function enterPlay() {
+  bu.beatemupClear()
+  hud.hudClear()
+  hud.hudBanner(big, "")
+  hud.hudSubtitle(small, "")
+  mode = M_PLAY
+  modeT = 0
+  arena = 0
+  camX = 0
+  bu.beatemupSpawn(bu.PLAYER, C_HERO, 40, 130, BODY[0], SHADOW[0])
+  hud.hudBindDigits(d0, d1, d2, d3, d4, d5, d6, d7)
+  hud.hudFrame(small, NAME_HERO)
+  lockArena()
+  spawned = 0
+  fillWave()
+  hudDirty = 1
+}
+
+// The walls. While a wave is alive the player may only move inside this arena; once it is dead the
+// right wall opens onto the next one.
+function lockArena() {
+  bu.beatemupSetBounds(arena * ARENA_W + 12, arena * ARENA_W + ARENA_W - 12)
+}
+
+function openGate() {
+  bu.beatemupSetBounds(arena * ARENA_W + 12, (arena + 1) * ARENA_W + ARENA_W - 12)
+}
+
+// Keep up to three enemies on the road, drawing from this arena's list until it runs out.
+function fillWave() {
+  let slot: i32 = 1
+  while (slot < bu.ACTORS) {
+    if (bu.beatemupAlive(slot) === 0) {
+      if (spawned < WAVE_STRIDE) {
+        let c: i32 = WAVE[arena * WAVE_STRIDE + spawned]
+        if (c >= 0) {
+          spawned = spawned + 1
+          // Enter from whichever edge is further from the player, so a wave never lands on top of
+          // them — the one thing a brawler must never do while the walls are shut.
+          let px: i32 = bu.beatemupX(bu.PLAYER)
+          let left: i32 = arena * ARENA_W + 20
+          let right: i32 = arena * ARENA_W + ARENA_W - 20
+          let x: i32 = right
+          if (px - left > right - px) { x = left }
+          bu.beatemupSpawn(slot, c, x, LANE_TOP + 6 + slot * 11, BODY[slot], SHADOW[slot])
+        } else {
+          slot = bu.ACTORS
+        }
+      } else {
+        slot = bu.ACTORS
+      }
+    }
+    slot = slot + 1
+  }
+}
+
+function waveExhausted(): i32 {
+  if (spawned >= WAVE_STRIDE) { return 1 }
+  if (WAVE[arena * WAVE_STRIDE + spawned] < 0) { return 1 }
+  return 0
+}
+
+// ── reactions ────────────────────────────────────────────────────────────────────────────────────
+function react(ev: i32) {
+  if ((ev & bu.EV_HIT) > 0) {
+    shake = 5
+    hitT = 8
+    sprite_set_visible(hitSpr, 1)
+    sprite_set_depth(hitSpr, 250)
+    hudDirty = 1
+  }
+  if ((ev & bu.EV_TAKEN) > 0) { shake = 7 hudDirty = 1 }
+  if ((ev & bu.EV_KO) > 0) { shake = 9 hudDirty = 1 }
+  if ((ev & bu.EV_PLAYER_DEAD) > 0) {
+    mode = M_DEAD
+    modeT = 0
+    hud.hudBanner(big, "GAME OVER")
+    hud.hudSubtitle(small, "START TO TRY AGAIN")
+  }
+}
+
+function hitStep() {
+  if (hitT <= 0) { return }
+  hitT = hitT - 1
+  sprite_set_frame(hitSpr, 3 - (hitT >> 1))
+  // World coordinates, like the fighters — the engine applies the camera.
+  sprite_set_pos(hitSpr, bu.beatemupLastHitX() - 16 + shakeX(),
+                 bu.beatemupLastHitY() - 16 + shakeY())
+  if (hitT === 0) { sprite_set_visible(hitSpr, 0) }
+}
+
+function shakeStep() { if (shake > 0) { shake = shake - 1 } }
+
+function shakeX(): i32 {
+  if (shake <= 0) { return 0 }
+  let amp: i32 = (shake + 1) >> 1
+  if ((shake & 1) === 1) { return amp }
+  return 0 - amp
+}
+
+function shakeY(): i32 {
+  if (shake <= 0) { return 0 }
+  let amp: i32 = shake >> 2
+  if ((shake & 2) === 2) { return amp }
+  return 0 - amp
+}
+
+// ── camera ───────────────────────────────────────────────────────────────────────────────────────
+// Follows the player, clamped to the arena the walls currently allow. It moves at most two pixels a
+// frame: a camera that snaps is a camera that makes the backdrop stutter every time you turn round.
+function camera() {
+  let want: i32 = bu.beatemupX(bu.PLAYER) - 110
+  let lo: i32 = arena * ARENA_W
+  let hi: i32 = lo
+  if (mode === M_CLEARED) { hi = (arena + 1) * ARENA_W }
+  if (want < lo) { want = lo }
+  if (want > hi) { want = hi }
+  if (want > LEVEL_W - 240) { want = LEVEL_W - 240 }
+  if (want < 0) { want = 0 }
+  if (want > camX + 3) { want = camX + 3 }
+  if (want < camX - 3) { want = camX - 3 }
+  camX = want
+  camera_set(camX, 0)
+}
+
+// ── the loop ─────────────────────────────────────────────────────────────────────────────────────
+function playStep(edge: i32) {
+  motion.motionPushPad(bu.PLAYER, keys_held(), edge)
+  let ev: i32 = bu.beatemupTick()
+  if (ev !== 0) { react(ev) }
+
+  if (mode !== M_PLAY) { return }
+
+  if ((ev & bu.EV_KO) > 0) { fillWave() }
+  if ((ev & bu.EV_CLEARED) > 0) {
+    if (waveExhausted() === 1) {
+      if (arena >= ARENAS - 1) {
+        mode = M_WIN
+        modeT = 0
+        hud.hudBanner(big, "YOU WIN")
+        hud.hudSubtitle(small, "START TO PLAY AGAIN")
+        return
+      }
+      mode = M_CLEARED
+      modeT = 0
+      openGate()
+      hud.hudBanner(big, "GO!")
+      return
+    }
+    fillWave()
+  }
+}
+
+
+
+enterTitle()
+
+while (true) {
+  let edge: i32 = keys_edge()
+  frameNo = frameNo + 1
+  modeT = modeT + 1
+
+  if (mode === M_TITLE) {
+    if ((edge & 8) > 0) { enterPlay() }
+  } else if (mode === M_PLAY) {
+    playStep(edge)
+    shakeStep()
+    hitStep()
+    camera()
+    bu.beatemupDraw(shakeX(), shakeY())
+    if (hudDirty === 1) { hud.hudUpdate(bu.beatemupHudView(), bu.beatemupScore()) hudDirty = 0 }
+  } else if (mode === M_CLEARED) {
+    // The gate is open; walking into the next arena starts its wave and shuts it again.
+    motion.motionPushPad(0, keys_held(), edge)
+    bu.beatemupTick()
+    shakeStep()
+    hitStep()
+    camera()
+    bu.beatemupDraw(shakeX(), shakeY())
+    if (bu.beatemupX(bu.PLAYER) > (arena + 1) * ARENA_W + 30) {
+      arena = arena + 1
+      lockArena()
+      spawned = 0
+      fillWave()
+      mode = M_PLAY
+      modeT = 0
+      hud.hudBanner(big, "")
+    }
+  } else if (mode === M_DEAD || mode === M_WIN) {
+    bu.beatemupDraw(0, 0)
+    if ((edge & 8) > 0) { enterTitle() }
+    if (modeT > 420) { enterTitle() }
+  }
+
+  frame()
+}

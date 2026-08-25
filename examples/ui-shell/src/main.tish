@@ -1,0 +1,95 @@
+// ui-shell — the same front end, built on `packages/ui.tish` instead of by hand.
+//
+// WHY THIS EXISTS. `packages/drop_shell.tish` draws its title, menu, arcana select and records
+// screen with raw `dropCentre` calls and its own dirty tracking. That worked, and it shipped a bug
+// that is worth being precise about: a cursor move set the same "repaint" flag a screen change
+// does, so pressing DOWN cleared all 240x160 and re-shaped every string — more work than fits
+// before the next vblank, so the whole menu visibly blinked out for a frame.
+//
+// I fixed that by hand, row by row. But dirty-region repainting is not a Magical Drop problem, and
+// `packages/ui.tish` already solves it: `makeButtonGroup(...).nav()` repaints exactly the two
+// buttons whose selection changed, and `uiBake` / `uiReplay` solve a screen's layout once and
+// replay it with no layout at all.
+//
+// So before migrating the shell onto it, this measures whether the claim holds — on both axes:
+//
+//   FUNCTIONALITY  a cursor move must not blank the screen, and must land on the right entry.
+//   PERFORMANCE    a cursor move must not re-lay-out. `uiLayoutStats()` reports the last pass's
+//                  node count and per-phase ticks, so "did that press cost a full layout" is a
+//                  number rather than an impression.
+//
+// The comparison it is against is schlop/drop-gba's `magical-drop`, whose front end does the same job with
+// hand-rolled row invalidation.
+//
+// CONTROLS  Up/Down move · A/Start select · Select forces a FULL re-render, for the contrast.
+import { uif } from 'font:../../../assets/fonts/ark-pixel-10px.ttf@10'
+import { titleFont } from 'font:../../../assets/fonts/alagard.ttf@16'
+import { backdrop, frame, keys_edge, log } from 'cargo:tish_agb'
+import {
+  uiInit, uiRender, uiLayoutStats, makeButtonGroup
+} from '../../../packages/ui'
+
+let BTN_A: i32 = 0
+let BTN_SELECT: i32 = 2
+let BTN_START: i32 = 3
+let BTN_UP: i32 = 6
+let BTN_DOWN: i32 = 7
+
+interface Run { t: i32, navs: i32, renders: i32, shown: i32 }
+let G: Run = { t: 0, navs: 0, renders: 0, shown: -1 }
+
+// The same five entries the assembled game's menu carries, so the comparison is like for like.
+let menu = makeButtonGroup([
+  { label: "STORY" },
+  { label: "SELF CHALLENGE" },
+  { label: "VS" },
+  { label: "PUZZLE" },
+  { label: "RECORDS" },
+])
+
+backdrop(0x0E0C16)
+// `stats: 1` is what makes `uiLayoutStats()` report anything; without it every number reads 0.
+uiInit({ font: uif, stats: 1 })
+
+function paintAll() {
+  G.renders = G.renders + 1
+  uiRender({
+    dir: "col", pad: 6, gap: 4, align: "center",
+    children: [
+      { text: "MAGICAL DROP", font: titleFont, color: "title" },
+      { text: "ui.tish front end", color: "dim" },
+      menu.view(null),
+      { text: "UP/DOWN move - SELECT forces a full re-render", color: "dim" },
+    ],
+  })
+  log("FULL RENDER " + G.renders + " " + uiLayoutStats())
+}
+
+paintAll()
+log("UI SHELL START index " + menu.index())
+
+while (true) {
+  G.t = G.t + 1
+  let k = keys_edge()
+
+  // Feed the group the pad. `nav()` returns 1 when the selection moved, and has ALREADY repainted
+  // the two buttons involved — no full render, and by construction no full clear either.
+  if ((k & (1 << BTN_UP)) !== 0 || (k & (1 << BTN_DOWN)) !== 0) {
+    if (menu.nav() === 1) {
+      G.navs = G.navs + 1
+      // The measurement. A nav that re-laid-out would report a node count here; one that only
+      // repainted two buttons reports the same numbers the last full render left behind, which is
+      // why the assertion compares n against the full render's rather than reading it alone.
+      log("NAV " + G.navs + " index " + menu.index() + " " + uiLayoutStats())
+    }
+  }
+
+  // The contrast case, on purpose: a full re-render is what the old shell did for EVERY press.
+  if ((k & (1 << BTN_SELECT)) !== 0) { paintAll() }
+
+  if ((k & (1 << BTN_A)) !== 0 || (k & (1 << BTN_START)) !== 0) {
+    log("PICKED " + menu.index())
+  }
+
+  frame()
+}

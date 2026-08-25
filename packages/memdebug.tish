@@ -1,0 +1,95 @@
+// memdebug.tish — what is held, where, and whether it is growing.
+//
+// Every memory bug in this codebase has had the same shape: something allocated per screen or per
+// scene and released by nobody, invisible until an unrelated allocation failed somewhere else
+// entirely — a 16-byte request dying on the way back to the overworld because a menu three files
+// away kept a node tree. The failure never points at the cause, so the only way to find one has
+// been to bisect by hand.
+//
+// This turns that into a number you can watch:
+//
+//   memSnapshot("enter town")     one line: heap (and delta), entities, sprites, UI pools, plus a
+//                                 line from every component that registered `onMemReport`
+//   memSnapshot("left shop")      call it at both sides of anything that opens and closes
+//
+// A leak is then obvious: the same tag's heap drops a little further every lap, or a registry that
+// should be flat (`ptrs`, `pool`) climbs. Costs nothing when you don't call it — the report
+// functions are only invoked from here.
+//
+// Typical use, at the scene boundaries and around menus:
+//
+//   memSnapshot("boot")
+//   loadScene(buildTown); memSnapshot("town")
+//   openShop();           memSnapshot("shop open")
+//   closeShop();          memSnapshot("shop closed")   <- compare against "town"
+import { heap_free, ui_mem_report, log } from 'cargo:tish_agb'
+// ⚠️ NO CRATE IMPORT. A memory debugger that only `tish_gba_game_engine` games can link is one the
+// ROMs most likely to be fighting for heap cannot use — they are the ones on the tight budget, and
+// they bisected `heap_free()` by hand against a hardcoded ladder of probe sizes instead
+// (schlopai/chuggie-engine#68). One native was the whole reason.
+//
+// Entity count is now supplied, and reads 0 when it is not. A game with no entities HAS no entities;
+// reporting 0 is the honest answer, not a degraded one.
+let ENT = { count: null }
+
+/// `fn(): i32` — e.g. `memSetEntityCount(entity_count)` in a game that links the engine.
+export function memSetEntityCount(fn) { ENT.count = fn }
+
+function entCount(): i32 {
+  if (ENT.count !== null) { return ENT.count() }
+  return 0
+}
+import { POOL, PTRS, RESETS, REPORTS, memTraceOn, memTraceOff } from './scene_hooks'
+
+// Previous snapshot, so every line carries a delta. A struct field, not a bare module scalar —
+// reassigning those from inside a function is unreliable on GBA.
+let LAST = { heap: 0 - 1 }
+
+function signed(n) {
+  if (n > 0) { return "+" + n }
+  return "" + n
+}
+
+// memSnapshot(tag) — log one line for the shared pools, then one per registered component.
+//
+// `heap` is free bytes and the bracketed number is the change since the previous snapshot, so a
+// leak reads directly off the log. `ents` is live entities, `pool` is the UI icon-sprite pool,
+// `ptrs` is the menu-cursor registry (this one must be FLAT — it growing is a leak by itself, and
+// was one), `hooks` is how many components registered a scene reset.
+export function memSnapshot(tag) {
+  let h = heap_free(64)
+  let d = ""
+  if (LAST.heap >= 0) { d = "  [" + signed(h - LAST.heap) + "]" }
+  LAST.heap = h
+  log("MEM " + tag + "  heap " + h + d
+      + "  ents " + entCount()
+      + "  pool " + POOL.sprites.length + "/" + POOL.n
+      + "  ptrs " + PTRS.list.length
+      + "  hooks " + RESETS.list.length)
+  log("    " + ui_mem_report())
+  let i = 0
+  while (i < REPORTS.list.length) {
+    log("    " + REPORTS.list[i]())
+    i = i + 1
+  }
+}
+
+// memTrace() — snapshot EVERY scene load and EVERY menu open/close, automatically.
+//
+// One call, usually right after the *Init block. From then on the log has a line per screen
+// boundary for the whole session, so a leak shows up as the same tag's delta never returning to 0 —
+// without having to guess in advance which screen to instrument.
+export function memTrace() {
+  memTraceOn(memSnapshot)
+}
+
+export function memTraceStop() {
+  memTraceOff()
+}
+
+// memFree() — free bytes, for a game that wants to assert or gate on it in its own loop.
+export function memFree() { return heap_free(64) }
+
+// memReset() — forget the baseline, so the next snapshot reports no delta. Use after a deliberate
+// large change (a scene load) that would otherwise swamp the numbers you care about.
+export function memReset() { LAST.heap = 0 - 1 }

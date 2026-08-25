@@ -1,0 +1,92 @@
+// fx.tish — pooled, entity-free hit / cast visuals.
+//
+// A transient effect MUST be pooled: spawning an entity per impact costs a frame exactly when the
+// action peaks (the topdown RPG port's pooled effects module used the same pattern). These are plain
+// world sprites (sprite_set_hud 0), so callers pass WORLD coords and the camera handles the rest.
+
+import {
+  sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_visible, sprite_set_hud
+} from 'cargo:tish_agb'
+
+// wsg16 frames usable as effect art (scripts/gen_wsg.py): 20 = hollow ring, 21 = filled orb.
+export let FXF_RING: i32 = 20
+export let FXF_ORB: i32 = 21
+
+let FX_N: i32 = 8
+let fxSpr: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let fxTtl: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let fxX: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let fxY: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let fxVy: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let fxBuilt: i32 = 0
+
+export function fxBuild(sheet: i32) {
+  if (fxBuilt !== 0) { return }
+  fxBuilt = 1
+  let i: i32 = 0
+  while (i < FX_N) {
+    let s: i32 = sprite_new(sheet)
+    sprite_set_hud(s, 0)
+    sprite_set_visible(s, 0)
+    fxSpr[i] = s
+    fxTtl[i] = 0
+    i = i + 1
+  }
+}
+
+export function fxClear() {
+  let i: i32 = 0
+  while (i < FX_N) {
+    fxTtl[i] = 0
+    sprite_set_visible(fxSpr[i], 0)
+    i = i + 1
+  }
+}
+
+/// Show `frame` at world (x, y) for `ttl` frames, drifting `vy` px/frame. Drops silently when full.
+export function fxSpawn(frame: i32, x: i32, y: i32, ttl: i32, vy: i32) {
+  if (fxBuilt === 0) { return }
+  let i: i32 = 0
+  while (i < FX_N) {
+    if (fxTtl[i] <= 0) {
+      fxTtl[i] = ttl
+      fxX[i] = x - 8
+      fxY[i] = y - 8
+      fxVy[i] = vy
+      sprite_set_frame(fxSpr[i], frame)
+      sprite_set_pos(fxSpr[i], fxX[i], fxY[i])
+      sprite_set_visible(fxSpr[i], 1)
+      return
+    }
+    i = i + 1
+  }
+}
+
+export function fxHit(x: i32, y: i32) { fxSpawn(FXF_ORB, x, y, 10, 0 - 1) }
+export function fxCastRing(x: i32, y: i32) { fxSpawn(FXF_RING, x, y, 14, 0) }
+export function fxHealRing(x: i32, y: i32) { fxSpawn(FXF_RING, x, y, 16, 0 - 1) }
+
+/// One line of a swing: three orbs stepped along the facing direction.
+export function fxSwing(x: i32, y: i32, dx: i32, dy: i32) {
+  fxSpawn(FXF_ORB, x + Math.imul(dx, 8), y + Math.imul(dy, 8), 8, 0)
+  fxSpawn(FXF_ORB, x + Math.imul(dx, 14), y + Math.imul(dy, 14), 8, 0)
+}
+
+export function fxStep() {
+  if (fxBuilt === 0) { return }
+  let i: i32 = 0
+  while (i < FX_N) {
+    if (fxTtl[i] > 0) {
+      fxTtl[i] = fxTtl[i] - 1
+      if (fxTtl[i] <= 0) {
+        sprite_set_visible(fxSpr[i], 0)
+      } else {
+        fxY[i] = fxY[i] + fxVy[i]
+        sprite_set_pos(fxSpr[i], fxX[i], fxY[i])
+        // flicker out over the last few frames
+        if (fxTtl[i] < 5) { sprite_set_visible(fxSpr[i], fxTtl[i] & 1) }
+      }
+    }
+    i = i + 1
+  }
+}

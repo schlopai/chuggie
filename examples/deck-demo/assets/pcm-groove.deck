@@ -1,0 +1,55 @@
+# PCM-only groove — gbaDirectSound voices only (no LR35902).
+# Use this to hear mixer underruns clearly when UI work starves audio_pump.
+deck 1
+bpm 120
+
+track Kick id kick gen gbaDirectSound * 4
+  gen waveform pulse duty 50 vol 15 bitcrush true pitch_drop -14 pitch_dec 0.05
+  adsr a 0 d 0.1 s 0 r 0.03
+  note 34 0 0.12 v 127
+  note 34 1 0.12 v 110
+  note 34 2 0.12 v 127
+  note 34 2.5 0.1 v 100
+  note 34 3 0.12 v 120
+  note 34 4 0.12 v 127
+  note 34 5 0.12 v 110
+  note 34 6 0.12 v 127
+  note 34 7 0.12 v 115
+  note 34 8 0.12 v 127
+  note 34 9 0.12 v 110
+  note 34 10 0.12 v 127
+  note 34 10.5 0.1 v 100
+  note 34 11 0.12 v 120
+  note 34 12 0.12 v 127
+  note 34 13 0.12 v 110
+  note 34 14 0.12 v 127
+  note 34 15 0.12 v 120
+
+track Lead id lead gen gbaDirectSound * 4
+  gen waveform triangle vol 11 bitcrush true
+  adsr a 0.02 d 0.15 s 8 r 0.1
+  note 60 0 0.5 v 100
+  note 63 0.5 0.5 v 95
+  note 67 1 0.5 v 110
+  note 63 1.5 0.5 v 90
+  note 60 2 0.5 v 100
+  note 58 2.5 0.5 v 90
+  note 55 3 1 v 105
+  note 60 4 0.5 v 100
+  note 63 4.5 0.5 v 95
+  note 67 5 0.5 v 110
+  note 70 5.5 0.5 v 115
+  note 67 6 0.5 v 100
+  note 63 6.5 0.5 v 90
+  note 60 7 1 v 105
+  note 58 8 0.5 v 95
+  note 60 8.5 0.5 v 100
+  note 63 9 0.5 v 105
+  note 67 9.5 0.5 v 110
+  note 63 10 1 v 100
+  note 60 11 1 v 95
+  note 55 12 0.5 v 90
+  note 58 12.5 0.5 v 95
+  note 60 13 1 v 100
+  note 63 14 1 v 110
+  note 60 15 1 v 105

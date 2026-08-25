@@ -1,0 +1,505 @@
+// VERSUS — a Street Fighter-shaped 1v1 fighter for the Game Boy Advance.
+//
+// Controls
+//   B light punch · A heavy punch · R light kick · L heavy kick
+//   A+B together   throw (unblockable, close range)
+//   ← away         block, while their attack is out.  ↓ crouch (↓ + button = a low)
+//   ↑ jump (↑← / ↑→ to move through the air).  START advances.  SELECT toggles the debug overlay.
+//   Specials are motions: ↓ ↘ → + A is everyone's, and each character has a second one on L.
+//
+// ── There is no entity system in this game ───────────────────────────────────────────────────────
+// Every other example in this repo mounts components and calls `step()`. This one does not: the
+// main loop is `fighterTick(); fighterDraw(); frame()` and nothing else, for the same reason
+// examples/rap-dojo does it — the engine's `behave()` hooks dispatch through a boxed `Value`
+// trampoline at roughly 42 ticks a callback, and a fighter has to run two state machines, two
+// hitboxes, two hurtboxes and a push-out inside a 4389-tick frame with room left over for the HUD.
+// Flat `i32[]` state and one compiled tick is what buys that room. See packages/fighter.tish.
+//
+// ── One background layer, and why it is not a banded one ─────────────────────────────────────────
+// The stage is a single opaque image. It began as a `bg_bands` layer — per-scanline parallax, three
+// depths for free — and had to stop being one, because banding turns a DROPPED frame into a CORRUPT
+// frame: the HBlank DMA re-arms mid-scanout and the bottom of the screen jumps sideways. This game
+// overruns on its busiest frames, so that was several visible tears a second. src/stage.tish has
+// the full account; it is the most useful thing in this example.
+import {
+  frame, keys_edge, keys_held, key_pressed, backdrop, camera_set,
+  bg_new, bg_set_visible, ui_begin, ui_clear_rect, ui_rect,
+  sprite_new, sprite_clear, sprite_set_pos, sprite_set_frame, sprite_set_visible, sprite_set_hud,
+  ticks,
+} from 'cargo:tish_agb'
+import { heroArt } from 'sheet64:../assets/hero.png'
+import { hero2Art } from 'sheet64:../assets/hero2.png'
+import { hero3Art } from 'sheet64:../assets/hero3.png'
+import { warriorArt } from 'sheet64:../assets/warrior.png'
+import { sparkArt } from 'sheet32:../assets/spark.png'
+import { digitArt } from 'sheet:../assets/digits.png'
+import { stageImg } from 'background:../assets/stage.png'
+import { big } from 'font:../../../assets/fonts/kenney-high-square.ttf@16'
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import * as fighter from '../../../packages/fighter'
+import * as motion from '../../../packages/motion'
+import { defineRoster } from './chars'
+import { FLOOR_Y, F_PORTRAIT, NAME_HERO, NAME_HERO2, NAME_HERO3, NAME_WARRIOR } from './frames'
+import * as hud from './hud'
+import * as ai from './ai'
+import { stageBands, STAGE_LEFT, STAGE_RIGHT } from './stage'
+import { BUILD_ID } from './buildid'
+
+// ── modes ────────────────────────────────────────────────────────────────────────────────────────
+let M_TITLE: i32 = 0
+let M_SELECT: i32 = 1
+let M_INTRO: i32 = 2
+let M_FIGHT: i32 = 3
+let M_KO: i32 = 4
+let M_ROUNDEND: i32 = 5
+let M_MATCHEND: i32 = 6
+
+let ROUND_SECONDS: i32 = 99
+let START_GAP: i32 = 52          // pixels between the fighters when a round begins
+
+let mode: i32 = M_TITLE
+let modeT: i32 = 0
+let frameNo: i32 = 0
+let round: i32 = 1
+let clockF: i32 = 0           // frames left on the round clock
+let clockSec: i32 = 0         // ... and the same in whole seconds, counted rather than divided
+let secTick: i32 = 0
+let logTick: i32 = 0
+let pick: i32 = 0             // the cursor on the select screen
+let chr1: i32 = 0
+let chr2: i32 = 1
+let debugOn: i32 = 0
+let perfStamp: i32 = 0        // Timer2 at the top of the previous loop pass
+let perfPeak: i32 = 0         // worst whole-frame period since the readout last updated
+let hudDirty: i32 = 1         // nothing on the HUD changes except on an event or a new second
+
+// Sprite handles for whatever the current mode built. `sprite_clear()` drops the lot on a mode
+// change, which is the only way to give the sheet allocator its VRAM back — there is no per-sprite
+// free, and four 64x64 portraits plus four fighter cells do not both fit alongside a 16px font.
+let SPR: i32[] = [0, 0, 0, 0, 0]
+let SP_BODY1: i32 = 0
+let SP_FX1: i32 = 1
+let SP_BODY2: i32 = 2
+let SP_FX2: i32 = 3
+let SP_SPARK: i32 = 4
+
+// The hit spark: one sprite, a 4-frame burst, parked off-screen when it is not playing.
+let sparkT: i32 = 0
+let sparkKind: i32 = 0
+
+// Screen shake, as a decaying alternating offset. Two integers is all a good impact needs.
+let shake: i32 = 0
+
+// ── boot ─────────────────────────────────────────────────────────────────────────────────────────
+backdrop(0x0a0710)
+const BG: i32 = bg_new(stageImg, 3)
+stageBands(BG)
+ui_begin()
+defineRoster(heroArt, hero2Art, hero3Art, warriorArt)
+fighter.fighterSetStage(STAGE_LEFT, STAGE_RIGHT, FLOOR_Y)
+motion.motionInit()
+
+// ── mode entry ───────────────────────────────────────────────────────────────────────────────────
+function enterTitle() {
+  sprite_clear()
+  hud.hudClear()
+  clearLabels()
+  bg_set_visible(BG, 1)
+  mode = M_TITLE
+  modeT = 0
+  hud.hudAnnounce(big, "VERSUS")
+  hud.hudSubtitle(small, "PRESS START", 78)
+  hud.hudNames(small, "", "")
+}
+
+// The select screen's geometry. Four 64px cells across 240px leaves 4px between them, so the
+// portraits are laid out on a fixed pitch and NEVER move — the selection is shown by a frame and by
+// the caption, not by nudging one of them out of line.
+// Four 64px cells on a 59px pitch, and the CURSOR BOX has to fit too: the last box's right edge is
+// SEL_X + 3*SEL_PITCH + SEL_BOX_X + SEL_BOX_W - 1, and one pixel over 239 is an edge that simply is
+// not drawn — which looks exactly like a bug in the box.
+let SEL_X: i32 = 2               // left edge of the first cell
+let SEL_PITCH: i32 = 59
+let SEL_Y: i32 = 46              // top of every portrait cell, all four the same
+let SEL_NAME_Y: i32 = 112        // the name under each portrait, clear of the cursor box
+let SEL_CX: i32 = 32             // centre of a cell, relative to its left edge
+let SEL_BOX_X: i32 = 4           // the cursor box, relative to its cell
+let SEL_BOX_W: i32 = 56
+let SEL_BOX_H: i32 = 62
+
+function enterSelect() {
+  sprite_clear()
+  hud.hudClear()
+  hud.hudAnnounceClear(big)
+  mode = M_SELECT
+  modeT = 0
+  // No stage behind the menu: the dusk backdrop is busy, the portraits are dark, and a select
+  // screen wants to be read rather than admired.
+  //
+  // ⚠️ The flat colour is the hardware BACKDROP, not a filled `ui_rect`. Painting the canvas
+  // full-screen allocates ~600 UI tiles that then have to be un-painted again, and a leftover of
+  // exactly that shape showed up over the middle of the next fight. The backdrop shows wherever no
+  // layer draws, costs nothing, and there is nothing to clean up afterwards.
+  bg_set_visible(BG, 0)
+  backdrop(0x140c1c)
+
+  // Four portraits, one per character sheet. They are their own sprites because each carries its
+  // own palette; showing all four at once is four of the GBA's sixteen sprite palette banks, which
+  // is exactly why they are torn down again before the fight starts.
+  let s: i32 = 0
+  while (s < 4) {
+    let h: i32 = sprite_new(sheetOf(s), F_PORTRAIT)
+    sprite_set_hud(h, 1)
+    sprite_set_pos(h, SEL_X + s * SEL_PITCH, SEL_Y)
+    SPR[s] = h
+    s = s + 1
+  }
+  hud.hudAnnounceAt(big, "CHOOSE YOUR FIGHTER", 12)
+  hud.hudNames(small, "", "")
+  hud.hudSubtitle(small, "A TO FIGHT", 132)
+  drawSelect()
+}
+
+// The four names, and a frame around the one under the cursor.
+//
+// ⚠️ CLEAR ALL FOUR FIRST, THEN DRAW THE CURSOR. `ui_clear_rect` snaps OUT to whole 8x8 tiles, and
+// the portraits sit on a 59px pitch — so clearing cell n+1's region also blanks the last few pixels
+// of cell n's. Interleaved (clear this one, draw that one) the cursor box came out with three sides:
+// the neighbour's clear had eaten its right edge.
+function drawSelect() {
+  let s: i32 = 0
+  while (s < 4) {
+    ui_clear_rect(SEL_X + s * SEL_PITCH + SEL_BOX_X - 1, SEL_Y - 3, SEL_BOX_W + 2, SEL_BOX_H + 2)
+    s = s + 1
+  }
+  s = 0
+  while (s < 4) {
+    let cx: i32 = SEL_X + s * SEL_PITCH + SEL_CX
+    let col: i32 = 0x8878a0
+    if (s === pick) { col = 0xffd24a }
+    hud.hudLabel(small, s, nameOf(s), cx, SEL_NAME_Y, col)
+    s = s + 1
+  }
+  ui_rect(SEL_X + pick * SEL_PITCH + SEL_BOX_X, SEL_Y - 2, SEL_BOX_W, SEL_BOX_H, 0xffd24a, 0)
+}
+
+function clearLabels() {
+  let s: i32 = 0
+  while (s < 4) {
+    hud.hudLabel(small, s, "", 0, 0, 0)
+    ui_clear_rect(SEL_X + s * SEL_PITCH + SEL_BOX_X - 1, SEL_Y - 3, SEL_BOX_W + 2, SEL_BOX_H + 2)
+    s = s + 1
+  }
+  hud.hudSubtitle(small, "", 0)
+}
+
+function enterMatch() {
+  sprite_clear()
+  hud.hudClear()
+  hud.hudAnnounceClear(big)
+  clearLabels()
+  ui_clear_rect(0, 40, 240, 80)
+  backdrop(0x0a0710)
+  bg_set_visible(BG, 1)
+  SPR[SP_BODY1] = sprite_new(sheetOf(chr1))
+  SPR[SP_FX1] = sprite_new(sheetOf(chr1))
+  SPR[SP_BODY2] = sprite_new(sheetOf(chr2))
+  SPR[SP_FX2] = sprite_new(sheetOf(chr2))
+  SPR[SP_SPARK] = sprite_new(sparkArt)
+  sprite_set_visible(SPR[SP_SPARK], 0)
+  // Four digit sprites for the clock and the combo counter — they are HUD sprites, so their
+  // positions are screen pixels and the camera does not drag them around.
+  let d0: i32 = sprite_new(digitArt)
+  let d1: i32 = sprite_new(digitArt)
+  let d2: i32 = sprite_new(digitArt)
+  let d3: i32 = sprite_new(digitArt)
+  let d4: i32 = sprite_new(digitArt)
+  let d5: i32 = sprite_new(digitArt)
+  let d6: i32 = sprite_new(digitArt)
+  let d7: i32 = sprite_new(digitArt)
+  sprite_set_hud(d0, 1)
+  sprite_set_hud(d1, 1)
+  sprite_set_hud(d2, 1)
+  sprite_set_hud(d3, 1)
+  sprite_set_hud(d4, 1)
+  sprite_set_hud(d5, 1)
+  sprite_set_hud(d6, 1)
+  sprite_set_hud(d7, 1)
+  hud.hudBindDigits(d0, d1, d2, d3, d4, d5, d6, d7)
+  fighter.fighterSpawn(0, chr1, SPR[SP_BODY1], SPR[SP_FX1])
+  fighter.fighterSpawn(1, chr2, SPR[SP_BODY2], SPR[SP_FX2])
+  fighter.fighterResetWins()
+  ai.aiInit(1)
+  round = 1
+  maxHp1 = fighter.fighterMaxHp(0)
+  maxHp2 = fighter.fighterMaxHp(1)
+  hud.hudFrame()
+  hud.hudNames(small, nameOf(chr1), nameOf(chr2))
+  hudDirty = 1
+  enterIntro()
+}
+
+function enterIntro() {
+  mode = M_INTRO
+  modeT = 0
+  let mid: i32 = (STAGE_LEFT + STAGE_RIGHT) >> 1
+  fighter.fighterRoundReset(0, mid - (START_GAP >> 1), 1)
+  fighter.fighterRoundReset(1, mid + (START_GAP >> 1), 0 - 1)
+  motion.motionInit()
+  ai.aiInit(1)
+  clockF = ROUND_SECONDS * 60
+  clockSec = ROUND_SECONDS
+  secTick = 60
+  shake = 0
+  sparkT = 0
+  sprite_set_visible(SPR[SP_SPARK], 0)
+  hud.hudAnnounce(big, "ROUND " + round)
+  hud.hudSubtitle(small, "", 0)
+  hudDirty = 1
+  drawHud()
+  fighter.fighterDraw(0, 0)
+}
+
+function enterFight() {
+  mode = M_FIGHT
+  modeT = 0
+  hud.hudSubtitle(small, "", 0)
+  fighter.fighterSetFrozen(0, 0)
+  fighter.fighterSetFrozen(1, 0)
+  hud.hudAnnounceClear(big)
+}
+
+function sheetOf(c: i32): i32 {
+  if (c === 0) { return heroArt }
+  if (c === 1) { return hero2Art }
+  if (c === 2) { return hero3Art }
+  return warriorArt
+}
+
+function nameOf(c: i32): string {
+  if (c === 0) { return NAME_HERO }
+  if (c === 1) { return NAME_HERO2 }
+  if (c === 2) { return NAME_HERO3 }
+  return NAME_WARRIOR
+}
+
+// ── the fight ────────────────────────────────────────────────────────────────────────────────────
+function fightStep(edge: i32) {
+  // Both fighters' pads go into the same history ring, and the CPU's entries are indistinguishable
+  // from the player's. Push BEFORE ticking: the fighter reads this frame's input, not last frame's.
+  // One `keys_held()` for the whole pad rather than eight `key_held` calls, and one crossing into
+  // motion rather than four — see padDirOf and motionFrame.
+  motion.motionPushPad(0, keys_held(), edge)
+  ai.aiTick(fighter.fighterAiView(1, 0), frameNo)
+  motion.motionPush(1, ai.aiDir(), ai.aiHeld(), ai.aiEdge())
+
+  let ev: i32 = fighter.fighterTick()
+  if (ev !== 0) { react(ev) hudDirty = 1 }
+
+  if (fighter.fighterFrozen() === 0) {
+    clockF = clockF - 1
+    // ⚠️ Counted down, never `clockF % 60`. The ARM7TDMI has no divide instruction, so a modulo in
+    // a per-frame path is a call into a software division routine — about a hundred ticks of a
+    // 4,389-tick frame, for a number that changes once a second.
+    secTick = secTick - 1
+    if (secTick <= 0) { secTick = 60 clockSec = clockSec - 1 hudDirty = 1 }
+    if (clockF <= 0) { timeUp() return }
+  }
+}
+
+// Turn the tick's event mask into everything the player actually perceives: the spark, the shake,
+// and the round ending. The fighter package deliberately knows about none of it.
+function react(ev: i32) {
+  if ((ev & (fighter.EV_P1_HIT | fighter.EV_P2_HIT)) > 0) {
+    spark(0)
+    shake = 7
+  } else if ((ev & (fighter.EV_P1_BLOCK | fighter.EV_P2_BLOCK)) > 0) {
+    spark(1)
+    shake = 3
+  }
+  if ((ev & fighter.EV_COUNTER) > 0) { shake = 10 }
+  if ((ev & (fighter.EV_P1_KO | fighter.EV_P2_KO)) > 0) {
+    shake = 14
+    fighter.fighterFreeze(14)
+    if ((ev & fighter.EV_P1_KO) > 0) { fighter.fighterAddWin(1) } else { fighter.fighterAddWin(0) }
+    mode = M_KO
+    modeT = 0
+    hud.hudAnnounce(big, "K.O.")
+  }
+}
+
+function spark(kind: i32) {
+  sparkKind = kind
+  sparkT = 8
+  sprite_set_visible(SPR[SP_SPARK], 1)
+  sprite_set_pos(SPR[SP_SPARK], fighter.fighterLastHitX() - 16, fighter.fighterLastHitY() - 16)
+}
+
+function sparkStep() {
+  if (sparkT <= 0) { return }
+  sparkT = sparkT - 1
+  // Four frames of burst played over eight ticks, so the spark reads at 60fps instead of blinking.
+  sprite_set_frame(SPR[SP_SPARK], sparkKind * 4 + (3 - (sparkT >> 1)))
+  sprite_set_pos(SPR[SP_SPARK], fighter.fighterLastHitX() - 16 + shakeX(),
+                 fighter.fighterLastHitY() - 16 + shakeY())
+  if (sparkT === 0) { sprite_set_visible(SPR[SP_SPARK], 0) }
+}
+
+// Time out: the round goes to whoever has the larger share of their own health left, so a 140-HP
+// character does not win on the clock simply by being bigger.
+function timeUp() {
+  let a: i32 = ((fighter.fighterHp(0) * 100) / fighter.fighterMaxHp(0)) | 0
+  let b: i32 = ((fighter.fighterHp(1) * 100) / fighter.fighterMaxHp(1)) | 0
+  mode = M_KO
+  modeT = 0
+  if (a > b) { fighter.fighterAddWin(0) hud.hudAnnounce(big, "TIME UP") }
+  else if (b > a) { fighter.fighterAddWin(1) hud.hudAnnounce(big, "TIME UP") }
+  else { hud.hudAnnounce(big, "DRAW") }
+}
+
+// ── HUD ──────────────────────────────────────────────────────────────────────────────────────────
+// Three crossings, not seventeen. `maxHp` is cached at the start of the match because it cannot
+// change during one.
+let maxHp1: i32 = 1
+let maxHp2: i32 = 1
+
+function drawHud() {
+  hud.hudUpdate(fighter.fighterHudView(0), maxHp1, fighter.fighterHudView(1), maxHp2, clockSec)
+}
+
+// SELECT opens the input display: the last eight directions player one fed the ring, newest first.
+// A motion that "does not work" is nearly always a motion that was never entered, and this is the
+// only way to tell those two apart without a debugger.
+// SELECT toggles this. It shows the worst whole-frame period seen in the last second, in Timer2
+// ticks: 4389 is one 60fps frame, and anything above it is a frame the engine had to drop.
+//
+// It is four digit sprites updated once a second rather than a string, because a perf counter that
+// re-shapes text every time the number changes is measuring itself — the first version of this
+// overlay cost more than the game did.
+function drawDebug() {
+  if (debugOn === 0) { return }
+  logTick = logTick - 1
+  if (logTick > 0) { return }
+  logTick = 60
+  hud.hudPerf(perfPeak)
+  perfPeak = 0
+}
+
+// ── camera ───────────────────────────────────────────────────────────────────────────────────────
+// The camera tracks the midpoint of the two fighters over the sixteen pixels the 256px stage has
+// spare, then the shake is added on top. Because the backdrop's parallax is derived from the camera
+// by the scanline DMA, this one number moves three depths at three speeds.
+function camera() {
+  let mid: i32 = (fighter.fighterX(0) + fighter.fighterX(1)) >> 1
+  let cx: i32 = mid - 120
+  if (cx < 0) { cx = 0 }
+  if (cx > 16) { cx = 16 }
+  camera_set(cx, 0)
+}
+
+// The impact shake, in SPRITE space. See the warning on fighterDraw: a banded backdrop cannot take
+// an abruptly moving camera, so what shakes is everything drawn on top of it.
+function shakeStep() {
+  if (shake > 0) { shake = shake - 1 }
+}
+
+function shakeX(): i32 {
+  if (shake <= 0) { return 0 }
+  let amp: i32 = (shake + 1) >> 1
+  if ((shake & 1) === 1) { return amp }
+  return 0 - amp
+}
+
+function shakeY(): i32 {
+  if (shake <= 0) { return 0 }
+  let amp: i32 = shake >> 2
+  if ((shake & 2) === 2) { return amp }
+  return 0 - amp
+}
+
+// ── menus ────────────────────────────────────────────────────────────────────────────────────────
+function selectStep(edge: i32) {
+  let moved: i32 = 0
+  if (key_pressed(9) > 0) { pick = (pick + 1) % 4 moved = 1 }
+  if (key_pressed(8) > 0) { pick = (pick + 3) % 4 moved = 1 }
+  if (moved === 1) { drawSelect() }
+  if ((edge & 1) > 0) {
+    chr1 = pick
+    chr2 = ai.aiPickChar(chr1)
+    enterMatch()
+  }
+}
+
+// Match over: two rounds won. Defined here because tish has no hoisting — a function must exist
+// before the statement that calls it.
+function matchEnd(winner: i32) {
+  mode = M_MATCHEND
+  modeT = 0
+  fighter.fighterClearCombos()
+  drawHud()
+  if (winner === 0) { hud.hudAnnounce(big, "YOU WIN") } else { hud.hudAnnounce(big, "YOU LOSE") }
+  hud.hudSubtitle(small, "START FOR ANOTHER", 80)
+}
+
+// ── the loop ─────────────────────────────────────────────────────────────────────────────────────
+enterTitle()
+
+while (true) {
+  let edge: i32 = keys_edge()
+  frameNo = frameNo + 1
+  // Whole-frame wall clock, from the engine's free-running Timer2. 4389 ticks is one 60fps frame.
+  // Measured here rather than through `frame_stats()` because that returns a STRING, and rendering
+  // it costs several times the frame it is reporting on.
+  let now: i32 = ticks()
+  let per: i32 = (now - perfStamp) & 0xFFFF
+  perfStamp = now
+  if (per > perfPeak) { perfPeak = per }
+  if ((edge & 4) > 0) {
+    debugOn = 1 - debugOn
+    if (debugOn === 0) { hud.hudPerfHide() }
+  }
+  modeT = modeT + 1
+
+  if (mode === M_TITLE) {
+    if ((edge & 8) > 0) { enterSelect() }
+  } else if (mode === M_SELECT) {
+    selectStep(edge)
+  } else if (mode === M_INTRO) {
+    // Sixty frames of "ROUND n", sixty of "FIGHT!", then control.
+    if (modeT === 60) { hud.hudAnnounce(big, "FIGHT!") }
+    if (modeT >= 110) { enterFight() }
+    camera()
+    fighter.fighterDraw(shakeX(), shakeY())
+  } else if (mode === M_FIGHT) {
+    fightStep(edge)
+    sparkStep()
+    camera()
+    shakeStep()
+    fighter.fighterDraw(shakeX(), shakeY())
+    // ⚠️ Only when something changed. Every reader here is a cross-module call and every painter is
+    // a canvas blit; running them on a frame where no number moved is pure cost, and this game has
+    // no spare frame to give. The clock's own second boundary is the only unprompted redraw.
+    if (hudDirty === 1) { drawHud() hudDirty = 0 }
+    drawDebug()
+  } else if (mode === M_KO) {
+    fighter.fighterTick()
+    sparkStep()
+    camera()
+    shakeStep()
+    fighter.fighterDraw(shakeX(), shakeY())
+    if (hudDirty === 1) { drawHud() hudDirty = 0 }
+    if (modeT >= 110) {
+      if (fighter.fighterWins(0) >= 2) { matchEnd(0) }
+      else if (fighter.fighterWins(1) >= 2) { matchEnd(1) }
+      else { round = round + 1 enterIntro() }
+    }
+  } else if (mode === M_MATCHEND) {
+    camera()
+    fighter.fighterDraw(0, 0)
+    if (modeT >= 180) { enterSelect() }
+    if ((edge & 8) > 0) { enterSelect() }
+  }
+
+  frame()
+}
+

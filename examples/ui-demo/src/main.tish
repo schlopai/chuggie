@@ -1,0 +1,214 @@
+// ui-demo — thin showcase of packages/ui.tish helpers (same patterns as shop).
+// Tabs: Items (list+detail) | Status (bars + toggles).
+// Heap rules on GBA: hoist ACT, uiAct only on key edges, patch in place, and on tab change
+// clear() the idle tab then STREAM the new tree (one-shot freezes ~2s on Status).
+import { uif } from "font:../../../assets/fonts/ark-pixel-10px.ttf@10"
+import { tiny } from "font:../../../assets/fonts/tinypixel.ttf@7"
+import { backdrop, frame, log, text_height } from "cargo:tish_agb"
+import {
+  uiInit, uiPaint, uiPaintStep, uiModal, uiKeys, uiAct, uiLayoutStats,
+  BTN_A, BTN_B, BTN_START,
+  makeSelector, makePanel, makeDetailPanel, makeTabs, makeToggleGroup, makeBar, col2
+} from "../../../packages/ui"
+
+let ITEMS = [
+  "Potion", "Ether", "Antidote", "Phoenix Down", "Elixir", "Tent"
+]
+let DESC = [
+  "A common tonic that restores 50 HP to a single ally.",
+  "A vial of ether restoring 30 MP to a single ally.",
+  "Cures the poison status from one party member.",
+  "A rare feather that revives a fallen ally to half HP.",
+  "A radiant draught restoring all HP and MP at once.",
+  "Pitch a tent at a save point to restore the whole party."
+]
+
+backdrop(0x0E0C16)
+// stats: 1 times each render pass. Free to leave on here (six ticks() reads per render) and it is how you
+// tell "the layout is slow" from "the paint is slow" — run under GBA_SHOT_LOG=1 to read the lines.
+uiInit({ font: uif, icons: 0, stats: 1 })
+
+let ITEM_DATA = []
+let ii: i32 = 0
+while (ii < ITEMS.length) {
+  ITEM_DATA.push({ name: ITEMS[ii], desc: DESC[ii], priceLabel: "Qty  x" + (ii + 1) })
+  ii = ii + 1
+}
+
+let ACT = [["confirm", BTN_A], ["back", BTN_B], ["menu", BTN_START]]
+
+let tabs = makeTabs(["Items", "Status"], { font: tiny })
+let DET = makeDetailPanel({
+  font: tiny, w: 112, border: "accent", pad: 5, title: "DETAIL", titleAlign: "center",
+  nameW: 100, descLines: 3, nameWrap: 1
+})
+let rowH = text_height(tiny)
+let sel = makeSelector({
+  cols: 1, gap: 1, rowH: rowH,
+  count: () => ITEMS.length,
+  cell: (i) => { return { text: ITEMS[i], color: "text", font: tiny } }
+})
+let opts = makeToggleGroup([
+  { label: "BGM", on: 1 },
+  { label: "SFX", on: 1 },
+  { label: "Hints", on: 0 }
+], { w: 180, font: tiny, gap: 2 })
+let hp = makeBar({ value: 42, max: 50, w: 140, h: 6, fill: "good", label: "HP", font: tiny })
+let mp = makeBar({ value: 18, max: 30, w: 140, h: 6, fill: "accent", label: "MP", font: tiny })
+
+let modalBox = {
+  dir: "col", pad: 8, gap: 5, border: "selected", fill: "panel", w: 140,
+  children: [
+    { text: "CONFIRM", color: "title", align: "center" },
+    { text: "Use this item?", color: "text", align: "center" },
+    { text: "A: yes    B: no", color: "dim", align: "center" }
+  ]
+}
+
+function buildBody() {
+  if (tabs.index() === 0) {
+    return {
+      // Default align stretch — panels fill the body height down to the footer.
+      // (align:"start" left content-sized boxes with a big empty gap.)
+      dir: "row", grow: 1, gap: 6,
+      children: [
+        makePanel({
+          title: "ITEMS", titleColor: "label", titleAlign: "center",
+          border: "border", fill: "panel", pad: 4, gap: 1, grow: 1,
+          children: [sel.view()]
+        }),
+        DET.view(ITEM_DATA[sel.index()])
+      ]
+    }
+  }
+  return makePanel({
+    title: "STATUS", titleColor: "label", titleAlign: "center",
+    border: "border", fill: "panel", pad: 6, gap: 5, grow: 1,
+    children: [
+      hp.view(),
+      mp.view(),
+      { text: "OPTIONS", color: "label", font: tiny },
+      opts.view()
+    ]
+  })
+}
+
+function buildTree() {
+  return {
+    dir: "col", pad: 5, gap: 8,
+    children: [
+      {
+        dir: "row", justify: "between", align: "end",
+        children: [
+          // `shadow` = the same string drawn again 1px down-right underneath, so a heading reads over
+          // whatever is behind it with no panel. Static text only: it costs a second shaping+blit pass and
+          // `uiRowText` doesn't carry it (see ui.tish `paint`).
+          { text: "UI TOOLKIT", color: "title", shadow: "dim" },
+          tabs.view()
+        ]
+      },
+      buildBody(),
+      {
+        dir: "row", gap: 8, align: "end",
+        children: [
+          { text: "L/R tabs", color: "dim", font: tiny },
+          { text: "A act", color: "dim", font: tiny }
+        ]
+      }
+    ]
+  }
+}
+
+// Drop the tab we're leaving so its boxed node graph can be freed before the new tree is built.
+function releaseIdleTab() {
+  if (tabs.index() === 0) {
+    opts.clear()
+    hp.clear()
+    mp.clear()
+  } else {
+    sel.clear()
+    DET.clear()
+  }
+}
+
+// Always stream tab/list swaps — one-shot uiRender blocks for ~2s on Status (toggles + bars).
+function show(stream) {
+  releaseIdleTab()
+  uiPaint(buildTree(), { stream: stream, bg: col2("bg"), budget: 8 })
+}
+
+let ST = { t: 0, modal: 0, modalT: 0, optTick: 0, opening: 1 }
+show(1)
+
+while (true) {
+  if (uiPaintStep() === 0) { ST.opening = 1; frame(); continue }
+  // One line per finished screen: which pass the tab swap actually spent its time in.
+  if (ST.opening === 1) { ST.opening = 0; log(uiLayoutStats()) }
+
+  let k = uiKeys()
+  let act = ""
+  if (k !== 0) { act = uiAct(ACT, k) }
+
+  if (ST.modal > 0) {
+    ST.modalT = ST.modalT - 1
+    if (ST.modalT <= 0 || act === "back" || act === "confirm") {
+      ST.modal = 0
+      show(1)
+    }
+    frame()
+    continue
+  }
+
+  if (tabs.navBits(k) === 1) {
+    show(1)
+  } else if (act === "menu") {
+    tabs.setIndex((tabs.index() + 1) % tabs.count())
+    show(1)
+  } else if (tabs.index() === 1) {
+    opts.navBits(k)
+    if (act === "confirm") { opts.actBits(k) }
+  } else if (act === "confirm") {
+    ST.modal = 1
+    ST.modalT = 180
+    uiModal(modalBox)
+  }
+
+  ST.t = ST.t + 1
+  if (ST.modal === 0) {
+    if (tabs.index() === 0) {
+      if (ST.t % 120 === 0) {
+        let neu = (sel.index() + 1) % ITEMS.length
+        if (neu === 0) {
+          tabs.setIndex(1)
+          show(1)
+        } else if (sel.select(neu) === 1) {
+          show(1)
+        } else if (DET.patch(ITEM_DATA[neu]) === 0) {
+          show(1)
+        }
+      }
+    } else {
+      if (ST.t % 40 === 0) {
+        let hv = hp.value() - 1
+        if (hv < 5) { hv = 50 }
+        hp.set(hv)
+        let mv = mp.value() + 1
+        if (mv > 30) { mv = 3 }
+        mp.set(mv)
+      }
+      if (ST.t % 120 === 0) {
+        opts.toggleAt(opts.index())
+        ST.optTick = ST.optTick + 1
+        if (ST.optTick % 2 === 0) {
+          opts.setIndex((opts.index() + 1) % opts.count())
+        }
+      }
+      if (ST.t % 480 === 0) {
+        tabs.setIndex(0)
+        sel.setIndex(0)
+        show(1)
+      }
+    }
+  }
+  frame()
+}

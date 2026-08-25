@@ -1,0 +1,36 @@
+{
+  "pattern": "Weapon frame layout for the Ninja Adventure pack. Two systems: (1) Items/Weapons/<Name>/ blade icons, (2) CharacterAnimated/Weapon/<Name>.png overlay atlases (legacy). AKARI bakes body+blade only — no FX layer.",
+  "hands_catalog": {
+    "file": "assets/ninja-adventure/catalog/ninja_green_hands.json",
+    "summary": "assets/ninja-adventure/catalog/ninja_green_hands.md",
+    "regen": "python3 scripts/index_ninja_green_hands.py",
+    "visual": "examples/akari/assets/attack-index/HANDS_INDEX/",
+    "coverage": "304 occupied cells — CharacterAnimated 32px SpriteSheet 8×17 (122) + all 12 Separate sheets (122), plus Character 16px SpriteSheet 4×7 + all SeparateAnim (60)",
+    "use": "Every cell lists hand/foot mitt clusters + sword_grip. Katana seating MUST use separate.Attack[dir][frame].sword_grip — never invent coordinates."
+  },
+  "weapons": {
+    "Katana": {
+      "blade_icon": {
+        "file": "assets/ninja-adventure/Items/Weapons/Katana/SpriteInHand.png",
+        "dims": [6, 10],
+        "orientation": "tip DOWN — orange wrap at TOP is the grip (NOT inventory Sprite.png which is tip-UP)",
+        "use": "Orange wrap seated at ninja_green_hands.json Attack[dir][frame].sword_grip."
+      },
+      "overlay_atlas": {
+        "file": "assets/ninja-adventure/Actor/CharacterAnimated/Weapon/Katana.png",
+        "grid": [8, 8],
+        "cell_px": 32,
+        "note": "Legacy static crescents — NOT used by Akari"
+      },
+      "attack_sync": {
+        "body": "Actor/CharacterAnimated/NinjaGreen/Separate/Attack.png",
+        "hands": "catalog/ninja_green_hands.json → sheets.Attack.frames[dir][frame].sword_grip",
+        "table": "scripts/gen_akari.py load_katana_attack()",
+        "hero_sheet": "examples/akari/assets/hero.png — sheet64: 9×4 of 64px (32px body @ 16,16)",
+        "layer_order": "body@16,16 → blade → mitt stamp",
+        "roles": ["f0 tip-up @ sword_grip", "f1 no blade", "f2 tip-out @ sword_grip", "f3 tip-out @ sword_grip"],
+        "debug": "examples/akari title → Attack Debug"
+      }
+    }
+  }
+}

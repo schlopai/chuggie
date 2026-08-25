@@ -1,0 +1,170 @@
+{
+  "DN": [
+    {
+      "blade": {
+        "grip": [
+          11,
+          9
+        ],
+        "angle": 180
+      },
+      "slash": null
+    },
+    {
+      "blade": null,
+      "slash": {
+        "piece": "DN",
+        "offset": [
+          -8,
+          -16
+        ]
+      }
+    },
+    {
+      "blade": {
+        "grip": [
+          12,
+          19
+        ],
+        "angle": -90
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "grip": [
+          12,
+          19
+        ],
+        "angle": -90
+      },
+      "slash": null
+    }
+  ],
+  "UP": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          10
+        ],
+        "angle": 180
+      },
+      "slash": null
+    },
+    {
+      "blade": null,
+      "slash": {
+        "piece": "UP",
+        "offset": [
+          -8,
+          -16
+        ]
+      }
+    },
+    {
+      "blade": {
+        "grip": [
+          16,
+          10
+        ],
+        "angle": 180
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "grip": [
+          16,
+          10
+        ],
+        "angle": 180
+      },
+      "slash": null
+    }
+  ],
+  "LF": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          10
+        ],
+        "angle": 180
+      },
+      "slash": null
+    },
+    {
+      "blade": null,
+      "slash": {
+        "piece": "LF",
+        "offset": [
+          -8,
+          -12
+        ]
+      }
+    },
+    {
+      "blade": {
+        "grip": [
+          7,
+          20
+        ],
+        "angle": -90
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "grip": [
+          7,
+          20
+        ],
+        "angle": -90
+      },
+      "slash": null
+    }
+  ],
+  "RT": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          10
+        ],
+        "angle": 180
+      },
+      "slash": null
+    },
+    {
+      "blade": null,
+      "slash": {
+        "piece": "RT",
+        "offset": [
+          0,
+          -16
+        ]
+      }
+    },
+    {
+      "blade": {
+        "grip": [
+          24,
+          18
+        ],
+        "angle": 90
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "grip": [
+          24,
+          18
+        ],
+        "angle": 90
+      },
+      "slash": null
+    }
+  ]
+}

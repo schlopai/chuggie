@@ -1,0 +1,116 @@
+// What a per-frame tish component costs, by calling convention.
+//
+// `bench-room` established that NATIVE enemies are nearly free: 24 of them on `chase`/`hopper` hold
+// 60fps. But the topdown RPG port sits at ~1800 ticks in the behaviour phase with only the PLAYER alive — 41% of a
+// 4389-tick frame for a single component. That number is about how the component is reached, not
+// what it does, and this bench measures exactly that: the same tiny body, called three ways.
+//
+//   Boxed      — `update: ({ this })`, state in `this.data`. What that game's Player uses.
+//   BoxedCvar  — `update: ({ this })`, state in engine cvars. Splits wrapper cost from property cost.
+//   Lean       — `lean: true, tick: (id: i32)`, state in cvars, typed natives throughout.
+//
+// `step_ticks(1)` is the behaviour phase alone, so the number is not diluted by movement or render.
+// Read it as ticks per frame for N components; divide by N for the per-component price.
+import { hero } from 'sheet32:../assets/hero.png'
+import { sprite_new, log } from 'cargo:tish_agb'
+import { step_ticks, frame_period } from 'cargo:tish_gba_game_engine'
+import { create, entityDespawn, setupGrid, setSolid, step, mount } from '../../../packages/engine'
+import * as comps from './comps'
+import { Boxed, BoxedCvar, Lean } from './comps'
+
+mount(comps)
+
+let TAG_PLAYER: i32 = 1
+let ROOM_W: i32 = 15
+let ROOM_H: i32 = 10
+let COLS: i32 = 30
+let ROWS: i32 = 20
+
+setupGrid(COLS, ROWS)
+let w: i32 = 0
+while (w < COLS) {
+  setSolid(w, 0)
+  setSolid(w, ROWS - 1)
+  w = w + 1
+}
+let h: i32 = 0
+while (h < ROWS) {
+  setSolid(0, h)
+  setSolid(COLS - 1, h)
+  h = h + 1
+}
+
+function setupBody(e, col, row, box, spd) {
+  let pad = (16 - box) / 2
+  let off = (32 - box) / 2
+  e.setPos(col * 16 + pad, row * 16 + pad)
+  e.topdown(box, box)
+  e.spriteOffset(0 - off, 0 - off)
+  e.moveSpeed(spd)
+}
+
+// The camera target. It carries no component of its own, so every tick the behaviour phase reports
+// belongs to the subjects below.
+let p = create()
+p.setSprite(sprite_new(hero))
+setupBody(p, 7, 5, 16, 1.25)
+p.topdownSnap(2)
+p.setHealth(6)
+p.setTag(TAG_PLAYER)
+p.roomFollow(ROOM_W, ROOM_H)
+
+let subjects = []
+
+function clearSubjects() {
+  let k = 0
+  while (k < subjects.length) {
+    entityDespawn(subjects[k])
+    k = k + 1
+  }
+  subjects = []
+}
+
+function spawnSubjects(n, comp) {
+  clearSubjects()
+  let k = 0
+  while (k < n) {
+    let e = create()
+    let col = 1 + (k % 12)
+    let row = 1 + (k - (k % 12)) / 12
+    e.setSprite(sprite_new(hero))
+    setupBody(e, col, row, 12, 0.0)
+    if (comp) { e.behave(comp, {}) }
+    subjects[subjects.length] = e.id
+    k = k + 1
+  }
+}
+
+function measure(label, n, comp) {
+  spawnSubjects(n, comp)
+  let s = 0
+  while (s < 40) {
+    step()
+    s = s + 1
+  }
+  let t1 = 0
+  let f = 0
+  while (f < 120) {
+    step()
+    t1 = t1 + step_ticks(1)
+    f = f + 1
+  }
+  let avg = t1 / 120
+  log("BEHAV " + label + " n=" + n + " behav=" + avg + " each=" + (avg / (n > 0 ? n : 1)) + " frame=" + frame_period(2))
+}
+
+log("BENCH-BEHAV start (4389 ticks = one 60fps frame)")
+measure("none     ", 0, null)
+measure("none     ", 4, null)
+measure("boxed    ", 1, Boxed)
+measure("boxed    ", 4, Boxed)
+measure("boxedCvar", 1, BoxedCvar)
+measure("boxedCvar", 4, BoxedCvar)
+measure("lean     ", 1, Lean)
+measure("lean     ", 4, Lean)
+log("BENCH-BEHAV done")
+while (true) { step() }

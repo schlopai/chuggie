@@ -1,0 +1,121 @@
+// RTS de-risk A2 — fog of war, and whether the background budget survives it.
+//
+// Two questions, both of which decide the shape of the RTS before any game is written:
+//
+//  1. **Can a shroud layer cover a map bigger than one background?** A `tilemap_new` layer is
+//     `Background32x32` — 16x16 of our 16px cells — and it WRAPS. The 30x20 map here does not fit.
+//     The answer is to treat the wrap as the mechanism: map cell (c,r) paints at BG cell
+//     (c & 15, r & 15), the screen is only 15x10 cells so nothing collides, and
+//     `bg_parallax(bg, 256, 256)` makes the layer track the camera so the wrap lines up. That is
+//     what `fog_blit` implements, and this ROM is where it is checked.
+//  2. **Does the layer fit?** The GBA has four backgrounds. This scene uses one, the shroud takes
+//     another, and a real game still wants a UI canvas. If the budget did not hold, fog would have
+//     to come out of the design rather than out of the engine.
+//
+// A scout walks a patrol between two corners. Watch the shroud open ahead of it and fall back to
+// the dithered "explored" state behind — explored never returns to black, which is the whole
+// difference between fog of war and a black screen.
+import { maze } from 'scene:../assets/maze.tmj'
+import { tiles } from 'background:../assets/rts_tiles.png'
+import { knight } from 'sheet:../../../assets/ninja-adventure/Actor/Character/Knight/SpriteSheet.png'
+import {
+  sprite_new, camera_set, ticks, log, scene_stream, tilemap_new, bg_parallax,
+} from 'cargo:tish_agb'
+import {
+  grid_from_map, spawn, set_transform, attach_sprite, set_collider, set_topdown, topdown_speed,
+  set_seek, flow_goal, seek_arrived, set_vision, fog_init, fog_state, fog_blit, entity_x, entity_y,
+  world_step, frame_period,
+} from 'cargo:tish_gba_game_engine'
+
+let COLS: i32 = 30
+let ROWS: i32 = 20
+let STRIDE: i32 = 4
+let FIELD: i32 = 0
+
+
+// The shroud layer. `w = h = 0` skips tilemap_new's own paint loop — every cell it will ever show
+// is written by `fog_blit` — and priority 0 puts it in FRONT of the scene's terrain.
+//
+// ⚠️ Order matters: `tilemap_new` rewrites all sixteen background palettes, so it has to come after
+// `scene_stream`, and the shroud's own palette has to be one the map can live with. It is two
+// colours (transparent and black), which is why this works at all.
+// The shroud layer, built from THE MAP'S OWN tileset — `rts_tiles.png` carries the terrain cells and
+// the two shroud cells in one image, and `maze.tmj` is built from the same file. That is what makes
+// this work: `tilemap_new` uploads its asset's palettes to all sixteen background banks, so a shroud
+// with a palette of its own repaints the whole map in it. See the README for the two arrangements
+// that were measured and rejected.
+//
+// `w = h = 0` skips tilemap_new's own paint loop — every cell it will ever show is written by
+// `fog_blit` — and priority 0 puts it in FRONT of the scene's terrain.
+let EMPTY: i32[] = []
+let fogBg: i32 = tilemap_new(tiles, 5, 0, 0, EMPTY, 0)
+
+scene_stream(maze)
+grid_from_map()
+fog_init(COLS, ROWS)
+// 256 = "track the camera exactly". Without this the layer stays put and the shroud slides off the
+// world as soon as the view moves.
+bg_parallax(fogBg, 256, 256)
+
+// One scout with a 4-cell sight radius. `set_vision` is a component, so the reveal is native and
+// costs the game nothing per frame.
+let scout: i32 = spawn()
+set_transform(scout, 2 * 16 + 3, 2 * 16 + 3)
+attach_sprite(scout, sprite_new(knight))
+set_collider(scout, 10, 10)
+set_topdown(scout)
+topdown_speed(scout, 1)
+set_vision(scout, 4)
+
+// A two-corner patrol. Waypoints are cells, because that is what a flow field is indexed by.
+let wpCol: i32[] = [27, 27, 2, 2]
+let wpRow: i32[] = [2, 17, 17, 2]
+let wp: i32 = 0
+
+let frameNo: i32 = 0
+let peak: i32 = 0
+let stamp: i32 = ticks()
+let wrote: i32 = 0
+
+// Kick off the first leg.
+flow_goal(FIELD, wpCol[0], wpRow[0])
+set_seek(scout, FIELD, 10, STRIDE, 6)
+
+while (true) {
+  // Next leg when the scout gets there. One order change every several seconds — the flow field is
+  // rebuilt here and nowhere else.
+  if (seek_arrived(scout) === 1) {
+    wp = wp + 1
+    if (wp > 3) { wp = 0 }
+    flow_goal(FIELD, wpCol[wp], wpRow[wp])
+    set_seek(scout, FIELD, 10, STRIDE, 6)
+  }
+
+  // Camera on the scout, clamped to the map (480x320 against a 240x160 screen).
+  let cx: i32 = entity_x(scout) - 120
+  let cy: i32 = entity_y(scout) - 80
+  if (cx < 0) { cx = 0 }
+  if (cy < 0) { cy = 0 }
+  if (cx > 240) { cx = 240 }
+  if (cy > 160) { cy = 160 }
+  camera_set(cx, cy)
+
+  world_step()
+  // AFTER world_step: `fog_system` runs inside it and this paints what that decided. Painting first
+  // would show the shroud one frame behind the scout, which reads as the light trailing it.
+  // gid 4 = opaque shroud, gid 5 = the dithered explored state (see scripts/gen_rts_spikes.py).
+  wrote = fog_blit(fogBg, tiles, 5, cx, cy, 4, 5)
+
+  let now: i32 = ticks()
+  let per: i32 = (now - stamp) & 0xFFFF
+  stamp = now
+  if (per > peak) { peak = per }
+  frameNo = frameNo + 1
+  if ((frameNo & 63) === 0) {
+    // `W` is cells written on the last blit — the number that says whether the dirty-cell tracking
+    // works. A settled camera should write 0; a moving one writes only the column scrolling in.
+    // `S` samples the fog state under the scout (2 = visible) and at the far corner (0 = unseen).
+    log("P" + peak + " E" + frame_period(2) + " W" + wrote + " S" + fog_state(2, 2) + fog_state(27, 17))
+    peak = 0
+  }
+}

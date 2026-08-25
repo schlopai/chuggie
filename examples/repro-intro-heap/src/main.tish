@@ -1,0 +1,88 @@
+// Where does the large SRPG example's opening put ~46 KB, and why does releasing it hand back only ~3 KB?
+//
+// That example boots with 69,632 bytes free after `uiInit`, plays 14 dialogue lines, and reaches its first
+// battle with ~21,500 — then dies partway through the first turn on a 96-byte allocation.
+// `ui_clear()` + `ui_release_scratch()` returns ~2.9 KB of the ~49 KB the opening took, and adding
+// `frame()` commits either side changes nothing.
+//
+// This reproduces JUST the opening's UI calls — the same sequence showIntro makes — and prints the
+// heap after each step, so the holder can be identified in a 30-second build instead of a
+// five-minute game build.
+import { log, vblank, frame, heap_free, ui_begin, ui_clear, ui_release_scratch,
+         ui_rect, ui_text_box, ui_reserve_tiles } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+
+const GOLD: i32 = 0xF4E4C1
+const PANEL: i32 = 0x1A1428
+
+// 14 lines, the same count as the ROM's opening, with comparable text lengths.
+const WHO: string[] = ["Boy","Bully","Bully","Bully","Bully","Ritz","Ritz",
+                       "Boy","Referee","Bully","Ritz","Bully","Ritz","Bully"]
+const L1: string[] = ["See? He says he's fine, so what's","the problem? You're the one who",
+                      "started it, and now you want to","walk away like nothing happened.",
+                      "That's not how any of this works","and you know it as well as I do.",
+                      "Stand up. Nobody is going home","until somebody says the word.",
+                      "Rules are rules, even out here.","You throw, you take one back.",
+                      "Enough. Both of you, line up.","Fine. But I'm not apologising.",
+                      "Nobody asked you to apologise.","Then let's finish it properly."]
+
+function probe(tag) { log(tag + " " + heap_free(64)) }
+
+probe("00 boot                     ")
+ui_reserve_tiles(320)
+frame()
+probe("01 after reserve 320        ")
+
+// ── the opening, exactly as showIntro builds it ─────────────────────────────────────────────────
+// ONE ui_begin for the whole sequence; each line only patches the three text boxes.
+ui_begin()
+ui_rect(0, 96, 240, 64, PANEL, 1)
+probe("02 after ui_begin + band    ")
+
+let i: i32 = 0
+while (i < 14) {
+  ui_text_box(body, 10, 102, WHO[i], GOLD, 220, 0, 0, "left", PANEL)
+  ui_text_box(body, 10, 118, L1[i], 0xF4E8D0, 220, 0, 0, "left", PANEL)
+  ui_text_box(body, 10, 132, L1[i], 0xF4E8D0, 220, 0, 0, "left", PANEL)
+  frame()
+  if (i === 0) { probe("03 after line 1             ") }
+  if (i === 6) { probe("04 after line 7             ") }
+  i = i + 1
+}
+probe("05 after all 14 lines       ")
+
+// ── the teardown the SRPG example does ──────────────────────────────────────────────────────────
+ui_clear()
+probe("06 after ui_clear           ")
+frame()
+probe("07 after commit             ")
+ui_release_scratch()
+probe("08 after ui_release_scratch ")
+frame()
+probe("09 after second commit      ")
+
+// A second canvas: if the first one's memory really came back, this must cost the same as step 02
+// did. If it costs nothing extra, the memory was retained and REUSED (a pool, not a leak).
+ui_begin()
+ui_rect(0, 96, 240, 64, PANEL, 1)
+probe("10 second ui_begin + band   ")
+
+// ── can the reserve be given back? ──────────────────────────────────────────────────────────────
+// It is 44 KB — by far the largest single holder — and a BATTLE does not use the UI canvas at all
+// (it draws through hud_text sprites and the iso board). If dropping it returns the memory, that example can
+// release before a fight and re-reserve for menus, which is ~44 KB exactly where it is starving.
+ui_clear()
+frame()
+ui_release_scratch()
+frame()
+probe("11 canvas down              ")
+ui_reserve_tiles(0)
+frame()
+probe("12 after reserve 0          ")
+ui_reserve_tiles(320)
+frame()
+probe("13 re-reserved 320          ")
+
+let f: i32 = 0
+while (f < 30) { frame() f = f + 1 }
+log("done")

@@ -1,0 +1,191 @@
+// link-demo — a LINK CABLE DIAGNOSTIC you can read off the screen.
+//
+// Every other link test in this repo is headless and asserts a log line. This one is for a human
+// with two mGBA windows or two cartridges and a cable, and it is deliberately the smallest thing
+// that can tell you what is actually happening:
+//
+//   * what state the port is in, in words, updated every frame;
+//   * which unit is the MASTER (the one nearest the cable's parent end) and which is the CHILD;
+//   * the seed the two agreed on — if these differ, the link is up but the game would desync;
+//   * a live BUTTON MIRROR: the bottom row is what THIS unit is pressing, the row above it is what
+//     the OTHER unit is pressing. Press A on one and watch it light up on the other. That is the
+//     whole point, and it needs no interpretation.
+//   * ROUND TRIP: frames between sending a word and seeing the peer's answer. On a healthy link
+//     this sits at 1-2. A number that climbs is a link that is technically up and too slow to play
+//     a lockstep game over.
+//
+// HOW TO RUN IT — mGBA GUI
+//   1. mgba-qt link-demo.gba
+//   2. File > New multiplayer window          (mGBA opens a second instance already linked)
+//   3. Load link-demo.gba in the new window
+//   Both should reach PLAYING within a second or two. Press buttons in either window.
+//
+// HOW TO RUN IT — REAL HARDWARE
+//   Flash the same ROM to two cartridges, connect a GBA link cable, and power both on. Order does
+//   not matter and neither does timing: a unit with no peer waits indefinitely rather than giving
+//   up, which is the case the first version got wrong.
+//
+// WHAT "PLAYING" PROVES. Both units enumerated, agreed a seed through a three-way handshake, and
+// are exchanging a word every frame. That is everything a lockstep game needs from the transport.
+import { body } from 'font:../../../assets/fonts/04b03.ttf@8'
+import { hero } from 'font:../../../assets/fonts/alagard.ttf@16'
+import {
+  backdrop, frame, keys_edge, key_held, ui_begin, ui_clear_rect, ui_text, log
+} from 'cargo:tish_agb'
+import {
+  LINK_OFFLINE, LINK_SYNCING, LINK_PLAYING, LINK_LOST, LINK_STALL,
+  linkOpen, linkState, linkExchange, linkSeed, linkId, linkIsMaster, linkQuiet, linkResync
+} from '../../../packages/link'
+
+let C_TEXT: i32 = 0xF0ECFF
+let C_DIM: i32 = 0x8880B0
+let C_GOLD: i32 = 0xF7C836
+let C_OK: i32 = 0x60C878
+let C_WARN: i32 = 0xF05050
+
+// tish button codes, and the order they are drawn in.
+let BTN_A: i32 = 0
+let BTN_B: i32 = 1
+let BTN_L: i32 = 4
+let BTN_R: i32 = 5
+let BTN_UP: i32 = 6
+let BTN_DOWN: i32 = 7
+let BTN_LEFT: i32 = 8
+let BTN_RIGHT: i32 = 9
+
+interface D {
+  t: i32, state: i32, shown: i32, seed: i32, id: i32, master: i32,
+  mine: i32, theirs: i32, shownMine: i32, shownTheirs: i32,
+  sentAt: i32, trip: i32, shownTrip: i32, exchanges: i32, shownEx: i32
+}
+let G: D = {
+  t: 0, state: -1, shown: -1, seed: -1, id: -2, master: -1,
+  mine: 0, theirs: 0, shownMine: -1, shownTheirs: -1,
+  sentAt: -1, trip: -1, shownTrip: -2, exchanges: 0, shownEx: -1
+}
+
+backdrop(0x101020)
+ui_begin()
+ui_text(hero, 8, 6, "LINK", C_GOLD)
+ui_text(body, 64, 12, "cable diagnostic", C_DIM)
+ui_text(body, 8, 148, "hold buttons - they appear on the other screen", C_DIM)
+
+linkOpen()
+log("LINK DEMO state " + linkState())
+
+// The pad, packed into the 14-bit payload the cable carries. Held, not edge-triggered: a mirror
+// wants to show what is being pressed right now, and holding a button is the clearest possible
+// demonstration that words are still flowing.
+function localBits(): i32 {
+  let out = 0
+  if (key_held(BTN_A) > 0) { out = out | (1 << 0) }
+  if (key_held(BTN_B) > 0) { out = out | (1 << 1) }
+  if (key_held(BTN_L) > 0) { out = out | (1 << 2) }
+  if (key_held(BTN_R) > 0) { out = out | (1 << 3) }
+  if (key_held(BTN_UP) > 0) { out = out | (1 << 4) }
+  if (key_held(BTN_DOWN) > 0) { out = out | (1 << 5) }
+  if (key_held(BTN_LEFT) > 0) { out = out | (1 << 6) }
+  if (key_held(BTN_RIGHT) > 0) { out = out | (1 << 7) }
+  return out
+}
+
+let NAMES = ["A", "B", "L", "R", "UP", "DN", "LF", "RT"]
+
+// One row: a caption and eight button labels, lit for the bits that are set.
+//
+// The caption is REDRAWN WITH THE ROW rather than written once above it. `ui_clear_rect` snaps to
+// 8px tile rows, so a 12px clear erases a 16px band — which quietly ate any static label sitting
+// near a row that repaints. Putting the caption inside the same clear makes the collision
+// impossible instead of merely unlikely.
+function paintBits(y: i32, caption, bits: i32) {
+  ui_clear_rect(0, y, 240, 12)
+  ui_text(body, 8, y, caption, C_DIM)
+  let i = 0
+  while (i < 8) {
+    let col = C_DIM
+    if ((bits & (1 << i)) !== 0) { col = C_OK }
+    ui_text(body, 62 + i * 22, y, NAMES[i], col)
+    i = i + 1
+  }
+}
+
+function stateName(s: i32) {
+  if (s === LINK_OFFLINE) { return "OFFLINE - port would not open" }
+  if (s === LINK_SYNCING) { return "SEARCHING for the other unit" }
+  if (s === LINK_PLAYING) { return "PLAYING - words flowing" }
+  return "LOST - the peer stopped answering"
+}
+
+while (true) {
+  G.t = G.t + 1
+  G.mine = localBits()
+
+  let peer = linkExchange(G.mine)
+  if (peer !== LINK_STALL) {
+    G.theirs = peer
+    G.exchanges = G.exchanges + 1
+    if (G.sentAt >= 0) { G.trip = G.t - G.sentAt }
+    G.sentAt = G.t
+  }
+
+  // A lost link goes back to searching on its own, so a cable knocked loose and pushed back in
+  // recovers without a power cycle. On hardware that is the difference between a diagnostic and
+  // a thing you have to keep rebooting.
+  if (linkState() === LINK_LOST) {
+    if ((G.t % 120) === 0) { linkResync() }
+  }
+
+  // Everything below is painted ONLY when it changes: `ui_text` shapes glyphs into background
+  // tiles, and re-shaping unchanging strings every frame is what once ran a title screen at 0.58x.
+  if (G.state !== linkState()) {
+    G.state = linkState()
+    ui_clear_rect(8, 34, 224, 14)
+    let col = C_WARN
+    if (G.state === LINK_PLAYING) { col = C_OK }
+    if (G.state === LINK_SYNCING) { col = C_GOLD }
+    ui_text(body, 8, 34, stateName(G.state), col)
+    log("LINK STATE " + G.state)
+  }
+
+  if (G.master !== linkIsMaster() || G.id !== linkId()) {
+    G.master = linkIsMaster()
+    G.id = linkId()
+    ui_clear_rect(8, 50, 224, 14)
+    let role = "CHILD"
+    if (G.master === 1) { role = "MASTER" }
+    ui_text(body, 8, 50, "ROLE " + role + "   id " + G.id, C_TEXT)
+  }
+
+  if (G.seed !== linkSeed()) {
+    G.seed = linkSeed()
+    ui_clear_rect(8, 64, 224, 14)
+    // The seed must MATCH on both screens. A link that is up with two different seeds looks
+    // perfect here and desyncs the moment a real game deals a board from it.
+    ui_text(body, 8, 64, "SEED " + G.seed + "   (must match the other screen)", C_TEXT)
+  }
+
+  if (G.trip !== G.shownTrip || G.exchanges - G.shownEx > 30) {
+    G.shownTrip = G.trip
+    G.shownEx = G.exchanges
+    ui_clear_rect(8, 78, 224, 14)
+    ui_text(body, 8, 78, "ROUND TRIP " + G.trip + " frames   EXCHANGES " + G.exchanges, C_TEXT)
+  }
+
+  if (G.theirs !== G.shownTheirs) {
+    G.shownTheirs = G.theirs
+    paintBits(100, "THEM", G.theirs)
+  }
+  if (G.mine !== G.shownMine) {
+    G.shownMine = G.mine
+    paintBits(124, "YOU", G.mine)
+  }
+
+  // A heartbeat for the headless test: proves the loop is live and reports what it can see.
+  if ((G.t % 120) === 0) {
+    log("LINK HEARTBEAT state " + G.state + " master " + G.master + " seed " + G.seed
+      + " exchanges " + G.exchanges + " trip " + G.trip + " quiet " + linkQuiet()
+      + " mine " + G.mine + " theirs " + G.theirs)
+  }
+
+  frame()
+}

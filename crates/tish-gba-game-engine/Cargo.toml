@@ -1,0 +1,21 @@
+[package]
+name = "tish_gba_game_engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "RPG-Maker-class game engine for tish-on-GBA: SoA entity store + fixed per-frame pipeline (imported via cargo:tish_gba_game_engine)"
+repository = "https://github.com/schlopai/chuggie-engine"
+
+# Linked into the generated GBA ROM crate alongside tish-agb. Exposes the tish
+# native-module ABI (`pub fn name(args: &[Value]) -> Value`); the tish compiler
+# auto-generates the glue for `import { … } from 'cargo:tish_gba_game_engine'`.
+# The engine drives tish-agb (its sprite/background handles ARE tish-agb handles),
+# so both crates resolve to the same path instances and their `Value` types unify.
+#
+# Layer rule: the engine depends ONLY on tish-agb (bindings) and the runtime facade —
+# never on `agb` directly. Hardware/rendering goes through tish-agb; the `Fixed` numeric
+# type comes from the facade. `agb` still resolves transitively (via both deps) so agb's
+# inherent `Num` methods remain callable, but the engine declares no agb dependency itself.
+[dependencies]
+tishlang_runtime_gba = { path = "../../../../tish/tish/crates/tish_runtime_gba", version = ">=0.1" }
+tish_agb = { path = "../tish-agb", version = ">=0.1" }

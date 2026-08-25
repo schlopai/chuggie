@@ -1,0 +1,291 @@
+// deck-demo — scrollable jukebox for diagnosing deck engines + intensifier stems.
+//
+// Catalog is tagged by engine so you can isolate hitching:
+//   PSG  — gameBoyDmg only (hardware; should not slow when UI is busy)
+//   PCM  — gbaDirectSound only (mixer; will hitch if audio_pump starves)
+//   DUAL — both engines together
+//   INT  — crossfading-stem-style layered song (L/R changes intensity 0..3)
+//
+// Up/Down scroll, A play, B stop, L/R intensity (on INT tracks). After first paint:
+// in-place updates only (VRAM). Detail panel patches are deferred while the d-pad
+// is moving so scroll refill + text reshape don't stack in one frame.
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { title } from 'font:../../../assets/fonts/peaberry.ttf@16'
+import { backdrop, frame, text_height, log, audio_pump } from 'cargo:tish_agb'
+import {
+  uiInit, uiPaint, uiPaintStep, uiKeys, uiAct, uiKeyDown, uiSetText,
+  makeSelector, makePanel, makeDetailPanel, col2,
+  BTN_A, BTN_B, BTN_UP, BTN_DOWN, BTN_L, BTN_R,
+} from '../../../packages/ui'
+import { deckPlay, deckStop, deckSetIntensity } from '../../../packages/deck'
+import {
+  chipCoin, chipHit, chipSlash, chipAccept, chipCancel, chipChime,
+} from '../../../packages/chipsfx'
+import { overworld } from 'deck:../assets/overworld.deck'
+import { battle } from 'deck:../assets/battle.deck'
+import { town } from 'deck:../assets/town.deck'
+import { dungeon } from 'deck:../assets/dungeon.deck'
+import { victory } from 'deck:../assets/victory.deck'
+import { titleTheme } from 'deck:../assets/title.deck'
+import { boss } from 'deck:../assets/boss.deck'
+import { night } from 'deck:../assets/night.deck'
+import { psgMeadow } from 'deck:../assets/psg-meadow.deck'
+import { psgMarch } from 'deck:../assets/psg-march.deck'
+import { pcmGroove } from 'deck:../assets/pcm-groove.deck'
+import { caravan } from 'deck:../assets/caravan.deck'
+import { siege } from 'deck:../assets/siege.deck'
+import { chase } from 'deck:../assets/chase.deck'
+import { sfxChime } from 'deck:../assets/sfx-chime.deck'
+import { sfxWarn } from 'deck:../assets/sfx-warn.deck'
+
+// kind: 0 song · 1 chipsfx · 2 deck sting · 3 stop
+// intSong: 1 = L/R stems (layer N in .deck)
+let ITEMS = [
+  // ── intensifiers (crossfading-stem-style) ──────────────────────────────────────
+  { name: "Siege", tag: "INT", kind: 0, song: siege, intSong: 1,
+    desc: "16-bar escalate. L/R = INT 0..3. Bed→lead→drums→stabs." },
+  { name: "Chase", tag: "INT", kind: 0, song: chase, intSong: 1,
+    desc: "12-bar chase. Same intensifier API, faster BPM." },
+  // ── long blendable (not a 1-bar loop) ─────────────────────────────────────
+  { name: "Caravan Route", tag: "DUAL", kind: 0, song: caravan, intSong: 0,
+    desc: "16-bar explore A/B/bridge/A'. Blend under gameplay." },
+  // ── single engine: PSG ────────────────────────────────────────────────────
+  { name: "PSG Meadow", tag: "PSG", kind: 0, song: psgMeadow, intSong: 0,
+    desc: "LR35902 only. Scroll should NOT hitch this track." },
+  { name: "PSG March", tag: "PSG", kind: 0, song: psgMarch, intSong: 0,
+    desc: "Pulse arp + wave + noise. No DirectSound." },
+  // ── single engine: PCM ────────────────────────────────────────────────────
+  { name: "PCM Groove", tag: "PCM", kind: 0, song: pcmGroove, intSong: 0,
+    desc: "DirectSound only. Hitch here = mixer starve." },
+  // ── dual engine ───────────────────────────────────────────────────────────
+  { name: "Meadow Circuit", tag: "DUAL", kind: 0, song: overworld, intSong: 0,
+    desc: "PSG + PCM kick/hat. Dual-engine reference." },
+  { name: "Iron Gate", tag: "DUAL", kind: 0, song: battle, intSong: 0,
+    desc: "Arp pulse + noise + PCM stabs." },
+  { name: "Harbor Walk", tag: "DUAL", kind: 0, song: town, intSong: 0,
+    desc: "Soft town. Pulse + sine bass + PCM hats." },
+  { name: "Depths Below", tag: "DUAL", kind: 0, song: dungeon, intSong: 0,
+    desc: "Dungeon. Sparse PSG + dark PCM swell." },
+  { name: "Iron Colossus", tag: "DUAL", kind: 0, song: boss, intSong: 0,
+    desc: "Boss. Heavy PSG + dual PCM." },
+  { name: "Quiet Watch", tag: "DUAL", kind: 0, song: night, intSong: 0,
+    desc: "Night. Soft ADSR + PCM chime." },
+  { name: "Soft Dawn", tag: "DUAL", kind: 0, song: titleTheme, intSong: 0,
+    desc: "Title. Slow pad + PCM swell." },
+  { name: "Triumph", tag: "DUAL", kind: 0, song: victory, intSong: 0,
+    desc: "Fanfare. Bright PSG + PCM crash." },
+  { name: "Stop music", tag: "CTL", kind: 3, song: 0, intSong: 0,
+    desc: "Silence deck. chipsfx still works." },
+  { name: "Coin", tag: "SFX", kind: 1, sfx: 0, intSong: 0,
+    desc: "chipsfx under BGM (channel borrow)." },
+  { name: "Hit", tag: "SFX", kind: 1, sfx: 1, intSong: 0, desc: "chipsfx hit." },
+  { name: "Slash", tag: "SFX", kind: 1, sfx: 2, intSong: 0, desc: "chipsfx slash." },
+  { name: "Accept", tag: "SFX", kind: 1, sfx: 3, intSong: 0, desc: "chipsfx accept." },
+  { name: "Cancel", tag: "SFX", kind: 1, sfx: 4, intSong: 0, desc: "chipsfx cancel." },
+  { name: "Chip chime", tag: "SFX", kind: 1, sfx: 5, intSong: 0, desc: "chipsfx chime." },
+  { name: "deck chime", tag: "STG", kind: 2, song: sfxChime, intSong: 0,
+    desc: "Short dual sting (replaces BGM)." },
+  { name: "deck warn", tag: "STG", kind: 2, song: sfxWarn, intSong: 0,
+    desc: "Noise + PCM drop sting." },
+]
+
+let S = { status: "ready", detDirty: -1, detWait: 0, intSong: 0, intensity: 0 }
+let FOOT = { status: null }
+
+backdrop(0x0E0C16)
+uiInit({ font: body, titleFont: title, tinyFont: body, tileReserve: 400 })
+
+let rowH = text_height(body)
+let LIST_H = 7 * (rowH + 1) - 1
+
+let DET = makeDetailPanel({
+  font: body, w: 108, border: "accent", pad: 4, title: "NOW", titleAlign: "center",
+  nameW: 96, descLines: 4, nameWrap: 1,
+})
+
+function detailOf(i) {
+  let it = ITEMS[i]
+  return { name: it.name, desc: it.desc, priceLabel: it.tag }
+}
+
+function statusForPlaying(it) {
+  if (it.intSong > 0) {
+    return "INT " + S.intensity
+  }
+  return it.tag
+}
+
+function setStatus(msg) {
+  S.status = msg
+  if (FOOT.status !== null) { uiSetText(FOOT.status, msg, "dim") }
+}
+
+function playChipSfx(id) {
+  if (id === 0) { chipCoin() }
+  if (id === 1) { chipHit() }
+  if (id === 2) { chipSlash() }
+  if (id === 3) { chipAccept() }
+  if (id === 4) { chipCancel() }
+  if (id === 5) { chipChime() }
+}
+
+function activate(i) {
+  let it = ITEMS[i]
+  if (it.kind === 0) {
+    deckPlay(it.song)
+    S.intSong = it.intSong
+    S.intensity = 0
+    setStatus(statusForPlaying(it))
+    log("deck " + it.tag + " " + it.name)
+  } else if (it.kind === 1) {
+    playChipSfx(it.sfx)
+    setStatus("sfx")
+  } else if (it.kind === 2) {
+    deckPlay(it.song)
+    S.intSong = 0
+    S.intensity = 0
+    setStatus("sting")
+    log("deck sting")
+  } else {
+    deckStop()
+    S.intSong = 0
+    S.intensity = 0
+    setStatus("stopped")
+    log("deck stop")
+  }
+}
+
+function bumpIntensity(delta) {
+  if (S.intSong === 0) { return }
+  let next = S.intensity + delta
+  if (next < 0) { next = 0 }
+  if (next > 3) { next = 3 }
+  if (next === S.intensity) { return }
+  S.intensity = deckSetIntensity(next)
+  setStatus("INT " + S.intensity)
+  log("deck intensity " + S.intensity)
+}
+
+let sel = makeSelector({
+  cols: 1, gap: 1, rowH: rowH, h: LIST_H, rowBg: "panel",
+  count: () => ITEMS.length,
+  cell: (i) => {
+    // Fixed widths so windowed scroll can opaque-patch text in place without remeasure
+    // (a content-sized leaf clips when a longer name scrolls into its slot).
+    let it = ITEMS[i]
+    return {
+      dir: "row", grow: 1, align: "center", justify: "between",
+      children: [
+        { text: it.name, color: "text", w: 86, ellip: 1 },
+        { text: it.tag, color: "dim", w: 28, align: "right" },
+      ],
+    }
+  },
+  onMove: (i) => {
+    // Defer detail reshape so it never shares a frame with the scroll refill.
+    S.detDirty = i
+    S.detWait = 2
+  },
+})
+
+function buildTree() {
+  FOOT.status = { text: S.status, color: "dim", font: body }
+  return {
+    dir: "col", pad: 4, gap: 4,
+    children: [
+      {
+        dir: "row", justify: "between", align: "end",
+        children: [
+          { text: "DECK DEMO", color: "title", font: title },
+          { text: "INT/PSG/PCM", color: "label", font: body },
+        ],
+      },
+      {
+        dir: "row", grow: 1, gap: 4, align: "stretch",
+        children: [
+          makePanel({
+            title: "TRACKS", titleColor: "label", titleAlign: "center",
+            border: "border", fill: "panel", pad: 3, gap: 1, grow: 1,
+            children: [sel.view()],
+          }),
+          DET.view(detailOf(sel.index())),
+        ],
+      },
+      {
+        dir: "row", justify: "between", align: "end",
+        children: [
+          FOOT.status,
+          { text: "L/R int  A/B", color: "dim", font: body },
+        ],
+      },
+    ],
+  }
+}
+
+function show() {
+  sel.clear()
+  DET.clear()
+  FOOT.status = null
+  uiPaint(buildTree(), { stream: 0, bg: col2("bg") })
+}
+
+// Boot dual-engine so verify still hears PSG + PCM together.
+deckPlay(overworld)
+S.status = "DUAL"
+S.intSong = 0
+S.intensity = 0
+show()
+
+let ACT = [["confirm", BTN_A], ["back", BTN_B]]
+let N = ITEMS.length
+
+while (true) {
+  if (uiPaintStep() === 0) { frame(); continue }
+
+  let k = uiKeys()
+  let act = ""
+  if (k !== 0) { act = uiAct(ACT, k) }
+
+  if (act === "confirm") {
+    activate(sel.index())
+  } else if (act === "back") {
+    deckStop()
+    S.intSong = 0
+    S.intensity = 0
+    setStatus("stopped")
+  } else if (k !== 0) {
+    if (uiKeyDown(k, BTN_L) > 0) {
+      bumpIntensity(-1)
+    } else if (uiKeyDown(k, BTN_R) > 0) {
+      bumpIntensity(1)
+    } else {
+      let old = sel.index()
+      let neu = old
+      if (uiKeyDown(k, BTN_UP) > 0) {
+        neu = old - 1
+        if (neu < 0) { neu = N - 1 }
+      } else if (uiKeyDown(k, BTN_DOWN) > 0) {
+        neu = old + 1
+        if (neu >= N) { neu = 0 }
+      }
+      if (neu !== old) {
+        // refillWindow batches under audio_defer + one pump; avoid stacking catch-up here.
+        sel.select(neu)
+      }
+    }
+  }
+
+  // Detail panel: wait until d-pad settles so scroll + reshape don't share a frame.
+  if (S.detDirty >= 0) {
+    if (S.detWait > 0) {
+      S.detWait = S.detWait - 1
+    } else {
+      audio_pump()
+      DET.patch(detailOf(S.detDirty))
+      S.detDirty = -1
+      audio_pump()
+    }
+  }
+
+  frame()
+}

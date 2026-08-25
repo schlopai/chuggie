@@ -1,0 +1,44 @@
+// A little game written entirely in tish: move a hero with the d-pad (it faces the
+// way it walks), and press START to toggle a "ghost" that trails behind. Positions
+// are `fixed` (sub-pixel), so movement compiles to native Num<i32,8> integer math.
+import { player } from 'asset:../assets/player.png'
+import {
+  sprite_new, sprite_set_pos, sprite_set_flip, sprite_set_visible,
+  input_x, input_y, key_pressed, frame
+} from 'cargo:tish_agb'
+
+let hero = sprite_new(player)
+let ghost = sprite_new(player)
+sprite_set_visible(ghost, 0)
+
+let px: fixed = 100.0
+let py: fixed = 72.0
+let speed: fixed = 2.0
+let ghostShown: i32 = 0
+
+while (true) {
+  let dx: i32 = input_x()
+  let dy: i32 = input_y()
+
+  if (dx > 0) {
+    px = px + speed
+    sprite_set_flip(hero, 0)
+  }
+  if (dx < 0) {
+    px = px - speed
+    sprite_set_flip(hero, 1)
+  }
+  if (dy > 0) { py = py + speed }
+  if (dy < 0) { py = py - speed }
+
+  sprite_set_pos(hero, px, py)
+
+  // START toggles the trailing ghost.
+  if (key_pressed(3) > 0) {
+    if (ghostShown === 0) { ghostShown = 1 } else { ghostShown = 0 }
+    sprite_set_visible(ghost, ghostShown)
+  }
+  sprite_set_pos(ghost, px - 16.0, py)
+
+  frame()
+}

@@ -1,0 +1,64 @@
+// Two typed module arrays that differ in EXACTLY ONE WAY.
+//
+// `A` and `B` are declared identically, filled identically at module scope, and read by identical
+// loops. The only difference in the whole file is that `B` is passed once, at the bottom, as an
+// argument to a native function — and `A` is not.
+//
+// If that alone flips `B`'s index path from the typed `Vec<i32>` read to the boxed
+// `get_index(&vm_read(&B), &Value::Number(i as f64))`, then a single native call de-optimises every
+// OTHER read of that array in the module, and the cost is paid on the hot loops rather than on the
+// call.
+
+import { grid_from_gids } from 'cargo:tish_gba_game_engine'
+
+// ⚠️ 256, NOT 1024. The boxed read got slower relative to the typed one as the typed path improved,
+// and at 1024 iterations B's span exceeded the 16-bit Timer2 and came back NEGATIVE — the exact
+// failure `examples/bench-access` documents. The ROM's own positive-span check caught it; the
+// number it would otherwise have reported was fiction.
+let N: i32 = 256
+
+export let A: i32[] = []
+let ai: i32 = 0
+while (ai < 1024) { A.push(ai & 7); ai = ai + 1 }
+
+export let B: i32[] = []
+let bi: i32 = 0
+while (bi < 1024) { B.push(bi & 7); bi = bi + 1 }
+
+/// Bare index: `A[i]`.
+export function sumA(): i32 {
+  let n: i32 = N
+  let acc: i32 = 0
+  let i: i32 = 0
+  while (i < n) { acc = acc + A[i]; i = i + 1 }
+  return acc
+}
+
+/// MASKED index: `A[i & 1023]`. The array is 1024 long and `i` runs 0..1023, so this reads exactly
+/// the same elements in exactly the same order as `sumA` — the mask cannot change a single access.
+export function sumAMasked(): i32 {
+  let n: i32 = N
+  let acc: i32 = 0
+  let i: i32 = 0
+  while (i < n) { acc = acc + A[i & 1023]; i = i + 1 }
+  return acc
+}
+
+/// Identical body to `sumA`. Reads `B`, which IS passed to a native — once, below, and never on
+/// this path.
+export function sumB(): i32 {
+  let n: i32 = N
+  let acc: i32 = 0
+  let i: i32 = 0
+  while (i < n) { acc = acc + B[i]; i = i + 1 }
+  return acc
+}
+
+/// Hands ONLY `B` to a native. `A` is never passed anywhere.
+///
+/// ⚠️ The first version of this probe called `grid_from_gids(32, 32, B, A)` — which passes BOTH
+/// arrays — and then concluded from "A is boxed too" that passing to a native was not the trigger.
+/// It was passing A. Check the arguments before believing a negative result.
+export function handOverB() {
+  grid_from_gids(32, 32, B, [1])
+}

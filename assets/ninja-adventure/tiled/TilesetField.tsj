@@ -1,0 +1,807 @@
+{
+ "columns": 5,
+ "image": "../Backgrounds/Tilesets/TilesetField.png",
+ "imagewidth": 80,
+ "imageheight": 240,
+ "margin": 0,
+ "spacing": 0,
+ "name": "TilesetField",
+ "tilecount": 75,
+ "tiledversion": "1.11.0",
+ "tilewidth": 16,
+ "tileheight": 16,
+ "type": "tileset",
+ "version": "1.10",
+ "wangsets": [
+  {
+   "colors": [
+    {
+     "color": "#38d24a",
+     "name": "orange_soil",
+     "probability": 1,
+     "tile": -1
+    }
+   ],
+   "name": "orange_soil",
+   "tile": -1,
+   "type": "mixed",
+   "wangtiles": [
+    {
+     "tileid": 0,
+     "wangid": [
+      0,
+      0,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 2,
+     "wangid": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      0
+     ]
+    },
+    {
+     "tileid": 10,
+     "wangid": [
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 12,
+     "wangid": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 1,
+     "wangid": [
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0
+     ]
+    },
+    {
+     "tileid": 11,
+     "wangid": [
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 5,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 7,
+     "wangid": [
+      1,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 3,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 4,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 6,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "colors": [
+    {
+     "color": "#2f8f3a",
+     "name": "spring_grass",
+     "probability": 1,
+     "tile": -1
+    }
+   ],
+   "name": "spring_grass",
+   "tile": -1,
+   "type": "mixed",
+   "wangtiles": [
+    {
+     "tileid": 15,
+     "wangid": [
+      0,
+      0,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 17,
+     "wangid": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      0
+     ]
+    },
+    {
+     "tileid": 25,
+     "wangid": [
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 27,
+     "wangid": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 16,
+     "wangid": [
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0
+     ]
+    },
+    {
+     "tileid": 26,
+     "wangid": [
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 20,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 22,
+     "wangid": [
+      1,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 18,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 19,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 21,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "colors": [
+    {
+     "color": "#e0c060",
+     "name": "summer_grass",
+     "probability": 1,
+     "tile": -1
+    }
+   ],
+   "name": "summer_grass",
+   "tile": -1,
+   "type": "mixed",
+   "wangtiles": [
+    {
+     "tileid": 30,
+     "wangid": [
+      0,
+      0,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 32,
+     "wangid": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      0
+     ]
+    },
+    {
+     "tileid": 40,
+     "wangid": [
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 42,
+     "wangid": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 31,
+     "wangid": [
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0
+     ]
+    },
+    {
+     "tileid": 41,
+     "wangid": [
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 35,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 37,
+     "wangid": [
+      1,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 33,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 34,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 36,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "colors": [
+    {
+     "color": "#e090b0",
+     "name": "autumn_ground",
+     "probability": 1,
+     "tile": -1
+    }
+   ],
+   "name": "autumn_ground",
+   "tile": -1,
+   "type": "mixed",
+   "wangtiles": [
+    {
+     "tileid": 45,
+     "wangid": [
+      0,
+      0,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 47,
+     "wangid": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      0
+     ]
+    },
+    {
+     "tileid": 55,
+     "wangid": [
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 57,
+     "wangid": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 46,
+     "wangid": [
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0
+     ]
+    },
+    {
+     "tileid": 56,
+     "wangid": [
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 50,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 52,
+     "wangid": [
+      1,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 48,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 49,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 51,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "colors": [
+    {
+     "color": "#f0f0f0",
+     "name": "field_snow",
+     "probability": 1,
+     "tile": -1
+    }
+   ],
+   "name": "field_snow",
+   "tile": -1,
+   "type": "mixed",
+   "wangtiles": [
+    {
+     "tileid": 60,
+     "wangid": [
+      0,
+      0,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 62,
+     "wangid": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      0
+     ]
+    },
+    {
+     "tileid": 70,
+     "wangid": [
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 72,
+     "wangid": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 61,
+     "wangid": [
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0
+     ]
+    },
+    {
+     "tileid": 71,
+     "wangid": [
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 65,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 67,
+     "wangid": [
+      1,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 63,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 64,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 66,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   ]
+  }
+ ]
+}

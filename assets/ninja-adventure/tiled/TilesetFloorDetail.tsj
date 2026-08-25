@@ -1,0 +1,15 @@
+{
+ "columns": 16,
+ "image": "../Backgrounds/Tilesets/TilesetFloorDetail.png",
+ "imagewidth": 256,
+ "imageheight": 80,
+ "margin": 0,
+ "spacing": 0,
+ "name": "TilesetFloorDetail",
+ "tilecount": 80,
+ "tiledversion": "1.11.0",
+ "tilewidth": 16,
+ "tileheight": 16,
+ "type": "tileset",
+ "version": "1.10"
+}

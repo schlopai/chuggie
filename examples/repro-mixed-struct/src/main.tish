@@ -1,0 +1,91 @@
+// MIXED-STRUCT LOWERING: a struct param qualifies on ONE numeric field, not all of them.
+//
+// Before this, a function taking a struct lowered to a native Rust `fn` only if EVERY field of that
+// struct was numeric. Half of a game's records carry a string, a null or an array beside their
+// numbers — the SRPG HUD demo's SQUAD row is the case that forced this — so one string field
+// disqualified the whole function and it stayed a boxed closure held by run()'s stack frame.
+//
+// Now the proof is per FIELD: `m.x` is a direct load and lowers, `m.name` is not and does not. A
+// function that reads the string simply fails the proof and stays boxed, exactly as before, so
+// nothing that lowered previously stops lowering.
+//
+// ⚠️ THIS FILE MUST COMPARE, NOT PRINT. A harness that logs values passes while every function
+// stayed boxed and proves nothing. Correct numbers are only half the check — the other half is
+// reading the generated Rust for the closure/get_prop count (see README).
+import { log, vblank } from 'cargo:tish_agb'
+
+type Mixed = { x: i32, y: i32, name: string }
+type Numeric = { a: i32, b: i32 }
+
+let fails: i32 = 0
+
+function check(label: string, got: i32, want: i32) {
+  if (got === want) {
+    log("ok   " + label + " = " + got)
+  } else {
+    fails = fails + 1
+    log("FAIL " + label + " = " + got + " want " + want)
+  }
+}
+
+// THE CASE THIS CHANGE EXISTS FOR: reads only the numeric fields of a record that also holds a
+// string. Must lower to a native fn taking &TishStruct_Mixed.
+function sumMixed(m: Mixed): i32 {
+  return m.x + m.y
+}
+
+// Arithmetic on mixed fields, to catch a wrong field being read: order matters and a mis-mapped
+// field would still produce a plausible-looking number.
+function weighMixed(m: Mixed): i32 {
+  return m.x * 100 + m.y
+}
+
+// Unchanged behaviour: an all-numeric struct param lowered before this and must still lower.
+function sumNumeric(n: Numeric): i32 {
+  return n.a + n.b
+}
+
+// THE REGRESSION GUARD: touching the string field must keep this function boxed and CORRECT. If the
+// proof ever admitted `m.name` as numeric, this would emit Rust that does not compile.
+function describe(m: Mixed): string {
+  return m.name + ":" + m.x
+}
+
+// Mixed struct beside a plain i32 param — the shape the return ABI arm handles.
+function offsetMixed(m: Mixed, d: i32): i32 {
+  return m.x + d
+}
+
+let mA: Mixed = { x: 7, y: 5, name: "alpha" }
+let mB: Mixed = { x: 2, y: 9, name: "beta" }
+let nA: Numeric = { a: 3, b: 4 }
+
+check("sumMixed(7,5)", sumMixed(mA), 12)
+check("sumMixed(2,9)", sumMixed(mB), 11)
+// 7*100+5 -- distinguishes x from y, so a swapped field mapping fails here rather than silently.
+check("weighMixed(7,5)", weighMixed(mA), 705)
+check("weighMixed(2,9)", weighMixed(mB), 209)
+check("sumNumeric(3,4)", sumNumeric(nA), 7)
+check("offsetMixed(7,+3)", offsetMixed(mA, 3), 10)
+check("offsetMixed(2,-1)", offsetMixed(mB, 0 - 1), 1)
+
+// The string path still works. Compared by length and a numeric tail rather than string equality,
+// so this stays an i32 comparison like every other check.
+let d1: string = describe(mA)
+check("describe(alpha).length", d1.length, 7)
+let d2: string = describe(mB)
+check("describe(beta).length", d2.length, 6)
+
+// The numeric fields must survive being read AFTER the string field is touched -- the boxed and
+// native paths share the same record.
+check("sumMixed after describe", sumMixed(mA), 12)
+
+if (fails === 0) {
+  log("ALL OK")
+} else {
+  log("FAILURES: " + fails)
+}
+
+let f: i32 = 0
+while (f < 30) { vblank() f = f + 1 }
+log("done")

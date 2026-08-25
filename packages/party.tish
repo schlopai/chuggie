@@ -1,0 +1,664 @@
+// party.tish — a front-view, party-vs-party turn battle. No board, no tiles, no projection.
+//
+// WHY THIS EXISTS RATHER THAN `packages/battle.tish`. That file is the obvious place to put a JRPG
+// fight and it cannot hold one: it imports `isob_*` (the iso grid), `./iso` and the whole
+// SRPG rules stack, so its turn loop cannot be separated from a board with columns, rows,
+// elevation and zones of control. A Final-Fantasy-shaped battle has none of those — four heroes on
+// the right, some monsters on the left, and a clock. Nothing in this file knows what a tile is.
+//
+// THREE CONVENTIONS, inherited from `examples/creature-rpg/src/battle.tish`, which reached the same
+// conclusion for the same reason and wrote them down:
+//
+//   1. `partyTick(keys)` TAKES INPUT AS AN ARGUMENT and never reads the pad. A whole fight can then
+//      be driven from a table, which is how the tuning numbers below were arrived at.
+//   2. It NEVER DRAWS. The caller owns presentation; this file owns what is true. Everything the
+//      renderer needs is a `party*` read, including the things it is tempting to act on here —
+//      `partyHitSeq`/`partyLastTarget` exist so a caller can shake a sprite without this file
+//      knowing sprites exist.
+//   3. `partyStart` RESETS EVERYTHING. A second battle inheriting the first one's dead is the
+//      classic bug in this repo; an SRPG campaign demo shipped it and lap 2 opened with lap 1's corpses.
+//
+// ── THE CLOCK IS "WAIT" ATB, NOT "ACTIVE" ──────────────────────────────────────────────────────
+//
+// Gauges fill while nobody is being asked a question, and FREEZE while a menu or a message is open.
+// Active-mode ATB — where the enemies keep acting while you read the menu — needs the renderer to
+// stay live under a modal cursor, and it makes a headless run unreproducible: the fight then depends
+// on how many frames the harness spent between button presses. Wait mode makes `partyTick` a pure
+// function of the input sequence, so the same key table always produces the same fight.
+//
+// ── SLOTS ARE POSITIONAL AND FIXED ─────────────────────────────────────────────────────────────
+//
+// 0..3 are the party, 4..7 are the foes, always, whether or not they are filled. The renderer can
+// therefore lay out a screen from the slot index alone and never has to search for "the third
+// living monster", and a dead combatant leaves its gap on screen rather than everyone sliding up.
+
+import { rngSeed, rngBelow } from './rng'
+
+export let PT_HERO: i32 = 0
+export let PT_FOE: i32 = 1
+
+export let SIDE_SLOTS: i32 = 4               // per side
+export let MAX_C: i32 = 8                    // both sides; see "slots are positional"
+let FOE0: i32 = 4                            // first foe slot — SIDE_SLOTS, named for the reader
+
+// ── states ───────────────────────────────────────────────────────────────────────────────────
+export let PS_INTRO: i32 = 0     // "Monsters appear!" — waiting for a press
+export let PS_WAIT: i32 = 1      // gauges filling; nobody is being asked anything
+export let PS_MENU: i32 = 2      // a hero is ready: FIGHT / MAGIC / ITEM / DEFEND
+export let PS_SPELL: i32 = 3     // picking a spell
+export let PS_TARGET: i32 = 4    // picking who it lands on
+export let PS_MSG: i32 = 5       // showing what just happened
+export let PS_END: i32 = 6       // final message
+export let PS_DONE: i32 = 7      // the caller may tear the screen down
+
+export let OUT_NONE: i32 = 0
+export let OUT_WIN: i32 = 1
+export let OUT_LOSE: i32 = 2
+
+// Input bits, so the caller can build them from a pad or a test table (convention 1).
+export let K_A: i32 = 1
+export let K_B: i32 = 2
+export let K_UP: i32 = 4
+export let K_DOWN: i32 = 8
+export let K_LEFT: i32 = 16
+export let K_RIGHT: i32 = 32
+
+// ── spells ───────────────────────────────────────────────────────────────────────────────────
+// Flat parallel tables rather than a struct array: a spell is read three times per action and
+// `SP_COST[i]` is a native i32 load, where `SPELLS[i].cost` on a typed struct array is not.
+// TARGETS: 0 = one foe, 1 = one ally, 2 = all foes.
+export let SPELL_NAME = ["FIRE", "BOLT", "CURE", "QUAKE"]
+let SP_COST: i32[] = [4, 5, 6, 12]
+let SP_POWER: i32[] = [22, 26, 30, 20]
+let SP_TARGET: i32[] = [0, 0, 1, 2]
+let SPELL_N: i32 = 4
+
+export let ITEM_NAME = ["POTION", "ETHER"]
+let IT_N: i32 = 2
+
+// ── combatants ───────────────────────────────────────────────────────────────────────────────
+// Untyped, because these are strings: `Value::String` is an ArcStr and an index read is a refcount
+// bump, while a `: string[]` annotation lowers to `Vec<String>` and DEEP-COPIES on every read.
+// `examples/solitaire/src/main.tish:91` records the same finding for its rank/suit labels.
+let C_NAME = ["", "", "", "", "", "", "", ""]
+
+let C_USED: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let C_TEAM: i32[] = [0, 0, 0, 0, 1, 1, 1, 1]
+let C_HP: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let C_MAXHP: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let C_MP: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let C_MAXMP: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let C_ATK: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let C_DEF: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let C_MAG: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let C_SPD: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let C_ART: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]   // an opaque id for the caller's sprite table
+let C_ATB: i32[] = [0, 0, 0, 0, 0, 0, 0, 0]
+let C_GUARD: i32[] = [0, 0, 0, 0, 0, 0, 0, 0] // 1 while DEFEND is up: halves the next blow taken
+
+// The gauge is 0..ATB_FULL and gains `spd` per tick, so a SPD 10 combatant acts every 90 frames of
+// unpaused clock and a SPD 20 one acts twice as often. Both numbers are visible to the renderer,
+// which is the point of keeping the scale round rather than normalising to a percentage.
+//
+// ⚠️ THE SIZE OF THIS NUMBER IS A PACING DECISION, NOT AN IMPLEMENTATION DETAIL. It started at 240,
+// which put a turn every 16-30 frames: a quarter of a second, so the fight resolved faster than the
+// message telling you what had happened could be read, and every gauge on screen crossed a bar
+// pixel EVERY frame — which defeats any damage gate a renderer can write, because the picture
+// genuinely does differ each frame. At 900 a turn takes one to two seconds, which is both the pace
+// an ATB battle is supposed to have and slow enough that a bar pixel lasts several frames.
+export let ATB_FULL: i32 = 900
+
+let nParty: i32 = 0
+let nFoe: i32 = 0
+
+// ── run state ────────────────────────────────────────────────────────────────────────────────
+let pState: i32 = 0
+let pOutcome: i32 = 0
+let pCursor: i32 = 0
+let pActor: i32 = 0 - 1       // whose turn is being decided, -1 for none
+let pSpell: i32 = 0
+let pMenu: i32 = 0            // the root-menu row that led into PS_TARGET (0 fight, 1 magic, 2 item)
+let pTarget: i32 = 0
+let pMsg = ""
+let pTurns: i32 = 0
+let msgHold: i32 = 0          // frames the current message has been up
+
+// Reported, not acted on — convention 2. `hitSeq` bumps on every blow so a renderer can tell a new
+// hit from a redraw, which a damage number alone cannot (two 7s in a row are indistinguishable).
+let lastDmg: i32 = 0
+let lastTarget: i32 = 0 - 1
+let lastHeal: i32 = 0
+let hitSeq: i32 = 0
+
+// Items are the run, not the fight, so `partyStart` deliberately does NOT reset them — the one
+// exception to convention 3, and the same exception creature-rpg carves out for its balls.
+let ITEMS: i32[] = [4, 2]
+
+// A message dismisses itself after this many frames if nothing is pressed. Battle text that waits
+// forever for a button makes an attract mode and a headless run impossible; A still skips it.
+let MSG_FRAMES: i32 = 54
+
+// ── setup ────────────────────────────────────────────────────────────────────────────────────
+
+/// Seed the fight's RNG stream. Stream 3 is this file's; callers own the rest.
+export function partyInit(seed: i32) {
+  rngSeed(3, seed)
+}
+
+/// Empty both sides. Does not touch the item stock.
+export function partyClear() {
+  let i: i32 = 0
+  while (i < MAX_C) {
+    C_USED[i] = 0
+    C_NAME[i] = ""
+    C_HP[i] = 0
+    C_MAXHP[i] = 0
+    C_MP[i] = 0
+    C_MAXMP[i] = 0
+    C_ATB[i] = 0
+    C_GUARD[i] = 0
+    C_ART[i] = 0
+    i = i + 1
+  }
+  nParty = 0
+  nFoe = 0
+}
+
+/// Add a combatant to the next free slot on `team`. Returns the slot, or -1 if that side is full.
+/// `art` is opaque here: this file never draws, so it is whatever the caller's sprite table wants.
+export function partyAdd(name, team: i32, hp: i32, mp: i32, atk: i32, def: i32,
+                         mag: i32, spd: i32, art: i32): i32 {
+  let base: i32 = 0
+  if (team === PT_FOE) { base = FOE0 }
+  let i: i32 = 0
+  while (i < SIDE_SLOTS) {
+    let s: i32 = base + i
+    if (C_USED[s] === 0) {
+      C_USED[s] = 1
+      C_NAME[s] = name
+      C_TEAM[s] = team
+      C_HP[s] = hp
+      C_MAXHP[s] = hp
+      C_MP[s] = mp
+      C_MAXMP[s] = mp
+      C_ATK[s] = atk
+      C_DEF[s] = def
+      C_MAG[s] = mag
+      C_SPD[s] = spd
+      C_ART[s] = art
+      C_ATB[s] = 0
+      C_GUARD[s] = 0
+      if (team === PT_FOE) { nFoe = nFoe + 1 } else { nParty = nParty + 1 }
+      return s
+    }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+/// Open the fight. Full heal, gauges staggered by speed, outcome cleared — see convention 3.
+export function partyStart(opening) {
+  let i: i32 = 0
+  while (i < MAX_C) {
+    if (C_USED[i] === 1) {
+      C_HP[i] = C_MAXHP[i]
+      C_MP[i] = C_MAXMP[i]
+      C_GUARD[i] = 0
+      // Staggered, not zeroed. Every gauge starting at 0 means the whole field becomes ready in
+      // speed order on the same handful of frames and the fight opens as a queue rather than a
+      // clock; seeding by speed spreads the first round out the way the rest of the fight looks.
+      C_ATB[i] = (C_SPD[i] * 6) % ATB_FULL
+    }
+    i = i + 1
+  }
+  pOutcome = OUT_NONE
+  pCursor = 0
+  pActor = 0 - 1
+  pSpell = 0
+  pMenu = 0
+  pTarget = 0
+  pTurns = 0
+  lastDmg = 0
+  lastHeal = 0
+  lastTarget = 0 - 1
+  hitSeq = 0
+  msgHold = 0
+  pMsg = opening
+  pState = PS_INTRO
+}
+
+// ── reads, for the caller's renderer ─────────────────────────────────────────────────────────
+export function partyState(): i32 { return pState }
+export function partyOutcome(): i32 { return pOutcome }
+export function partyCursor(): i32 { return pCursor }
+export function partyActor(): i32 { return pActor }
+export function partyTarget(): i32 { return pTarget }
+export function partyTurns(): i32 { return pTurns }
+export function partyMessage() { return pMsg }
+export function partyUsed(i: i32): i32 { return C_USED[i] }
+export function partyName(i: i32) { return C_NAME[i] }
+export function partyTeamOf(i: i32): i32 { return C_TEAM[i] }
+export function partyHp(i: i32): i32 { return C_HP[i] }
+export function partyMaxHp(i: i32): i32 { return C_MAXHP[i] }
+export function partyMp(i: i32): i32 { return C_MP[i] }
+export function partyMaxMp(i: i32): i32 { return C_MAXMP[i] }
+export function partyArt(i: i32): i32 { return C_ART[i] }
+export function partyAtb(i: i32): i32 { return C_ATB[i] }
+export function partyGuarding(i: i32): i32 { return C_GUARD[i] }
+export function partyAlive(i: i32): i32 {
+  if (C_USED[i] === 1 && C_HP[i] > 0) { return 1 }
+  return 0
+}
+export function partyItemStock(i: i32): i32 { return ITEMS[i] }
+export function partyLastDamage(): i32 { return lastDmg }
+export function partyLastHeal(): i32 { return lastHeal }
+export function partyLastTarget(): i32 { return lastTarget }
+export function partyHitSeq(): i32 { return hitSeq }
+
+/// How many rows the current menu has, and what they read as. Returning labels from here keeps the
+/// renderer from having to know that row 3 of the root menu is DEFEND.
+export function partyMenuCount(): i32 {
+  if (pState === PS_MENU) { return 4 }
+  if (pState === PS_SPELL) { return SPELL_N }
+  if (pState === PS_TARGET) { return MAX_C }   // the cursor skips invalid slots; see moveTarget
+  return 0
+}
+export function partyMenuLabel(i: i32) {
+  if (pState === PS_MENU) {
+    if (i === 0) { return "FIGHT" }
+    if (i === 1) { return "MAGIC" }
+    if (i === 2) { return "ITEM" }
+    return "DEFEND"
+  }
+  if (pState === PS_SPELL) { return SPELL_NAME[i] }
+  return ""
+}
+/// Can the actor afford menu row `i` right now? The renderer greys out what this says no to, and
+/// `partyTick` refuses it — the check lives here so the two cannot disagree.
+export function partyMenuOk(i: i32): i32 {
+  if (pState === PS_MENU) {
+    if (i === 1) {
+      if (C_MAXMP[pActor] <= 0) { return 0 }
+      if (C_MP[pActor] < SP_COST[0]) { return 0 }
+      return 1
+    }
+    if (i === 2) {
+      if (ITEMS[0] > 0 || ITEMS[1] > 0) { return 1 }
+      return 0
+    }
+    return 1
+  }
+  if (pState === PS_SPELL) {
+    if (C_MP[pActor] >= SP_COST[i]) { return 1 }
+    return 0
+  }
+  return 1
+}
+
+// ── arithmetic ───────────────────────────────────────────────────────────────────────────────
+// Tuned by driving `partyTick` from a key table over the demo's roster: a fight runs eight to
+// fourteen actions, a hero survives three unanswered monster turns, and no blow is ever 0 — a 0
+// reads as a bug to a player even when the defence maths says it is correct.
+function physical(a: i32, d: i32): i32 {
+  let base: i32 = (a * 6) / (d + 6) + 2
+  let v: i32 = (base * (88 + rngBelow(3, 25))) / 100
+  if (v < 1) { v = 1 }
+  return v
+}
+function magical(m: i32, power: i32, d: i32): i32 {
+  let base: i32 = (power * (m + 8)) / (d + 24) + 2
+  let v: i32 = (base * (88 + rngBelow(3, 25))) / 100
+  if (v < 1) { v = 1 }
+  return v
+}
+
+function applyDamage(who: i32, d: i32) {
+  let v: i32 = d
+  // DEFEND is spent by the blow it absorbs, not by the clock. A guard that lasted until the actor's
+  // next turn made DEFEND strictly better than attacking whenever the gauge was long.
+  if (C_GUARD[who] === 1) {
+    v = v / 2
+    if (v < 1) { v = 1 }
+    C_GUARD[who] = 0
+  }
+  C_HP[who] = C_HP[who] - v
+  if (C_HP[who] < 0) { C_HP[who] = 0 }
+  lastDmg = v
+  lastHeal = 0
+  lastTarget = who
+  hitSeq = hitSeq + 1
+}
+
+function applyHeal(who: i32, h: i32) {
+  C_HP[who] = C_HP[who] + h
+  if (C_HP[who] > C_MAXHP[who]) { C_HP[who] = C_MAXHP[who] }
+  lastHeal = h
+  lastDmg = 0
+  lastTarget = who
+  hitSeq = hitSeq + 1
+}
+
+// ── side queries ─────────────────────────────────────────────────────────────────────────────
+export function partyAliveCount(team: i32): i32 {
+  let base: i32 = 0
+  if (team === PT_FOE) { base = FOE0 }
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < SIDE_SLOTS) {
+    if (partyAlive(base + i) === 1) { n = n + 1 }
+    i = i + 1
+  }
+  return n
+}
+
+function firstAlive(team: i32): i32 {
+  let base: i32 = 0
+  if (team === PT_FOE) { base = FOE0 }
+  let i: i32 = 0
+  while (i < SIDE_SLOTS) {
+    if (partyAlive(base + i) === 1) { return base + i }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+function randomAlive(team: i32): i32 {
+  let n: i32 = partyAliveCount(team)
+  if (n <= 0) { return 0 - 1 }
+  let pick: i32 = rngBelow(3, n)
+  let base: i32 = 0
+  if (team === PT_FOE) { base = FOE0 }
+  let seen: i32 = 0
+  let i: i32 = 0
+  while (i < SIDE_SLOTS) {
+    let s: i32 = base + i
+    if (partyAlive(s) === 1) {
+      if (seen === pick) { return s }
+      seen = seen + 1
+    }
+    i = i + 1
+  }
+  return firstAlive(team)
+}
+
+// ── the turn ─────────────────────────────────────────────────────────────────────────────────
+
+function say(m) {
+  pMsg = m
+  msgHold = 0
+  pState = PS_MSG
+}
+
+// Is the fight over? Called after every resolution, BEFORE the message is dismissed, so the losing
+// blow's text can still be read while the result is already decided.
+function checkEnd(): i32 {
+  if (partyAliveCount(PT_FOE) === 0) {
+    pOutcome = OUT_WIN
+    return 1
+  }
+  if (partyAliveCount(PT_HERO) === 0) {
+    pOutcome = OUT_LOSE
+    return 1
+  }
+  return 0
+}
+
+// Hand the turn back to the clock. The actor's gauge is emptied here and nowhere else, so an action
+// that returns early without spending it (a cancelled menu) genuinely costs nothing.
+function endTurn() {
+  if (pActor >= 0) { C_ATB[pActor] = 0 }
+  pActor = 0 - 1
+  pTurns = pTurns + 1
+  pCursor = 0
+}
+
+// The monster AI, entire: hit a living hero, favouring the weakest. Anything cleverer is invisible
+// at four combatants, and anything random-uniform makes the fight feel like it is not paying
+// attention — a monster that ignores the hero on 3 HP is the one thing players do notice.
+function foeAct(who: i32) {
+  let target: i32 = 0 - 1
+  let bestHp: i32 = 99999
+  let i: i32 = 0
+  while (i < SIDE_SLOTS) {
+    if (partyAlive(i) === 1) {
+      if (C_HP[i] < bestHp) {
+        bestHp = C_HP[i]
+        target = i
+      }
+    }
+    i = i + 1
+  }
+  // One turn in four it swings at someone else, so a low hero is not a guaranteed execution.
+  if (rngBelow(3, 4) === 0) {
+    let r: i32 = randomAlive(PT_HERO)
+    if (r >= 0) { target = r }
+  }
+  if (target < 0) { return }
+
+  if (C_MP[who] >= SP_COST[0] && rngBelow(3, 3) === 0) {
+    C_MP[who] = C_MP[who] - SP_COST[0]
+    applyDamage(target, magical(C_MAG[who], SP_POWER[0], C_DEF[target]))
+    say(C_NAME[who] + " casts FIRE! " + C_NAME[target] + " -" + lastDmg)
+    return
+  }
+  applyDamage(target, physical(C_ATK[who], C_DEF[target]))
+  say(C_NAME[who] + " strikes " + C_NAME[target] + "! -" + lastDmg)
+}
+
+// ── target cursor ────────────────────────────────────────────────────────────────────────────
+// The cursor walks SLOTS, not a compacted list of living combatants, so it can only ever land on
+// something valid and the renderer's slot-indexed layout keeps working when a monster dies
+// mid-selection.
+function targetSide(): i32 {
+  if (pMenu === 1) { return SP_TARGET[pSpell] }
+  if (pMenu === 2) {
+    if (pCursorItem() === 0) { return 1 }
+    return 1
+  }
+  return 0
+}
+// Which item the ITEM branch is holding. Only two exist, and the root menu enters the branch with
+// the first one it has stock of, so this is a lookup rather than a second menu.
+function pCursorItem(): i32 {
+  if (ITEMS[0] > 0) { return 0 }
+  return 1
+}
+
+function targetTeam(): i32 {
+  if (targetSide() === 1) { return PT_HERO }
+  return PT_FOE
+}
+
+function moveTarget(step: i32) {
+  let team: i32 = targetTeam()
+  let base: i32 = 0
+  if (team === PT_FOE) { base = FOE0 }
+  let i: i32 = 0
+  while (i < SIDE_SLOTS) {
+    // Walk from the current slot in `step` direction until a living one turns up. Bounded by
+    // SIDE_SLOTS, so a wholly dead side cannot spin here.
+    pTarget = base + (((pTarget - base + step) + SIDE_SLOTS) % SIDE_SLOTS)
+    if (partyAlive(pTarget) === 1) { return }
+    i = i + 1
+  }
+}
+
+function openTarget() {
+  let t: i32 = firstAlive(targetTeam())
+  if (t < 0) { return }
+  pTarget = t
+  pState = PS_TARGET
+}
+
+// Resolve the hero action the menus have assembled.
+function heroAct() {
+  let who: i32 = pActor
+  if (pMenu === 0) {
+    applyDamage(pTarget, physical(C_ATK[who], C_DEF[pTarget]))
+    say(C_NAME[who] + " attacks " + C_NAME[pTarget] + "! -" + lastDmg)
+    return
+  }
+  if (pMenu === 1) {
+    C_MP[who] = C_MP[who] - SP_COST[pSpell]
+    if (SP_TARGET[pSpell] === 1) {
+      applyHeal(pTarget, magical(C_MAG[who], SP_POWER[pSpell], 0))
+      say(C_NAME[who] + " casts CURE. " + C_NAME[pTarget] + " +" + lastHeal)
+      return
+    }
+    if (SP_TARGET[pSpell] === 2) {
+      // An all-foes spell reports the LAST blow through `lastDmg`, and bumps `hitSeq` once per
+      // victim, so a renderer that shakes on `hitSeq` shakes for each of them.
+      let total: i32 = 0
+      let i: i32 = 0
+      while (i < SIDE_SLOTS) {
+        let s: i32 = FOE0 + i
+        if (partyAlive(s) === 1) {
+          applyDamage(s, magical(C_MAG[who], SP_POWER[pSpell], C_DEF[s]))
+          total = total + lastDmg
+        }
+        i = i + 1
+      }
+      say(C_NAME[who] + " casts " + SPELL_NAME[pSpell] + "! -" + total)
+      return
+    }
+    applyDamage(pTarget, magical(C_MAG[who], SP_POWER[pSpell], C_DEF[pTarget]))
+    say(C_NAME[who] + " casts " + SPELL_NAME[pSpell] + "! -" + lastDmg)
+    return
+  }
+  if (pMenu === 2) {
+    let it: i32 = pCursorItem()
+    ITEMS[it] = ITEMS[it] - 1
+    if (it === 0) {
+      applyHeal(pTarget, 45)
+      say(C_NAME[pTarget] + " drinks a POTION. +" + lastHeal)
+    } else {
+      C_MP[pTarget] = C_MP[pTarget] + 12
+      if (C_MP[pTarget] > C_MAXMP[pTarget]) { C_MP[pTarget] = C_MAXMP[pTarget] }
+      lastTarget = pTarget
+      hitSeq = hitSeq + 1
+      say(C_NAME[pTarget] + " drinks an ETHER. MP up")
+    }
+    return
+  }
+  C_GUARD[who] = 1
+  say(C_NAME[who] + " guards.")
+}
+
+// Advance every gauge one frame and hand the turn to whoever fills first. Ties go to the higher
+// slot-order hero, then to the foes — deterministic, which wait-mode ATB is for.
+function runClock() {
+  let ready: i32 = 0 - 1
+  let i: i32 = 0
+  while (i < MAX_C) {
+    if (partyAlive(i) === 1) {
+      C_ATB[i] = C_ATB[i] + C_SPD[i]
+      if (C_ATB[i] >= ATB_FULL) {
+        C_ATB[i] = ATB_FULL
+        if (ready < 0) { ready = i }
+      }
+    }
+    i = i + 1
+  }
+  if (ready < 0) { return }
+  pActor = ready
+  if (C_TEAM[ready] === PT_FOE) {
+    foeAct(ready)
+    return
+  }
+  pCursor = 0
+  pMenu = 0
+  pState = PS_MENU
+}
+
+// One frame of the fight. `keys` is edge-triggered presses as K_* bits — see convention 1.
+export function partyTick(keys: i32) {
+  if (pState === PS_INTRO) {
+    msgHold = msgHold + 1
+    if ((keys & K_A) > 0 || msgHold > MSG_FRAMES) {
+      msgHold = 0
+      pState = PS_WAIT
+    }
+    return
+  }
+
+  if (pState === PS_WAIT) {
+    runClock()
+    return
+  }
+
+  if (pState === PS_MENU) {
+    if ((keys & K_UP) > 0) { pCursor = (pCursor + 3) % 4 }
+    if ((keys & K_DOWN) > 0) { pCursor = (pCursor + 1) % 4 }
+    if ((keys & K_A) > 0) {
+      if (partyMenuOk(pCursor) === 0) { return }
+      pMenu = pCursor
+      if (pMenu === 3) {
+        heroAct()
+        return
+      }
+      if (pMenu === 1) {
+        pCursor = 0
+        pState = PS_SPELL
+        return
+      }
+      openTarget()
+    }
+    return
+  }
+
+  if (pState === PS_SPELL) {
+    if ((keys & K_UP) > 0) { pCursor = (pCursor + SPELL_N - 1) % SPELL_N }
+    if ((keys & K_DOWN) > 0) { pCursor = (pCursor + 1) % SPELL_N }
+    if ((keys & K_B) > 0) {
+      pCursor = 1
+      pState = PS_MENU
+      return
+    }
+    if ((keys & K_A) > 0) {
+      if (partyMenuOk(pCursor) === 0) { return }
+      pSpell = pCursor
+      // An all-foes spell has nothing to aim, so it skips the target cursor entirely rather than
+      // asking a question whose answer is ignored.
+      if (SP_TARGET[pSpell] === 2) {
+        heroAct()
+        return
+      }
+      openTarget()
+    }
+    return
+  }
+
+  if (pState === PS_TARGET) {
+    if ((keys & K_UP) > 0 || (keys & K_LEFT) > 0) { moveTarget(0 - 1) }
+    if ((keys & K_DOWN) > 0 || (keys & K_RIGHT) > 0) { moveTarget(1) }
+    if ((keys & K_B) > 0) {
+      pCursor = pMenu
+      pState = PS_MENU
+      return
+    }
+    if ((keys & K_A) > 0) { heroAct() }
+    return
+  }
+
+  if (pState === PS_MSG) {
+    msgHold = msgHold + 1
+    if ((keys & K_A) > 0 || msgHold > MSG_FRAMES) {
+      msgHold = 0
+      if (checkEnd() === 1) {
+        if (pOutcome === OUT_WIN) { pMsg = "The party is victorious!" }
+        else { pMsg = "The party has fallen..." }
+        pState = PS_END
+        return
+      }
+      endTurn()
+      pState = PS_WAIT
+    }
+    return
+  }
+
+  if (pState === PS_END) {
+    msgHold = msgHold + 1
+    if ((keys & K_A) > 0 || msgHold > MSG_FRAMES * 2) { pState = PS_DONE }
+    return
+  }
+}

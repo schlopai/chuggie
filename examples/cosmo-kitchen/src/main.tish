@@ -1,0 +1,290 @@
+// Cosmo Kitchen — jukebox for the intergalactic chef music + SFX pack.
+//
+// Tags: ZONE · DUN · BTL · INT · EDM · UI · STG · SFX · CTL
+// Up/Down scroll, A play, B stop, L/R intensity on INT tracks.
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { title } from 'font:../../../assets/fonts/peaberry.ttf@16'
+import { backdrop, frame, text_height, log, audio_pump } from 'cargo:tish_agb'
+import {
+  uiInit, uiPaint, uiPaintStep, uiKeys, uiKeyDown, uiSetText,
+  makeSelector, makePanel, makeDetailPanel, col2,
+  BTN_A, BTN_B, BTN_UP, BTN_DOWN, BTN_L, BTN_R,
+} from '../../../packages/ui'
+import { deckPlay, deckStop, deckSetIntensity } from '../../../packages/deck'
+import { playZone, SONGS, sfx as playSfx } from './audio'
+
+let ITEMS = [
+  // ── INT battles ───────────────────────────────────────────────────────────
+  { name: "Skillet Skirmish", tag: "INT", kind: 0, song: SONGS.battleSkilletSkirmish, intSong: 1,
+    desc: "Gm funk INT. L/R threat. Own riff DNA." },
+  { name: "Kitchen Showdown", tag: "INT", kind: 0, song: SONGS.bossKitchenShowdown, intSong: 1,
+    desc: "Chromatic climb INT + alarm stabs." },
+  // ── Hub / UI ──────────────────────────────────────────────────────────────
+  { name: "Neon Diner", tag: "UI", kind: 0, song: SONGS.titleNeonDiner, intSong: 0,
+    desc: "Lydian lounge. Long held tops." },
+  { name: "Starport Market", tag: "ZONE", kind: 0, song: SONGS.hubStarportMarket, intSong: 0,
+    desc: "ii-V funk. Syncop bass + clave hats." },
+  { name: "Clipboard", tag: "UI", kind: 0, song: SONGS.menuClipboard, intSong: 0,
+    desc: "Near-silent ambient fifths." },
+  { name: "Vendomat", tag: "UI", kind: 0, song: SONGS.shopVendomat, intSong: 0,
+    desc: "Staccato G-major jingle." },
+  { name: "Holo Lounge", tag: "UI", kind: 0, song: SONGS.ambientHoloLounge, intSong: 0,
+    desc: "Dialog bed. Almost no drums." },
+  { name: "Mise en Place", tag: "BTL", kind: 0, song: SONGS.deployMiseEnPlace, intSong: 0,
+    desc: "Sus ticks. Prep tension." },
+  // ── Zones (each different key / groove) ───────────────────────────────────
+  { name: "Hyperspace Cruise", tag: "ZONE", kind: 0, song: SONGS.zoneHyperspaceCruise, intSong: 0,
+    desc: "Pedal drone + planing thirds." },
+  { name: "Agri-Dome", tag: "ZONE", kind: 0, song: SONGS.zoneAgriDome, intSong: 0,
+    desc: "F pentatonic pastoral." },
+  { name: "Neon Night Market", tag: "ZONE", kind: 0, song: SONGS.zoneNeonNightMarket, intSong: 0,
+    desc: "Noir Cm. Offbeat entries." },
+  { name: "Cruise Liner", tag: "ZONE", kind: 0, song: SONGS.zoneCruiseLiner, intSong: 0,
+    desc: "Waltz-leaning A major." },
+  { name: "Asteroid Diner", tag: "ZONE", kind: 0, song: SONGS.zoneAsteroidDiner, intSong: 0,
+    desc: "Bbm rock vamp + dembow kick." },
+  // ── Dungeons ──────────────────────────────────────────────────────────────
+  { name: "Icebox", tag: "DUN", kind: 0, song: SONGS.dungeonIcebox, intSong: 0,
+    desc: "Sparse Dorian. Hollow drips." },
+  { name: "Spice Mines", tag: "DUN", kind: 0, song: SONGS.dungeonSpiceMines, intSong: 0,
+    desc: "Phrygian hammer-ons + 16ths." },
+  { name: "Sugar Caverns", tag: "DUN", kind: 0, song: SONGS.dungeonSugarCaverns, intSong: 0,
+    desc: "Lydian sparkle runs." },
+  { name: "Derelict Galley", tag: "DUN", kind: 0, song: SONGS.dungeonDerelictGalley, intSong: 0,
+    desc: "Chromatic crawl + tritones." },
+  { name: "Waste Compactor", tag: "DUN", kind: 0, song: SONGS.dungeonWasteCompactor, intSong: 0,
+    desc: "Locrian grind." },
+  // ── Other battles ─────────────────────────────────────────────────────────
+  { name: "Recipe Duel", tag: "BTL", kind: 0, song: SONGS.battleCardRecipeDuel, intSong: 0,
+    desc: "3-chord F#m shuffle ostinato." },
+  { name: "Rush Hour", tag: "BTL", kind: 0, song: SONGS.battleRushHour, intSong: 0,
+    desc: "Mixolydian sprint. No INT layers." },
+  // ── EDM club ──────────────────────────────────────────────────────────────
+  { name: "Warehouse Floor", tag: "EDM", kind: 0, song: SONGS.edmWarehouseTechno, intSong: 0,
+    desc: "Am pedal techno. 16th hypnotic gate." },
+  { name: "Gravity House", tag: "EDM", kind: 0, song: SONGS.edmGravityHouse, intSong: 0,
+    desc: "Cm house stabs + offbeat hats." },
+  { name: "Acid Reactor", tag: "EDM", kind: 0, song: SONGS.edmAcidReactor, intSong: 0,
+    desc: "303-ish saw 16ths. Mutating patterns." },
+  { name: "Trance Orbit", tag: "EDM", kind: 0, song: SONGS.edmTranceOrbit, intSong: 0,
+    desc: "Am-F-C-G arp rush. Gate opens late." },
+  { name: "Chopped Breaks", tag: "EDM", kind: 0, song: SONGS.edmChoppedBreaks, intSong: 0,
+    desc: "Amen-ish kicks. Ragga stab. Fast hats." },
+  { name: "Dub Fridge", tag: "EDM", kind: 0, song: SONGS.edmDubFridge, intSong: 0,
+    desc: "Sparse dub techno. Fake delay taps." },
+  { name: "Electro Alley", tag: "EDM", kind: 0, song: SONGS.edmElectroAlley, intSong: 0,
+    desc: "Syncop bass + cowbell freestyle." },
+  // ── Stings ────────────────────────────────────────────────────────────────
+  { name: "Plated!", tag: "STG", kind: 2, song: SONGS.stingPlatedVictory, intSong: 0,
+    desc: "Spoon fanfare climb." },
+  { name: "Burned!", tag: "STG", kind: 2, song: SONGS.stingBurnedDefeat, intSong: 0,
+    desc: "Burn motif + drop." },
+  { name: "New Recipe", tag: "STG", kind: 2, song: SONGS.stingLevelUp, intSong: 0,
+    desc: "Pentatonic sparkle." },
+  { name: "Side Order", tag: "STG", kind: 2, song: SONGS.stingSidequest, intSong: 0,
+    desc: "Curious sixth leap." },
+  { name: "Health Inspector", tag: "STG", kind: 2, song: SONGS.stingLawWhistle, intSong: 0,
+    desc: "Double whistle + burn." },
+  // ── Control / SFX ─────────────────────────────────────────────────────────
+  { name: "Stop music", tag: "CTL", kind: 3, song: 0, intSong: 0,
+    desc: "Silence deck. SFX still works." },
+  { name: "Sizzle", tag: "SFX", kind: 1, sfx: "sizzle", intSong: 0, desc: "Bright airy hiss." },
+  { name: "Chop", tag: "SFX", kind: 1, sfx: "chop", intSong: 0, desc: "Hard metallic click." },
+  { name: "Ladle", tag: "SFX", kind: 1, sfx: "ladle", intSong: 0, desc: "Slow rising scoop." },
+  { name: "Microwave", tag: "SFX", kind: 1, sfx: "microwave", intSong: 0, desc: "Thin beep windup." },
+  { name: "Order bell", tag: "SFX", kind: 1, sfx: "bell", intSong: 0, desc: "High G6 bell." },
+  { name: "Card flip", tag: "SFX", kind: 1, sfx: "card", intSong: 0, desc: "Tick + scrape." },
+  { name: "Pop", tag: "SFX", kind: 1, sfx: "pop", intSong: 0, desc: "Fast upward pop." },
+  { name: "Fizz", tag: "SFX", kind: 1, sfx: "fizz", intSong: 0, desc: "Loose low fizz." },
+  { name: "Whistle", tag: "SFX", kind: 1, sfx: "whistle", intSong: 0, desc: "Piercing G6." },
+  { name: "Fridge", tag: "SFX", kind: 1, sfx: "fridge", intSong: 0, desc: "Narrow low thump." },
+  { name: "Steam", tag: "SFX", kind: 1, sfx: "steam", intSong: 0, desc: "Long vent whoosh." },
+  { name: "Clink", tag: "SFX", kind: 1, sfx: "clink", intSong: 0, desc: "Glass ping." },
+  { name: "Spatula", tag: "SFX", kind: 1, sfx: "spatula", intSong: 0, desc: "Falling scrape." },
+  { name: "Timer", tag: "SFX", kind: 1, sfx: "timer", intSong: 0, desc: "Kitchen timer beep." },
+  { name: "Grease fire", tag: "SFX", kind: 1, sfx: "grease", intSong: 0, desc: "Harsh burst." },
+  { name: "Bubbling", tag: "SFX", kind: 1, sfx: "bubble", intSong: 0, desc: "Pot burble." },
+  { name: "Spoon", tag: "SFX", kind: 1, sfx: "spoon", intSong: 0, desc: "Brand tonal hit." },
+  { name: "Coin", tag: "SFX", kind: 1, sfx: "coin", intSong: 0, desc: "Credits pickup." },
+  { name: "Accept", tag: "SFX", kind: 1, sfx: "accept", intSong: 0, desc: "UI confirm." },
+  { name: "Cancel", tag: "SFX", kind: 1, sfx: "cancel", intSong: 0, desc: "UI back." },
+]
+
+let S = { status: "ready", detDirty: -1, detWait: 0, intSong: 0, intensity: 0 }
+let FOOT = { status: null }
+
+backdrop(0x140C18)
+uiInit({ font: body, titleFont: title, tinyFont: body, tileReserve: 400 })
+
+let rowH = text_height(body)
+let LIST_H = 7 * (rowH + 1) - 1
+
+let DET = makeDetailPanel({
+  font: body, w: 108, border: "accent", pad: 4, title: "NOW", titleAlign: "center",
+  nameW: 96, descLines: 4, nameWrap: 1,
+})
+
+function detailOf(i) {
+  let it = ITEMS[i]
+  return { name: it.name, desc: it.desc, priceLabel: it.tag }
+}
+
+function statusForPlaying(it) {
+  if (it.intSong > 0) { return "INT " + S.intensity }
+  return it.tag
+}
+
+function setStatus(msg) {
+  S.status = msg
+  if (FOOT.status !== null) { uiSetText(FOOT.status, msg, "dim") }
+}
+
+function activate(i) {
+  let it = ITEMS[i]
+  if (it.kind === 0 || it.kind === 2) {
+    deckPlay(it.song)
+    S.intSong = it.intSong
+    S.intensity = 0
+    setStatus(statusForPlaying(it))
+    log("CK " + it.tag + " " + it.name)
+  } else if (it.kind === 1) {
+    playSfx(it.sfx)
+    setStatus("sfx")
+  } else {
+    deckStop()
+    S.intSong = 0
+    S.intensity = 0
+    setStatus("stopped")
+  }
+}
+
+function bumpIntensity(delta) {
+  if (S.intSong === 0) { return }
+  let next = S.intensity + delta
+  if (next < 0) { next = 0 }
+  if (next > 3) { next = 3 }
+  if (next === S.intensity) { return }
+  S.intensity = deckSetIntensity(next)
+  setStatus("INT " + S.intensity)
+  log("CK threat " + S.intensity)
+}
+
+let sel = makeSelector({
+  cols: 1, gap: 1, rowH: rowH, h: LIST_H, rowBg: "panel",
+  count: () => ITEMS.length,
+  cell: (i) => {
+    let it = ITEMS[i]
+    return {
+      dir: "row", grow: 1, align: "center", justify: "between",
+      children: [
+        { text: it.name, color: "text", w: 86, ellip: 1 },
+        { text: it.tag, color: "dim", w: 28, align: "right" },
+      ],
+    }
+  },
+  onMove: (i) => {
+    S.detDirty = i
+    S.detWait = 2
+  },
+})
+
+function buildTree() {
+  FOOT.status = { text: S.status, color: "dim", font: body }
+  return {
+    dir: "col", pad: 4, gap: 4,
+    children: [
+      {
+        dir: "row", justify: "between", align: "end",
+        children: [
+          { text: "COSMO KITCHEN", color: "title", font: title },
+          { text: "AUDIO PACK", color: "label", font: body },
+        ],
+      },
+      {
+        dir: "row", grow: 1, gap: 4, align: "stretch",
+        children: [
+          makePanel({
+            title: "TRACKS", titleColor: "label", titleAlign: "center",
+            border: "border", fill: "panel", pad: 3, gap: 1, grow: 1,
+            children: [sel.view()],
+          }),
+          DET.view(detailOf(sel.index())),
+        ],
+      },
+      {
+        dir: "row", justify: "between", align: "end",
+        children: [
+          FOOT.status,
+          { text: "L/R int  A/B", color: "dim", font: body },
+        ],
+      },
+    ],
+  }
+}
+
+function show() {
+  sel.clear()
+  DET.clear()
+  FOOT.status = null
+  uiPaint(buildTree(), { stream: 0, bg: col2("bg") })
+}
+
+// Boot hub so verify hears dual-engine market funk.
+playZone("hub")
+S.status = "ZONE"
+S.intSong = 0
+S.intensity = 0
+show()
+
+let N = ITEMS.length
+
+while (true) {
+  if (uiPaintStep() === 0) { frame(); continue }
+
+  let k = uiKeys()
+
+  // Direct button tests, like the L/R/UP/DOWN branches below already do. The old
+  // [["confirm", BTN_A], ...] table meant a `let act = ""` string allocation plus two
+  // string compares EVERY frame, key or no key — dispatch on the frame path is i32s.
+  if (uiKeyDown(k, BTN_A) > 0) {
+    activate(sel.index())
+  } else if (uiKeyDown(k, BTN_B) > 0) {
+    deckStop()
+    S.intSong = 0
+    S.intensity = 0
+    setStatus("stopped")
+  } else if (k !== 0) {
+    if (uiKeyDown(k, BTN_L) > 0) {
+      bumpIntensity(-1)
+    } else if (uiKeyDown(k, BTN_R) > 0) {
+      bumpIntensity(1)
+    } else {
+      let old = sel.index()
+      let neu = old
+      if (uiKeyDown(k, BTN_UP) > 0) {
+        neu = old - 1
+        if (neu < 0) { neu = N - 1 }
+      } else if (uiKeyDown(k, BTN_DOWN) > 0) {
+        neu = old + 1
+        if (neu >= N) { neu = 0 }
+      }
+      if (neu !== old) {
+        // refillWindow batches under audio_defer + one pump; avoid stacking catch-up here.
+        sel.select(neu)
+      }
+    }
+  }
+
+  if (S.detDirty >= 0) {
+    if (S.detWait > 0) {
+      S.detWait = S.detWait - 1
+    } else {
+      audio_pump()
+      DET.patch(detailOf(S.detDirty))
+      S.detDirty = -1
+      audio_pump()
+    }
+  }
+
+  frame()
+}

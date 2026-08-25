@@ -1,0 +1,230 @@
+{
+  "DN": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          9
+        ],
+        "angle": 0,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": null,
+      "body_source": "Separate/Attack.png"
+    },
+    {
+      "blade": {
+        "grip": [
+          16,
+          10
+        ],
+        "angle": 0,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": {
+        "piece": "WIDE_A",
+        "offset": [
+          -8,
+          -16
+        ],
+        "source": "Weapon/Katana.png!WIDE_A"
+      },
+      "body_source": "Separate/Attack.png"
+    },
+    {
+      "blade": {
+        "grip": [
+          22,
+          16
+        ],
+        "angle": 90,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": null,
+      "body_source": "Separate/Attack.png"
+    },
+    {
+      "blade": {
+        "grip": [
+          22,
+          16
+        ],
+        "angle": 90,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": null,
+      "body_source": "Separate/Attack.png"
+    }
+  ],
+  "UP": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          8
+        ],
+        "angle": 0,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": null,
+      "body_source": "Separate/Attack.png"
+    },
+    {
+      "blade": {
+        "grip": [
+          16,
+          9
+        ],
+        "angle": 0,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": {
+        "piece": "WIDE_A",
+        "offset": [
+          -8,
+          -16
+        ],
+        "source": "Weapon/Katana.png!WIDE_A"
+      },
+      "body_source": "Separate/Attack.png"
+    },
+    {
+      "blade": {
+        "grip": [
+          10,
+          14
+        ],
+        "angle": 90,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": null,
+      "body_source": "Separate/Attack.png"
+    },
+    {
+      "blade": {
+        "grip": [
+          10,
+          14
+        ],
+        "angle": 90,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": null,
+      "body_source": "Separate/Attack.png"
+    }
+  ],
+  "LF": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          9
+        ],
+        "angle": 0,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": null,
+      "body_source": "Separate/Attack.png"
+    },
+    {
+      "blade": {
+        "grip": [
+          16,
+          10
+        ],
+        "angle": 0,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": {
+        "piece": "TALL_L",
+        "offset": [
+          -8,
+          -12
+        ],
+        "source": "Weapon/Katana.png!TALL_L"
+      },
+      "body_source": "Separate/Attack.png"
+    },
+    {
+      "blade": {
+        "grip": [
+          8,
+          16
+        ],
+        "angle": 90,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": null,
+      "body_source": "Separate/Attack.png"
+    },
+    {
+      "blade": {
+        "grip": [
+          8,
+          16
+        ],
+        "angle": 90,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": null,
+      "body_source": "Separate/Attack.png"
+    }
+  ],
+  "RT": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          9
+        ],
+        "angle": 0,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": null,
+      "body_source": "Separate/Attack.png"
+    },
+    {
+      "blade": {
+        "grip": [
+          16,
+          10
+        ],
+        "angle": 0,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": {
+        "piece": "WIDE_B",
+        "offset": [
+          0,
+          -16
+        ],
+        "source": "Weapon/Katana.png!WIDE_B"
+      },
+      "body_source": "Separate/Attack.png"
+    },
+    {
+      "blade": {
+        "grip": [
+          24,
+          16
+        ],
+        "angle": -90,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": null,
+      "body_source": "Separate/Attack.png"
+    },
+    {
+      "blade": {
+        "grip": [
+          24,
+          16
+        ],
+        "angle": -90,
+        "source": "Items/Weapons/Katana/Sprite.png"
+      },
+      "slash": null,
+      "body_source": "Separate/Attack.png"
+    }
+  ]
+}

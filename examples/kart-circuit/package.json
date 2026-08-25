@@ -1,0 +1,27 @@
+{
+  "name": "kart-circuit",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "build": "python3 ../../scripts/stamp_build.py . && tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "verify": "./verify.sh",
+    "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
+    "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png 300",
+    "assets": "python3 ../../scripts/gen_kart_circuit.py && python3 ../../scripts/gen_kart_circuit_music.py",
+    "clean": "rm -rf .tish .buildno src/buildid.tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
+  },
+  "devDependencies": {
+    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
+    }
+  },
+  "description": "A Mode 7 kart racer on a real Mode 7 ground plane: drift, boost pads, off-road penalties and three rubber-banded AI opponents around a generated circuit."
+}

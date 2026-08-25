@@ -1,0 +1,310 @@
+// packages/isodemo — the boot/title/HUD shell every `iso-*` demo shares.
+//
+// The suite's point is one example per capability, which only works if an example is ~100 lines of
+// THAT capability and nothing else. Without this, every demo re-writes the same forty: init the
+// board, init the UI, draw a card so a screenshot is identifiable, draw a control bar, handle B.
+//
+// Deliberately built on `hud_text` (a tish_agb text slot) rather than `packages/title`: titleScreen
+// bundles a 32px Alagard font, which is right for a game's front door and wrong for twenty demo
+// ROMs that each pay for it. A demo card is six lines of text.
+//
+// Slots are reserved from the TOP of the range so a demo can use 0..DEMO_SLOT_BASE-1 freely.
+
+import { hud_text, key_pressed, frame, heap_free, log } from 'cargo:tish_agb'
+import { isoInit } from './iso'
+import { uiInit } from './ui'
+
+// ⚠️ `key_pressed` takes a NUMERIC code — `num()` coerces anything else to 0.0, so
+// `key_pressed("b")` silently reads **A**, with no error and no warning. Named constants here so no
+// demo has to remember the numbers or rediscover that.
+export let KEY_A: i32 = 0
+export let KEY_B: i32 = 1
+export let KEY_SELECT: i32 = 2
+export let KEY_START: i32 = 3
+export let KEY_L: i32 = 4
+export let KEY_R: i32 = 5
+export let KEY_UP: i32 = 6
+export let KEY_DOWN: i32 = 7
+export let KEY_LEFT: i32 = 8
+export let KEY_RIGHT: i32 = 9
+
+// Text slots this package owns. A demo's own slots must stay below DEMO_SLOT_BASE.
+export let DEMO_SLOT_BASE: i32 = 40
+let S_TITLE: i32 = 40
+let S_BLURB: i32 = 41
+let S_HINT: i32 = 42
+let S_HUD0: i32 = 43          // ..S_HUD0+3, the bottom bar
+let HUD_LINES: i32 = 4
+
+const D = { titled: 0, hudN: 0, mem0: 0 - 1, laps: 0, sig: 0 - 1 }
+
+// ── heap trace across the open/close cycle ───────────────────────────────────────────────────────
+// Every demo in this suite has the same lifecycle: B returns to the title card, A goes back in. That
+// is the cycle a leak shows up in, so the harness measures it once here rather than each demo doing
+// it (or, as was actually the case, none of them doing it).
+//
+// It logs — `log()` goes to the mgba channel, so nothing appears on screen and no screenshot moves.
+// Read it with GBA_SHOT_LOG=1 and grep ISODEMO-MEM. The number that matters is the DELTA between lap
+// 1 and lap 2: a demo that tears down what it builds returns to the same free-heap figure, and one
+// that leaks drifts by the same amount every lap.
+//
+// `packages/memdebug` was the obvious tool and is the wrong one here: its `memTrace()` hooks scene
+// loads and menu-stack pushes, and these demos use neither.
+function memMark(tag) {
+  let h = heap_free(64)
+  let d = ""
+  if (D.mem0 >= 0) { d = "  delta " + (h - D.mem0) }
+  D.mem0 = h
+  log("ISODEMO-MEM " + tag + " lap " + D.laps + "  free " + h + d)
+}
+
+// ── init ─────────────────────────────────────────────────────────────────────────────────────────
+// Everything a demo needs up before it draws: the iso projection + engine grid (isoInit also runs
+// isob_load, so cell heights answer), and the UI pool.
+//
+// `tileReserve` matters and is not a nicety: agb grows its live-tile map in doubling steps at 3/5
+// load, so a panel that lights ~300 canvas tiles will trip the 512→1024 growth (a ~20 KB request)
+// MID-OPEN on a heap already holding the board. iso-town found that the hard way and reserves 320.
+export function demoInit(cfg) {
+  isoInit(cfg)
+  uiInit({
+    font: cfg.font,
+    sheet: cfg.sheet,
+    icons: pickN(cfg.icons, 16),
+    tileReserve: pickN(cfg.tileReserve, 320),
+  })
+  D.titled = 0
+  D.hudN = 0
+}
+
+function pickN(v, dflt) {
+  if (v === null) { return dflt }
+  return v
+}
+
+// ── the title card ───────────────────────────────────────────────────────────────────────────────
+// One screen naming the demo, so a `npm run shot` PNG is self-identifying — with twenty ROMs, a
+// screenshot that could be any of them is worthless as a regression check.
+// ⚠️ It does NOT clear the background or sprites, and that is deliberate. It used to, and the world
+// never came back: `bg_clear()` drops the board layer `isoInit` created, so after the card the map
+// was black with the node sprites floating on it. A demo shows the card BEFORE `demoInit` builds
+// anything, and re-shows it as an overlay on B — neither needs the scene torn down.
+export function demoTitle(name, blurb) {
+  D.laps = D.laps + 1
+  memMark("title")
+  D.sig = 0 - 1
+  hud_text(S_TITLE, 8, 16, name)
+  hud_text(S_BLURB, 8, 34, blurb)
+  hud_text(S_HINT, 8, 140, "A: start    B: back here")
+  D.titled = 1
+}
+
+// Block on the card until A. Returns nothing; the demo carries on afterwards.
+//
+// ⚠️ It burns a frame after seeing A, and that line is load-bearing. `key_pressed` is a
+// just-pressed EDGE for the current frame, so returning immediately hands the demo's own loop the
+// same frame with A still reading pressed — the press that dismissed the card then also picks the
+// first menu item. One SRPG demo opened its briefing panel the instant it booted; another hid the
+// same bug because its cursor starts on the area you are already standing on, so the phantom
+// "travel" was a no-op.
+export function demoAwaitStart() {
+  while (true) {
+    if (key_pressed(KEY_A)) {
+      demoClearTitle()
+      memMark("enter")
+      frame()
+      return
+    }
+    frame()
+  }
+}
+
+export function demoClearTitle() {
+  hud_text(S_TITLE, 0, 0, "")
+  hud_text(S_BLURB, 0, 0, "")
+  hud_text(S_HINT, 0, 0, "")
+  D.titled = 0
+}
+
+// ── the bottom bar ───────────────────────────────────────────────────────────────────────────────
+// Up to four lines, drawn bottom-up so line 0 is always the lowest and a demo can add a second
+// without the first moving. Re-issuing identical text is free (the slot is cached), so a demo can
+// call this every frame.
+export function demoHud(lines) {
+  let n = lines.length
+  if (n > HUD_LINES) { n = HUD_LINES }
+  let i = 0
+  while (i < n) {
+    // 146, not 150. The 7px font renders into a ~10px cell (ascender + descender), so a line put at
+    // 150 runs to y=160 and the bottom row of every glyph is cut off by the screen edge. It stayed
+    // borderline-legible for eight demos and was only caught when a demo's whole point was reading a
+    // number off that line.
+    hud_text(S_HUD0 + i, 6, 146 - i * 10, lines[i])
+    i = i + 1
+  }
+  // blank any line the caller dropped since last frame, else it lingers
+  while (i < D.hudN) {
+    hud_text(S_HUD0 + i, 0, 0, "")
+    i = i + 1
+  }
+  D.hudN = n
+}
+
+export function demoClearHud() {
+  demoHud([])
+}
+
+// ── back ─────────────────────────────────────────────────────────────────────────────────────────
+// B returns to the card. Every demo should honour it: a soak run then cycles instead of dead-ending
+// on a screen that no longer changes, which is what makes "the last painted frame is near the
+// requested count" a meaningful crash check.
+export function demoBackPressed() {
+  return key_pressed(KEY_B)
+}
+
+// ── widget: a list with a cursor ─────────────────────────────────────────────────────────────────
+// Two demos in and both had hand-rolled the same thing: a header, N rows of "label ....... value",
+// a `>` on the selected one, and up/down that wraps. `iso-shop` and two SRPG demos (since moved to the chuggie-tactics repo)
+// all want it too, so it lives here rather than being written six more times.
+//
+// The caller owns the slot range — `slot` through `slot + 2*rows`. That is deliberate: a demo that
+// shows two lists at once needs two ranges, and a widget that allocated its own would collide.
+const L = { slot: 0, x: 8, y: 30, lineH: 12, rows: 6, rightX: 176, headerY: 14, drawn: 0 }
+
+export function demoListInit(cfg) {
+  L.slot = cfg.slot
+  L.x = pickN(cfg.x, 8)
+  L.y = pickN(cfg.y, 30)
+  L.lineH = pickN(cfg.lineH, 12)
+  L.rows = pickN(cfg.rows, 6)
+  L.rightX = pickN(cfg.rightX, 176)
+  // The header's own y, not derived from the first row: deriving it (`y - lineH - 2`) silently
+  // moved one SRPG demo's header 2px when the widget was extracted, which the pixel gate caught. A widget
+  // should not decide a caller's layout.
+  L.headerY = pickN(cfg.headerY, 14)
+  L.drawn = 0
+}
+
+// `items` is [{ left, right }]; `right` may be "" for a single-column list. `header` may be null.
+export function demoListDraw(items, sel, header) {
+  if (header !== null) { hud_text(L.slot, L.x, L.headerY, header) }
+  let n = items.length
+  if (n > L.rows) { n = L.rows }
+  let i = 0
+  while (i < n) {
+    let mark = "  "
+    if (i === sel) { mark = "> " }
+    hud_text(L.slot + 1 + i, L.x, L.y + i * L.lineH, mark + items[i].left)
+    hud_text(L.slot + 1 + L.rows + i, L.rightX, L.y + i * L.lineH, items[i].right)
+    i = i + 1
+  }
+  while (i < L.drawn) {
+    hud_text(L.slot + 1 + i, 0, 0, "")
+    hud_text(L.slot + 1 + L.rows + i, 0, 0, "")
+    i = i + 1
+  }
+  L.drawn = n
+}
+
+// ── redraw guard ─────────────────────────────────────────────────────────────────────────────────
+// `demoDirty(sig)` returns 1 only when `sig` differs from the last call, so a demo can wrap any
+// expensive repaint in it.
+//
+// ⚠️ This is not an optimisation, it is an INPUT FIX, and it was rediscovered five separate times
+// before landing here (iso-story-branch, several SRPG demos since moved to the chuggie-tactics repo, and the flag
+// panel). Rebuilding a row array and its concatenated strings every frame costs enough that the main
+// loop stops completing once per vblank — and `key_pressed` is then polled less than once a frame,
+// so SHORT KEY TAPS ARE SILENTLY DROPPED. The symptom is always the same and always misleading: a
+// long hold on A works, a two-frame tap does nothing, and there is nothing wrong with the input code.
+//
+// `hud_text` already caches by content, so the slot writes are not the cost. Building the array that
+// feeds them is.
+//
+//   if (demoDirty(mySignature()) === 1) { demoListDraw(rows(), sel, header) }
+//
+// The signature must cover EVERYTHING visible — a cursor that moves without changing the signature
+// leaves the old highlight on screen.
+// ⚠️ TWO functions, not one, and the split is forced by codegen. The obvious
+// `demoDirty(sig) -> 0|1` has SCALAR PARAMETERS AND A SCALAR RETURN, which is exactly the shape the
+// compiler lowers to a native Rust fn — and a lowered body cannot see module-scope cells, so it
+// failed to compile against its own state. Hence a getter and a setter.
+//
+// ⚠️ And the state lives in `D`, the struct `demoInit`/`demoHud` already share — NOT in a `DIRTY`
+// const of its own. A separate const was unreachable from `demoTitle` for the same reason, so the
+// title card could not invalidate the guard. Whatever `D` can reach, all of these can.
+//
+//   let s = mySignature()
+//   if (s !== demoDirtySig()) { demoDirtySet(s); redraw() }
+export function demoDirtySig() { return D.sig }
+export function demoDirtySet(v) { D.sig = v }
+
+// Force the next comparison to report changed. Call after anything that blanks the canvas from
+// outside the demo's own draw path — a title card, a dialogue box, a scene swap.
+export function demoDirtyReset() { D.sig = 0 - 1 }
+
+export function demoListClear() {
+  let i = 0
+  while (i < 1 + L.rows * 2) {
+    hud_text(L.slot + i, 0, 0, "")
+    i = i + 1
+  }
+  L.drawn = 0
+}
+
+// Wrapping move. Returns the new index — the caller keeps the selection, because it usually needs
+// it for other things too and a widget owning it would mean asking the widget for it every frame.
+export function demoListMove(sel, delta, count) {
+  let s = sel + delta
+  if (s < 0) { s = count - 1 }
+  if (s >= count) { s = 0 }
+  return s
+}
+
+// ── widget: a paged panel ────────────────────────────────────────────────────────────────────────
+// A title, an optional right-aligned badge, a body, and `PAGE n/m` — an SRPG mission briefing, its
+// rumour reader and its item descriptions are all this shape. LEFT/RIGHT wrap, matching the real
+// game's panels.
+const P = { slot: 0, x: 12, y: 34, lineH: 12, lines: 7, drawn: 0 }
+
+export function demoPagerInit(cfg) {
+  P.slot = cfg.slot
+  P.x = pickN(cfg.x, 12)
+  P.y = pickN(cfg.y, 34)
+  P.lineH = pickN(cfg.lineH, 12)
+  P.lines = pickN(cfg.lines, 7)
+  P.drawn = 0
+}
+
+export function demoPagerDraw(title, badge, lines, page, pages) {
+  hud_text(P.slot, 8, 14, title)
+  if (badge !== null) { hud_text(P.slot + 1, 176, 14, badge) }
+  let n = lines.length
+  if (n > P.lines) { n = P.lines }
+  let i = 0
+  while (i < n) {
+    hud_text(P.slot + 2 + i, P.x, P.y + i * P.lineH, lines[i])
+    i = i + 1
+  }
+  while (i < P.drawn) {
+    hud_text(P.slot + 2 + i, 0, 0, "")
+    i = i + 1
+  }
+  P.drawn = n
+  if (pages > 1) { hud_text(P.slot + 2 + P.lines, 176, 128, "PAGE " + (page + 1) + "/" + pages) }
+}
+
+export function demoPagerClear() {
+  let i = 0
+  while (i < 3 + P.lines) {
+    hud_text(P.slot + i, 0, 0, "")
+    i = i + 1
+  }
+  P.drawn = 0
+}
+
+export function demoPagerMove(page, delta, pages) {
+  let p = page + delta
+  if (p < 0) { p = pages - 1 }
+  if (p >= pages) { p = 0 }
+  return p
+}

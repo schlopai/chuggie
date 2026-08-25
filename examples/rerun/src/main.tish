@@ -1,0 +1,336 @@
+// rerun — record a run, play it back, and check that the game did the same thing twice.
+//
+// ── WHAT IT IS THE ACCEPTANCE TEST FOR ────────────────────────────────────────────────────────
+//
+// `packages/replay.tish`, which is new, and which exists because this repo's hardest testing problem
+// had no tool behind it. `docs/MEMORY.md` records it twice:
+//
+//   * **"twin ROMs can't prove equality"** — a screenshot at a fixed frame compares two different
+//     MOMENTS. Two builds that diverge can still match; two that agree can still look different. The
+//     recorded advice is "diff a per-frame trace", and nothing produced one.
+//   * **tish builds are nondeterministic in ORDER** (a HashMap in codegen), so "same source, same
+//     behaviour" is an assumption that wants checking rather than believing.
+//
+// This ROM checks it, on the cartridge, every twelve seconds, with no harness at all:
+//
+//   1. **RECORD** — an attract player drives a small simulation for 600 frames. Every frame's button
+//      mask goes onto the tape, and the game's own state is folded into a rolling checksum.
+//   2. **REPLAY** — the simulation is reset, the tape is rewound, and the same 600 frames run again
+//      with the recorded input instead of the player. The checksum is recomputed from scratch.
+//   3. **COMPARE** — the two sums are shown side by side. Equal means the run reproduced. Different
+//      means this ROM is not a pure function of (seed, input), and the frame counter tells you how
+//      far it got before it stopped being one.
+//
+// Then it picks a new seed and does it again, so a soak run is hundreds of determinism checks rather
+// than one.
+//
+// ⚠️ THE CHECKSUM FOLDS IN GAME STATE, NOT JUST INPUT. Inputs alone only prove the TAPE replayed —
+// which is a property of `replay.tish` and not very interesting. `replayMix` is what makes the sum
+// a statement about the GAME: position, score and the pickup id go in every frame, so a divergence
+// anywhere in the simulation moves the number.
+//
+// ⚠️ AND THE GAME READS INPUT IN EXACTLY ONE PLACE. Every button this ROM acts on comes back from
+// `replayTick`. A stray `key_pressed` anywhere else would be a second, unrecorded input channel and
+// the replay would quietly stop reproducing — which is the one way to misuse this package.
+
+import { small } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  backdrop, ui_begin, ui_rect, ui_text, ui_clear_rect, ui_reserve_tiles,
+  frame, keys_held, log
+} from 'cargo:tish_agb'
+import {
+  replayInit, replayRecord, replayTick, replayMix, replayStop, replayPlay,
+  replayMode, replayFrame, replayLen, replayFrames, replayStateSum, replaySeed,
+  replayOverflowed, replayCapacity, RP_RECORD, RP_PLAY, RP_DONE
+} from '../../../packages/replay'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+import { chipBlip, chipCoin, chipChime, chipCancel } from '../../../packages/chipsfx'
+
+// ── the simulation ───────────────────────────────────────────────────────────────────────────
+// Deliberately tiny, and deliberately a pure function of (seed, input): a dot on an 8x6 board and a
+// pickup whose next cell comes from RNG stream 0, which `replayPlay` re-seeds.
+let COLS: i32 = 8
+let ROWS: i32 = 6
+// ⚠️ THE BOARD MUST FIT IN 160 PIXELS. At CELL 22 the six rows were 132px starting at y=30, so the
+// board ran to y=162 — off the bottom of the screen — and the info panel at y=124 was drawn on top
+// of it. The dot and the pickup were being drawn correctly, off-screen and underneath a panel.
+let CELL: i32 = 16
+let BX: i32 = 56          // (240 - 8*16) / 2
+let BY: i32 = 20
+let MOVE_EVERY: i32 = 6      // frames between steps while a direction is held
+
+//   0 cx  1 cy  2 score  3 pick  4 cool
+let S: i32[] = [0, 0, 0, 0, 0]
+let S_CX: i32 = 0
+let S_CY: i32 = 1
+let S_SCORE: i32 = 2
+let S_PICK: i32 = 3
+let S_COOL: i32 = 4
+
+//   0 phase  1 t  2 trial  3 seed  4 sumRec  5 sumPlay  6 result  7 sig  8 pass  9 fail  10 entries
+let V: i32[] = [0, 0, 0, 0, 0, 0, 0, 0 - 1, 0, 0, 0]
+let V_PHASE: i32 = 0
+let V_T: i32 = 1
+let V_TRIAL: i32 = 2
+let V_SEED: i32 = 3
+let V_SREC: i32 = 4
+let V_SPLAY: i32 = 5
+let V_RESULT: i32 = 6
+let V_SIG: i32 = 7
+let V_PASS: i32 = 8
+let V_FAIL: i32 = 9
+let V_ENT: i32 = 10
+
+let PH_REC: i32 = 0
+let PH_PLAY: i32 = 1
+let PH_SHOW: i32 = 2
+
+let RUN_FRAMES: i32 = 600
+let SHOW_FRAMES: i32 = 150
+
+let BG: i32 = 0x0E1220
+let PANEL: i32 = 0x1C2440
+let EDGE: i32 = 0x80A0E0
+let INK: i32 = 0xE8ECF8
+let DIM: i32 = 0x8890B0
+let GOLD: i32 = 0xFFD060
+let GOOD: i32 = 0x60D080
+let BAD: i32 = 0xF06060
+let DOT: i32 = 0x50B0F0
+let PICK: i32 = 0xFFC040
+
+function simReset() {
+  S[S_CX] = 3
+  S[S_CY] = 2
+  S[S_SCORE] = 0
+  S[S_COOL] = 0
+  S[S_PICK] = rngBelow(0, COLS * ROWS)
+}
+
+// One frame of the game, from a button mask. Everything it touches is in `S`, and the only source of
+// randomness is stream 0 — which is what makes it replayable.
+function simStep(k: i32) {
+  if (S[S_COOL] > 0) { S[S_COOL] = S[S_COOL] - 1 }
+  else {
+    let moved: i32 = 0
+    if ((k & 16) > 0 && S[S_CX] < COLS - 1) { S[S_CX] = S[S_CX] + 1  moved = 1 }   // RIGHT
+    else if ((k & 32) > 0 && S[S_CX] > 0) { S[S_CX] = S[S_CX] - 1  moved = 1 }     // LEFT
+    else if ((k & 64) > 0 && S[S_CY] > 0) { S[S_CY] = S[S_CY] - 1  moved = 1 }     // UP
+    else if ((k & 128) > 0 && S[S_CY] < ROWS - 1) { S[S_CY] = S[S_CY] + 1  moved = 1 } // DOWN
+    if (moved === 1) { S[S_COOL] = MOVE_EVERY }
+  }
+  if (S[S_CY] * COLS + S[S_CX] === S[S_PICK]) {
+    S[S_SCORE] = S[S_SCORE] + 1
+    S[S_PICK] = rngBelow(0, COLS * ROWS)
+  }
+}
+
+// Fold the whole simulation into the checksum. If any of these differ on the replay, the sums差.
+function simMix() {
+  replayMix(S[S_CX])
+  replayMix(S[S_CY])
+  replayMix(S[S_SCORE])
+  replayMix(S[S_PICK])
+}
+
+// The attract "player". Its choices come from stream 1, which the replay never touches — on the
+// replay pass the inputs come from the tape instead, which is the entire point.
+//
+// ⚠️ IT HOMES ON THE PICKUP, and that is not decoration. The first version walked at random and
+// scored ZERO in 600 frames, so the branch that consumes RNG and re-places the pickup never ran once
+// — the checksum was faithfully verifying a simulation that did almost nothing, and a deliberately
+// injected divergence in that branch went undetected. A self-check is only worth what it exercises
+// (`docs/MEMORY.md`, "identity row hides the operator").
+function autoKeys(): i32 {
+  if ((V[V_T] % 8) !== 0) { return 0 }
+  let tx: i32 = S[S_PICK] - ((S[S_PICK] / COLS) | 0) * COLS
+  let ty: i32 = (S[S_PICK] / COLS) | 0
+  // One move in eight is random, so the path is not a straight line and the tape has real variety.
+  if (rngBelow(1, 8) === 0) {
+    let r: i32 = rngBelow(1, 4)
+    if (r === 0) { return 16 }
+    if (r === 1) { return 32 }
+    if (r === 2) { return 64 }
+    return 128
+  }
+  if (tx > S[S_CX]) { return 16 }
+  if (tx < S[S_CX]) { return 32 }
+  if (ty < S[S_CY]) { return 64 }
+  if (ty > S[S_CY]) { return 128 }
+  return 0
+}
+
+// ── boot ─────────────────────────────────────────────────────────────────────────────────────
+backdrop(BG)
+ui_reserve_tiles(320)
+ui_begin()
+// 256 runs is far more than a 600-frame session needs — see the compression line on screen.
+replayInit({ capacity: 256 })
+
+function startTrial() {
+  V[V_TRIAL] = V[V_TRIAL] + 1
+  V[V_SEED] = 1000 + Math.imul(V[V_TRIAL], 7717)
+  V[V_PHASE] = PH_REC
+  V[V_T] = 0
+  // Both the simulation's stream AND the attract player's are seeded here; `replayPlay` re-seeds
+  // stream 0 only, because stream 1 must NOT be replayed — the tape replaces it.
+  rngSeed(0, V[V_SEED])
+  rngSeed(1, V[V_SEED] + 31)
+  simReset()
+  replayRecord(V[V_SEED])
+}
+startTrial()
+log("RERUN boot cap=" + replayCapacity())
+
+// ── painting ─────────────────────────────────────────────────────────────────────────────────
+let NUMS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+function numStr(n: i32) {
+  if (n <= 0) { return "0" }
+  let s = ""
+  let v: i32 = n
+  while (v > 0) {
+    s = NUMS[v % 10] + s
+    v = (v / 10) | 0
+  }
+  return s
+}
+
+// ⚠️ THE SCREEN REPAINTS PER REGION, AND THE DOT MOVES IN THREE `ui_rect` CALLS.
+//
+// The first version cleared all 240x160 and redrew everything whenever the dot moved — roughly every
+// seventh frame. A full-screen clear plus twenty draw calls does not fit in one frame, so captures
+// caught it half finished: a board with no pickup and a dot that was ten pixels of a ten-by-ten
+// square. That is the same trap `examples/solitaire` documents, and the same fix — the unit of
+// repaint is the thing that changed, not the screen.
+//
+//   board + panel   once per PHASE
+//   header text     every 16 frames (it carries a frame counter, so it cannot be event-driven)
+//   the dot         every move: erase the old cell, draw the pickup, draw the dot
+let PREV: i32[] = [0 - 1, 0 - 1, 0 - 1]     // last drawn dot cx, cy, pickup
+
+function cellX(i: i32): i32 { return BX + (i - ((i / COLS) | 0) * COLS) * CELL }
+function cellY(i: i32): i32 { return BY + ((i / COLS) | 0) * CELL }
+
+function paintBoard() {
+  ui_clear_rect(0, 16, 240, 104)
+  ui_rect(BX - 2, BY - 2, COLS * CELL + 4, ROWS * CELL + 4, PANEL, 1)
+  ui_rect(BX - 2, BY - 2, COLS * CELL + 4, 1, EDGE, 1)
+  ui_rect(BX - 2, BY + ROWS * CELL + 1, COLS * CELL + 4, 1, EDGE, 1)
+  PREV[0] = 0 - 1
+  PREV[1] = 0 - 1
+  PREV[2] = 0 - 1
+}
+
+// The moving parts. No clear: every rect fully covers its own footprint, so there is nothing of the
+// old frame left to show through — the same reason `examples/pinball`'s gauges need no clear.
+function paintDot() {
+  if (PREV[0] >= 0) {
+    ui_rect(BX + PREV[0] * CELL, BY + PREV[1] * CELL, CELL, CELL, PANEL, 1)
+  }
+  if (PREV[2] >= 0 && PREV[2] !== S[S_PICK]) {
+    ui_rect(cellX(PREV[2]), cellY(PREV[2]), CELL, CELL, PANEL, 1)
+  }
+  ui_rect(cellX(S[S_PICK]) + 4, cellY(S[S_PICK]) + 4, CELL - 8, CELL - 8, PICK, 1)
+  ui_rect(BX + S[S_CX] * CELL + 3, BY + S[S_CY] * CELL + 3, CELL - 6, CELL - 6, DOT, 1)
+  PREV[0] = S[S_CX]
+  PREV[1] = S[S_CY]
+  PREV[2] = S[S_PICK]
+}
+
+function paintHeader() {
+  ui_clear_rect(0, 0, 240, 16)
+  let phase = "RECORD"
+  let pcol: i32 = GOLD
+  if (V[V_PHASE] === PH_PLAY) { phase = "REPLAY"  pcol = DOT }
+  if (V[V_PHASE] === PH_SHOW) { phase = "COMPARE"  pcol = INK }
+  ui_text(small, 6, 4, phase, pcol)
+  ui_text(small, 62, 4, "trial " + numStr(V[V_TRIAL]), DIM)
+  ui_text(small, 116, 4, "frame " + numStr(replayFrame()), DIM)
+  ui_text(small, 182, 4, "score " + numStr(S[S_SCORE]), INK)
+}
+
+function paintPanel() {
+  ui_clear_rect(0, 120, 240, 40)
+  ui_rect(0, 120, 240, 40, PANEL, 1)
+  ui_rect(0, 120, 240, 1, EDGE, 1)
+  let ent: i32 = V[V_ENT]
+  ui_text(small, 6, 126, "tape " + numStr(ent) + " runs = " + numStr(RUN_FRAMES) + " frames", DIM)
+  if (ent > 0) { ui_text(small, 156, 126, numStr((RUN_FRAMES / ent) | 0) + "x smaller", DIM) }
+  if (V[V_PHASE] === PH_SHOW) {
+    let col: i32 = BAD
+    let word = "DIVERGED"
+    if (V[V_RESULT] === 1) { col = GOOD  word = "IDENTICAL" }
+    ui_text(small, 6, 140, word, col)
+    ui_text(small, 78, 140, "rec " + numStr(V[V_SREC]) + "  play " + numStr(V[V_SPLAY]), INK)
+  } else {
+    ui_text(small, 6, 140, "pass " + numStr(V[V_PASS]) + "   fail " + numStr(V[V_FAIL]), DIM)
+  }
+}
+
+paintBoard()
+paintHeader()
+paintPanel()
+
+// ── the loop ─────────────────────────────────────────────────────────────────────────────────
+while (true) {
+  V[V_T] = V[V_T] + 1
+
+  if (V[V_PHASE] === PH_REC) {
+    // A human at the pad would be recorded exactly the same way; the attract player is here so the
+    // ROM verifies itself with nobody watching.
+    let want: i32 = autoKeys()
+    let k: i32 = replayTick(want | (keys_held() & 1023))
+    simStep(k)
+    simMix()
+    if (V[V_T] >= RUN_FRAMES) {
+      replayStop()
+      V[V_SREC] = replayStateSum()
+      V[V_ENT] = replayLen()
+      log("RERUN trial " + V[V_TRIAL] + " recorded runs=" + replayLen()
+        + " frames=" + replayFrames() + " sum=" + V[V_SREC] + " ovf=" + replayOverflowed())
+      // Replay from a CLEAN simulation and a re-seeded stream 0 — the same starting conditions the
+      // recording had, which is the whole claim being tested.
+      V[V_PHASE] = PH_PLAY
+      V[V_T] = 0
+      replayPlay()
+      simReset()
+      chipBlip()
+    }
+  } else if (V[V_PHASE] === PH_PLAY) {
+    // The argument is ignored in PLAY mode; passing the live pad proves it.
+    let k: i32 = replayTick(keys_held() & 1023)
+    simStep(k)
+    simMix()
+    if (V[V_T] >= RUN_FRAMES || replayMode() === RP_DONE) {
+      V[V_SPLAY] = replayStateSum()
+      if (V[V_SPLAY] === V[V_SREC]) {
+        V[V_RESULT] = 1
+        V[V_PASS] = V[V_PASS] + 1
+        chipChime()
+      } else {
+        V[V_RESULT] = 0
+        V[V_FAIL] = V[V_FAIL] + 1
+        chipCancel()
+      }
+      log("RERUN trial " + V[V_TRIAL] + " rec=" + V[V_SREC] + " play=" + V[V_SPLAY]
+        + " result=" + V[V_RESULT] + " score=" + S[S_SCORE] + " pass=" + V[V_PASS] + " fail=" + V[V_FAIL])
+      V[V_PHASE] = PH_SHOW
+      V[V_T] = 0
+    }
+  } else {
+    if (V[V_T] >= SHOW_FRAMES) { startTrial() }
+  }
+
+  // Phase/result/trial changes redraw the furniture; everything else only moves the dot.
+  let ph: i32 = V[V_PHASE] * 1021 + V[V_RESULT] * 4099 + V[V_TRIAL] * 65
+  if (V[V_SIG] !== ph) {
+    V[V_SIG] = ph
+    paintBoard()
+    paintPanel()
+    paintHeader()
+  }
+  if (S[S_CX] !== PREV[0] || S[S_CY] !== PREV[1] || S[S_PICK] !== PREV[2]) { paintDot() }
+  if ((V[V_T] % 16) === 0) { paintHeader() }
+
+  frame()
+}

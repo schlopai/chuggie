@@ -1,0 +1,26 @@
+# Plated! - victory
+# Spoon fanfare climb.
+deck 1
+bpm 150
+
+track Lead id lead gen gameBoyDmg
+  gen type pulse duty 50 env_mode step vol 14
+  note 60 0 0.2 v 110
+  note 64 0.2 0.2 v 115
+  note 67 0.4 0.35 v 120
+  note 72 0.9 0.3 v 120
+  note 76 1.25 0.25 v 125
+  note 79 1.55 0.5 v 127
+  note 84 2.2 0.7 v 120
+
+track Bass id bass gen gameBoyDmg
+  gen type wave wave_shape saw vol 14
+  note 36 0 0.5 v 120
+  note 43 0.5 0.5 v 115
+  note 48 1 0.5 v 120
+  note 36 1.5 1 v 125
+
+track Crash id crash gen gbaDirectSound
+  gen waveform triangle vol 12 bitcrush true
+  adsr a 0 d 0.25 s 0 r 0.2
+  note 48 0.7 0.4 v 127

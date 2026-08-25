@@ -1,0 +1,88 @@
+// hpbar.tish — floating health bar over every living unit.
+//
+// One world sprite per unit (sprite_set_hud 0, so the camera does the scrolling). The bar art is
+// wsg16 frames 22..29 (8 fill steps, scripts/gen_wsg.py); the frame is only rewritten when the
+// step actually changes, so a full-HP fight costs 6 sprite_set_pos calls a frame and nothing else.
+
+import { sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_visible, sprite_set_hud } from 'cargo:tish_agb'
+// entity_hp / entity_x / entity_y are called DIRECTLY, not via units.tish's unitHp/posX/posY
+// wrappers: a cross-module tish fn lowers to a boxed value_call with a boxed argument, and this
+// runs UNITS times a frame. The natives lower to `*_typed(i32)` with no boxing at all.
+import { entity_hp } from 'cargo:tish_gba_game_engine'
+import { UNITS, U_ENT, U_ALIVE, U_XS, U_YS } from './units'
+
+let BAR_F0: i32 = 22
+let BAR_STEPS: i32 = 8
+let MAX_HP: i32 = 40
+
+// hp -> bar step, as a table: the GBA has no divide instruction, so `(hp + 4) / 5` was a software
+// division per unit per frame. A typed array read is ~2.9 ticks.
+let HP_STEP: i32[] = [
+  1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4,
+  4, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8
+]
+
+let barSpr: i32[] = [0, 0, 0, 0, 0, 0]
+let barStep: i32[] = [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1]
+let barVis: i32[] = [0, 0, 0, 0, 0, 0]
+let built: i32 = 0
+
+export function hpBarsBuild(sheet: i32) {
+  if (built === 0) {
+    built = 1
+    let i: i32 = 0
+    while (i < UNITS) {
+      let s: i32 = sprite_new(sheet)
+      sprite_set_hud(s, 0)
+      sprite_set_visible(s, 0)
+      barSpr[i] = s
+      i = i + 1
+    }
+  }
+  let j: i32 = 0
+  while (j < UNITS) {
+    barStep[j] = 0 - 1
+    barVis[j] = 0
+    sprite_set_visible(barSpr[j], 0)
+    j = j + 1
+  }
+}
+
+export function hpBarsHide() {
+  if (built === 0) { return }
+  let i: i32 = 0
+  while (i < UNITS) {
+    barVis[i] = 0
+    sprite_set_visible(barSpr[i], 0)
+    i = i + 1
+  }
+}
+
+export function hpBarsStep() {
+  if (built === 0) { return }
+  let i: i32 = 0
+  while (i < UNITS) {
+    if (U_ALIVE[i] === 0) {
+      if (barVis[i] !== 0) {
+        barVis[i] = 0
+        sprite_set_visible(barSpr[i], 0)
+      }
+    } else {
+      let hp: i32 = entity_hp(U_ENT[i])
+      if (hp < 0) { hp = 0 }
+      // ceil to a step (MAX_HP 40 / 8 steps = 5 HP each) so a sliver never reads as empty
+      if (hp > MAX_HP) { hp = MAX_HP }
+      let st: i32 = HP_STEP[hp]
+      if (st !== barStep[i]) {
+        barStep[i] = st
+        sprite_set_frame(barSpr[i], BAR_F0 + st - 1)
+      }
+      if (barVis[i] === 0) {
+        barVis[i] = 1
+        sprite_set_visible(barSpr[i], 1)
+      }
+      sprite_set_pos(barSpr[i], U_XS[i] - 8, U_YS[i] - 16)
+    }
+    i = i + 1
+  }
+}

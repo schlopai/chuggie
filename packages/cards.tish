@@ -1,0 +1,287 @@
+// cards.tish — piles of cards: the model under patience, deckbuilders and trick-takers.
+//
+// `examples/solitaire` and a card-battle example (since moved to the chuggie-tactics repo) each wrote their own pile array, their own
+// shuffle and their own "move the top N cards" loop. This is that model extracted once. It owns
+// NOTHING about rendering, input or rules — a pile here is an ordered stack of card ids with a
+// face-up bit each, and every game's legality check stays in the game.
+//
+// ## The card id
+//
+// A card is a plain i32. For the standard 52-card deck the id IS the composite:
+//
+//     id = suit * 13 + rank        rank 0..12 = A,2..10,J,Q,K      suit 0..3 = S,H,D,C
+//
+// The suit order is SPADE, HEART, DIAMOND, CLUB — not alphabetical, and not chosen here. It is what
+// `examples/solitaire` already encodes, and the one place it matters is that the red pair becomes
+// the contiguous `suit === 1 || suit === 2`. A package that renumbered the suits would silently
+// disagree with the example it was extracted from.
+//
+// `cardRank`/`cardSuit`/`cardIsRed` decode it. A game that does not want French-suited cards (a
+// deckbuilder, a trick-taker with a bespoke deck) simply never calls them and uses the id as an
+// index into its own table — which is why `cardsBuildDeck` takes a count rather than assuming 52.
+//
+// ## Capacity is a POWER OF TWO on purpose
+//
+// Every slot lookup is `(p << shift) | i`. A `p * capacity` would be a soft-float multiply on this
+// chip unless it went through `Math.imul` (docs/perf-rules.md), and pile indexing is the single
+// hottest thing a card game does — a 52-card deal touches it a few hundred times before a frame is
+// even drawn. `cardsInit` rounds the requested capacity up to a power of two and keeps the shift.
+//
+// ## What is deliberately absent
+//
+// No undo stack. Solitaire's undo records *moves with their face-up side effects*, which is a rules
+// concept, not a pile concept — a deckbuilder's undo would be a different shape entirely. No
+// rendering: `pileCount`/`pileAt`/`pileFaceUp` are the accessors a paint loop needs and nothing here
+// knows where a pile is on screen.
+
+import { rngBelow } from './rng'
+
+export let CARD_NONE: i32 = 0 - 1
+
+export let SUIT_SPADE: i32 = 0
+export let SUIT_HEART: i32 = 1
+export let SUIT_DIAMOND: i32 = 2
+export let SUIT_CLUB: i32 = 3
+
+let CARD: i32[] = []    // card id per slot, CARD_NONE when empty
+let FUP: i32[] = []     // face-up flag per slot
+let CNT: i32[] = []     // cards currently in each pile
+
+let nPile: i32 = 0
+let cap: i32 = 0
+let shift: i32 = 0
+
+// ---------------------------------------------------------------------------------------------
+// Card id decoding — standard 52-card deck only. A bespoke deck ignores these.
+// ---------------------------------------------------------------------------------------------
+
+export function cardRank(c: i32): i32 { return c % 13 }
+export function cardSuit(c: i32): i32 { return (c / 13) | 0 }
+
+export function cardIsRed(c: i32): i32 {
+  let s: i32 = (c / 13) | 0
+  if (s === SUIT_HEART || s === SUIT_DIAMOND) { return 1 }
+  return 0
+}
+
+// ---------------------------------------------------------------------------------------------
+// Setup
+// ---------------------------------------------------------------------------------------------
+
+// piles: how many piles exist. capacity: the most cards any ONE pile must hold — rounded up to a
+// power of two, so ask for what you need and do not pre-round it yourself.
+//
+// ⚠️ capacity is per pile, not a total. A Klondike tableau column can legally hold 19 cards, but the
+// stock holds 52 at deal time, so the answer for Klondike is 52 and not 19.
+export function cardsInit(cfg) {
+  nPile = cfg.piles
+  let want: i32 = cfg.capacity
+  cap = 1
+  shift = 0
+  while (cap < want) { cap = cap << 1  shift = shift + 1 }
+
+  // ⚠️ NOT `CARD.length = 0` — that silently NO-OPS on a typed array in tish, so a second
+  // `cardsInit` would append a whole new set of slots behind the old ones and every index would be
+  // off by the first table's size. Pop it down instead.
+  while (CARD.length > 0) { CARD.pop()  FUP.pop() }
+  while (CNT.length > 0) { CNT.pop() }
+  let i: i32 = 0
+  let slots: i32 = nPile << shift
+  while (i < slots) { CARD.push(CARD_NONE)  FUP.push(0)  i = i + 1 }
+  i = 0
+  while (i < nPile) { CNT.push(0)  i = i + 1 }
+}
+
+export function cardsPileCount(): i32 { return nPile }
+export function cardsCapacity(): i32 { return cap }
+
+// Fill `pile` with ids 0..count-1, face down, replacing whatever was there. For a French deck pass
+// 52; for two decks pass 104 and decode with `id % 52`; for a bespoke deck pass your card count.
+export function cardsBuildDeck(pile: i32, count: i32) {
+  CNT[pile] = 0
+  let i: i32 = 0
+  while (i < count) { pilePush(pile, i, 0)  i = i + 1 }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Pile access
+// ---------------------------------------------------------------------------------------------
+
+export function pileCount(p: i32): i32 { return CNT[p] }
+
+export function pileAt(p: i32, i: i32): i32 {
+  if (i < 0 || i >= CNT[p]) { return CARD_NONE }
+  return CARD[(p << shift) | i]
+}
+
+export function pileFaceUp(p: i32, i: i32): i32 {
+  if (i < 0 || i >= CNT[p]) { return 0 }
+  return FUP[(p << shift) | i]
+}
+
+export function pileSetFaceUp(p: i32, i: i32, up: i32) {
+  if (i < 0 || i >= CNT[p]) { return }
+  FUP[(p << shift) | i] = up
+}
+
+// The top card is the LAST one pushed — the one a player picks up. Returns CARD_NONE on an empty
+// pile rather than trapping, because "is this pile empty" is nearly always the next question.
+export function pileTop(p: i32): i32 {
+  let n: i32 = CNT[p]
+  if (n === 0) { return CARD_NONE }
+  return CARD[(p << shift) | (n - 1)]
+}
+
+export function pileTopFaceUp(p: i32): i32 {
+  let n: i32 = CNT[p]
+  if (n === 0) { return 0 }
+  return FUP[(p << shift) | (n - 1)]
+}
+
+export function pilePush(p: i32, card: i32, up: i32) {
+  let n: i32 = CNT[p]
+  if (n >= cap) { return }
+  CARD[(p << shift) | n] = card
+  FUP[(p << shift) | n] = up
+  CNT[p] = n + 1
+}
+
+export function pilePop(p: i32): i32 {
+  let n: i32 = CNT[p]
+  if (n === 0) { return CARD_NONE }
+  let c: i32 = CARD[(p << shift) | (n - 1)]
+  CNT[p] = n - 1
+  return c
+}
+
+export function pileClear(p: i32) { CNT[p] = 0 }
+
+// ---------------------------------------------------------------------------------------------
+// Moving cards between piles
+// ---------------------------------------------------------------------------------------------
+
+// Move the top `n` cards of `src` onto `dst`, KEEPING THEIR ORDER and their face-up bits.
+//
+// ⚠️ This is not n pops and n pushes. Popping reverses the run, which is correct for dealing off a
+// deck and wrong for every other move in a card game — dragging a 5-card sequence in Klondike must
+// land it in the same order it left. Solitaire hit this and fixed it locally; it is fixed here.
+// Use `pileDeal` when you DO want the reversal.
+export function pileMove(src: i32, dst: i32, n: i32): i32 {
+  let have: i32 = CNT[src]
+  if (n <= 0 || n > have) { return 0 }
+  if (CNT[dst] + n > cap) { return 0 }
+  let base: i32 = have - n
+  let i: i32 = 0
+  while (i < n) {
+    let s: i32 = (src << shift) | (base + i)
+    pilePush(dst, CARD[s], FUP[s])
+    i = i + 1
+  }
+  CNT[src] = base
+  return n
+}
+
+// Deal `n` cards off the top of `src` onto `dst`, one at a time — so the run ARRIVES REVERSED, the
+// way cards come off a real deck. `up` sets the face of every card dealt. Returns how many moved,
+// which is short of `n` when the source runs out.
+export function pileDeal(src: i32, dst: i32, n: i32, up: i32): i32 {
+  let moved: i32 = 0
+  while (moved < n) {
+    if (CNT[src] === 0) { return moved }
+    let c: i32 = pilePop(src)
+    pilePush(dst, c, up)
+    moved = moved + 1
+  }
+  return moved
+}
+
+// Tip `src` wholesale back onto `dst`, reversed and face down — the stock recycle in patience, the
+// discard-to-draw reshuffle in a deckbuilder. Shuffling afterwards is the caller's choice.
+export function pileRecycle(src: i32, dst: i32): i32 {
+  return pileDeal(src, dst, CNT[src], 0)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Shuffling
+// ---------------------------------------------------------------------------------------------
+
+// Fisher-Yates, DOWNWARD. The upward variant — walking i up and picking `rngBelow(n)` — is not a
+// uniform shuffle; it is a classic bug that produces a visibly biased deal and no error. `stream` is
+// an rng.tish stream id, so a game can shuffle from a seeded stream and be replayable.
+export function pileShuffle(p: i32, stream: i32) {
+  let n: i32 = CNT[p]
+  let i: i32 = n - 1
+  while (i > 0) {
+    let j: i32 = rngBelow(stream, i + 1)
+    let a: i32 = (p << shift) | i
+    let b: i32 = (p << shift) | j
+    let tc: i32 = CARD[a]
+    let tu: i32 = FUP[a]
+    CARD[a] = CARD[b]
+    FUP[a] = FUP[b]
+    CARD[b] = tc
+    FUP[b] = tu
+    i = i - 1
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Queries a hand needs
+// ---------------------------------------------------------------------------------------------
+
+// Index of the first card in `p` whose id is `card`, or -1. Deckbuilders need this because a card
+// leaves the hand by identity, not by position.
+export function pileFind(p: i32, card: i32): i32 {
+  let i: i32 = 0
+  let n: i32 = CNT[p]
+  while (i < n) {
+    if (CARD[(p << shift) | i] === card) { return i }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+// Remove the card at index `i`, closing the gap and preserving the order of everything above it.
+export function pileRemoveAt(p: i32, i: i32): i32 {
+  let n: i32 = CNT[p]
+  if (i < 0 || i >= n) { return CARD_NONE }
+  let c: i32 = CARD[(p << shift) | i]
+  let k: i32 = i
+  while (k < n - 1) {
+    let a: i32 = (p << shift) | k
+    let b: i32 = (p << shift) | (k + 1)
+    CARD[a] = CARD[b]
+    FUP[a] = FUP[b]
+    k = k + 1
+  }
+  CNT[p] = n - 1
+  return c
+}
+
+// Insertion sort by card id, ascending — small piles only, which a hand always is.
+export function pileSort(p: i32) {
+  let n: i32 = CNT[p]
+  let i: i32 = 1
+  while (i < n) {
+    let c: i32 = CARD[(p << shift) | i]
+    let u: i32 = FUP[(p << shift) | i]
+    let j: i32 = i - 1
+    while (j >= 0 && CARD[(p << shift) | j] > c) {
+      CARD[(p << shift) | (j + 1)] = CARD[(p << shift) | j]
+      FUP[(p << shift) | (j + 1)] = FUP[(p << shift) | j]
+      j = j - 1
+    }
+    CARD[(p << shift) | (j + 1)] = c
+    FUP[(p << shift) | (j + 1)] = u
+    i = i + 1
+  }
+}
+
+// How many cards across ALL piles. The invariant a card game should assert every deal: cards are
+// conserved, and a move that loses one is a bug that hides for hours.
+export function cardsTotal(): i32 {
+  let t: i32 = 0
+  let i: i32 = 0
+  while (i < nPile) { t = t + CNT[i]  i = i + 1 }
+  return t
+}

@@ -1,0 +1,281 @@
+// Sunny Land components — a classic side-scrolling platformer built on the reusable engine systems.
+//   Player  — run/walk, coyote + buffered + variable-height jump, an air (double) jump unlocked by a
+//             gem, drop through one-way platforms, HP + hearts HUD, stomp enemies, respawn on death.
+//   Enemy   — an opossum patrol that turns at walls/ledges, hurts on contact, dies when stomped.
+//   Cherry  — a coin: bumps the score.        Gem — a powerup: unlocks the double jump (and heals).
+//   fx*     — a POOLED one-shot animation (stomp puff / pickup sparkle). Not an entity: see fxInit.
+import { input_x, input_y, key_pressed, key_held, sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_visible } from 'cargo:tish_agb'
+import { keyReleased, updateHearts, hudText } from '../../../packages/engine'
+import { fxPoof } from 'sheet32:../assets/fx-poof.png'
+import { fxSpark } from 'sheet32:../assets/fx-spark.png'
+
+let A: i32 = 0   // jump button
+let B: i32 = 1   // run button
+
+// Entity kind tags (see `this.setTag` / `other.tag()`) — so a pickup grants only to the player and
+// an enemy that wanders over a coin is ignored.
+export let TAG_PLAYER: i32 = 1
+
+// Player sprite frames (sheet32): idle 0-3, run 4-9, jump-up 10, fall 11, hurt 12-13.
+let F_IDLE: i32 = 0
+let F_RUN: i32 = 4
+let F_JUMP: i32 = 10
+let F_HURT: i32 = 12
+
+// ── shared game state ─────────────────────────────────────────────────────────
+// Module-level so a collectible's own handler can update them and the player's HUD/logic can read
+// them. `coins` = score; `doubleJump` = has the air-jump powerup been picked up.
+let coins: i32 = 0
+let doubleJump = false
+
+// ── the player's own state, as module scalars rather than `this.data.*` ───────────────────────────
+// ⚠️ There is exactly ONE player, and `this.data.face` is TWO boxed property lookups (`data`, then
+// the field) every time it is touched. A module-level typed scalar is ~1.7 ticks. Per-entity `data`
+// earns its keep when there are many of an entity; for a singleton it is pure overhead on the
+// hottest callback in the game. See docs/perf-rules.md §2.
+let pFace: i32 = 1
+let pAirJumped: i32 = 0
+let pLastCoins: i32 = 0 - 1
+let pLastHp: i32 = 0 - 1
+let pFlip: i32 = 0 - 1        // what setFlip was last told, so it is not told again
+let pClip: i32 = 0 - 1        // and which animation clip, likewise
+let pSpawnX: i32 = 0
+let pSpawnY: i32 = 0
+
+// ── one-shot FX, POOLED ───────────────────────────────────────────────────────
+// ⚠️⚠️ An FX used to be an ENTITY: `create()` + `sprite_new()` + `behave(Fx, …)` with `start`/`update`
+// hooks, despawning itself ~20 frames later. (This is the SECOND of the two costs this example had;
+// the dominant one was the per-enemy tish `tick` — see the note above `Enemy` below.) A/B on this
+// level, same ROM shape, same instrumentation, one FX every 30 frames (`frame_period(2)`, the EMA;
+// 4,389 ticks = one 60fps frame):
+//
+//     idle, nothing spawning     EMA 4,371     — inside budget
+//     entity FX, one alive       EMA 5,750     — 31% OVER budget, i.e. a sustained ~45fps
+//     pooled FX, one alive       EMA 4,378     — indistinguishable from idle
+//
+// `behave` builds the entity's rich method wrapper and `sprite_new` allocates sprite VRAM, and both
+// land on the frame you can least afford them: the one where something just happened. An FX is
+// spawned by every cherry and every stomp, so the game dropped frames *precisely* when the player was
+// doing well.
+//
+// The pool below pre-creates the sprites ONCE and drives them from flat `i32[]` arrays with typed
+// externs (~1 tick each). Spawning is now a handful of native stores. See docs/perf-rules.md.
+// Slots 0..2 are sparks (pickups), 3..4 are poofs (stomps) — one sprite per slot, bound to its sheet
+// at boot, so a spawn never has to re-point a sheet.
+export let FX_SPARK: i32 = 0
+export let FX_POOF: i32 = 1
+let FX_POOF_AT: i32 = 3       // slots [0, FX_POOF_AT) are sparks, [FX_POOF_AT, FX_SLOTS) are poofs
+let FX_SLOTS: i32 = 5
+let fxSprite: i32[] = [0, 0, 0, 0, 0]
+let fxTtl: i32[] = [0, 0, 0, 0, 0]     // frames left alive; 0 = free
+let fxFrm: i32[] = [0, 0, 0, 0, 0]     // current animation frame
+let fxCd: i32[] = [0, 0, 0, 0, 0]      // frames until the next animation frame
+
+// Fall below this and you are in a chasm, not on the level. The ground surface is row 11 (y = 176);
+// nothing playable sits below row 12.
+let PIT_Y: i32 = 200
+
+// Both FX clips run at 4 frames per animation frame; spark is 4 frames long, poof is 6.
+let FX_STEP: i32 = 4
+
+export function fxInit() {
+  let i: i32 = 0
+  while (i < FX_SLOTS) {
+    let h: i32 = i < FX_POOF_AT ? sprite_new(fxSpark) : sprite_new(fxPoof)
+    fxSprite[i] = h
+    sprite_set_visible(h, 0)
+    i = i + 1
+  }
+}
+
+// Start a one-shot animation at a WORLD position. `kind` is FX_SPARK or FX_POOF. The old entity drew
+// its sprite through `spriteOffset(-8, -8)`; a raw sprite has no offset, so centre it here.
+export function fxSpawn(kind: i32, x: i32, y: i32) {
+  let lo: i32 = kind === FX_POOF ? FX_POOF_AT : 0
+  let hi: i32 = kind === FX_POOF ? FX_SLOTS : FX_POOF_AT
+  let slot: i32 = 0 - 1
+  let i: i32 = lo
+  while (i < hi) {
+    if (fxTtl[i] === 0) { slot = i i = hi } else { i = i + 1 }
+  }
+  // Every slot of this kind is busy — steal the oldest rather than drop the effect. (`lo`, not a
+  // `% (hi - lo)` rotation: the ARM7TDMI has no divide instruction, so `%` is a call into a software
+  // routine — see docs/perf-rules.md §3 — and three simultaneous sparks is already the rare case.)
+  if (slot < 0) { slot = lo }
+  let len: i32 = kind === FX_POOF ? 6 : 4
+  let h: i32 = fxSprite[slot]
+  fxTtl[slot] = len * FX_STEP
+  fxFrm[slot] = 0
+  fxCd[slot] = FX_STEP
+  sprite_set_pos(h, x - 8, y - 8)
+  sprite_set_frame(h, 0)
+  sprite_set_visible(h, 1)
+}
+
+// Advance every live slot. Called once a frame from the main loop — five typed array reads when
+// nothing is playing, which is the common case.
+export function fxTick() {
+  let i: i32 = 0
+  while (i < FX_SLOTS) {
+    let t: i32 = fxTtl[i]
+    if (t > 0) {
+      t = t - 1
+      fxTtl[i] = t
+      if (t === 0) {
+        sprite_set_visible(fxSprite[i], 0)
+      } else {
+        let cd: i32 = fxCd[i] - 1
+        if (cd <= 0) {
+          cd = FX_STEP
+          let f: i32 = fxFrm[i] + 1
+          fxFrm[i] = f
+          sprite_set_frame(fxSprite[i], f)
+        }
+        fxCd[i] = cd
+      }
+    }
+    i = i + 1
+  }
+}
+
+// ── player ──────────────────────────────────────────────────────────────────
+function animatePlayer(e, dx, running, grounded) {
+  // `setFlip` only when it actually changes — it was three boxed calls a frame to re-assert the
+  // direction the sprite was already facing.
+  if (dx < 0) { pFace = 0 - 1 }
+  else if (dx > 0) { pFace = 1 }
+  let want: i32 = 0
+  if (pFace < 0) { want = 1 }
+  if (want !== pFlip) { pFlip = want e.setFlip(want === 1) }
+
+  // ⚠️ `play` is idempotent on the native side — re-asserting the same clip is a no-op there — but
+  // the CALL is not free: four boxed arguments is ~150 ticks, every frame, to say what the sprite is
+  // already doing. Gate it on the clip actually changing. (`clip` encodes which of the three plus the
+  // run speed, because switching walk<->run has to re-issue.)
+  let clip: i32 = 0
+  if (!grounded) { clip = 1 }
+  else if (dx !== 0) { clip = running ? 2 : 3 }
+  if (clip === pClip) { return }
+  pClip = clip
+  if (clip === 1) { e.play(F_JUMP, 2, 8, false) }
+  else if (clip === 2) { e.play(F_RUN, 6, 4, true) }
+  else if (clip === 3) { e.play(F_RUN, 6, 6, true) }
+  else { e.play(F_IDLE, 4, 14, true) }
+}
+
+export const Player = {
+  start: ({ this }) => {
+    this.setTag(TAG_PLAYER)
+    pFace = 1
+    pAirJumped = 0
+    pSpawnX = this.data.spawnX | 0
+    pSpawnY = this.data.spawnY | 0
+  },
+  update: ({ this }) => {
+    let dx = input_x()
+    let running = key_held(B) > 0
+    this.run(running)
+    this.moveX(dx)
+
+    // ⚠️ A chasm has no floor tiles, so the body settles on the map's bottom edge — walled in by dirt
+    // on both sides and far too deep to jump out of. That is a SOFT-LOCK: the fox just stands there
+    // forever and the only way on was to reset the console. Falling in now costs a heart and puts you
+    // back at the start, the way a platformer is supposed to behave.
+    if (this.y > PIT_Y) {
+      this.setPos(pSpawnX, pSpawnY)
+      this.hurt(1)
+      return
+    }
+
+    let grounded = this.onGround()
+    if (grounded) { pAirJumped = 0 }
+    if (key_pressed(A) > 0) {
+      if (grounded) {
+        if (input_y() > 0) { this.drop() } else { this.jump() }   // Down+A drops through a ledge
+      } else if (doubleJump && pAirJumped === 0) {
+        this.bounce(5)                                            // mid-air jump (gem powerup)
+        pAirJumped = 1
+      }
+    }
+    if (keyReleased(A) > 0) { this.jumpRelease() }                // release early → short hop
+
+    animatePlayer(this, dx, running, grounded)
+    // ⚠️ Gate the hearts on CHANGE, like the coin counter below. `this.hp()` and `updateHearts` are
+    // two boxed wrapper calls (~100 ticks each) spent every frame to redraw a row that changes a
+    // handful of times a life. This example was running at 4,361 ticks of a 4,389-tick frame — it
+    // had no headroom at all, so a single stomp's FX entity was enough to drop a frame, which is
+    // exactly what "it gets slow when there are enemies about" feels like.
+    let hp = this.hp()
+    if (pLastHp !== hp) { pLastHp = hp updateHearts(hp, 2) }
+    // Coin count, drawn only when it changes — the "x" + n concat ran every frame otherwise,
+    // allocating a string before hudText's own cache could skip the relayout.
+    if (pLastCoins !== coins) { pLastCoins = coins hudText(0, 216, 8, "x" + coins) }
+  },
+  // No auto-despawn: on death, warp back to the start and refill health.
+  onDeath: ({ this }) => {
+    this.setPos(pSpawnX, pSpawnY)
+    this.heal(this.maxHp())
+  }
+}
+
+// ── enemy (opossum) ───────────────────────────────────────────────────────────
+// ⚠️⚠️ THE PATROL IS NATIVE (`e.patrol(1)` in main.tish). There is deliberately NO `tick` hook here.
+//
+// It used to have one, and the comment above it claimed the `tick` ABI was "one call, plain field
+// access, no per-op ABI trip". That is not what tish generates. Read `.tish/gba/sunny-land/src/
+// main.rs` — every line of that six-line patrol lowered to boxed work, per enemy, per frame:
+//
+//   s.dir        → tishlang_runtime::get_prop(&(s).clone(), "dir")     // clone the object, then a
+//   s.x, s.y     → get_prop(&(s).clone(), "x") … "y"                   // STRING-KEYED lookup
+//   s.blocked    → get_prop(&(s).clone(), "blocked")
+//   s.x + 16     → ops::add(&Value, &Value) then to_int32_value(…)     // boxed f64 arithmetic
+//   tileSolid(…) → value_call(&_callee, &[Value::Number(…), …])        // boxed cross-module call
+//   s.dir/move/flip = …                                                 // three boxed writes back
+//
+// ~8 object clones + string-keyed property lookups, a boxed cross-module call, and every `+`/`-`
+// through boxed f64 — all of it multiplied by the number of enemies. And `patrol_system` /
+// `world_step` skip entities that are off screen (`is_active`), so this is paid ONLY for the enemies
+// currently visible. That is why the game ran at well under half speed with two opossums on screen
+// and was fine with none: the cost arrives exactly when an enemy scrolls into view.
+//
+// `set_patrol` in the engine is the same six lines in Rust — same wall/ledge probe, same reverse —
+// at zero tish cost, and it now mirrors the sprite too (`flipMode`), which is the only reason this
+// example had hand-rolled it in the first place.
+export const Enemy = {
+  // Landed on from above → stomp (enemy dies in a puff, player bounces). Side contact → the player
+  // takes a hit (its i-frames stop repeat damage while in contact). Coins/other collisions ignored.
+  onCollide: ({ this, other }) => {
+    if (other.tag() !== TAG_PLAYER) { return }
+    if (other.y + 6 < this.y) {
+      this.hurt(99)
+      other.bounce(5)
+      fxSpawn(FX_POOF, this.x, this.y)
+    } else {
+      other.hurt(1)
+    }
+  }
+}
+
+// ── collectibles ────────────────────────────────────────────────────────────
+export const Cherry = {
+  // No `start` hook: the spin is set at spawn (main.tish). A hook that only configures the entity
+  // forces its rich wrapper to be rebuilt on the first frame — 11 coins' worth of that is 70K here.
+  onCollide: ({ this, other }) => {
+    if (other.tag() === TAG_PLAYER) {
+      coins = coins + 1
+      fxSpawn(FX_SPARK, this.x, this.y)
+      this.despawn()
+    }
+  }
+}
+
+export const Gem = {
+  onCollide: ({ this, other }) => {
+    if (other.tag() === TAG_PLAYER) {
+      doubleJump = true          // unlock the air jump for the rest of the level
+      other.heal(2)              // and top up a heart
+      fxSpawn(FX_SPARK, this.x, this.y)
+      this.despawn()
+    }
+  }
+}

@@ -1,0 +1,948 @@
+// artillery — two turrets, three planets, and one shot at a time.
+//
+// ── What it is the acceptance test for ───────────────────────────────────────────────────────────
+//
+// **N-body inverse-square gravity, integrated in pure integer tish.** Golf proved a rigid disc comes
+// to rest; soccer proved discs collide stably. Neither says anything about a force that varies
+// continuously with position, which is the case where a table, a fixed-point scale and an overflow
+// bound all have to be right at once — and where being slightly wrong produces a shot that looks
+// entirely plausible and is not reproducible.
+//
+// The claim under test is three-part, and each part is asserted by verify.sh rather than admired:
+//
+//   1. **The arc is bent by every planet at once.** A shot fired flat across the arena lands
+//      somewhere a straight line does not. (Negative control: the determinism test below passes
+//      perfectly with gravity commented out — a straight line is extremely reproducible.)
+//   2. **It is computed with no floating point and no division.** The ARM7TDMI has neither. This is
+//      checked by grepping the GENERATED RUST, not by trusting the source to mean what it says.
+//   3. **It is bit-reproducible.** The same seed and the same inputs give a byte-identical shell
+//      trace, which is the property a link-cable build would later be built on.
+//
+// ── Why this exists before the game it is for ────────────────────────────────────────────────────
+//
+// The target is a Warheads/Gunbound-style artillery game with ship classes, a scrolling arena and
+// two-console lockstep. Every one of those is well-understood here; the integrator was not. So this
+// is the spike, in the tradition of the de-risk spikes before it, and the numbers it produces
+// (the tick cost of a substep, the substep count actually needed, the real OAM occupancy) are what
+// the bigger game gets planned against.
+//
+// ── Controls ─────────────────────────────────────────────────────────────────────────────────────
+// LEFT/RIGHT aim · UP/DOWN power · A holds to charge and releases to fire · START rematches.
+// It plays itself until you touch the pad.
+
+import { SQ, GACC, ISQRT, SINT, COST } from './tables'
+import { wh8 } from 'sheet8:../assets/wh8.png'
+import { planets32 } from 'sheet32:../assets/planets32.png'
+import {
+  frame, log, backdrop, ticks, heap_free,
+  hud_text, key_held,
+  sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_visible, sprite_set_hud
+} from 'cargo:tish_agb'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// EVERY MODULE BINDING IS DECLARED BEFORE EVERY FUNCTION AND BEFORE ANY CODE.
+//
+// tish emits module bindings into `run()` in source order while emitting each function value at its
+// own position, so anything referencing a binding declared LATER captures a `let` that appears below
+// it and fails as `E0425: cannot find value` (tishlang/tish#629). Declaring first is free.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+// ── Fixed-point scales ───────────────────────────────────────────────────────────────────────────
+// Position Q8 px, velocity Q16 px per TICK. The pairing is the entire reason for these two numbers:
+// a Q8 heading from COST/SINT times a Q8 speed gives a Q16 velocity with NO shift at all.
+let VMAX: i32 = 1310720            // 20 px/frame — the anti-tunnelling bound depends on this
+let SHELL_R: i32 = 2
+let SCREEN_W: i32 = 240
+let SCREEN_H: i32 = 160
+
+// Sheet frame order — the contract with scripts/gen_artillery.py.
+let F_SHELL: i32 = 0
+let F_TRAIL: i32 = 1
+let F_GHOST: i32 = 2
+let F_SEG_OFF: i32 = 3
+let F_SEG_ON: i32 = 4
+let F_SEG_HOT: i32 = 5
+let F_TURRET0: i32 = 6
+let F_BOOM0: i32 = 3               // in planets32: 3 planet frames, then 4 blast frames
+
+// ── Phases ───────────────────────────────────────────────────────────────────────────────────────
+let PH_AIM: i32 = 0
+let PH_FLIGHT: i32 = 1
+let PH_BOOM: i32 = 2
+let PH_TURN: i32 = 3
+let PH_OVER: i32 = 4
+
+// Shot outcomes.
+let ST_DEAD: i32 = 0
+let ST_FLY: i32 = 1
+let ST_PLANET: i32 = 2
+let ST_GONE: i32 = 3
+let ST_HIT: i32 = 4
+
+// ── The input word ───────────────────────────────────────────────────────────────────────────────
+// Nine bits, laid out now rather than later: a link build sends this word and stamps a round number
+// above it, and a layout that changes after the fact means nothing ever pairs again.
+let IN_UP: i32 = 1
+let IN_DOWN: i32 = 2
+let IN_LEFT: i32 = 4
+let IN_RIGHT: i32 = 8
+let IN_A: i32 = 16
+let IN_START: i32 = 256
+
+// ── Weapon ───────────────────────────────────────────────────────────────────────────────────────
+let BLAST_R: i32 = 24
+let BLAST_DMG: i32 = 40
+let BLAST_RINV: i32 = 2730         // 65536 / BLAST_R, so falloff needs no runtime divide
+let TURN_TICKS: i32 = 900          // a real rule: run the clock out and you fire as you stand
+let MAX_FLIGHT: i32 = 900
+let MATCH_TURNS: i32 = 24          // on exhaustion the lower HP loses — see the PH_TURN block
+
+// ── Planets ──────────────────────────────────────────────────────────────────────────────────────
+// ⚠️⚠️ FOUR SLOTS FOR THREE PLANETS, AND THE PADDING IS LOAD-BEARING.
+//
+// Masking an index is not enough on its own: the mask must be provably INSIDE the array, which means
+// the array length must be the power of two the mask implies. With three elements, `PL_X[p & 3]` can
+// name index 3, so the compiler cannot prove it in bounds and emits an f64 bounds-check fallback —
+// and that fallback is CONTAGIOUS. Its type is f64, so `Math.imul(..., PL_MASS[p & 3])` became
+// `to_int32(<f64>)`, which made the product f64-typed, which dragged the `gx + ...` accumulation out
+// of the integer domain and back through `to_int_unchecked`. One under-sized array turned the whole
+// force computation into soft float. Measured in this example's own generated Rust; padding to four
+// made every one of those reads a direct i32 load.
+let PL_N: i32 = 3
+let PL_X: i32[] = [120, 60, 188, 0]
+let PL_Y: i32[] = [80, 36, 124, 0]
+let PL_R: i32[] = [10, 13, 15, 0]           // ⚠️ these ARE gen_artillery.py's PLANET_R
+let PL_MASS: i32[] = [320, 192, 512, 0]     // Q8, 256 = 1.0
+let PL_HIT2: i32[] = [144, 225, 289, 0]     // (r + SHELL_R)^2
+let PL_SPR: i32[] = [0 - 1, 0 - 1, 0 - 1, 0 - 1]
+
+// ── Shells. Slot 0 is live, slot 1 is the aim-preview probe. Four wide so `& 3` is in bounds. ────
+let SHX: i32[] = [0, 0, 0, 0]               // Q8 world px
+let SHY: i32[] = [0, 0, 0, 0]
+let SHVX: i32[] = [0, 0, 0, 0]              // Q16 px per tick
+let SHVY: i32[] = [0, 0, 0, 0]
+let SHST: i32[] = [0, 0, 0, 0]
+let SHK: i32[] = [0, 0, 0, 0]               // ticks since launch
+
+// ── Turrets ──────────────────────────────────────────────────────────────────────────────────────
+let T_X: i32[] = [18, 222]
+let T_Y: i32[] = [104, 56]
+let T_HP: i32[] = [100, 100]
+let T_SPR: i32[] = [0 - 1, 0 - 1]
+// Aim is Q4 over its firing unit: the fired angle is `AIM >> 4`, an ordinary 1/256th of a turn.
+// The sub-unit exists so a TICK is a meaningful amount of aim — at whole 1/256ths a linked build
+// running six ticks per input sample would swing the gun 8 degrees per sample.
+let AIM: i32[] = [16 * 240, 16 * 112]
+let PWR: i32[] = [16 * 24, 16 * 24]
+let AIMHOLD: i32[] = [0, 0]
+let PWRHOLD: i32[] = [0, 0]
+
+// ── The attract driver's memory: a per-side hill climb. ──────────────────────────────────────────
+// The first driver fired a fresh random shot every turn and never landed one in 3,600 frames, so the
+// soak proved only that nothing crashed — it could not assert that damage lands, that HP falls, or
+// that a match ever ends. Remembering the closest shot so far and perturbing around it converges in
+// a handful of turns, and it is still only arithmetic over the SAME integrator the player's shot
+// uses. (The real budgeted search belongs to the bigger game; this is the spike's stand-in.)
+let CPU_BA: i32[] = [247, 119]              // best angle so far, in fired units
+let CPU_BP: i32[] = [24, 24]                // best power so far
+let CPU_BS: i32[] = [999999, 999999]        // that shot's closest approach, squared
+
+// ── Simulation state. Always reached as G.field: `let s: Game = G` COPIES and discards writes. ───
+interface Game {
+  mode: i32,                       // 0 = running the boot self-test, 1 = playing
+  phase: i32, phaseT: i32, who: i32, turn: i32, winner: i32,
+  simFrame: i32, simTick: i32, turnClock: i32,
+  charge: i32, prev0: i32, prev1: i32,
+  seq: i32, match: i32, rebuild: i32, human: i32,
+  ck: i32,                         // the self-test's rolling trajectory checksum
+  bx: i32, by: i32,                // where the last shell died — the blast centre
+  cpuA: i32, cpuP: i32,            // the attract driver's target for this turn, in FIRED units
+  minD2: i32,                      // closest this shell came to the ENEMY turret, squared
+  shotA: i32, shotP: i32           // what this shell was actually fired with
+}
+let G: Game = {
+  mode: 0, phase: PH_FLIGHT, phaseT: 0, who: 0, turn: 0, winner: 0 - 1,
+  simFrame: 0, simTick: 0, turnClock: TURN_TICKS,
+  charge: 0, prev0: 0, prev1: 0,
+  seq: 0, match: 0, rebuild: 0, human: 0, ck: 12345, bx: 0, by: 0,
+  cpuA: 247, cpuP: 24, minD2: 999999, shotA: 0, shotP: 0
+}
+
+// ── Presentation only. NOTHING in the step body may read or write this. ──────────────────────────
+interface View { hudKey: i32, pvKey: i32, pvN: i32, trailHead: i32, trailT: i32, boomSpr: i32,
+                 lastX: i32, lastY: i32, pvLastX: i32, pvLastY: i32 }
+let V: View = { hudKey: 0 - 1, pvKey: 0 - 1, pvN: 0, trailHead: 0, trailT: 0, boomSpr: 0 - 1,
+                lastX: 0, lastY: 0, pvLastX: 0, pvLastY: 0 }
+
+// ── The dot ring: 32 sprites, two jobs, split by RANGE so neither can starve the other. ──────────
+// [0,12) is the aim preview, [12,32) is the in-flight trail. All 32 point at shared frames and agb
+// refcounts sprite VRAM by frame, so the whole ring costs 2 tiles.
+// ⚠️ Pooled and created once, never spawned: docs/perf-rules.md §6 measures an entity-per-effect at
+// 31% over the frame budget, and effects fire on GOOD outcomes, so the game would stutter exactly
+// when the player is enjoying it.
+let DOT_N: i32 = 64
+let DOT_TRAIL0: i32 = 16
+// Pixels between dots. The line is spaced by DISTANCE, never by time — see the
+// presentation block for why. 6 px reads as a dotted line rather than a row of specks.
+let DOT_STEP: i32 = 6
+let TRAIL_SLOTS: i32 = 48
+let DOTS: i32[] = [
+  0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1,
+  0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1,
+  0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1,
+  0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1,
+  0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1,
+  0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1,
+  0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1,
+  0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1
+]
+let SEG_N: i32 = 16
+let SEGS: i32[] = [
+  0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1,
+  0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1
+]
+
+let shellSpr: i32 = 0 - 1
+let tkPeak: i32 = 0
+let tkAcc: i32 = 0
+let tkN: i32 = 0
+// The headline measurement this spike exists to produce: what one substep of N-body gravity costs.
+// Accumulated over the whole window and divided ONCE at report time, because a per-substep divide
+// would cost more than the thing it measures.
+let igAcc: i32 = 0
+let igSub: i32 = 0
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// BOOT
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+backdrop(0x000208)
+
+let i: i32 = 0
+while (i < PL_N) {
+  PL_SPR[i & 3] = sprite_new(planets32)
+  sprite_set_frame(PL_SPR[i & 3], i)
+  i = i + 1
+}
+i = 0
+while (i < 2) {
+  T_SPR[i & 1] = sprite_new(wh8)
+  sprite_set_frame(T_SPR[i & 1], F_TURRET0 + i)
+  i = i + 1
+}
+shellSpr = sprite_new(wh8)
+sprite_set_frame(shellSpr, F_SHELL)
+sprite_set_visible(shellSpr, 0)
+V.boomSpr = sprite_new(planets32)
+sprite_set_visible(V.boomSpr, 0)
+
+i = 0
+while (i < DOT_N) {
+  let h: i32 = sprite_new(wh8)
+  if (i < DOT_TRAIL0) { sprite_set_frame(h, F_GHOST) }
+  else { sprite_set_frame(h, F_TRAIL) }
+  sprite_set_visible(h, 0)
+  DOTS[i & 31] = h
+  i = i + 1
+}
+i = 0
+while (i < SEG_N) {
+  let h2: i32 = sprite_new(wh8)
+  sprite_set_frame(h2, F_SEG_OFF)
+  sprite_set_hud(h2, 1)
+  sprite_set_pos(h2, 76 + (i << 3), 150)
+  SEGS[i & 15] = h2
+  i = i + 1
+}
+
+// ⚠️ THE SELF-TEST RUNS THROUGH THE SHIPPING INTEGRATOR, NOT A COPY OF IT.
+//
+// A checksum over a second implementation asserts that the second implementation has not changed,
+// which is worth nothing. So the canned arena above is left in place, a canned shot is armed here,
+// and the ordinary flight phase below integrates it. `G.mode` stays 0 until it terminates, at which
+// point the real match is built. One integrator, exercised by the test that guards it.
+SHX[0 & 3] = 20 << 8
+SHY[0 & 3] = 148 << 8
+SHVX[0 & 3] = Math.imul(COST[224 & 255], 768)      // Q8 heading . Q8 speed = Q16 velocity
+SHVY[0 & 3] = Math.imul(SINT[224 & 255], 768)
+SHST[0 & 3] = ST_FLY
+SHK[0 & 3] = 0
+
+let bt: i32 = 0
+while (bt < 7) {
+  let bdist: i32 = bt << 2
+  let bdd: i32 = ISQRT[SQ[bdist & 1023] & 2047]
+  let bdmg: i32 = 0
+  if (bdd < BLAST_R) {
+    let bfall: i32 = Math.imul(BLAST_R - bdd, BLAST_RINV) >> 8
+    bdmg = Math.imul(BLAST_DMG, bfall) >> 8
+  }
+  log("ART SELFTEST blast d=" + bdist + " dmg=" + bdmg)
+  bt = bt + 1
+}
+
+log("ART BOOT heap=" + heap_free())
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// MAIN LOOP — the whole simulation is inline here.
+//
+// ⚠️ THE STEP BODY IS A PURE FUNCTION OF `in0` AND `in1`, AND IT IS INLINE ON PURPOSE.
+//
+// Pure: nothing below the input read calls `key_held`. That discipline is what makes a link build a
+// new file rather than a rewrite — two consoles exchange these two words and run this identical body.
+// Inline: a tish function touching module state is a boxed `value_call` at ~117 ticks plus ~28 per
+// argument (docs/perf-rules.md §2), and a lowered one historically could not see module scope at all.
+// A module-level `while` has neither problem.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+while (true) {
+  let t0: i32 = ticks()
+
+  // ── Rebuild the arena when a match starts. Inline, because a no-argument function that WRITES
+  // module arrays is the shape most likely to be lowered and lose its scope.
+  if (G.rebuild === 1) {
+    G.rebuild = 0
+    rngSeed(0, 7717 + Math.imul(G.match, 40503))
+    let pi: i32 = 0
+    while (pi < PL_N) {
+      // ⚠️ EIGHT CANDIDATES, ALWAYS DRAWN, first acceptable one kept. A `while (overlaps) retry`
+      // loop draws a CONDITIONAL number of times, so the RNG stream position would depend on the
+      // values drawn — which is exactly how a replay stops reproducing. Same principle as
+      // packages/rng.tish's refusal to short-circuit rngChance at 100.
+      let bx: i32 = 120
+      let by: i32 = 80
+      let got: i32 = 0
+      let tries: i32 = 0
+      while (tries < 8) {
+        let cx: i32 = 56 + rngBelow(0, 128)
+        let cy: i32 = 24 + rngBelow(0, 112)
+        if (got === 0) {
+          let ok: i32 = 1
+          let qi: i32 = 0
+          while (qi < pi) {
+            let sx: i32 = cx - PL_X[qi & 3]
+            let sy: i32 = cy - PL_Y[qi & 3]
+            let asx2: i32 = sx   if (asx2 < 0) { asx2 = 0 - asx2 }
+            let asy2: i32 = sy   if (asy2 < 0) { asy2 = 0 - asy2 }
+            if (asx2 + asy2 < 72) { ok = 0 }
+            qi = qi + 1
+          }
+          // Keep clear of both turrets, or a match opens with a planet sitting on a gun.
+          if (cx < 56 || cx > 184) { ok = 0 }
+          if (ok === 1) { bx = cx  by = cy  got = 1 }
+        }
+        tries = tries + 1
+      }
+      PL_X[pi & 3] = bx
+      PL_Y[pi & 3] = by
+      let rr: i32 = PL_R[pi & 3]
+      PL_HIT2[pi & 3] = Math.imul(rr + SHELL_R, rr + SHELL_R)
+      sprite_set_pos(PL_SPR[pi & 3], bx - 16, by - 16)
+      pi = pi + 1
+    }
+    T_HP[0 & 1] = 100
+    T_HP[1 & 1] = 100
+    // ⚠️ THE DRIVER'S LEARNED AIM DOES NOT SURVIVE A NEW ARENA. Leaving it meant whichever side
+    // solved the FIRST board kept that solution for ever and won every rematch on boards it had
+    // never seen — five matches, same winner, 100-to-nothing. A hill climb is only valid over the
+    // landscape it climbed.
+    CPU_BS[0 & 1] = 999999
+    CPU_BS[1 & 1] = 999999
+    CPU_BA[0 & 1] = 247
+    CPU_BA[1 & 1] = 119
+    CPU_BP[0 & 1] = 24
+    CPU_BP[1 & 1] = 24
+    G.winner = 0 - 1
+    G.turn = 0
+    G.who = rngBelow(0, 2)
+    G.phase = PH_AIM
+    G.phaseT = 0
+    G.turnClock = TURN_TICKS
+    G.charge = 0
+    V.pvKey = 0 - 1
+    // ⚠️ STREAM 3 IS THE ATTRACT DRIVER'S OWN, and it is separate from stream 0 on purpose. The
+    // arena and the coin flip must stay a pure function of the match seed no matter how many shots
+    // a CPU takes, or a replay of the same match would deal a different board.
+    rngSeed(3, 40503 + Math.imul(G.match, 7717))
+    // ⚠️ THE SPREAD NARROWS AS THE BEST SHOT GETS CLOSER. A fixed +/-12 units is 17 degrees, which
+    // is wider than the target: the driver would find a hit and then wander straight off it again,
+    // which is what nineteen shots and one hit looked like. Annealing on the best distance so far
+    // makes the search converge instead of orbiting.
+    let sprA: i32 = 12
+    let sprP: i32 = 6
+    if (CPU_BS[G.who & 1] < 16384) { sprA = 5   sprP = 3 }
+    if (CPU_BS[G.who & 1] < 4096) { sprA = 2   sprP = 2 }
+    if (CPU_BS[G.who & 1] < 1024) { sprA = 1   sprP = 1 }
+    // ⚠️ EXPLOIT, DO NOT ONLY EXPLORE. Once a shot has actually landed there is nothing left to
+    // search for, and perturbing it by the smallest step still misses at this range — the driver
+    // hovered next to a winning shot and stopped scoring entirely. Spread 0 re-fires it exactly.
+    // The draw is still taken so the stream position stays a pure function of the turn number.
+    if (CPU_BS[G.who & 1] < 256) { sprA = 0   sprP = 0 }
+    G.cpuA = (CPU_BA[G.who & 1] + rngBelow(3, (sprA << 1) | 1) - sprA) & 255
+    G.cpuP = CPU_BP[G.who & 1] + rngBelow(3, (sprP << 1) | 1) - sprP
+    if (G.cpuP < 8) { G.cpuP = 8 }
+    if (G.cpuP > 46) { G.cpuP = 46 }
+    log("ART ARENA id=m" + G.match + " n=" + PL_N
+      + " p=" + (PL_X[0 & 3] + Math.imul(PL_Y[0 & 3], 7) + Math.imul(PL_X[1 & 3], 31)
+                 + Math.imul(PL_Y[1 & 3], 71) + Math.imul(PL_X[2 & 3], 131) + Math.imul(PL_Y[2 & 3], 197))
+      + " first=" + G.who)
+  }
+
+  // ── Input. The ONLY place the pad is read. ─────────────────────────────────────────────────────
+  let bits: i32 = 0
+  if (key_held(9) === 1) { bits = bits | IN_RIGHT }
+  if (key_held(8) === 1) { bits = bits | IN_LEFT }
+  if (key_held(6) === 1) { bits = bits | IN_UP }
+  if (key_held(7) === 1) { bits = bits | IN_DOWN }
+  if (key_held(0) === 1) { bits = bits | IN_A }
+  if (key_held(3) === 1) { bits = bits | IN_START }
+  if (bits !== 0) { G.human = 1 }
+
+  // ⚠️ The attract driver emits INPUT BITS, not a call to "fire". examples/golf's driver calls
+  // body_impulse directly, so golf's attract mode never exercises its own input path and a broken
+  // one would soak green. Here the CPU and a player are indistinguishable to everything below.
+  let in0: i32 = bits
+  let in1: i32 = bits
+  if (G.human === 0 && G.mode === 1) {
+    let auto: i32 = 0
+    if (G.phase === PH_AIM) {
+      // ⚠️ THE DRIVER WALKS THE GUN WITH THE D-PAD AND PRESSES A. It does not call the fire path.
+      //
+      // examples/golf's attract driver calls `body_impulse` directly, which means golf's attract
+      // mode never exercises golf's own input handling — a broken charge/release would soak green.
+      // Here the CPU is indistinguishable from a player to everything downstream, so the soak is a
+      // test of the whole game and not just of the rules.
+      //
+      // It picks a fresh target each turn from stream 3 rather than firing the same shot for ever.
+      // Aiming at the enemy and never varying meant thirteen consecutive shots into the same planet:
+      // no hits, no winner, and a soak that proved only that nothing crashed.
+      let w3: i32 = G.who & 1
+      let curA: i32 = AIM[w3 & 1] >> 4
+      let curP: i32 = PWR[w3 & 1] >> 4
+      let wantA: i32 = G.cpuA
+      let wantP: i32 = G.cpuP
+      let da: i32 = (wantA - curA) & 255
+      if (da > 0 && da < 128) { auto = auto | IN_RIGHT }
+      if (da >= 128 && da < 255) { auto = auto | IN_LEFT }
+      if (curP < wantP - 1) { auto = auto | IN_UP }
+      if (curP > wantP + 1) { auto = auto | IN_DOWN }
+      // Charge once lined up, then release. `phaseT > 150` is the give-up: a target it cannot reach
+      // must not stall the turn, and the turn clock behind it is the real backstop.
+      if (auto === 0 || G.phaseT > 150) {
+        if (G.phaseT < 170) { auto = auto | IN_A }
+      }
+    }
+    if (G.phase === PH_OVER) { auto = auto | IN_START }
+    in0 = auto
+    in1 = auto
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  // STEP. One tick per display frame here; a linked build runs several per exchanged word, which
+  // is why everything below counts in TICKS and the shell is integrated one tick at a time.
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  G.simFrame = G.simFrame + 1
+
+  // Edges are computed in SIMULATION time, from the exchanged words. `key_pressed` would give an
+  // edge on the console that pressed the button and on no other — which fires a shell on one screen
+  // only, a desync on the very first turn.
+  let e0: i32 = in0 & (in0 ^ G.prev0)
+  let e1: i32 = in1 & (in1 ^ G.prev1)
+  G.prev0 = in0
+  G.prev1 = in1
+  let me: i32 = in0
+  let myEdge: i32 = e0
+  if (G.who === 1) { me = in1  myEdge = e1 }
+
+  G.phaseT = G.phaseT + 1
+  G.simTick = G.simTick + 1
+
+  // ── AIM ───────────────────────────────────────────────────────────────────────────────────────
+  if (G.phase === PH_AIM) {
+    G.turnClock = G.turnClock - 1
+    let w: i32 = G.who & 1
+    let ad: i32 = 0
+    if ((me & IN_LEFT) !== 0) { ad = 0 - 1 }
+    if ((me & IN_RIGHT) !== 0) { ad = 1 }
+    if (ad === 0) { AIMHOLD[w & 1] = 0 }
+    else {
+      AIMHOLD[w & 1] = AIMHOLD[w & 1] + 1
+      let sp2: i32 = 1 + (AIMHOLD[w & 1] >> 4)
+      if (sp2 > 20) { sp2 = 20 }
+      AIM[w & 1] = (AIM[w & 1] + Math.imul(ad, sp2)) & 4095
+    }
+    let pd: i32 = 0
+    if ((me & IN_DOWN) !== 0) { pd = 0 - 1 }
+    if ((me & IN_UP) !== 0) { pd = 1 }
+    if (pd === 0) { PWRHOLD[w & 1] = 0 }
+    else {
+      PWRHOLD[w & 1] = PWRHOLD[w & 1] + 1
+      let sp3: i32 = 1 + (PWRHOLD[w & 1] >> 4)
+      if (sp3 > 16) { sp3 = 16 }
+      PWR[w & 1] = PWR[w & 1] + Math.imul(pd, sp3)
+      if (PWR[w & 1] < 16) { PWR[w & 1] = 16 }
+      if (PWR[w & 1] > 768) { PWR[w & 1] = 768 }
+    }
+
+    // Charge while A is held, fire on release — golf's idiom. The turn clock firing for you is a
+    // real rule, and it is also what stops a soak stalling on one turn for ever.
+    if ((me & IN_A) !== 0) { G.charge = 1 }
+    let fire: i32 = 0
+    if (G.charge === 1 && (me & IN_A) === 0) { fire = 1 }
+    if (G.turnClock <= 0) { fire = 1 }
+    if (fire === 1) {
+      G.charge = 0
+      let a: i32 = (AIM[w & 1] >> 4) & 255
+      let pw: i32 = PWR[w & 1] >> 4
+      let spd: i32 = 256 + Math.imul(pw, 14)          // Q8 px/frame, ~1.0 to 3.6
+      SHX[0 & 3] = (T_X[w & 1] + (Math.imul(COST[a & 255], 9) >> 8)) << 8
+      SHY[0 & 3] = (T_Y[w & 1] + (Math.imul(SINT[a & 255], 9) >> 8)) << 8
+      SHVX[0 & 3] = Math.imul(COST[a & 255], spd)
+      SHVY[0 & 3] = Math.imul(SINT[a & 255], spd)
+      SHST[0 & 3] = ST_FLY
+      SHK[0 & 3] = 0
+      G.shotA = a
+      G.shotP = pw
+      G.minD2 = 999999
+      G.seq = G.seq + 1
+      G.phase = PH_FLIGHT
+      G.phaseT = 0
+      V.trailT = 0
+      V.lastX = SHX[0 & 3] >> 8
+      V.lastY = SHY[0 & 3] >> 8
+      log("ART SHOT id=q" + G.seq + " side=" + w + " a=" + a + " p=" + pw + " f=" + G.simFrame)
+    }
+  }
+
+  // ── Choose what to integrate this frame. ONE integrator body serves the live shell, the aim
+  // preview and the boot self-test; a second copy would make the self-test worthless.
+  let s: i32 = 0 - 1
+  let nticks: i32 = 0
+  if (G.phase === PH_FLIGHT) { s = 0  nticks = 1 }
+  else if (G.phase === PH_AIM && G.mode === 1) {
+    // The preview is BUDGETED, not batch-computed: a full 48-tick lookahead every frame the d-pad is
+    // held is thousands of ticks. A packed key invalidates the walk; it then advances a fixed slice
+    // per frame and lights a dot as it reaches one. The visible effect is an arc drawing itself.
+    let w2: i32 = G.who & 1
+    let key: i32 = (AIM[w2 & 1] << 12) | PWR[w2 & 1]
+    if (key !== V.pvKey) {
+      V.pvKey = key
+      V.pvN = 0
+      let a2: i32 = (AIM[w2 & 1] >> 4) & 255
+      let pw2: i32 = PWR[w2 & 1] >> 4
+      let spd2: i32 = 256 + Math.imul(pw2, 14)
+      SHX[1 & 3] = (T_X[w2 & 1] + (Math.imul(COST[a2 & 255], 9) >> 8)) << 8
+      SHY[1 & 3] = (T_Y[w2 & 1] + (Math.imul(SINT[a2 & 255], 9) >> 8)) << 8
+      SHVX[1 & 3] = Math.imul(COST[a2 & 255], spd2)
+      SHVY[1 & 3] = Math.imul(SINT[a2 & 255], spd2)
+      SHST[1 & 3] = ST_FLY
+      SHK[1 & 3] = 0
+      V.pvLastX = SHX[1 & 3] >> 8
+      V.pvLastY = SHY[1 & 3] >> 8
+      let di: i32 = 0
+      while (di < DOT_TRAIL0) { sprite_set_visible(DOTS[di & 63], 0)  di = di + 1 }
+    }
+    if (V.pvN < DOT_TRAIL0 && SHST[1 & 3] === ST_FLY) { s = 1  nticks = 6 }
+  }
+
+  if (s >= 0) {
+    let tk: i32 = 0
+    while (tk < nticks) {
+      // Substeps are a POWER OF TWO chosen from speed, so both the position advance and the
+      // acceleration split are shifts rather than divides.
+      let asx: i32 = SHVX[s & 3]   if (asx < 0) { asx = 0 - asx }
+      let asy: i32 = SHVY[s & 3]   if (asy < 0) { asy = 0 - asy }
+      let sq: i32 = asx + asy
+      let sub: i32 = 0
+      if (sq > 131072) { sub = 1 }
+      if (sq > 262144) { sub = 2 }
+      if (sq > 524288) { sub = 3 }
+      let steps: i32 = 1 << sub
+      igSub = igSub + steps
+      // ⚠️ THE BRACKET IS AROUND THE SUBSTEP LOOP ALONE. The first version wrapped the whole tick
+      // loop, which contains the ART SHELL telemetry — and a log() costs far more than the substeps
+      // it was supposed to be measuring, so the number swung between 48 and 142 ticks depending on
+      // how many logging frames landed in the window.
+      let ig0: i32 = ticks()
+      let sn: i32 = 0
+      while (sn < steps) {
+        let px: i32 = SHX[s & 3] >> 8        // Q8 -> whole px, once, reused by every planet
+        let py: i32 = SHY[s & 3] >> 8
+
+        // Escape check FIRST, in whole pixels. It is also what keeps |dx| inside SQ's 1024 entries:
+        // past this bound a masked index would alias a far offset onto a near one, and a planet
+        // 1200 px away would yank the shell — which looks like a physics bug and is a masking bug.
+        if (px < 0 - 240 || px > 480 || py < 0 - 240 || py > 400) { SHST[s & 3] = ST_GONE  sn = steps }
+        else {
+          let gx: i32 = 0
+          let gy: i32 = 0
+          let p: i32 = 0
+          while (p < PL_N) {
+            let dx: i32 = PL_X[p & 3] - px
+            let dy: i32 = PL_Y[p & 3] - py
+            let adx: i32 = dx   if (adx < 0) { adx = 0 - adx }
+            let ady: i32 = dy   if (ady < 0) { ady = 0 - ady }
+            // ⚠️ MASKED INDEX INTO A POWER-OF-TWO ARRAY. Both halves matter: the identical promoted
+            // array costs 0.45 ticks this way and 25 through any form the compiler cannot reduce to
+            // a mask (examples/bench-tables §3).
+            let d2: i32 = SQ[adx & 1023] + SQ[ady & 1023]
+
+            // COLLISION AND GRAVITY SHARE ONE d2 — the reason this loop is cheap. The distance the
+            // hit test needs and the distance the force law needs are the same number, computed once.
+            if (d2 < PL_HIT2[p & 3]) { SHST[s & 3] = ST_PLANET  p = PL_N  sn = steps }
+            else {
+              // ⚠️ `1024 | hi`, NOT `1024 + hi`. A shift result is not i32-typed to a surrounding
+              // `+`, so the add would drag the whole index into soft float — which is exactly what
+              // `1 + (dist >> 5)` does in examples/golf's generated Rust.
+              let idx: i32 = 0
+              if (d2 < 4096) { idx = d2 >> 2 }
+              else {
+                let hi: i32 = d2 >> 8
+                if (hi > 1023) { hi = 1023 }
+                idx = 1024 | hi
+              }
+              let kk: i32 = GACC[idx & 2047]
+              // ⚠️ EVERY MULTIPLY IS `Math.imul` AND EVERY PRODUCT IS CONSUMED BY A SHIFT. A plain
+              // `a * b` between two i32 LOCALS is an f64 multiply — verified in soccer's generated
+              // Rust. The generator asserts these peak at 26x inside i32.
+              gx = (gx + ((Math.imul(Math.imul(dx, kk) >> 10, PL_MASS[p & 3])) >> 8)) | 0
+              gy = (gy + ((Math.imul(Math.imul(dy, kk) >> 10, PL_MASS[p & 3])) >> 8)) | 0
+              p = p + 1
+            }
+          }
+
+          if (SHST[s & 3] === ST_FLY) {
+            let nvx: i32 = (SHVX[s & 3] + (gx >> sub)) | 0
+            let nvy: i32 = (SHVY[s & 3] + (gy >> sub)) | 0
+            // ⚠️ CLAMPED EVERY SUBSTEP, not once per tick. This is the load-bearing half of the
+            // anti-tunnelling argument: worst travel per substep is 20/8 = 2.5 px against a smallest
+            // collision radius of 12, and that only holds if the speed really is bounded here.
+            if (nvx > VMAX) { nvx = VMAX }
+            if (nvx < 0 - VMAX) { nvx = 0 - VMAX }
+            if (nvy > VMAX) { nvy = VMAX }
+            if (nvy < 0 - VMAX) { nvy = 0 - VMAX }
+            SHVX[s & 3] = nvx
+            SHVY[s & 3] = nvy
+            // `>>`, never `/`. Faster, and it floors toward -inf where `x/256|0` truncates toward
+            // zero — a slingshotting shell goes negative, and one rounding rule everywhere is what
+            // makes the arc reproducible.
+            SHX[s & 3] = (SHX[s & 3] + (nvx >> (8 + sub))) | 0
+            SHY[s & 3] = (SHY[s & 3] + (nvy >> (8 + sub))) | 0
+          }
+          sn = sn + 1
+        }
+      }
+      igAcc = igAcc + ((ticks() - ig0) & 0xFFFF)
+      SHK[s & 3] = SHK[s & 3] + 1
+
+      // Direct hit on a turret, tested once per tick rather than per substep: a shell moving 2.5 px
+      // a substep cannot skip an 8px target within one tick's worth of them.
+      if (s === 0 && SHST[0 & 3] === ST_FLY) {
+        let hx: i32 = SHX[0 & 3] >> 8
+        let hy: i32 = SHY[0 & 3] >> 8
+        let vi: i32 = 0
+        while (vi < 2) {
+          let qx: i32 = hx - T_X[vi & 1]
+          let qy: i32 = hy - T_Y[vi & 1]
+          let aqx: i32 = qx   if (aqx < 0) { aqx = 0 - aqx }
+          let aqy: i32 = qy   if (aqy < 0) { aqy = 0 - aqy }
+          // ⚠️ A PROXIMITY FUSE, NOT A CONTACT FUSE — and without it the blast radius was decoration.
+          //
+          // The shell used to detonate only within 6 px of a turret. But a shell only ever dies on a
+          // ship, on a planet, or off the edge of the world, and the planets sit in the middle band
+          // where no turret is — so the ONLY scoring event was a near-exact direct hit, the 24 px
+          // falloff curve could never be reached by anything, and a driver that had learned to pass
+          // within 14 px of its target still scored nothing at all. Detonating inside the blast
+          // radius is both the genre's rule and what makes near-misses worth aiming for.
+          // ⚠️ THE FUSE DOES NOT ARM ON YOUR OWN HULL. A shell spawns 9 px from the muzzle, which
+          // is inside the 14 px proximity radius, so widening the fuse made every shot detonate on
+          // its own launcher on tick one. The damage told the story exactly: every blast dealt 24,
+          // which is the falloff value at 9 px. Whoever fired first killed themselves first, so one
+          // side "won" five matches in a row 100-to-nothing. A boomerang that comes back and hits
+          // you is still fair game, hence a delay rather than an exemption.
+          let armed: i32 = 1
+          if (vi === G.who && SHK[0 & 3] <= 12) { armed = 0 }
+          let hd2: i32 = SQ[aqx & 1023] + SQ[aqy & 1023]
+          if (armed === 1 && hd2 < 196) { SHST[0 & 3] = ST_HIT }
+          vi = vi + 1
+        }
+      }
+      if (s === 0 && SHK[0 & 3] > MAX_FLIGHT) { SHST[0 & 3] = ST_GONE }
+
+      if (s === 0 && G.mode === 0) {
+        // The self-test checksums the whole PATH, not the endpoint: an integrator that lands in the
+        // right place by a different route is still a changed integrator.
+        G.ck = (Math.imul(G.ck, 16777619) ^ (SHX[0 & 3] + Math.imul(SHY[0 & 3], 3))) | 0
+      }
+      if (s === 0 && (SHK[0 & 3] & 7) === 0) {
+        log("ART SHELL id=q" + G.seq + "k" + SHK[0 & 3] + " x=" + (SHX[0 & 3] >> 8)
+          + " y=" + (SHY[0 & 3] >> 8) + " vx=" + SHVX[0 & 3] + " vy=" + SHVY[0 & 3])
+      }
+      if (SHST[s & 3] !== ST_FLY) { tk = nticks }
+      else { tk = tk + 1 }
+    }
+    if (s === 1) {
+      // The preview is spaced by distance too, or the proposed line and the line the shot actually
+      // draws would not look like the same object.
+      let px2: i32 = SHX[1 & 3] >> 8
+      let py2: i32 = SHY[1 & 3] >> 8
+      let qdx: i32 = px2 - V.pvLastX
+      let qdy: i32 = py2 - V.pvLastY
+      if (qdx < 0) { qdx = 0 - qdx }
+      if (qdy < 0) { qdy = 0 - qdy }
+      let qseg: i32 = qdx + (qdy >> 1)
+      if (qdy > qdx) { qseg = qdy + (qdx >> 1) }
+      if (qseg >= DOT_STEP && V.pvN < DOT_TRAIL0) {
+        V.pvLastX = px2
+        V.pvLastY = py2
+        let dh: i32 = DOTS[V.pvN & 63]
+        sprite_set_pos(dh, px2 - 4, py2 - 4)
+        sprite_set_visible(dh, 1)
+        V.pvN = V.pvN + 1
+      }
+    }
+  }
+
+  // ── FLIGHT resolution ──────────────────────────────────────────────────────────────────────────
+  if (G.phase === PH_FLIGHT && SHST[0 & 3] !== ST_FLY) {
+    G.bx = SHX[0 & 3] >> 8
+    G.by = SHY[0 & 3] >> 8
+    let d0: i32 = 0
+    let d1: i32 = 0
+    if (SHST[0 & 3] !== ST_GONE) {
+      // Blast damage is linear in DISTANCE, so it needs a real root — from a table, and the falloff
+      // reciprocal is baked so there is no runtime divide either. BOTH turrets are tested, including
+      // the firer's own: self-damage is what makes a close shot a decision.
+      let vi2: i32 = 0
+      while (vi2 < 2) {
+        let qx2: i32 = G.bx - T_X[vi2 & 1]
+        let qy2: i32 = G.by - T_Y[vi2 & 1]
+        let aq2: i32 = qx2   if (aq2 < 0) { aq2 = 0 - aq2 }
+        let ar2: i32 = qy2   if (ar2 < 0) { ar2 = 0 - ar2 }
+        let bd2: i32 = SQ[aq2 & 1023] + SQ[ar2 & 1023]
+        if (bd2 < 2048) {
+          let dist: i32 = ISQRT[bd2 & 2047]
+          if (dist < BLAST_R) {
+            let fall: i32 = Math.imul(BLAST_R - dist, BLAST_RINV) >> 8
+            let dmg: i32 = Math.imul(BLAST_DMG, fall) >> 8
+            T_HP[vi2 & 1] = T_HP[vi2 & 1] - dmg
+            if (T_HP[vi2 & 1] < 0) { T_HP[vi2 & 1] = 0 }
+            if (vi2 === 0) { d0 = dmg }
+            else { d1 = dmg }
+          }
+        }
+        vi2 = vi2 + 1
+      }
+    }
+    // ⚠️ SCORE THE BLAST, NOT THE FLY-BY.
+    //
+    // The first version scored a shot on its CLOSEST APPROACH during flight, which is the obvious
+    // metric and the wrong one: damage is dealt where the shell DIES, so the driver happily
+    // converged on shots that passed within 14 px of the enemy and then sailed on to explode
+    // somewhere else. Twenty-seven shots, a perfect-looking hill climb, and zero damage. What the
+    // search optimises has to be the thing the game rewards.
+    if (SHST[0 & 3] === ST_GONE) { G.minD2 = 999999 }
+    else {
+      let ex: i32 = G.bx - T_X[(1 - G.who) & 1]
+      let ey: i32 = G.by - T_Y[(1 - G.who) & 1]
+      let aex: i32 = ex   if (aex < 0) { aex = 0 - aex }
+      let aey: i32 = ey   if (aey < 0) { aey = 0 - aey }
+      if (aex > 1023) { aex = 1023 }
+      if (aey > 1023) { aey = 1023 }
+      G.minD2 = SQ[aex & 1023] + SQ[aey & 1023]
+    }
+    if (G.mode === 1 && G.minD2 < CPU_BS[G.who & 1]) {
+      CPU_BS[G.who & 1] = G.minD2
+      CPU_BA[G.who & 1] = G.shotA
+      CPU_BP[G.who & 1] = G.shotP
+    }
+    log("ART AIMLOG side=" + G.who + " a=" + G.shotA + " p=" + G.shotP
+      + " d2=" + G.minD2 + " best=" + CPU_BS[G.who & 1]
+      + " ba=" + CPU_BA[G.who & 1] + " bp=" + CPU_BP[G.who & 1]
+      + " wantA=" + G.cpuA + " wantP=" + G.cpuP)
+    log("ART BOOM id=q" + G.seq + " st=" + SHST[0 & 3] + " k=" + SHK[0 & 3]
+      + " x=" + G.bx + " y=" + G.by + " d0=" + d0 + " d1=" + d1
+      + " h0=" + T_HP[0 & 1] + " h1=" + T_HP[1 & 1])
+
+    if (G.mode === 0) {
+      // The self-test is over: report it and start the real match.
+      log("ART SELFTEST traj=" + G.ck + " k=" + SHK[0 & 3] + " st=" + SHST[0 & 3]
+        + " x=" + G.bx + " y=" + G.by)
+      G.mode = 1
+      G.rebuild = 1
+      G.phase = PH_AIM
+      T_HP[0 & 1] = 100
+      T_HP[1 & 1] = 100
+    } else {
+      G.phase = PH_BOOM
+      G.phaseT = 0
+    }
+    SHST[0 & 3] = ST_DEAD
+    sprite_set_visible(shellSpr, 0)
+  }
+
+  // ── BOOM / TURN / OVER ─────────────────────────────────────────────────────────────────────────
+  if (G.phase === PH_BOOM && G.phaseT >= 32) {
+    sprite_set_visible(V.boomSpr, 0)
+    if (T_HP[0 & 1] <= 0 || T_HP[1 & 1] <= 0) {
+      G.winner = 0
+      if (T_HP[0 & 1] <= 0) { G.winner = 1 }
+      if (T_HP[0 & 1] <= 0 && T_HP[1 & 1] <= 0) { G.winner = 2 }
+      G.phase = PH_OVER
+      G.phaseT = 0
+      log("ART RESULT id=m" + G.match + " winner=" + G.winner + " turns=" + G.turn
+        + " f=" + G.simFrame + " h0=" + T_HP[0 & 1] + " h1=" + T_HP[1 & 1])
+    } else {
+      G.phase = PH_TURN
+      G.phaseT = 0
+    }
+  }
+  if (G.phase === PH_TURN && G.phaseT >= 16 && G.turn >= MATCH_TURNS) {
+    // Time. Whoever is ahead on HP takes it; level is a draw.
+    G.winner = 2
+    if (T_HP[0 & 1] > T_HP[1 & 1]) { G.winner = 0 }
+    if (T_HP[1 & 1] > T_HP[0 & 1]) { G.winner = 1 }
+    G.phase = PH_OVER
+    G.phaseT = 0
+    log("ART RESULT id=m" + G.match + " winner=" + G.winner + " turns=" + G.turn
+      + " f=" + G.simFrame + " h0=" + T_HP[0 & 1] + " h1=" + T_HP[1 & 1] + " cap=1")
+  }
+  if (G.phase === PH_TURN && G.phaseT >= 16) {
+    G.who = 1 - G.who
+    G.turn = G.turn + 1
+    G.turnClock = TURN_TICKS
+    G.phase = PH_AIM
+    G.phaseT = 0
+    V.pvKey = 0 - 1
+    // ⚠️ THE SPREAD NARROWS AS THE BEST SHOT GETS CLOSER. A fixed +/-12 units is 17 degrees, which
+    // is wider than the target: the driver would find a hit and then wander straight off it again,
+    // which is what nineteen shots and one hit looked like. Annealing on the best distance so far
+    // makes the search converge instead of orbiting.
+    let sprA: i32 = 12
+    let sprP: i32 = 6
+    if (CPU_BS[G.who & 1] < 16384) { sprA = 5   sprP = 3 }
+    if (CPU_BS[G.who & 1] < 4096) { sprA = 2   sprP = 2 }
+    if (CPU_BS[G.who & 1] < 1024) { sprA = 1   sprP = 1 }
+    // ⚠️ EXPLOIT, DO NOT ONLY EXPLORE. Once a shot has actually landed there is nothing left to
+    // search for, and perturbing it by the smallest step still misses at this range — the driver
+    // hovered next to a winning shot and stopped scoring entirely. Spread 0 re-fires it exactly.
+    // The draw is still taken so the stream position stays a pure function of the turn number.
+    if (CPU_BS[G.who & 1] < 256) { sprA = 0   sprP = 0 }
+    G.cpuA = (CPU_BA[G.who & 1] + rngBelow(3, (sprA << 1) | 1) - sprA) & 255
+    G.cpuP = CPU_BP[G.who & 1] + rngBelow(3, (sprP << 1) | 1) - sprP
+    if (G.cpuP < 8) { G.cpuP = 8 }
+    if (G.cpuP > 46) { G.cpuP = 46 }
+    let di2: i32 = DOT_TRAIL0
+    while (di2 < DOT_N) { sprite_set_visible(DOTS[di2 & 63], 0)  di2 = di2 + 1 }
+    log("ART TURN id=m" + G.match + "t" + G.turn + " side=" + G.who + " f=" + G.simFrame)
+  }
+  if (G.phase === PH_OVER && (myEdge & IN_START) !== 0) {
+    G.match = G.match + 1
+    G.rebuild = 1
+    let di3: i32 = 0
+    while (di3 < DOT_N) { sprite_set_visible(DOTS[di3 & 63], 0)  di3 = di3 + 1 }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  // PRESENTATION. Nothing above reads any of this.
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  let ti: i32 = 0
+  while (ti < 2) {
+    sprite_set_pos(T_SPR[ti & 1], T_X[ti & 1] - 4, T_Y[ti & 1] - 4)
+    ti = ti + 1
+  }
+
+  if (G.phase === PH_FLIGHT) {
+    let sx2: i32 = SHX[0 & 3] >> 8
+    let sy2: i32 = SHY[0 & 3] >> 8
+    sprite_set_visible(shellSpr, 1)
+    sprite_set_pos(shellSpr, sx2 - 4, sy2 - 4)
+    // ⚠️ THE TRAIL IS SPACED BY DISTANCE, NOT BY TIME, and that is the whole difference between a
+    // line and a scatter of specks.
+    //
+    // Dropping a dot every third TICK sounds equivalent and is not: a shell accelerating through a
+    // gravity well covers three or four times as much ground per tick near a planet as it does at
+    // apoapsis, so the dots came out bunched where the shot was slow and stretched to nothing where
+    // it was fast — which is exactly where the interesting part of the curve is. Spacing on
+    // distance gives a uniform dotted line whatever the shell is doing.
+    //
+    // The distance is the octagonal approximation `max + (min >> 1)`: within about 5% of the true
+    // hypotenuse, two compares and a shift, and no square root on a chip that has no divide either.
+    // Manhattan would have done but overestimates a diagonal by 41%, which visibly tightens the
+    // spacing on exactly the diagonal segments that make up most of an arc.
+    let tdx: i32 = sx2 - V.lastX
+    let tdy: i32 = sy2 - V.lastY
+    if (tdx < 0) { tdx = 0 - tdx }
+    if (tdy < 0) { tdy = 0 - tdy }
+    let seg: i32 = tdx + (tdy >> 1)
+    if (tdy > tdx) { seg = tdy + (tdx >> 1) }
+    if (seg >= DOT_STEP) {
+      V.lastX = sx2
+      V.lastY = sy2
+      let th: i32 = DOTS[(DOT_TRAIL0 + V.trailHead) & 63]
+      sprite_set_pos(th, sx2 - 4, sy2 - 4)
+      sprite_set_visible(th, 1)
+      V.trailHead = V.trailHead + 1
+      if (V.trailHead >= TRAIL_SLOTS) { V.trailHead = 0 }
+    }
+  }
+
+  if (G.phase === PH_BOOM) {
+    sprite_set_visible(V.boomSpr, 1)
+    let bf: i32 = G.phaseT >> 3
+    if (bf > 3) { bf = 3 }
+    sprite_set_frame(V.boomSpr, F_BOOM0 + bf)
+    sprite_set_pos(V.boomSpr, G.bx - 16, G.by - 16)
+  }
+
+  // Power meter as SEGMENT SPRITES. Power changes every frame while charging, and hud_bar would be
+  // a boxed eight-argument call (~340 ticks) against one typed call (~1) — and it looks more like
+  // the genre besides.
+  let filled: i32 = (PWR[G.who & 1] >> 4) >> 1
+  let si: i32 = 0
+  while (si < SEG_N) {
+    let f2: i32 = F_SEG_OFF
+    if (si < filled) { f2 = F_SEG_ON }
+    if (si < filled && si >= 12) { f2 = F_SEG_HOT }
+    sprite_set_frame(SEGS[si & 15], f2)
+    si = si + 1
+  }
+
+  // hud_text draws SPRITES and reallocates the moment the string changes, so it is written only when
+  // the value actually differs — golf's lastHud guard.
+  let hk: i32 = (G.who << 26) | (T_HP[0 & 1] << 18) | (T_HP[1 & 1] << 10) | G.phase
+  if (hk !== V.hudKey) {
+    V.hudKey = hk
+    hud_text(0, 4, 4, "P1 " + T_HP[0 & 1] + "   P2 " + T_HP[1 & 1])
+    if (G.phase === PH_OVER) { hud_text(1, 4, 140, "WINNER P" + (G.winner + 1) + " - START") }
+    else { hud_text(1, 4, 140, "P" + (G.who + 1) + " TO FIRE") }
+  }
+
+  let t1: i32 = (ticks() - t0) & 0xFFFF
+  if (t1 > tkPeak) { tkPeak = t1 }
+  tkAcc = tkAcc + t1
+  tkN = tkN + 1
+  // Name the frame that overran rather than reporting only that one did. A peak with no phase
+  // attached sends you reading the integrator, which is not where the time goes.
+  if (t1 > 3000) {
+    log("ART SPIKE t=" + t1 + " ph=" + G.phase + " pt=" + G.phaseT + " f=" + G.simFrame)
+  }
+  if ((G.simFrame & 511) === 0) {
+    // ⚠️ `>> 9`, not `/ 512`. tish's `/` is a software division AND returns a float — the first
+    // version of this line logged `avg=495.025390625`, which is a soft-float divide on a chip with
+    // no FPU, in the instrumentation that exists to measure soft-float cost.
+    let per100: i32 = 0
+    if (igSub > 0) { per100 = ((Math.imul(igAcc, 100) / igSub) | 0) }
+    log("ART TICKS peak=" + tkPeak + " avg=" + (tkAcc >> 9) + " n=" + tkN
+      + " igsub=" + igSub + " igtick=" + igAcc + " per100=" + per100)
+    log("HEAP " + heap_free())
+    tkPeak = 0
+    tkAcc = 0
+    tkN = 0
+    igAcc = 0
+    igSub = 0
+  }
+
+  frame()
+}

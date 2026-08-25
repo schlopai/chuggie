@@ -1,0 +1,227 @@
+{
+ "columns": 14,
+ "image": "../Backgrounds/Tilesets/tileset_bed.png",
+ "imagewidth": 224,
+ "imageheight": 192,
+ "margin": 0,
+ "spacing": 0,
+ "name": "tileset_bed",
+ "tilecount": 168,
+ "tiledversion": "1.11.0",
+ "tilewidth": 16,
+ "tileheight": 16,
+ "type": "tileset",
+ "version": "1.10",
+ "wangsets": [
+  {
+   "colors": [
+    {
+     "color": "#38d24a",
+     "name": "stone_slab",
+     "probability": 1,
+     "tile": -1
+    }
+   ],
+   "name": "stone_slab",
+   "tile": -1,
+   "type": "mixed",
+   "wangtiles": [
+    {
+     "tileid": 126,
+     "wangid": [
+      0,
+      0,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 128,
+     "wangid": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      0
+     ]
+    },
+    {
+     "tileid": 154,
+     "wangid": [
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 156,
+     "wangid": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 127,
+     "wangid": [
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0
+     ]
+    },
+    {
+     "tileid": 155,
+     "wangid": [
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 140,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "tileid": 142,
+     "wangid": [
+      1,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 129,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 143,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 130,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 144,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 131,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 145,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    {
+     "tileid": 141,
+     "wangid": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   ]
+  }
+ ]
+}

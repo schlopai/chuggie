@@ -1,0 +1,18 @@
+# Health Inspector - law
+# Double whistle + burn.
+deck 1
+bpm 130
+
+track Lead id lead gen gameBoyDmg
+  gen type pulse duty 12_5 env_mode step vol 14
+  note 88 0 0.12 v 127
+  note 88 0.2 0.12 v 120
+  note 81 0.45 0.3 v 110
+  note 69 0.9 0.25 v 110
+  note 68 1.2 0.45 v 100
+
+track Noise id n gen gameBoyDmg
+  gen type noise noise_mode short vol 7 env_mode step env_step 1
+  note 60 0.1 0.08 v 90
+  note 60 0.3 0.08 v 90
+  note 60 1 0.25 v 110

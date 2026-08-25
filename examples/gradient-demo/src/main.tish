@@ -1,0 +1,184 @@
+// gradient-demo — text gradients in both axes.
+// Horizontal: text_color(n) + colors[] maps stops across letters (L→R).
+// Vertical:   text_draw({ vgrad: 1, colors }) remaps each glyph's rows top→bottom
+//             from the same 1bpp font mask — no custom bitmap font required.
+import { title } from "font:../../../assets/fonts/peaberry.ttf@16"
+import { body } from "font:../../../assets/fonts/tinypixel.ttf@7"
+import { display } from "font:../../../assets/fonts/silver.ttf@19"
+import {
+  backdrop, text_draw, text_color, text_width,
+  frame, key_pressed,
+} from "cargo:tish_agb"
+
+let BTN_LEFT: i32 = 8
+let BTN_RIGHT: i32 = 9
+let PAGES: i32 = 3
+let FOOTER: i32 = 17
+
+// Ice / gold / fire / rose / rainbow stop tables (RGB888 → agb packs them).
+let ICE = [0xFFFFFF, 0xD8F4FF, 0xA8E0F8, 0x68C0E8, 0x3898D0, 0x1870B0]
+let GOLD = [0xFFF8C0, 0xFFE86A, 0xFFD040, 0xF0B028, 0xD09018, 0xA06810]
+let FIRE = [0xFFF0A0, 0xFFCE4A, 0xFF8A4A, 0xFF5C8A, 0xC02040, 0x801018]
+let ROSE = [0xFFF0F0, 0xFFC0C8, 0xF08898, 0xD05868, 0xA03040, 0x701828]
+let RAINBOW = [
+  0xFF5C8A, 0xFF8A4A, 0xFFCE4A, 0x8CE06A,
+  0x6AB0FF, 0x7A80FF, 0xE0A0FF, 0xFF80D0,
+]
+
+let S = { page: 0, phase: 0, tick: 0 }
+
+/// Map each character of `word` onto `stops` (evenly spaced). Returns a string
+/// with text_color() switches baked in. Palette index 1 = stops[0].
+function gradientSpan(word, stops) {
+  let n = stops.length
+  let len = word.length
+  let s = ""
+  let i = 0
+  while (i < len) {
+    let idx = 0
+    if (len > 1 && n > 1) {
+      idx = (i * (n - 1)) / (len - 1)
+    }
+    s = s + text_color(idx + 1) + word.slice(i, i + 1)
+    i = i + 1
+  }
+  return s
+}
+
+/// Rotate stop table so the animated line can cycle hues.
+function rotateStops(stops, shift) {
+  let n = stops.length
+  let out = []
+  let i = 0
+  while (i < n) {
+    out.push(stops[(i + shift) % n])
+    i = i + 1
+  }
+  return out
+}
+
+function drawHGrad(font, slot, x, y, word, stops, shadow) {
+  text_draw(font, slot, x, y, gradientSpan(word, stops), {
+    colors: stops, shadow: shadow,
+  })
+}
+
+function drawVGrad(font, slot, x, y, word, stops, shadow) {
+  text_draw(font, slot, x, y, word, {
+    colors: stops, shadow: shadow, vgrad: 1,
+  })
+}
+
+function paintHorizontal() {
+  backdrop(0x0A1020)
+  text_draw(body, 0, 4, 4, "horizontal  text_color L-R", 0x667788)
+
+  let weapon = gradientSpan("Weapon", ICE)
+  let wx = (240 - text_width(title, "Weapon")) / 2
+  text_draw(title, 1, wx, 28, weapon, {
+    colors: ICE, shadow: 0x082038,
+  })
+
+  text_draw(display, 2, 8, 58, gradientSpan("TREASURE", GOLD), {
+    colors: GOLD, shadow: 0x2A1800,
+  })
+  text_draw(display, 3, 8, 84, gradientSpan("FIREBALL", FIRE), {
+    colors: FIRE, shadow: 0x280010,
+  })
+
+  let rain = rotateStops(RAINBOW, S.phase)
+  text_draw(title, 4, 8, 116, gradientSpan("RAINBOW", rain), {
+    colors: rain, shadow: 0x101018,
+  })
+}
+
+/// SRPG status-panel washes (horizontal): gold mobility, ice offense, rose defense.
+function paintStatus() {
+  backdrop(0x2A5A8A)
+  text_draw(body, 0, 4, 4, "status  horizontal L-R", 0xB8D0E8)
+
+  let gSh = 0x2A1800
+  let iSh = 0x082038
+  let rSh = 0x280010
+  let lx = 12
+  let rx = 128
+  let y0 = 20
+  let dy = 20
+
+  drawHGrad(title, 1, lx, y0, "Move", GOLD, gSh)
+  drawHGrad(title, 2, lx + 52, y0, "4", GOLD, gSh)
+  drawHGrad(title, 3, rx, y0, "Jump", GOLD, gSh)
+  drawHGrad(title, 4, rx + 52, y0, "3", GOLD, gSh)
+
+  drawHGrad(title, 5, lx, y0 + dy, "Weapon", ICE, iSh)
+  drawHGrad(title, 6, rx, y0 + dy, "Atk", ICE, iSh)
+  drawHGrad(title, 7, rx + 44, y0 + dy, "8", ICE, iSh)
+
+  drawHGrad(title, 8, lx, y0 + dy * 2, "Def", ROSE, rSh)
+  drawHGrad(title, 9, lx + 44, y0 + dy * 2, "8", ROSE, rSh)
+
+  drawHGrad(title, 10, lx, y0 + dy * 3, "Magic", ICE, iSh)
+  drawHGrad(title, 11, rx, y0 + dy * 3, "Pow", ICE, iSh)
+  drawHGrad(title, 12, rx + 44, y0 + dy * 3, "8", ICE, iSh)
+
+  drawHGrad(title, 13, lx, y0 + dy * 4, "Res", ROSE, rSh)
+  drawHGrad(title, 14, lx + 44, y0 + dy * 4, "6", ROSE, rSh)
+  drawHGrad(title, 15, rx, y0 + dy * 4, "Speed", GOLD, gSh)
+  drawHGrad(title, 16, rx + 60, y0 + dy * 4, "5", GOLD, gSh)
+}
+
+/// Same words as page 0, but colors[] wash top→bottom inside every glyph.
+function paintVertical() {
+  backdrop(0x0A1020)
+  text_draw(body, 0, 4, 4, "vertical  vgrad top-bottom", 0x667788)
+
+  let wx = (240 - text_width(title, "Weapon")) / 2
+  drawVGrad(title, 1, wx, 28, "Weapon", ICE, 0x082038)
+
+  drawVGrad(display, 2, 8, 58, "TREASURE", GOLD, 0x2A1800)
+  drawVGrad(display, 3, 8, 84, "FIREBALL", FIRE, 0x280010)
+
+  let rain = rotateStops(RAINBOW, S.phase)
+  drawVGrad(title, 4, 8, 116, "RAINBOW", rain, 0x101018)
+}
+
+function clearContent() {
+  let i = 0
+  while (i < FOOTER) {
+    text_draw(body, i, 0, 0, "")
+    i = i + 1
+  }
+}
+
+function paint() {
+  if (S.page === 0) { paintHorizontal() }
+  if (S.page === 1) { paintStatus() }
+  if (S.page === 2) { paintVertical() }
+  text_draw(body, FOOTER, 4, 148, "< >  page " + (S.page + 1) + "/" + PAGES, 0x8899AA)
+}
+
+paint()
+
+while (true) {
+  let next = S.page
+  if (key_pressed(BTN_LEFT) > 0) { next = (S.page + PAGES - 1) % PAGES }
+  if (key_pressed(BTN_RIGHT) > 0) { next = (S.page + 1) % PAGES }
+
+  if (next !== S.page) {
+    S.page = next
+    // Drop every content Object first, then wait — agb frees Sprite VRAM lazily.
+    clearContent()
+    let w = 0
+    while (w < 2) { frame(); w = w + 1 }
+    paint()
+  } else if (S.page === 0 || S.page === 2) {
+    // Rainbow auto-advance on showcase pages (in-place slot overwrite).
+    S.tick = S.tick + 1
+    if (S.tick >= 8) {
+      S.tick = 0
+      S.phase = (S.phase + 1) % RAINBOW.length
+      paint()
+    }
+  }
+  frame()
+}

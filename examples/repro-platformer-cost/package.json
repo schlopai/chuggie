@@ -1,0 +1,21 @@
+{
+  "name": "repro-platformer-cost",
+  "private": true,
+  "scripts": {
+    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
+    "verify": "./verify.sh",
+    "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\""
+  },
+  "devDependencies": {
+    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_agb": { "path": "../../crates/tish-agb" },
+      "tish_gba_game_engine": { "path": "../../crates/tish-gba-game-engine" }
+    }
+  },
+  "version": "0.0.0",
+  "description": "Measure where packages/platformer.tish spends its ticks: drive vs animate vs the hook dispatch itself — the numbers behind the platformer de-boxing pass."
+}

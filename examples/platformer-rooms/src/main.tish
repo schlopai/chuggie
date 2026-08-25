@@ -1,0 +1,24 @@
+// Platformer room-PAN demo — the side-scrolling counterpart of ninja-village (which is top-down).
+// The level is a 2x2 grid of 15x10-tile rooms (30x20 = 480x320 px). The camera LOCKS to the
+// player's current room and SLIDES to the next when the player crosses a room edge — the metroidvania-style
+// classic "walk through the doorway, screen pans over" feel — instead of scrolling continuously.
+// Same platformer physics as platformer-scroll; only the camera call differs (`roomFollow`).
+import { tileset } from 'background:../assets/tileset.png'
+import { heroSheet } from 'sheet:../assets/hero.png'
+import { sprite_new } from 'cargo:tish_agb'
+import { mount, create, loadStreamMap, step } from '../../../packages/engine'
+import { level } from './maps'
+import * as components from './components'
+import { Player } from './components'
+
+mount(components)
+loadStreamMap(level, tileset)
+
+let hero = create()
+hero.setPos(level.spawnCol * 16, level.spawnRow * 16)
+hero.setSprite(sprite_new(heroSheet))
+hero.platformer(16, 16)
+hero.behave(Player, {})
+hero.roomFollow(15, 10)   // camera locks to each 15x10-tile room, sliding over on a boundary cross
+
+while (true) { step() }

@@ -1,0 +1,26 @@
+// Shared, persistent game state for AKARI. One object, imported by both main.tish and
+// components.tish — the player's upgrades and story flags live here so they survive scene changes
+// (each scene rebuilds its entities from scratch, but this object is not cleared).
+export const gameState = {
+  playerId: -1,     // the live player entity id (enemies read it to chase; combat reads it to buff)
+  scene: 0,         // 0 = town, 1 = shrine, 2+ = house interiors
+  music: -1,        // which BGM is looping (−1 none, 0 town, 1 dungeon) — avoids restarting on re-enter
+  maxHp: 6,         // hit points in half-heart units (perHeart = 2 → 3 hearts to start)
+  hasSword: false,  // gained from the Elder in the opening cutscene — no attack without it
+  hasStars: true,   // ninja stars (B) — a ninja's own kit, carried from the start
+  hasKey: false,    // reserved for a locked door
+  gems: 0,          // collected shrine gems (score)
+  bossDead: false,  // the Hollow Shrine cleansed → a heart container earned
+  bossHandled: false,
+  openingDone: false, // set after the Elder cutscene (Continue skips it)
+  // Soft-death / warp respawn (tiles). Also mirrored as entryX/entryY pixels for onDeath.
+  entryCol: 18,
+  entryRow: 14,
+  entryX: 18 * 16 + 1,
+  entryY: 14 * 16 + 1,
+  // Filled by readSave() for the Continue path.
+  loadHp: 6,
+  loadCol: -1,
+  loadRow: -1,
+  saveSlot: 0,      // which of the 3 SRAM files the pause Save writes to
+}

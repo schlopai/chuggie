@@ -1,0 +1,737 @@
+// feel.tish — a game-feel library for tiled GBA screens.
+//
+// Lives in chuggie-engine, not in a game: nothing here knows what a card is. It imports four natives
+// (ui_rect, the fx shake, and the PSG) and takes screen coordinates. It was written inside card-gba and
+// moved out once three games and an example were all consuming it — a shared thing living in one
+// consumer's tree is a shared thing only until the second consumer disagrees with the first.
+//
+// Named for, and structured after, More Mountains' FEEL (feel-docs.moremountains.com). FEEL ships
+// ~150 feedback types for Unity; almost none of them port. What ports is the ARCHITECTURE, and it is
+// worth more than the effects:
+//
+//   1. A PLAYER IS A LIST. FEEL's MMF_Player holds feedbacks and `PlayFeedbacks()` fires all of them.
+//      One call site, many effects, composed as data. The old card-fx.tish had four effects with four
+//      different APIs (fxStart/fxKey/fxY/fxColour vs fxBurst/fxBurstTick/fxBurstDraw vs …), so a
+//      caller wanting "a destroy" had to know all four and sequence them by hand. Here a destroy is
+//      one row range in a table and one call.
+//
+//   2. EVERY FEEDBACK HAS THE SAME ENVELOPE. In FEEL each feedback — whatever it does — carries
+//      Initial Delay, Duration, Chance, Cooldown Duration and an intensity. That uniformity is what
+//      lets the player be generic. Ours carries the same five, because each one turned out to earn
+//      its place on a card board (see the notes on each below).
+//
+//   3. THE EMITTER DOES NOT KNOW THE RECEIVER. FEEL calls this Channels: a feedback broadcasts and
+//      any Shaker listening on that channel responds. We need exactly this, for a reason FEEL never
+//      had: our engines resolve a whole ability cascade inside ONE frame, so effects cannot be played
+//      inline, and engine code must not learn pixel geometry (a typed aggregate is copied across a
+//      Tish function boundary, so the engine/view seam carries scalars only). feelEmit/feelDrain is
+//      that channel — the engine broadcasts (kind, cell, magnitude), the view drains and translates.
+//
+//   4. SPRINGS, NOT TWEENS. The single best idea in FEEL for this project. A tween needs a start, an
+//      end and a duration; a spring just gets pushed and settles. FEEL's stated reason is the one
+//      that matters here: you can "spam them without risk of them conflicting" and they "add up".
+//      The old fxShake could not be spammed — a second call overwrote the first and lost its decay —
+//      which is exactly wrong for a QB cascade that destroys three cards in one resolution. Three
+//      spring bumps SUM into one bigger, longer shake, for free. The spring itself has since been
+//      pushed down into the engine (`fx_bump`) so it moves the camera and the sprites as well as the
+//      canvas — the argument above is why it is a spring at all, and it travelled with the code.
+//
+// ── The one rule that is ours, not FEEL's ──────────────────────────────────
+//
+// Unity's cost model is the inverse of this machine's: there, drawing is free and logic is dear.
+// Here a canvas repaint measures and blits glyphs into background tiles, and doing that per frame is
+// what once ran a title screen at 0.58x. So effects split into two classes and the split is load-
+// bearing:
+//
+//   PER-FRAME  things that move without drawing a pixel — the scroll registers, and later sprite
+//              positions and palette entries. Spring-driven, updated every frame, free. These are
+//              the ones worth handing to the engine: a per-frame effect stepped in Rust costs the
+//              game nothing at all, not even a boxed call, which is why the shake now lives there.
+//   KEYFRAME   things that draw on the canvas — call-outs, burst rings, flash bars. Six repaints
+//              across an effect's life reads as motion at a fortieth of the cost.
+//
+// A third divergence, on scale: a Tish function costs ~151 bytes of heap whether it is called or not,
+// so FEEL's 150-feedback taxonomy is not a target to grow toward. Six kinds, one player, one spring
+// pair. Adding a kind should have to justify itself.
+
+import { ui_rect, text_draw, text_visible, fx_bump, fx_shake_stop } from "cargo:tish_agb"
+// The tunings are chuggie-engine's chipsfx, but INLINED rather than imported, and the reason is measured:
+// importing that module cost Queen's Blood 10,496 bytes of heap and took heap_free(40960) from one
+// full block to ZERO. A Tish function costs ~151 bytes whether it is called or not, and the import
+// brings thirteen of them plus their module state; QB wanted eight and would have paid for thirteen.
+//
+// Everything below is synthesised on the PSG: the pitch sweep and the volume envelope are hardware,
+// so a rising blip costs no ROM, no mixer voice, and no per-frame work once started. Channel 2 for
+// tonal effects and 4 for percussive is chipsfx's etiquette — channel 1 carries a melody, if a game
+// ever has one, and effects should never punch a hole in it.
+import { psg_square, psg_slide, psg_noise, chip_borrow } from "cargo:tish_agb"
+
+// ── A NOTE ON THE SHAPE OF THIS FILE ───────────────────────────────────────
+// Everything here is packed into as few module-level arrays and as few functions as it can be, and
+// that is not premature tuning — it is the difference between this library being usable and not.
+//
+// The first version had ~36 functions and ~30 separate arrays. Wiring it into Queen's Blood took
+// heap_free(40960) from one full block to zero and the ROM panicked at frame 27. That metric is the
+// one that matters: the UI tile table is 640 x 64 B and must be ONE CONTIGUOUS block, so 52 KB of
+// free heap with no 40,960-byte run in it is a dead cartridge. Module-level data is allocated at boot,
+// BEFORE that block is taken, so thirty small allocations do not cost thirty allocations' worth of
+// bytes — they cost whatever contiguity they destroy. Packing is worth several times its own size:
+// this project has measured 2.4 KB packed returning 21.8 KB.
+//
+// So: one strided array per concern, and one indexed accessor instead of ten one-line ones.
+
+// ── Feedback kinds ─────────────────────────────────────────────────────────
+// FEEL groups its feedbacks by subsystem (Camera, Transform, UI, Audio…). Ours are grouped by COST
+// CLASS, because that is the distinction that decides how they are ticked.
+export let FB_CALLOUT: i32 = 0   // keyframe: a line of text that rises and fades
+export let FB_BURST: i32 = 1     // keyframe: an expanding ring at a board cell
+export let FB_FLASH: i32 = 2     // keyframe: a bar that sweeps out from the centre
+export let FB_BUMP: i32 = 3      // per-frame: a spring impulse on the screen offset
+export let FB_FREEZE: i32 = 4    // no draw: hit-stop, the caller stops advancing the game
+export let FB_SFX: i32 = 5       // no draw: a note on the PSG
+
+// The event kinds the three card games broadcast. They live here rather than in a game's engine
+// because all three want the same vocabulary and only the geometry differs — which is the whole point
+// of the split: the engine says "a card at cell 7 died", the view is the only thing that knows where
+// cell 7 is in pixels.
+export let FE_PLACE: i32 = 1
+export let FE_DESTROY: i32 = 2
+export let FE_BUFF: i32 = 3
+export let FE_DEBUFF: i32 = 4
+export let FE_LANE: i32 = 5
+export let FE_CAPTURE: i32 = 6
+
+// Sound ids, for an SFX row's p0 and for feelPlaySfx.
+export let SFX_PLACE: i32 = 0
+export let SFX_DESTROY: i32 = 1
+export let SFX_BUFF: i32 = 2
+export let SFX_LANE: i32 = 3
+export let SFX_ILLEGAL: i32 = 4
+export let SFX_WIN: i32 = 5
+export let SFX_LOSE: i32 = 6
+export let SFX_CURSOR: i32 = 7
+
+// Fields for feelSlot(i, field). Ten one-line accessors were ten closures; this is one.
+export let FS_KIND: i32 = 0
+export let FS_KEY: i32 = 1
+export let FS_X: i32 = 2
+export let FS_BASEY: i32 = 3
+export let FS_Y: i32 = 4
+export let FS_BANDTOP: i32 = 5
+export let FS_BANDH: i32 = 6
+export let FS_DONE: i32 = 7
+export let FS_FLASHW: i32 = 8
+
+// ── Presets ────────────────────────────────────────────────────────────────
+// FEEL's Recipes page and its prefab MMF_Players. A preset is a contiguous run of rows; playing it
+// spawns every row at once, each with its own delay. This table IS the game's feel — three ROMs
+// sharing it share how the games feel, not merely how they are drawn.
+export let FP_PLACE: i32 = 0
+export let FP_DESTROY: i32 = 1
+export let FP_BUFF: i32 = 2
+export let FP_LANE: i32 = 3
+export let FP_ILLEGAL: i32 = 4
+export let FP_VICTORY: i32 = 5
+export let FP_DEFEAT: i32 = 6
+export let FP_N: i32 = 7
+
+// Per preset, stride 4: [firstRow, rowCount, cooldownFrames, lastPlayedFrame].
+//
+// The cooldown is FEEL's "minimum time between two plays of that feedback", and on a card board it is
+// not a nicety — a QB cascade can destroy four cards inside one resolution, and without it that is
+// four call-outs stacked in one band, which reads as a rendering fault rather than as four deaths.
+// The cascade still SHAKES four times, because bumps sum; only the drawing is rate-limited.
+let PRESET_W: i32 = 4
+let P: i32[] = [
+  0, 2, 0, -999,
+  2, 5, 10, -999,
+  7, 3, 8, -999,
+  10, 4, 8, -999,
+  14, 2, 6, -999,
+  16, 6, 0, -999,
+  22, 3, 0, -999
+]
+
+// The rows, stride 8: [kind, delay, dur, p0, chance, anch, ox, oy].
+//
+//   delay   FEEL's Initial Delay, and the only sequencing primitive we need. FEEL also has Pause /
+//           Holding Pause / Looper because its lists are authored in an inspector by people who
+//           cannot see the numbers; we can write the numbers.
+//   dur     frames it lives for (ignored by BUMP, SFX and FREEZE, which have no duration)
+//   p0      PALETTE SLOT for the drawing kinds (see FPAL), amplitude for BUMP, frames for FREEZE,
+//           sound id for SFX
+//   chance  percent 0-100. FEEL's Chance slider: one compare, and it is what stops the twentieth
+//           destroy of a match reading as a rerun of the first.
+//   anch    0 EVENT-anchored (play position + ox/oy), 1 SCREEN-anchored (ox/oy absolute). FEEL hands
+//           PlayFeedbacks one position because in a 3D scene everything happens at the hit point; on
+//           a card screen a ring belongs to a cell and a banner belongs to the frame, and conflating
+//           them puts the burst ring on the score banner.
+let ROW_W: i32 = 8
+let R: i32[] = [
+  3, 0, 0, 2, 100, 0, 0, 0      , // FP_PLACE    bump
+  5, 0, 0, 0, 100, 0, 0, 0      , //             sfx
+  4, 0, 4, 4, 100, 0, 0, 0      , // FP_DESTROY  freeze
+  3, 0, 0, 6, 100, 0, 0, 0      , //             bump
+  1, 0, 24, 0, 100, 0, 0, 0     , //             burst
+  5, 0, 0, 1, 100, 0, 0, 0      , //             sfx
+  0, 6, 48, 0, 100, 1, 20, 110  , //             callout
+  3, 0, 0, 2, 100, 0, 0, 0      , // FP_BUFF     bump
+  5, 0, 0, 2, 100, 0, 0, 0      , //             sfx
+  0, 0, 48, 1, 100, 1, 20, 110  , //             callout
+  2, 0, 20, 0, 100, 1, 0, 128   , // FP_LANE     flash
+  5, 0, 0, 3, 100, 0, 0, 0      , //             sfx
+  0, 4, 48, 2, 100, 1, 20, 110  , //             callout
+  3, 0, 0, 3, 100, 0, 0, 0      , //             bump
+  3, 0, 0, 4, 100, 0, 0, 0      , // FP_ILLEGAL  bump
+  5, 0, 0, 4, 100, 0, 0, 0      , //             sfx
+  2, 0, 20, 0, 100, 1, 0, 128   , // FP_VICTORY  flash
+  3, 0, 0, 8, 100, 0, 0, 0      , //             bump
+  4, 0, 6, 6, 100, 0, 0, 0      , //             freeze
+  5, 0, 0, 5, 100, 0, 0, 0      , //             sfx
+  0, 8, 48, 2, 100, 1, 20, 110  , //             callout
+  1, 2, 24, 2, 100, 0, 0, 0     , //             burst
+  2, 0, 28, 0, 100, 1, 0, 128   , // FP_DEFEAT   flash
+  5, 0, 0, 6, 100, 0, 0, 0      , //             sfx
+  0, 6, 48, 3, 100, 1, 20, 110    //             callout
+]
+
+// ── Effect palette ─────────────────────────────────────────────────────────
+// A drawing row's p0 is an INDEX into this, not an RGB value, and that indirection is forced by the
+// hardware: the UI palette holds 15 entries, `ui_begin` does not reset it, and everything past the
+// 15th silently paints as the 15th. Queen's Blood already spends all 15 — its palette block is
+// literally headed "15 slots, all of them" — so a library shipping four literal colours of its own
+// would not fail loudly, it would just quietly recolour the board. Each game registers colours it
+// ALREADY owns; the defaults are the demo's, which has room to spare.
+//   0 destroy   1 buff   2 win/lane   3 lose
+let FPAL: i32[] = [0xC03840, 0x50D070, 0xE0A030, 0x4A6080]
+
+// Optional drop-shadow for sprite call-outs, off by default so nothing changes for existing callers.
+// A call-out is drawn OVER whatever the game is showing, and a bright word on a bright background is
+// unreadable however well it animates — a red MISS over a red floor was the case that prompted this.
+// Module state rather than a parameter so `feelCalloutDraw`'s signature stays as it is.
+// A one-element array, not a bare `let`: tish lowers a mutable module binding to a `VmRef` cell and
+// a function assigning a plain i32 into one is an E0308 at the Rust stage. `G` and `FPAL` above use
+// the same shape for the same reason.
+let CSHADOW: i32[] = [-1]
+
+// Where a call-out sits, and how far it travels. [baseY, liftDivisor]; baseY -1 means "feel's own",
+// which is what every existing caller gets.
+//
+// feel's built-in anchor is screen-anchored at the card games' layout, and a game whose action sits
+// lower gets the word in the middle of its characters, travelling further than it should. That is a
+// property of the CONSUMER's screen, not of the effect, so it belongs here as a knob rather than as
+// something each game re-derives by reading this file.
+let CANCHOR: i32[] = [-1, 1]
+/// Anchor sprite call-outs to your own layout: `baseY` is where the word starts, and `liftDiv`
+/// divides feel's travel (2 = half as far). Pass `baseY = -1` to use feel's own screen anchor.
+export function feelCalloutAnchor(baseY: i32, liftDiv: i32) {
+  CANCHOR[0] = baseY
+  if (liftDiv < 1) { CANCHOR[1] = 1 } else { CANCHOR[1] = liftDiv }
+}
+
+/// Give sprite call-outs a drop shadow (`-1` for none). Set once, at startup.
+export function feelCalloutShadow(rgb: i32) {
+  CSHADOW[0] = rgb
+}
+
+export function feelPalette(i: i32, rgb: i32) {
+  if (i < 0 || i > 3) { return }
+  FPAL[i] = rgb
+}
+
+// ── Live instances ─────────────────────────────────────────────────────────
+// Six concurrent effects, stride 9: [kind, wait, life, dur, key, x, y, p0, scale]. kind -1 is free.
+// Six is deliberate: past that a card screen is illegible anyway, and FEEL's own answer to overlap —
+// cooldowns — is cheaper than a bigger pool.
+export let FEEL_MAX: i32 = 6
+let SLOT_W: i32 = 9
+let L: i32[] = [
+  -1, 0, 0, 0, -1, 0, 0, 0, 256,
+  -1, 0, 0, 0, -1, 0, 0, 0, 256,
+  -1, 0, 0, 0, -1, 0, 0, 0, 256,
+  -1, 0, 0, 0, -1, 0, 0, 0, 256,
+  -1, 0, 0, 0, -1, 0, 0, 0, 256,
+  -1, 0, 0, 0, -1, 0, 0, 0, 256
+]
+
+// Keyframes per drawing kind. Six for a call-out is what the magical-drop chain counter settled on;
+// a ring needs fewer because it is four thin fills.
+export let K_CALLOUT: i32 = 6
+let K_BURST: i32 = 4
+let K_FLASH: i32 = 5
+
+// ── Globals ────────────────────────────────────────────────────────────────
+// [intensityQ8, frameCounter, freezeFrames, rngState]
+//
+// The intensity is FEEL's FeedbacksIntensity — "1 is normal, 0.5 is half power, 0 is no effect" — in
+// Q8. On this project it is also the accessibility dial: feelIntensity(0) is a hard off switch for
+// screen shake and flashing, which is a setting a GBA game of the era would never have shipped and
+// costs one multiply. The frame counter ticks whether or not the game is frozen — see feelFrozen.
+let G: i32[] = [256, 0, 0, 22695477]
+
+// ── Position Shake lives in the ENGINE now ─────────────────────────────────
+//
+// This file used to carry the spring itself: [x, vx, y, vy, displaced] in Q8, integrated in
+// `feelSpring()` and written out through `ui_scroll`. The maths was right and it is unchanged — it
+// moved verbatim into tish_agb's `fx_bump` (see SHAKE_K / SHAKE_D there, which are this file's old
+// SPK / SPD). What moved with it is the reasoning: springs are PUSHED rather than driven, bumps sum,
+// and a settle test has to read velocity as well as position.
+//
+// It moved for reach, not for cost. `ui_scroll` offsets the UI CANVAS and nothing else, so a shake
+// written here was invisible in exactly the two places a shake is most wanted: a scrolling map,
+// whose pixels are camera-relative, and a screen drawn entirely in sprites, like a result screen.
+// The engine applies one spring to the camera, the canvas and the HUD sprites in the same compose
+// pass. Two shake implementations in one ROM writing the same scroll register with independent
+// lifetimes is a bug waiting for the first scene that runs both, so there is now exactly one.
+//
+export function feelIntensity(q8: i32) { G[0] = q8 }
+export function feelGetIntensity(): i32 { return G[0] }
+
+function feelRand(): i32 {
+  let r: i32 = G[3]
+  r = (r * 1103515245 + 12345) & 0x7FFFFFFF
+  G[3] = r
+  return (r >> 16) & 0x7FFF
+}
+
+// One function, not eight. Each arm is a couple of native calls, and natives are free — eight small
+// wrappers would be 1.2 KB of heap spent on legibility this file can get from comments instead.
+// MIDI note numbers: 72 = C5, 76 = E5, 79 = G5, 84 = C6, 88 = E6.
+function feelSfx(id: i32) {
+  if (id === 0) { chip_borrow(2, 4); psg_square(2, 79, 1, 9, 5, 8); return }         // place: dry pluck
+  if (id === 1) { chip_borrow(4, 4); psg_noise(11, 6, 8, 4, 0, 1); return }          // destroy: snap
+  if (id === 2) { chip_borrow(1, 18); psg_slide(88, 2, 13, 3, 40, 4, 2, 0); return } // buff: rising
+  if (id === 3) { chip_borrow(2, 18); psg_square(2, 76, 2, 11, 2, 40); return }      // lane: chime
+  if (id === 4) { chip_borrow(2, 10); psg_square(2, 72, 1, 9, 4, 14); return }       // illegal: low
+  if (id === 5) { chip_borrow(1, 18); psg_slide(88, 2, 13, 3, 40, 4, 2, 0); return } // win: fanfare
+  if (id === 6) { chip_borrow(2, 10); psg_slide(84, 1, 11, 3, 24, 3, 2, 1); return } // lose: falling
+  chip_borrow(2, 4); psg_square(2, 84, 1, 5, 6, 6)                                   // cursor: tick
+}
+
+// For the things that are ONLY a sound — a cursor move should not need a preset.
+export function feelPlaySfx(id: i32) {
+  if (G[0] === 0) { return }
+  feelSfx(id)
+}
+
+// The cascade voice: one semitone higher per link, so a four-deep ability chain is audible AS a chain
+// rather than as the same note four times. Parameterised by depth, which is why it is an export
+// rather than a preset row — a preset row carries a constant.
+export function feelChain(step: i32) {
+  if (G[0] === 0) { return }
+  let n: i32 = step
+  if (n < 1) { n = 1 }
+  if (n > 16) { n = 16 }
+  chip_borrow(2, 10)
+  psg_square(2, 76 + n * 2, 2, 11, 3, 14)
+}
+
+// Push the screen. Bumps ADD — the whole reason for a spring rather than a timer, and the bug it
+// fixes: a shake driven by a countdown was overwritten by the next call, losing its decay, which is
+// exactly wrong for a cascade that destroys three cards in one resolution.
+//
+// A DELEGATE, not a reimplementation. The spring is the engine's (`fx_bump`), stepped in Rust
+// during the compose pass, so this costs one native call at the call site and nothing per frame —
+// `feelTick` no longer integrates anything. Callers are unaffected: same name, same units, same
+// summing, and the same SPK/SPD tuning on the other side.
+export function feelBump(ax: i32, ay: i32) {
+  fx_bump(ax, ay)
+}
+
+// ── Hit-stop ───────────────────────────────────────────────────────────────
+// Frames where the game does not advance. The cheapest effect in this file — it is the ABSENCE of
+// work — and one of the strongest-feeling. The game asks feelFrozen() and skips its update; the feel
+// layer keeps ticking, which is FEEL's "unscaled time" in the one form that means anything on
+// hardware with no timescale.
+export function feelFreeze(frames: i32) {
+  let f: i32 = (frames * G[0]) >> 8
+  if (f > G[2]) { G[2] = f }
+}
+export function feelFrozen(): i32 {
+  if (G[2] > 0) { return 1 }
+  return 0
+}
+
+// ── Playing a preset ───────────────────────────────────────────────────────
+// FEEL's PlayFeedbacks(position, intensity). `mag` is a small event magnitude — one card destroyed
+// versus four — scaled sub-linearly, because FEEL's own note is that a 2-chain and an 8-chain must
+// not feel alike but an 8-chain must still fit on the screen.
+function feelScale(mag: i32): i32 {
+  let m: i32 = mag
+  if (m < 1) { m = 1 }
+  if (m > 8) { m = 8 }
+  let s: i32 = 256 + (m - 1) * 64
+  return (s * G[0]) >> 8
+}
+
+function feelFree(): i32 {
+  let i: i32 = 0
+  while (i < FEEL_MAX) {
+    if (L[i * SLOT_W] < 0) { return i }
+    i = i + 1
+  }
+  // Everything is busy. FEEL would queue; we drop, because a seventh simultaneous effect on a
+  // 240x160 board is noise and stealing a live slot would leave its band un-erased.
+  return -1
+}
+
+// Returns 1 if anything played, 0 if the intensity dial is off, the preset is out of range, or every
+// row's chance roll refused it. A play whose DRAWING was rate-limited still returns 1, because it
+// still shook the screen and still made a sound — see the mute below.
+export function feelPlay(preset: i32, x: i32, y: i32, mag: i32): i32 {
+  if (G[0] === 0) { return 0 }
+  if (preset < 0 || preset >= FP_N) { return 0 }
+  let pb: i32 = preset * PRESET_W
+  // THE COOLDOWN RATE-LIMITS DRAWING, NOT THE WHOLE PRESET — which is what the note on `P` says it
+  // does, and what it did not do. Returning here refused every row, including the BUMP, so a cascade
+  // that destroyed four cards in one resolution shook ONCE. That is precisely the behaviour the
+  // spring was chosen to avoid: FEEL's argument for springs is that you can "spam them without risk
+  // of them conflicting", and a gate in front of them throws that away.
+  //
+  // Found by examples/feel-demo, the first thing in chuggie-engine ever to call this file — its B button
+  // plays a preset four times in one frame and logged one play and three refusals.
+  //
+  // Muted, a play still bumps, still freezes and still sounds; it does not spawn a call-out, a burst
+  // or a flash. Freezing repeatedly is harmless (`feelFreeze` takes the max) and four identical
+  // notes inside one frame are one note on a PSG channel, so only the drawing needed the gate.
+  let muted: i32 = 0
+  if (G[1] - P[pb + 3] < P[pb + 2]) {
+    muted = 1
+  } else {
+    // Only a play that actually DREW something restarts the clock. Otherwise a spammed preset would
+    // push its own cooldown forward on every call and the band would never repaint.
+    P[pb + 3] = G[1]
+  }
+
+  let sc: i32 = feelScale(mag)
+  let at: i32 = P[pb]
+  let n: i32 = P[pb + 1]
+  let played: i32 = 0
+  let r: i32 = 0
+  while (r < n) {
+    let rb: i32 = (at + r) * ROW_W
+    let chance: i32 = R[rb + 4]
+    // -1, not 100: the test is `roll < chance`, so a default of 100 would make a 100%-chance row the
+    // one row that never fires. Only roll when the row actually asks for a roll.
+    let roll: i32 = -1
+    if (chance < 100) { roll = feelRand() % 100 }
+    if (roll < chance) {
+      let kind: i32 = R[rb]
+      let p0: i32 = R[rb + 3]
+      if (kind === FB_BUMP) {
+        // A bump is not an instance — it goes straight into the spring and sums with whatever is
+        // already there. No slot spent, no life to track.
+        let amp: i32 = p0 * sc
+        let bx: i32 = amp
+        if ((feelRand() & 1) === 1) { bx = 0 - amp }
+        feelBump(bx, (amp / 2) | 0)
+        played = 1
+      } else if (kind === FB_FREEZE) {
+        feelFreeze(p0)
+        played = 1
+      } else if (kind === FB_SFX && R[rb + 1] === 0) {
+        // The common case: no slot, no bookkeeping, straight to the hardware envelope.
+        feelSfx(p0)
+        played = 1
+      } else if (muted === 1 && kind !== FB_SFX) {
+        // Rate-limited: this is the row the cooldown exists for. Four deaths in one resolution must
+        // not stack four banners in one band — that reads as a rendering fault, not as four deaths.
+      } else {
+        // A CALL-OUT IS A SINGLETON. There is one banner band on the screen, so two live call-outs do
+        // not coexist — they take turns clearing the band and erasing each other's text, which looks
+        // exactly like an effect that randomly fails to draw. The newest event takes the band.
+        if (kind === FB_CALLOUT) {
+          let c: i32 = 0
+          while (c < FEEL_MAX) {
+            if (L[c * SLOT_W] === FB_CALLOUT) {
+              L[c * SLOT_W] = -1
+              L[c * SLOT_W + 4] = -1
+            }
+            c = c + 1
+          }
+        }
+        let slot: i32 = feelFree()
+        if (slot >= 0) {
+          let ax: i32 = R[rb + 6]
+          let ay: i32 = R[rb + 7]
+          if (R[rb + 5] === 0) {
+            ax = x + ax
+            ay = y + ay
+          }
+          let sb: i32 = slot * SLOT_W
+          L[sb] = kind
+          L[sb + 1] = R[rb + 1]
+          L[sb + 2] = R[rb + 2]
+          L[sb + 3] = R[rb + 2]
+          L[sb + 4] = -1
+          L[sb + 5] = ax
+          L[sb + 6] = ay
+          L[sb + 7] = p0
+          L[sb + 8] = sc
+          played = 1
+        }
+      }
+    }
+    r = r + 1
+  }
+  return played
+}
+
+// Cancel everything and put the screen back. FEEL's StopFeedbacks + RestoreInitialValues, which it
+// treats as a discipline rather than an afterthought — and it is one here too, because a scene that
+// changed mid-shake would otherwise inherit a displaced canvas.
+export function feelStop() {
+  let i: i32 = 0
+  while (i < FEEL_MAX) {
+    L[i * SLOT_W] = -1
+    L[i * SLOT_W + 4] = -1
+    i = i + 1
+  }
+  G[2] = 0
+  // Settles the spring AND puts the camera, canvas and HUD sprites back square — the engine owns
+  // all three now, so this restores more than the `ui_scroll(0, 0)` it replaced. Deliberately not
+  // `fx_clear()`: that would also kill particles and the flash, which this file does not own.
+  fx_shake_stop()
+}
+
+// ── The tick ───────────────────────────────────────────────────────────────
+// One call per frame, always, before the game's own update. Returns a BITMASK of the slots that
+// crossed into a new keyframe and need repainting, so a caller writes
+//
+//   let m = feelTick()
+//   if (m !== 0) { … draw the slots whose bit is set … }
+//
+// and on the great majority of frames does nothing at all. That mask is the entire reason the
+// keyframe rule survives contact with a generic player: the player knows WHEN to draw, the game knows
+// WHAT, and neither pays on a quiet frame.
+export function feelTick(): i32 {
+  G[1] = G[1] + 1
+  if (G[2] > 0) { G[2] = G[2] - 1 }
+  // No spring step here any more — the engine integrates it in the compose pass, so the shake keeps
+  // running at the right rate even on a frame this tick is skipped.
+
+  let mask: i32 = 0
+  let i: i32 = 0
+  while (i < FEEL_MAX) {
+    let sb: i32 = i * SLOT_W
+    let kind: i32 = L[sb]
+    if (kind >= 0) {
+      if (kind === FB_SFX) {
+        // A delayed sound: no duration, nothing to draw. It fires once and frees, which is why it
+        // never contributes to the repaint mask.
+        if (L[sb + 1] > 0) {
+          L[sb + 1] = L[sb + 1] - 1
+        } else {
+          feelSfx(L[sb + 7])
+          L[sb] = -1
+        }
+      } else if (L[sb + 1] > 0) {
+        L[sb + 1] = L[sb + 1] - 1
+      } else {
+        L[sb + 2] = L[sb + 2] - 1
+        if (L[sb + 2] <= 0) {
+          // One last repaint so the caller can erase the band, then the slot frees on the NEXT tick.
+          // Two-phase, because a slot freed here would be gone before the caller could draw it.
+          if (L[sb + 4] === -2) {
+            L[sb] = -1
+            L[sb + 4] = -1
+          } else {
+            L[sb + 4] = -2
+            mask = mask | (1 << i)
+          }
+        } else {
+          let keys: i32 = K_CALLOUT
+          if (kind === FB_BURST) { keys = K_BURST }
+          if (kind === FB_FLASH) { keys = K_FLASH }
+          let elapsed: i32 = L[sb + 3] - L[sb + 2]
+          let k: i32 = ((elapsed * keys) / L[sb + 3]) | 0
+          if (k >= keys) { k = keys - 1 }
+          if (k !== L[sb + 4]) {
+            L[sb + 4] = k
+            mask = mask | (1 << i)
+          }
+        }
+      }
+    }
+    i = i + 1
+  }
+  return mask
+}
+
+// ── Reading a slot ─────────────────────────────────────────────────────────
+// ONE accessor, indexed by FS_*. Ten one-line getters were ten closures at ~151 bytes each; this is
+// one, and scalars are all that cross this seam anyway because a typed aggregate is COPIED across a
+// Tish function boundary.
+//
+// The rise scales with magnitude, but the BAND does not: it is a fixed rectangle sized for the
+// tallest rise. If it tracked the magnitude, a small call-out could not fully erase the taller one it
+// replaced, and the leftover sliver would sit there for the rest of the match.
+export function feelSlot(i: i32, field: i32): i32 {
+  let sb: i32 = i * SLOT_W
+  if (field === 0) { return L[sb] }
+  if (field === 1) { return L[sb + 4] }
+  if (field === 2) { return L[sb + 5] }
+  if (field === 3) { return L[sb + 6] }
+  if (field === 5) { return L[sb + 6] - 22 }
+  if (field === 6) { return 34 }
+  if (field === 7) {
+    if (L[sb + 4] === -2) { return 1 }
+    return 0
+  }
+  if (field === 8) {
+    let k: i32 = L[sb + 4]
+    if (k < 0) { return 0 }
+    return 40 + k * 50
+  }
+  // FS_Y: how far the call-out has risen on its current keyframe.
+  let k: i32 = L[sb + 4]
+  if (k < 0) { return L[sb + 6] }
+  let lift: i32 = (12 * L[sb + 8]) >> 8
+  if (lift > 20) { lift = 20 }
+  return L[sb + 6] - (((k * lift) / (K_CALLOUT - 1)) | 0)
+}
+
+// Arrive white-hot, settle into the preset's colour, dim out. FEEL's own note, and the thing that
+// actually sells a call-out: it has to MOVE and it has to CHANGE COLOUR, or a player reads it as a
+// label that happens to be there rather than as an event.
+// Draw a live call-out AS A SPRITE, and let the hardware composite it over whatever is underneath.
+//
+// This exists because every consumer that drew the call-out into the UI canvas got it wrong, in one
+// of exactly three ways, and card-gba/examples/callout-repro reproduces all three side by side:
+//
+//   opaque band behind the text  -> a black slab; whatever was under the band is gone
+//   clear the band, then ui_text -> the word rises out of its own fixed band and smears
+//   never clear                  -> one copy stamped per keyframe
+//
+// None of those is a bug in the consumer. The UI canvas is ONE LAYER: anything written to it replaces
+// what was there, so a canvas call-out must either erase what it floats over or leave a trail. It is
+// not solvable at the call site, which is why drop.tish and feel-demo both work only by keeping their
+// band over empty playfield — a constraint that quietly becomes part of every screen's layout.
+//
+// text_draw builds OAM objects instead. Transparent by construction, moving it is a position change
+// rather than an erase-and-redraw, and nothing underneath is ever touched. `slot` is a text_draw slot
+// the caller reserves for this; one is enough, because a call-out is already a singleton.
+export function feelCalloutDraw(i: i32, font: i32, slot: i32, word, hot: i32, dim: i32) {
+  if (i < 0 || i >= FEEL_MAX) { return }
+  if (feelSlot(i, FS_KIND) !== FB_CALLOUT) { return }
+  if (feelSlot(i, FS_DONE) === 1) {
+    text_visible(slot, 0)
+    return
+  }
+  // align/maxw centre it across the screen. FS_X is a left edge chosen for feel-demo's layout, and a
+  // consumer with a different one should not have to re-derive centring.
+  let y: i32 = feelSlot(i, FS_Y)
+  if (CANCHOR[0] >= 0) {
+    // Keep feel's motion, re-anchored: how far it has risen, scaled, from the caller's base.
+    y = CANCHOR[0] - Math.floor((feelSlot(i, FS_BASEY) - y) / CANCHOR[1])
+  }
+  if (CSHADOW[0] >= 0) {
+    text_draw(font, slot, 0, y, word,
+              { color: feelColour(i, hot, dim), align: "center", maxw: 240,
+                shadow: CSHADOW[0] })
+  } else {
+    text_draw(font, slot, 0, y, word,
+              { color: feelColour(i, hot, dim), align: "center", maxw: 240 })
+  }
+  // RE-SHOW EVERY TIME. text_visible(slot, 0) is a STICKY per-slot flag, not a one-shot, so without
+  // this the first call-out of a match draws and every one after it is invisible. A single-play repro
+  // cannot see that, which is why card-gba/examples/callout-repro plays the effect twice.
+  text_visible(slot, 1)
+}
+
+// Take the banner off screen. text_visible keeps the sprite's VRAM allocated, so re-showing it is a
+// boolean flip rather than another rasterisation.
+export function feelCalloutHide(slot: i32) {
+  text_visible(slot, 0)
+}
+
+export function feelColour(i: i32, hot: i32, dim: i32): i32 {
+  let k: i32 = L[i * SLOT_W + 4]
+  if (k <= 1) { return hot }
+  if (k >= K_CALLOUT - 1) { return dim }
+  let slot: i32 = L[i * SLOT_W + 7]
+  if (slot < 0 || slot > 3) { return hot }
+  return FPAL[slot]
+}
+
+// Draw a burst ring at its current radius. This one draws itself because a ring is four thin fills
+// with no game knowledge in them; `bg` is what the previous ring is erased to, which only the caller
+// knows.
+export function feelBurstDraw(i: i32, bg: i32) {
+  let sb: i32 = i * SLOT_W
+  let cx: i32 = L[sb + 5]
+  let cy: i32 = L[sb + 6]
+  // Erase EVERY radius the ring can have occupied, not merely a box at the largest one. An outline at
+  // rmax passes nowhere near the previous ring, so the effect renders as four nested rectangles that
+  // all stay up instead of one expanding ring. It survived a first look because at its final radius
+  // the ring traces the board cell's own border, and at 240x160 that reads as grid.
+  let j: i32 = 0
+  while (j < K_BURST) {
+    let rr: i32 = 4 + j * 5
+    ui_rect(cx - rr, cy - rr, rr * 2, 1, bg, 1)
+    ui_rect(cx - rr, cy + rr - 1, rr * 2, 1, bg, 1)
+    ui_rect(cx - rr, cy - rr, 1, rr * 2, bg, 1)
+    ui_rect(cx + rr - 1, cy - rr, 1, rr * 2, bg, 1)
+    j = j + 1
+  }
+  let k: i32 = L[sb + 4]
+  if (k < 0) { return }
+  let r: i32 = 4 + k * 5
+  let slot: i32 = L[sb + 7]
+  if (slot < 0 || slot > 3) { slot = 0 }
+  let col: i32 = FPAL[slot]
+  ui_rect(cx - r, cy - r, r * 2, 1, col, 1)
+  ui_rect(cx - r, cy + r - 1, r * 2, 1, col, 1)
+  ui_rect(cx - r, cy - r, 1, r * 2, col, 1)
+  ui_rect(cx + r - 1, cy - r, 1, r * 2, col, 1)
+}
+
+// ── Channels ───────────────────────────────────────────────────────────────
+// FEEL's broadcast/listener split, which we need harder than FEEL does. A QB ability cascade runs to
+// a stable point inside ONE frame — up to 64 iterations — so the engine cannot play effects inline;
+// and the engine must not learn pixel geometry, because a typed aggregate is COPIED across a Tish
+// function boundary. So the engine broadcasts semantics and the view, which owns the geometry,
+// drains and decides what that looks like.
+//
+// A ring buffer of 16, stride 3: [kind, a, b]. Dropped-oldest when full — a cascade that overflows it
+// has already produced more events than a 240x160 screen can show, and keeping the most recent keeps
+// the one still on screen when the player looks.
+let EV_MAX: i32 = 16
+let EQ: i32[] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+// [head, count, currentA, currentB]
+let EV: i32[] = [0, 0, 0, 0]
+
+export function feelEmit(kind: i32, a: i32, b: i32) {
+  let head: i32 = EV[0]
+  let count: i32 = EV[1]
+  let slot: i32 = ((head + count) % EV_MAX) * 3
+  EQ[slot] = kind
+  EQ[slot + 1] = a
+  EQ[slot + 2] = b
+  if (count < EV_MAX) {
+    EV[1] = count + 1
+  } else {
+    EV[0] = (head + 1) % EV_MAX
+  }
+}
+
+export function feelPending(): i32 { return EV[1] }
+
+// Pop the oldest event's kind, or -1 when empty. Its a/b are readable until the next drain.
+export function feelDrain(): i32 {
+  if (EV[1] === 0) { return -1 }
+  let head: i32 = EV[0]
+  let base: i32 = head * 3
+  let k: i32 = EQ[base]
+  EV[2] = EQ[base + 1]
+  EV[3] = EQ[base + 2]
+  EV[0] = (head + 1) % EV_MAX
+  EV[1] = EV[1] - 1
+  return k
+}
+
+export function feelEvA(): i32 { return EV[2] }
+export function feelEvB(): i32 { return EV[3] }

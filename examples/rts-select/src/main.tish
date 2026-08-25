@@ -1,0 +1,224 @@
+// RTS de-risk A3 — the control scheme, and attack-move.
+//
+// The other two spikes proved that units can MOVE. This one asks whether a player can command them
+// with a d-pad, and whether `set_soldier` fights on its own once they arrive.
+//
+// What is being tested:
+//   1. **Selection over a live world.** A free cursor, A to select the unit under it, A again on
+//      open ground to order the selection there, L to cycle one unit → the whole army, B to clear.
+//   2. **Orders land on the RIGHT units.** Selection is a bitmask over the unit table, and issuing
+//      an order re-arms only the selected slots.
+//   3. **`set_soldier`** — attack-move. Six blue units are ordered across the map into four red
+//      ones; nobody is told to attack. They should stop and fight on contact, and the reds should
+//      die. `K` in the log is the enemy body count.
+//   4. **The UI canvas does not leak.** A panel repaints only when the selection changes, and the
+//      scratch is released after the paint (a canvas holds ~48KB of scratch otherwise, which the
+//      next scene inherits as corruption).
+import { maze } from 'scene:../assets/maze.tmj'
+import { knight } from 'sheet:../../../assets/ninja-adventure/Actor/Character/Knight/SpriteSheet.png'
+import { skeleton } from 'sheet:../../../assets/ninja-adventure/Actor/Character/Skeleton/SpriteSheet.png'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  sprite_new, sprite_set_pos, sprite_set_hud, sprite_set_frame, camera_set, key_pressed, ticks, log,
+  scene_stream, ui_begin, ui_rect, ui_text, ui_release_scratch,
+} from 'cargo:tish_agb'
+import {
+  grid_from_map, spawn, set_transform, attach_sprite, set_collider, set_topdown, topdown_speed,
+  set_seek, clear_seek, set_soldier, soldier_target, set_health, entity_alive, entity_x, entity_y,
+  flow_goal, world_step, frame_period,
+} from 'cargo:tish_gba_game_engine'
+
+let STRIDE: i32 = 4
+let MINE: i32 = 6 // player units, slots 0..5
+let FOES: i32 = 4 // enemy units, slots 6..9
+let ALL: i32 = 10
+let FIELD: i32 = 0
+
+scene_stream(maze)
+grid_from_map()
+
+// ── The unit table ───────────────────────────────────────────────────────────
+// Parallel typed columns indexed by slot, the shape every game in this repo uses for a roster
+// (examples/warsong/src/units.tish). No structs, no boxed objects, no per-unit tish tick.
+let uEnt: i32[] = []
+let uTeam: i32[] = []
+
+function addUnit(col: i32, row: i32, team: i32, art: i32) {
+  let e: i32 = spawn()
+  set_transform(e, col * 16 + 3, row * 16 + 3)
+  attach_sprite(e, sprite_new(art))
+  set_collider(e, 10, 10)
+  set_topdown(e)
+  topdown_speed(e, 1)
+  set_health(e, 20, 0)
+  // 14px range = adjacent tiles, 4 damage every 20 frames. A soldier ACQUIRES at 4x its range and
+  // walks the rest, which is what makes this attack-MOVE rather than attack-whatever-I-bump-into.
+  // Team is what makes another soldier an enemy — deliberately not the entity tag, so tags stay
+  // free for the game's own kinds.
+  set_soldier(e, team, 14, 4, 20)
+  uEnt.push(e)
+  uTeam.push(team)
+}
+
+let i: i32 = 0
+while (i < MINE) {
+  addUnit(2 + (i - ((i / 3) * 3)), 3 + (i / 3) * 2, 0, knight)
+  i = i + 1
+}
+i = 0
+while (i < FOES) {
+  addUnit(25 + (i - ((i / 2) * 2)), 9 + (i / 2) * 2, 1, skeleton)
+  i = i + 1
+}
+
+// The enemy marches on the player's camp from the first frame, on its OWN flow field. Two standing
+// orders coexisting is the reason fields are a small numbered set rather than one global: field 0 is
+// whatever the player last commanded, field 1 is the enemy's advance, and neither disturbs the
+// other. It also means this ROM demonstrates attack-move with no input at all — the armies meet in
+// the middle and fight because `set_soldier` says to, not because anything ordered them to.
+flow_goal(1, 3, 4)
+i = MINE
+while (i < ALL) {
+  set_seek(uEnt[i], 1, 10, STRIDE, 6)
+  i = i + 1
+}
+
+// ── Selection ────────────────────────────────────────────────────────────────
+// A bitmask, not a list: "is slot k selected" is one shift and one and, and the whole selection
+// fits in a register. Ten units need ten bits.
+let sel: i32 = 0
+let selCount: i32 = 0
+let lastSel: i32 = 0 - 1
+
+let curCol: i32 = 4
+let curRow: i32 = 5
+let cursor: i32 = sprite_new(knight)
+sprite_set_frame(cursor, 16) // the idle row — a stand-in marker, not an animation
+
+function unitAt(col: i32, row: i32): i32 {
+  let k: i32 = 0
+  while (k < ALL) {
+    if (entity_alive(uEnt[k]) === 1) {
+      if ((entity_x(uEnt[k]) + 5) / 16 === col && (entity_y(uEnt[k]) + 5) / 16 === row) { return k }
+    }
+    k = k + 1
+  }
+  return 0 - 1
+}
+
+function countBits(m: i32): i32 {
+  let n: i32 = 0
+  let k: i32 = 0
+  while (k < ALL) {
+    // ⚠️ The parentheses are load-bearing: `===` binds tighter than `&`, so `(m >> k) & 1 === 1`
+    // parses as `(m >> k) & (1 === 1)` and counts nothing. It cost a run of this spike.
+    if (((m >> k) & 1) === 1) { n = n + 1 }
+    k = k + 1
+  }
+  return n
+}
+
+let frameNo: i32 = 0
+let peak: i32 = 0
+let stamp: i32 = ticks()
+let hold: i32 = 0
+let kills: i32 = 0
+let painted: i32 = 0
+
+while (true) {
+  // ── Cursor ─────────────────────────────────────────────────────────────────
+  let dc: i32 = 0
+  let dr: i32 = 0
+  if (key_pressed(9) === 1) { dc = 1 }
+  if (key_pressed(8) === 1) { dc = 0 - 1 }
+  if (key_pressed(7) === 1) { dr = 1 }
+  if (key_pressed(6) === 1) { dr = 0 - 1 }
+  if (hold > 0) { hold = hold - 1 }
+  if ((dc !== 0 || dr !== 0) && hold === 0) {
+    hold = 5
+    curCol = curCol + dc
+    curRow = curRow + dr
+    if (curCol < 1) { curCol = 1 }
+    if (curRow < 1) { curRow = 1 }
+    if (curCol > 28) { curCol = 28 }
+    if (curRow > 18) { curRow = 18 }
+  }
+
+  // ── A: select what is under the cursor, or order the selection there ────────
+  if (key_pressed(0) === 1) {
+    let hit: i32 = unitAt(curCol, curRow)
+    if (hit >= 0 && uTeam[hit] === 0) {
+      sel = 1 << hit
+    } else if (sel !== 0) {
+      // One flow field for the whole order — this is the call the other spikes exist to justify.
+      flow_goal(FIELD, curCol, curRow)
+      let k: i32 = 0
+      while (k < ALL) {
+        if (((sel >> k) & 1) === 1) {
+          // Staggered arrive radii so the group settles into a blob rather than one 16px cell.
+          set_seek(uEnt[k], FIELD, 8 + k * 5, STRIDE, 6)
+        }
+        k = k + 1
+      }
+    }
+  }
+  // ── L: cycle one unit → the whole army ─────────────────────────────────────
+  if (key_pressed(4) === 1) {
+    if (sel === 63) { sel = 1 } else { sel = 63 }
+  }
+  // ── B: clear the selection and halt it ─────────────────────────────────────
+  if (key_pressed(1) === 1) {
+    let k: i32 = 0
+    while (k < ALL) {
+      if (((sel >> k) & 1) === 1) { clear_seek(uEnt[k]) }
+      k = k + 1
+    }
+    sel = 0
+  }
+
+  let cx: i32 = curCol * 16 - 120
+  let cy: i32 = curRow * 16 - 80
+  if (cx < 0) { cx = 0 }
+  if (cy < 0) { cy = 0 }
+  if (cx > 240) { cx = 240 }
+  if (cy > 160) { cy = 160 }
+  camera_set(cx, cy)
+  sprite_set_pos(cursor, curCol * 16 - cx, curRow * 16 - cy)
+  sprite_set_hud(cursor, 1)
+
+  world_step()
+
+  // ── The panel ───────────────────────────────────────────────────────────────
+  // Repaint ONLY when the selection changes. A panel rebuilt every frame is the single easiest way
+  // to spend a frame on a HUD, and `ui_begin` throws the whole canvas away.
+  if (sel !== lastSel) {
+    lastSel = sel
+    selCount = countBits(sel)
+    ui_begin()
+    ui_rect(0, 132, 240, 28, 0x102040, 1)
+    ui_text(body, 4, 138, "SELECTED " + selCount, 0xFFFFFF)
+    ui_text(body, 4, 148, "A move  L all  B stop", 0x88AACC)
+    // ⚠️ The canvas keeps ~48KB of scratch until this is called, and the next scene inherits it as
+    // corruption. Releasing it right after the paint is the whole discipline.
+    ui_release_scratch()
+    painted = painted + 1
+  }
+
+  let now: i32 = ticks()
+  let per: i32 = (now - stamp) & 0xFFFF
+  stamp = now
+  if (per > peak) { peak = per }
+  frameNo = frameNo + 1
+  if ((frameNo & 63) === 0) {
+    // `K` = enemies dead (attack-move works), `S` = selected count, `R` = panel repaints so far.
+    let k: i32 = MINE
+    let dead: i32 = 0
+    while (k < ALL) {
+      if (entity_alive(uEnt[k]) === 0) { dead = dead + 1 }
+      k = k + 1
+    }
+    kills = dead
+    log("P" + peak + " E" + frame_period(2) + " K" + kills + " S" + selCount + " R" + painted + " T" + soldier_target(uEnt[0]))
+    peak = 0
+  }
+}

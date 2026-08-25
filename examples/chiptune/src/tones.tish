@@ -1,0 +1,58 @@
+// tones — the PSG driver's calibration ROM.
+//
+// Plays known pitches, one per channel, in fixed one-second windows, so `verify.sh` can capture the
+// emulated audio and FFT each window to assert the note that actually came out. This is the audio
+// equivalent of a screenshot test: without it, "the synth works" rests on someone listening, and a
+// note table that is a semitone out or an octave low sounds perfectly plausible.
+//
+// The schedule (each window is 60 frames = ~1s):
+//   0  ch1 square  A4  440.0 Hz
+//   1  ch1 square  A5  880.0 Hz      (octave shift exercises the >> in the note table)
+//   2  ch2 square  E4  329.6 Hz      (second square channel, different duty)
+//   3  ch3 wave    A4  440.0 Hz      (the wavetable channel's own rate formula)
+//   4  ch4 noise                     (unpitched — asserted as broadband, not as a note)
+//   5  silence                       (proves stop() actually stops)
+import { frame, backdrop, log, psg_square, psg_wave, psg_wave_table, psg_noise, psg_stop } from 'cargo:tish_agb'
+
+// A triangle-ish ramp for channel 3: 32 steps up and back down. Any symmetric shape works; this one
+// is quiet in the harmonics, which keeps the FFT peak unambiguous.
+const TRIANGLE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                  15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+
+function hold(n) {
+  let i = 0
+  while (i < n) { frame(); i = i + 1 }
+}
+
+backdrop(0x101820)
+psg_wave_table(TRIANGLE)
+
+log("TONE window=0 ch=1 note=A4")
+psg_square(1, 69, 2, 15, 0, 0)   // ch1, MIDI 69 = A4, 50% duty, full volume, no decay, sustain
+hold(60)
+
+log("TONE window=1 ch=1 note=A5")
+psg_square(1, 81, 2, 15, 0, 0)
+hold(60)
+
+log("TONE window=2 ch=2 note=E4")
+psg_stop(1)
+psg_square(2, 64, 1, 15, 0, 0)   // MIDI 64 = E4, 25% duty
+hold(60)
+
+log("TONE window=3 ch=3 note=A4")
+psg_stop(2)
+psg_wave(69, 1, 0)               // wavetable channel, full volume
+hold(60)
+
+log("TONE window=4 ch=4 noise")
+psg_stop(3)
+psg_noise(15, 0, 0, 4, 0, 0)
+hold(60)
+
+log("TONE window=5 silence")
+psg_stop(0)                      // 0 = all channels
+hold(60)
+
+log("TONE done")
+while (true) { frame() }

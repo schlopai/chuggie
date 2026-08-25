@@ -1,0 +1,706 @@
+// shmup.tish — a reusable SHOOT-'EM-UP toolkit for the chuggie-engine engine.
+//
+// The genre kit for a top-down (or side) scrolling shooter: a player ship with weapon levels, bullets
+// and bullet-hell patterns, enemy movement AIs, a scripted level director, power-ups, and a
+// multi-phase boss. It builds straight on the raw engine ABI (like the fast path in the examples), so
+// bullets and enemies are WRAPPER-FREE — a screen full of shots costs no per-entity tish object.
+//
+// The heavy lifting is native (see tish-gba-game-engine): `set_hurt` makes a bullet a tag-targeted
+// contact-damage box that the engine resolves every frame, and `set_despawn_offscreen` / `set_lifetime`
+// auto-retire spent shots. So a "bullet" here is just components — transform + velocity + collider +
+// sprite + hurt + lifetime — with no behaviour callback; the engine flies it, hits with it, and cleans
+// it up. Enemy *movement* uses the fast `tick` hook (free-velocity vx/vy, no wrapper); enemy *death*
+// (score + explosion + drops) is a raw `onDeath`. Only the player and the boss carry richer logic.
+//
+//     import * as shmup from '../../../packages/shmup'
+//     shmup.shmupInit({ sheet: ships, bossSheet: boss })   // once, after the sheets are imported
+//     shmup.loadStars(stars, 1)
+//     shmup.spawnPlayer(120, 135, {})
+//     let level = shmup.makeDirector([
+//       { at: 40,  run: () => { shmup.spawnRow(5, -12, 30, (x) => { shmup.spawnGrunt(x, {}) }) } },
+//       { at: 600, run: () => { shmup.spawnBoss({ hp: 60 }) } },
+//     ])
+//     while (true) { shmup.scrollStars(level.time()); level.update(); shmup.step() }
+//
+// Angles are in degrees, screen-convention: 0 = right (+x), 90 = down (+y), -90 = up. Every helper's
+// options object is optional and its fields default sensibly — pass only what you want to change.
+import {
+  spawn, despawn, set_transform, set_body, set_collider, set_sprite_offset, attach_sprite,
+  set_tag, entity_tag, set_health, health_hp,
+  set_hurt, set_lifetime, set_despawn_offscreen, set_mover,
+  bullet_style, fire_bullet, fire_angle, fire_ring, fire_spread, fire_aimed,
+  cvar, set_cvar,
+  define_component, add_behaviour, entity_x, entity_y, entity_sprite, anim_play, world_step
+} from 'cargo:tish_gba_game_engine'
+import { sprite_new, sprite_set_frame, input_x, input_y, bg_new, bg_scroll, sound_play } from 'cargo:tish_agb'
+
+// The engine + tish-agb ship a `tish.d.tish` declaring the typed signatures of their hot exports, so a
+// call like `set_body(e, vx, vy)` with typed args lowers to a DIRECT `crate::set_body_typed(..)` Rust
+// call (no `Value` boxing) — the compiler auto-loads those; nothing to declare here.
+
+// ── Kind tags (private) — the engine matches hurt boxes to these. ──
+let PLAYER: i32 = 1
+let ENEMY: i32 = 2  // grunts AND the boss (so the player's shots hit both)
+let PLAYER_SHOT: i32 = 3
+let ENEMY_SHOT: i32 = 4
+let POWERUP_GUN: i32 = 5
+let POWERUP_SHIELD: i32 = 6
+
+// ── Module config (the sheet + its frame layout + tuning), set once by `shmupInit`. ──
+// A typed struct so every `cfg.bossF` read in a hot tick is a native field load, not a hashmap get.
+interface Cfg {
+  sheet: i32, bossSheet: i32,
+  shipF: i32, shipLF: i32, shipRF: i32, shotF: i32, eshotF: i32,
+  gruntF: i32, gruntAnim: i32, weaverF: i32, shooterF: i32,
+  pwGunF: i32, pwShieldF: i32, boomF: i32, boomLen: i32, boomSpeed: i32,
+  bossF: i32, bossHitF: i32, boomSfx: i32,
+  splitterF: i32, dripletF: i32, bouncerF: i32, chargerF: i32
+}
+let cfg: Cfg = {
+  sheet: -1, bossSheet: -1,
+  shipF: 0, shipLF: 1, shipRF: 2, shotF: 3, eshotF: 4,
+  gruntF: 5, gruntAnim: 2, weaverF: 7, shooterF: 8,
+  pwGunF: 9, pwShieldF: 10, boomF: 11, boomLen: 4, boomSpeed: 3,
+  bossF: 0, bossHitF: 1, boomSfx: -1,
+  splitterF: 15, dripletF: 16, bouncerF: 17, chargerF: 18
+}
+// Shared game state — components mutate it; the game reads it for the HUD and end conditions. Typed
+// so the ticks' GS.bossHp/bossMax and the HUD gate read/write native fields, not boxed props.
+interface GameState { score: i32, lives: i32, weapon: i32, playerDead: bool, bossDead: bool, bossHp: i32, bossMax: i32 }
+let GS: GameState = { score: 0, lives: 3, weapon: 1, playerDead: false, bossDead: false, bossHp: 0, bossMax: 0 }
+interface Ref { player: i32 }
+let REF: Ref = { player: -1 }        // the live player entity id (-1 once dead, until respawn)
+interface Stars { bg: i32, speed: fixed }
+let STARS: Stars = { bg: -1, speed: 1 }   // one scrolling star layer
+interface Reg { done: bool }
+let REG: Reg = { done: false }
+// Director cursor: `t` = frames elapsed, `i` = index of the next un-fired cue. Typed so the per-frame
+// `t += 1` and the `i < length` scan (which keeps running every frame, e.g. all through the boss
+// fight after the last cue has fired) are native i32 ops, not boxed get_prop/set_prop churn.
+interface DirState { t: i32, i: i32 }
+// Reusable enemy-bullet style for the boss/shooter — built once in shmupInit, not re-allocated per tick.
+let bossOpt = { target: PLAYER, frame: 4, size: 6 }
+// Typed per-entity state slots (native i32, via cvar/set_cvar) — a tick's counters/flags live here
+// instead of on a boxed `Value` context, so reading/writing them (and the arithmetic on them) is native.
+let CV_T: i32 = 0  // frame counter
+let CV_HP: i32 = 1  // last hp (for hit-flash edge detection)
+let CV_FLASH: i32 = 2  // remaining flash frames
+let CV_CURF: i32 = 3  // current sprite frame (skip redundant set_frame)
+let CV_DIR: i32 = 4  // horizontal direction for the bouncer AI (+1 / -1)
+let CV_BF: i32 = 5  // boss base sprite frame (per-boss, so mini-bosses can look different)
+let CV_HF: i32 = 6  // boss hit-flash sprite frame
+
+// A value, or a default when the field is absent (null/undefined) — NOT `||`, since 0 is valid.
+function pick(v, d) {
+  if (v === null) { return d }
+  if (typeof v === 'undefined') { return d }
+  return v
+}
+function defOpts(o) {
+  if (o !== null && typeof o !== 'undefined') { return o }
+  return {}
+}
+
+// Make a sprite object showing a specific frame of a sheet (the low-level pairing every spawn needs).
+function mkSprite(sheet, frame) {
+  let sp = sprite_new(sheet)
+  sprite_set_frame(sp, frame)
+  return sp
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Configure the toolkit with the imported sprite sheets and (optionally) a custom frame layout, then
+// register the components. Call once before spawning anything. `sheet` is a `sheet:` (16×16) handle
+// laid out as the default expects: 0 ship, 1/2 banks, 3 player shot, 4 enemy shot, 5/6 grunt,
+// 7 weaver, 8 shooter, 9/10 power-ups, 11-14 explosion. `bossSheet` is a `sheet32:` handle.
+export function shmupInit(c) {
+  cfg.sheet = c.sheet
+  cfg.bossSheet = pick(c.bossSheet, c.sheet)
+  cfg.shipF = pick(c.shipF, 0)
+  cfg.shipLF = pick(c.shipLF, 1)
+  cfg.shipRF = pick(c.shipRF, 2)
+  cfg.shotF = pick(c.shotF, 3)
+  cfg.eshotF = pick(c.eshotF, 4)
+  cfg.gruntF = pick(c.gruntF, 5)
+  cfg.gruntAnim = pick(c.gruntAnim, 2)
+  cfg.weaverF = pick(c.weaverF, 7)
+  cfg.shooterF = pick(c.shooterF, 8)
+  cfg.pwGunF = pick(c.pwGunF, 9)
+  cfg.pwShieldF = pick(c.pwShieldF, 10)
+  cfg.boomF = pick(c.boomF, 11)
+  cfg.boomLen = pick(c.boomLen, 4)
+  cfg.boomSpeed = pick(c.boomSpeed, 3)
+  cfg.bossF = pick(c.bossF, 0)
+  cfg.bossHitF = pick(c.bossHitF, 1)
+  cfg.boomSfx = pick(c.boomSfx, -1)   // optional explosion sfx (wav handle); -1 = silent
+  cfg.splitterF = pick(c.splitterF, 15)
+  cfg.dripletF = pick(c.dripletF, 16)
+  cfg.bouncerF = pick(c.bouncerF, 17)
+  cfg.chargerF = pick(c.chargerF, 18)
+  bossOpt.frame = cfg.eshotF   // finalize the shared boss-bullet style now that frames are configured
+  registerComponents()
+}
+
+// Reset the shared game state for a new run (score/lives/weapon back to start).
+export function resetGame() {
+  GS.score = 0
+  GS.lives = 3
+  GS.weapon = 1
+  GS.playerDead = false
+  GS.bossDead = false
+  GS.bossHp = 0
+  GS.bossMax = 0
+}
+
+// The shared state object (score, lives, weapon, playerDead, bossDead, bossHp/Max) — for the HUD.
+// Return type annotated so a typed caller (`let gs: GameState = gameState()`) reads native fields.
+export function gameState(): GameState { return GS }
+
+// Set the player's auto-fire weapon level (1..3). Higher = wider spread. Handy to start a demo/level
+// with a fanned shot instead of ramping up through power-ups.
+export function setWeapon(w: i32) { GS.weapon = Math.max(1, Math.min(w, 3)) }
+
+// Clear the boss state (no active boss, bar hidden, not-yet-dead) — call at the START of a level so a
+// previous level's boss kill doesn't count for this one. A new spawnBoss re-arms it.
+export function clearBoss() { GS.bossDead = false; GS.bossMax = 0; GS.bossHp = 0 }
+// The live player entity id (or -1 between death and respawn).
+export function playerId() { return REF.player }
+
+// A single scrolling star background (a `background:` handle). `speed` = px/frame (higher = faster).
+export function loadStars(sheet, speed) {
+  STARS.bg = bg_new(sheet)
+  STARS.speed = pick(speed, 1)
+}
+// Scroll the starfield for frame `t` (call each frame before `step`). Wraps seamlessly at 256px.
+// `t` is typed i32 so the offset math and `bg_scroll` lower to native calls — no per-frame boxing.
+export function scrollStars(t: i32) {
+  if (STARS.bg >= 0) {
+    let off: i32 = 0 - t * STARS.speed   // fixed speed * frame → truncated to whole pixels
+    bg_scroll(STARS.bg, 0, off)
+  }
+}
+
+// Advance the world one frame (engine pipeline: AI ticks → movement → combat → cleanup → render).
+export function step() { world_step() }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bullets + patterns + FX
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Fire one bullet from screen point (cx,cy) with velocity (vx,vy) px/frame. A pure-component entity
+// (no behaviour): it flies, deals `opts.damage` to entities tagged `opts.target`, and auto-despawns
+// on hit / off-screen / after `opts.ttl`. opts: { target, frame, damage, size, ttl }.
+// Resolve a bullet options object into the engine's native `bullet_style` — ONCE, so a whole pattern
+// (a ring of 16, a fan of 5) then spawns entirely in Rust instead of re-picking defaults per bullet.
+// This is the boxing boundary: the `Value` opts object is read here, once per burst; every bullet the
+// `fire_*` call then makes is native. opts: { target, frame, damage, size, ttl }.
+function applyStyle(opts) {
+  let o = defOpts(opts)
+  let target = pick(o.target, ENEMY)
+  bullet_style(
+    cfg.sheet,
+    pick(o.frame, cfg.shotF),
+    pick(o.size, 6),
+    pick(o.damage, 1),
+    target,
+    target === ENEMY ? PLAYER_SHOT : ENEMY_SHOT,
+    pick(o.ttl, 240)
+  )
+}
+
+// Fire one bullet from screen point (cx,cy) with velocity (vx,vy) px/frame. A pure-component entity
+// (no behaviour): it flies, deals `opts.damage` to entities tagged `opts.target`, and auto-despawns
+// on hit / off-screen / after `opts.ttl`. The spawn itself is native (see engine `fire_bullet`).
+export function fireBullet(cx: fixed, cy: fixed, vx: fixed, vy: fixed, opts): i32 {
+  applyStyle(opts)
+  return fire_bullet(cx, cy, vx, vy)
+}
+
+// Fire a bullet at a heading in degrees (0 right, 90 down, -90 up) and a scalar speed. The angle→
+// velocity trig runs natively (agb fixed-point cos/sin), not through soft-float `Math`.
+export function fireAngle(cx: fixed, cy: fixed, angleDeg: fixed, speed: fixed, opts): i32 {
+  applyStyle(opts)
+  return fire_angle(cx, cy, angleDeg, speed)
+}
+
+// A fan of `count` bullets `spreadDeg` wide, centred on `centerDeg`. The whole fan spawns natively.
+export function fireSpread(cx: fixed, cy: fixed, centerDeg: fixed, count: i32, spreadDeg: fixed, speed: fixed, opts) {
+  applyStyle(opts)
+  fire_spread(cx, cy, centerDeg, count, spreadDeg, speed)
+}
+
+// A full ring of `count` bullets (the bullet-hell staple) — the entire ring spawns in one native call.
+export function fireRing(cx: fixed, cy: fixed, count: i32, speed: fixed, opts) {
+  applyStyle(opts)
+  fire_ring(cx, cy, count, speed)
+}
+
+// Fire one bullet from (fromx,fromy) aimed straight at (tox,toy) at scalar `speed`. Normalises the
+// direction natively (no `atan2` round-trip) — the aimed-fire replacement for `aimAngle`+`fireAngle`.
+export function fireAimed(fromx: fixed, fromy: fixed, tox: fixed, toy: fixed, speed: fixed, opts): i32 {
+  applyStyle(opts)
+  return fire_aimed(fromx, fromy, tox, toy, speed)
+}
+
+// The heading (degrees) from (fromx,fromy) toward (tox,toy) — for aimed enemy fire. Kept for API
+// compatibility; internally the toolkit now uses the native `fireAimed` (which skips the angle).
+export function aimAngle(fromx, fromy, tox, toy) {
+  return Math.atan2(toy - fromy, tox - fromx) * 180 / Math.PI
+}
+
+// A one-shot explosion at screen point (cx,cy): a non-looping clip that clears itself when it ends.
+export function explode(cx, cy) {
+  let e = spawn()
+  set_transform(e, cx - 8, cy - 8)
+  attach_sprite(e, mkSprite(cfg.sheet, cfg.boomF))
+  anim_play(e, cfg.boomF, cfg.boomLen, cfg.boomSpeed, false)
+  set_lifetime(e, cfg.boomLen * cfg.boomSpeed)
+  if (cfg.boomSfx >= 0) { sound_play(cfg.boomSfx) }   // optional explosion sfx
+  return e
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Spawns — player, enemies, power-ups, boss
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Spawn the player ship centred at (cx,cy). It reads the d-pad, stays on screen, auto-fires upward at
+// its current weapon level, and picks up power-ups on contact. opts: { hp, speed }.
+export function spawnPlayer(cx, cy, opts) {
+  let o = defOpts(opts)
+  let e = spawn()
+  set_transform(e, cx - 5, cy - 5)
+  set_collider(e, 10, 10)
+  attach_sprite(e, mkSprite(cfg.sheet, cfg.shipF))
+  set_sprite_offset(e, -3, -3)
+  set_tag(e, PLAYER)
+  set_health(e, pick(o.hp, 3), 90)   // 90-frame mercy window after each hit
+  add_behaviour(e, 'sPlayer', { cd: 0, speed: pick(o.speed, 2) })
+  REF.player = e
+  return e
+}
+
+// Spawn one enemy from an options bag. The lower-level primitive behind spawnGrunt/Weaver/Shooter;
+// opts: { x, y, w, vx, vy, sheet, frameSize, frame, animLen, animSpeed, hp, contact, pts, drop, spd,
+// behaviour }. `sheet`/`frameSize` default to the toolkit's own 16px sheet; override them for an
+// enemy whose art lives elsewhere (a 32px rock, a mini-boss on the boss sheet).
+export function spawnEnemy(opts) {
+  let o = defOpts(opts)
+  let w = pick(o.w, 12)
+  let half = w / 2
+  let e = spawn()
+  set_transform(e, pick(o.x, 120) - half, pick(o.y, -12) - half)
+  set_collider(e, w, w)
+  set_body(e, pick(o.vx, 0), pick(o.vy, 0.7))
+  let frame = pick(o.frame, cfg.gruntF)
+  // The sprite offset centres a `fs`-px art frame on a `w`-px hitbox, so a big sprite with a small
+  // collider (a rock you can graze) still draws around its own middle.
+  let fs = pick(o.frameSize, 16)
+  attach_sprite(e, mkSprite(pick(o.sheet, cfg.sheet), frame))
+  set_sprite_offset(e, (w - fs) / 2, (w - fs) / 2)
+  set_tag(e, ENEMY)
+  set_health(e, pick(o.hp, 2), 0)             // 0 i-frames: every shot in a stream chips it
+  set_hurt(e, pick(o.contact, 1), PLAYER, 0)  // ramming the player hurts (no despawn)
+  set_despawn_offscreen(e, 1)
+  let alen = pick(o.animLen, 1)
+  if (alen > 1) { anim_play(e, frame, alen, pick(o.animSpeed, 12), true) }
+  add_behaviour(e, pick(o.behaviour, 'sEnemy'), {
+    pts: pick(o.pts, 100), drop: pick(o.drop, 0), spd: pick(o.spd, 1), t: 0
+  })
+  // Native movement pattern (weave/straight) — driven in Rust by `mover_system`, so an enemy whose
+  // only per-frame job is to MOVE needs NO tish `tick` at all. `o.mover` = { pattern, amp, period }.
+  let mv = o.mover
+  if (mv !== null && typeof mv !== 'undefined') {
+    set_mover(e, mv.pattern, pick(o.vy, 0.7), mv.amp, mv.period)
+  }
+  return e
+}
+
+// A grunt: descends in a straight line, 2-frame idle flap. `x` is its column; opts override the rest.
+export function spawnGrunt(x, opts) {
+  let o = defOpts(opts)
+  o.x = x
+  o.frame = pick(o.frame, cfg.gruntF)
+  o.animLen = pick(o.animLen, cfg.gruntAnim)
+  o.hp = pick(o.hp, 2)
+  o.behaviour = 'sEnemy'
+  return spawnEnemy(o)
+}
+
+// A weaver: weaves side to side while descending — NATIVE movement (`mover` pattern 1), so it costs
+// zero per-frame tish. Its only behaviour is `sEnemy` (an onDeath hook; no tick).
+export function spawnWeaver(x, opts) {
+  let o = defOpts(opts)
+  o.x = x
+  o.frame = pick(o.frame, cfg.weaverF)
+  o.hp = pick(o.hp, 3)
+  o.vy = pick(o.vy, 0.55)
+  o.pts = pick(o.pts, 150)
+  o.behaviour = 'sEnemy'
+  o.mover = pick(o.mover, { pattern: 1, amp: 1.3, period: 80 })
+  return spawnEnemy(o)
+}
+
+// A shooter: drifts down while weaving (NATIVE movement) and fires aimed shots on a cadence. Only the
+// FIRING is a tish `tick` (`sShooter`) — the movement is native, so it's one cheap call, not per-op.
+export function spawnShooter(x, opts) {
+  let o = defOpts(opts)
+  o.x = x
+  o.frame = pick(o.frame, cfg.shooterF)
+  o.w = pick(o.w, 14)
+  o.hp = pick(o.hp, 5)
+  o.vy = pick(o.vy, 0.45)
+  o.pts = pick(o.pts, 300)
+  o.behaviour = 'sShooter'
+  o.mover = pick(o.mover, { pattern: 1, amp: 0.5, period: 120 })
+  return spawnEnemy(o)
+}
+
+// A bouncer: oozes down slowly, ping-ponging off the side walls (the `sBouncer` lean tick).
+export function spawnBouncer(x, opts) {
+  let o = defOpts(opts)
+  o.x = x
+  o.frame = pick(o.frame, cfg.bouncerF)
+  o.hp = pick(o.hp, 3)
+  o.vy = pick(o.vy, 0.35)
+  o.pts = pick(o.pts, 200)
+  o.behaviour = 'sBouncer'
+  let e = spawnEnemy(o)
+  set_cvar(e, CV_DIR, 1)
+  return e
+}
+
+// A charger: homes on the player's column and dives (the `sCharger` lean tick).
+export function spawnCharger(x, opts) {
+  let o = defOpts(opts)
+  o.x = x
+  o.frame = pick(o.frame, cfg.chargerF)
+  o.hp = pick(o.hp, 2)
+  o.vy = pick(o.vy, 0.9)
+  o.pts = pick(o.pts, 250)
+  o.behaviour = 'sCharger'
+  return spawnEnemy(o)
+}
+
+// A splitter: a fat blob that bursts into two driplets when killed (the `sSplitter` onDeath hook).
+export function spawnSplitter(x, opts) {
+  let o = defOpts(opts)
+  o.x = x
+  o.frame = pick(o.frame, cfg.splitterF)
+  o.w = pick(o.w, 16)
+  o.hp = pick(o.hp, 4)
+  o.vy = pick(o.vy, 0.45)
+  o.pts = pick(o.pts, 250)
+  o.behaviour = 'sSplitter'
+  return spawnEnemy(o)
+}
+
+// A drifting power-up. kind: 1 = weapon-up, 2 = extra life (POWERUP_GUN / POWERUP_SHIELD).
+export function spawnPowerup(cx, cy, kind) {
+  let e = spawn()
+  set_transform(e, cx - 6, cy - 6)
+  set_collider(e, 12, 12)
+  set_body(e, 0, 0.5)
+  let frame = kind === POWERUP_SHIELD ? cfg.pwShieldF : cfg.pwGunF
+  attach_sprite(e, mkSprite(cfg.sheet, frame))
+  set_sprite_offset(e, -2, -2)
+  set_tag(e, kind === POWERUP_SHIELD ? POWERUP_SHIELD : POWERUP_GUN)
+  set_lifetime(e, 600)
+  set_despawn_offscreen(e, 1)
+  return e
+}
+// Named power-up kinds for spawnPowerup.
+export function powerWeapon() { return POWERUP_GUN }
+export function powerLife() { return POWERUP_SHIELD }
+
+// The kind tags the toolkit's hurt boxes and bullet styles are matched against. A game that builds
+// its own player or enemy out of raw engine calls — an Asteroids ship, which needs rotation and
+// thrust that `spawnPlayer` does not do — still has to wear the tag the rest of the toolkit shoots
+// at, so these are the two constants it needs. `fire*`'s `opts.target` takes one of them too.
+export function tagPlayer() { return PLAYER }
+export function tagEnemy() { return ENEMY }
+
+// The boss: enters from the top, then sweeps and cycles attack patterns through three HP phases.
+export function spawnBoss(opts) {
+  let o = defOpts(opts)
+  let hp = pick(o.hp, 60)
+  let bf: i32 = pick(o.frame, cfg.bossF)        // per-boss frames → mini-bosses can differ
+  let hf: i32 = pick(o.hitFrame, cfg.bossHitF)
+  let e = spawn()
+  set_transform(e, pick(o.x, 120) - 14, -34)
+  set_collider(e, 28, 24)
+  set_body(e, 0, 0)
+  attach_sprite(e, mkSprite(cfg.bossSheet, bf))
+  set_sprite_offset(e, -2, -4)
+  set_tag(e, ENEMY)
+  set_health(e, hp, 0)
+  set_hurt(e, pick(o.contact, 3), PLAYER, 0)
+  add_behaviour(e, 'sBoss', { t: 0, lastHp: hp, flash: 0, pts: pick(o.pts, 5000) })
+  set_cvar(e, CV_BF, bf)
+  set_cvar(e, CV_HF, hf)
+  GS.bossMax = hp
+  GS.bossHp = hp
+  GS.bossDead = false     // re-arm — supports multiple bosses per run (mini-boss per level)
+  return e
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Level director + formations
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A scripted timeline. `events` is an array of `{ at: frame, run: () => {…} }` in ascending `at`
+// order; each frame, `update()` fires every event whose time has arrived. `time()` is the current
+// frame, `done()` true once the last event has fired. This is the "scripted level" — waves, pauses,
+// mid-level power-up drops, the boss cue — all authored as data.
+export function makeDirector(events) {
+  let st: DirState = { t: 0, i: 0 }
+  return {
+    update: () => {
+      st.t = st.t + 1
+      while (st.i < events.length && events[st.i].at <= st.t) {
+        events[st.i].run()
+        st.i = st.i + 1
+      }
+    },
+    time: () => st.t,
+    done: () => st.i >= events.length,
+    reset: () => { st.t = 0; st.i = 0 }   // re-arm the timeline (replay a level without rebuilding it)
+  }
+}
+
+// Spawn `count` enemies in a horizontal row centred on screen, `gap` px apart, by calling
+// `spawnFn(x)` for each column x. e.g. `spawnRow(5, 30, (x) => { spawnGrunt(x, {}) })`.
+export function spawnRow(count, gap, spawnFn) {
+  let total = (count - 1) * gap
+  let startX = 120 - total / 2
+  let k = 0
+  while (k < count) {
+    spawnFn(startX + k * gap)
+    k = k + 1
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Components (registered once; raw hooks so enemies/bullets stay wrapper-free)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The player's weapon by level: 1 = single shot, 2 = twin, 3 = triple spread.
+let firePlayerWeapon = (cx, cy, level) => {
+  let opt = { target: ENEMY, frame: cfg.shotF, damage: 1, size: 5, ttl: 140 }
+  if (level <= 1) {
+    fireBullet(cx, cy, 0, -3.4, opt)
+  } else if (level === 2) {
+    fireBullet(cx - 4, cy, 0, -3.4, opt)
+    fireBullet(cx + 4, cy, 0, -3.4, opt)
+  } else {
+    fireBullet(cx, cy, 0, -3.6, opt)
+    fireAngle(cx, cy, -106, 3.4, opt)
+    fireAngle(cx, cy, -74, 3.4, opt)
+  }
+}
+
+// Player: move + clamp + auto-fire (per-frame `update`), pick up power-ups (`onCollide`), and on
+// death lose a life + weapon level and respawn, or end the game.
+let playerUpdate = (data, e, dt) => {
+  let ent: i32 = e
+  let dx: fixed = input_x()
+  let dy: fixed = input_y()
+  let spd: fixed = data.speed
+  let nx: fixed = entity_x(ent) + dx * spd
+  let ny: fixed = entity_y(ent) + dy * spd
+  if (nx < 0) { nx = 0 }
+  if (nx > 230) { nx = 230 }
+  if (ny < 0) { ny = 0 }
+  if (ny > 150) { ny = 150 }
+  set_transform(ent, nx, ny)
+  let sp: i32 = entity_sprite(ent)
+  if (dx < 0) { sprite_set_frame(sp, cfg.shipLF) }
+  else if (dx > 0) { sprite_set_frame(sp, cfg.shipRF) }
+  else { sprite_set_frame(sp, cfg.shipF) }
+  let cd: i32 = cvar(ent, CV_T) - 1   // fire cooldown in a native slot, not boxed data.cd
+  if (cd <= 0) {
+    firePlayerWeapon(nx + 5, ny - 2, GS.weapon)
+    cd = 8
+  }
+  set_cvar(ent, CV_T, cd)
+}
+
+let playerCollide = (data, e, other) => {
+  let t = entity_tag(other)
+  if (t === POWERUP_GUN) {
+    GS.weapon = Math.min(GS.weapon + 1, 3)
+    despawn(other)
+  } else if (t === POWERUP_SHIELD) {
+    GS.lives = Math.min(GS.lives + 1, 9)
+    despawn(other)
+  }
+}
+
+let onPlayerDeath = (data, e) => {
+  explode(entity_x(e) + 5, entity_y(e) + 5)
+  despawn(e)
+  REF.player = -1
+  GS.lives = GS.lives - 1
+  if (GS.lives > 0) {
+    GS.weapon = Math.max(1, GS.weapon - 1)   // classic: knocked down a weapon level on death
+    spawnPlayer(120, 135, { hp: 3 })
+  } else {
+    GS.playerDead = true
+  }
+}
+
+// Enemy death (shared): explosion + score + optional power-up drop, then despawn. (The engine does NOT
+// auto-despawn an entity that has an onDeath hook — the hook owns the teardown.)
+let onEnemyDeath = (data, e) => {
+  let cx = entity_x(e) + 8
+  let cy = entity_y(e) + 8
+  explode(cx, cy)
+  GS.score = GS.score + (typeof data.pts === 'number' ? data.pts : 100)
+  if (data.drop === 1) { spawnPowerup(entity_x(e), entity_y(e), POWERUP_GUN) }
+  if (data.drop === 2) { spawnPowerup(entity_x(e), entity_y(e), POWERUP_SHIELD) }
+  despawn(e)
+}
+
+// Shooter: FIRE only — its movement is native (`set_mover`), so this tick's whole job is to lob an
+// aimed shot on a cadence (~once every 1.2s). One cheap call per shooter per frame, no per-op ABI.
+let shooterTick = (e: i32) => {
+  let t: i32 = cvar(e, CV_T) + 1   // native i32 counter in a typed slot; lean tick, no boxed ctx
+  set_cvar(e, CV_T, t)
+  if (t % 70 === 0 && REF.player >= 0) {
+    fireAimed(entity_x(e) + 7, entity_y(e) + 12, entity_x(REF.player) + 5, entity_y(REF.player) + 5, 1.4, bossOpt)
+  }
+}
+
+// Boss: enter, sweep, and rotate attack patterns across three HP thirds; flash on taking damage.
+// State (counter, last-hp, flash timer, current frame) lives in NATIVE typed slots (cvar), so the
+// per-frame reads/writes and the arithmetic on them are native — not boxed `d.field` hashmap ops.
+let bossTick = (e: i32) => {
+  let t: i32 = cvar(e, CV_T) + 1
+  set_cvar(e, CV_T, t)
+  let hp: i32 = health_hp(e)
+  GS.bossHp = hp
+  let by: fixed = entity_y(e)
+  let cx: fixed = entity_x(e) + 16
+  let cy: fixed = by + 18
+  if (by < 12) {
+    set_body(e, 0, 0.5)
+  } else {
+    // Horizontal sweep — inline of the old `tri(t, 220, 0.7)`, all native fixed: a triangle in
+    // [-0.7, 0.7] over 220 frames. vx via set_body (lean tick manages its own Body).
+    let p: i32 = t % 220
+    let ramp: i32 = p < 110 ? p : 220 - p
+    let off: fixed = ramp - 55
+    set_body(e, off * 7 / 550, 0)
+    let maxHp: i32 = GS.bossMax        // coerce the boxed field to a native i32 once
+    let third: i32 = maxHp / 3
+    if (hp > third * 2) {
+      if (t % 60 === 0) { fireRing(cx, cy, 9, 1.0, bossOpt) }
+    } else if (hp > third) {
+      if (t % 46 === 0 && REF.player >= 0) {
+        let a = aimAngle(cx, cy, entity_x(REF.player) + 5, entity_y(REF.player) + 5)
+        fireSpread(cx, cy, a, 5, 46, 1.3, bossOpt)
+      }
+    } else {
+      if (t % 40 === 0) { fireRing(cx, cy, 12, 1.3, bossOpt) }
+      if (t % 40 === 20 && REF.player >= 0) {
+        fireAimed(cx, cy, entity_x(REF.player) + 5, entity_y(REF.player) + 5, 1.9, bossOpt)
+      }
+    }
+  }
+  // hit-flash: swap to the flash frame for a few frames whenever hp dropped; only re-issue set_frame
+  // when the shown frame changes (curF slot). All native i32 slot math.
+  let flash: i32 = cvar(e, CV_FLASH)
+  let lastHp: i32 = cvar(e, CV_HP)
+  if (hp < lastHp) { flash = 4 }
+  set_cvar(e, CV_HP, hp)
+  let sp: i32 = entity_sprite(e)
+  let curF: i32 = cvar(e, CV_CURF)
+  let hitF: i32 = cvar(e, CV_HF)     // per-boss frames (set by spawnBoss)
+  let baseF: i32 = cvar(e, CV_BF)
+  if (flash > 0) {
+    if (curF !== hitF) { sprite_set_frame(sp, hitF); set_cvar(e, CV_CURF, hitF) }
+    set_cvar(e, CV_FLASH, flash - 1)
+  } else {
+    if (curF !== baseF) { sprite_set_frame(sp, baseF); set_cvar(e, CV_CURF, baseF) }
+    set_cvar(e, CV_FLASH, 0)
+  }
+}
+
+let onBossDeath = (data, e) => {
+  let cx = entity_x(e) + 14
+  let cy = entity_y(e) + 14
+  explode(cx, cy)
+  explode(cx - 12, cy + 8)
+  explode(cx + 12, cy - 6)
+  explode(cx - 6, cy - 12)
+  explode(cx + 8, cy + 12)
+  GS.score = GS.score + (typeof data.pts === 'number' ? data.pts : 5000)   // per-boss bonus
+  GS.bossDead = true
+  despawn(e)
+}
+
+// ── Extra goo-blob AIs (all reusable) ────────────────────────────────────────
+// Bouncer: oozes down slowly while ping-ponging off the side walls. Lean tick — direction lives in a
+// cvar slot, position via the typed `entity_x` extern, velocity via `set_body`; entirely native.
+let bouncerTick = (e: i32) => {
+  let x: fixed = entity_x(e)
+  let dir: i32 = cvar(e, CV_DIR)
+  if (x < 6) { dir = 1 } else if (x > 218) { dir = 0 - 1 }
+  set_cvar(e, CV_DIR, dir)
+  set_body(e, dir * 1.4, 0.35)
+}
+
+// Charger: creeps toward the player's LIVE column while diving fast — cheap homing, no path math.
+let chargerTick = (e: i32) => {
+  if (REF.player >= 0) {
+    let dir: i32 = entity_x(REF.player) > entity_x(e) ? 1 : 0 - 1
+    set_body(e, dir * 1.1, 0.95)
+  }
+}
+
+// Splitter: on death, bursts into two little driplets that fan outward — then explodes as usual.
+let onSplitterDeath = (data, e) => {
+  let x: fixed = entity_x(e)
+  let y: fixed = entity_y(e)
+  spawnEnemy({ x: x + 8, y: y + 4, frame: cfg.dripletF, w: 8, vx: 0 - 0.6, vy: 0.8, hp: 1, pts: 25 })
+  spawnEnemy({ x: x + 8, y: y + 4, frame: cfg.dripletF, w: 8, vx: 0.6, vy: 0.8, hp: 1, pts: 25 })
+  onEnemyDeath(data, e)
+}
+
+// Register every component once (idempotent). Raw `define_component` so the enemy hooks stay
+// wrapper-free — a bullet-hell frame never builds a per-entity tish object.
+function registerComponents() {
+  if (REG.done) { return }
+  REG.done = true
+  define_component('sPlayer', {
+    update: (data, e, dt) => { playerUpdate(data, e, dt) },
+    onCollide: (data, e, other) => { playerCollide(data, e, other) },
+    onDeath: (data, e) => { onPlayerDeath(data, e) }
+  })
+  define_component('sEnemy', { onDeath: (data, e) => { onEnemyDeath(data, e) } })
+  // `lean: true` — the tick gets just the entity id (a native i32), no boxed context object. State
+  // lives in cvar slots and velocity is written with set_body, so the whole tick is native.
+  define_component('sShooter', {
+    lean: true,
+    tick: shooterTick,           // registered directly — the engine calls it, no wrapper dispatch
+    onDeath: (data, e) => { onEnemyDeath(data, e) }
+  })
+  define_component('sBoss', {
+    lean: true,
+    tick: bossTick,
+    onDeath: (data, e) => { onBossDeath(data, e) }
+  })
+  define_component('sBouncer', {
+    lean: true,
+    tick: bouncerTick,
+    onDeath: (data, e) => { onEnemyDeath(data, e) }
+  })
+  define_component('sCharger', {
+    lean: true,
+    tick: chargerTick,
+    onDeath: (data, e) => { onEnemyDeath(data, e) }
+  })
+  define_component('sSplitter', { onDeath: (data, e) => { onSplitterDeath(data, e) } })
+}

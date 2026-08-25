@@ -1,0 +1,54 @@
+// Ninja Village — a full village square (3 houses, a bordering picket fence, big trees, cut-log
+// stumps, a goods cart + basket, and scattered grass/fern decor). The whole scene is one
+// self-contained Tiled map, `assets/village_square.tmj`: it references the shared tileset library
+// and bakes its own collision (a `Collision` layer), so `tish build` packs + streams it into ROM
+// with no prebuilt binary map or atlas checked in (tish-gba-scenepack's include_scene!, resolved
+// via tish-agb's tish.schemes.json). Every tile is from the pixel-verified catalog under
+// assets/ninja-adventure — same pipeline as the ninja-adventure example.
+import { village } from 'scene:../assets/village_square.tmj'
+import { ninja } from 'sheet:../assets/ninja.png'
+import { villager } from 'sheet:../assets/villager.png'
+import { heart } from 'sheet:../assets/heart.png'
+import { heartUi } from 'sheet:../assets/heart_ui.png'
+import { sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_hud } from 'cargo:tish_agb'
+import { mount, create, loadSceneRom, mapSpawnCount, mapSpawn, step } from '../../../packages/engine'
+import * as components from './components'
+import { Player, Heart, Villager } from './components'
+
+mount(components)
+loadSceneRom(village)
+
+// Spawn from the map's object layer, attaching a component per kind (kind 0 = player w/ camera;
+// 1 = villager NPC; 2 = bobbing heart pickup). Behaviour lives in ./components — see `behave`.
+let si: i32 = 0
+while (si < mapSpawnCount()) {
+  let sp = mapSpawn(si)
+  let e = create()
+  e.onGrid(sp.col, sp.row)
+  if (sp.kind === 0) {
+    e.setSprite(sprite_new(ninja))
+    e.roomFollow(15, 10)   // room-locked: camera locks per 15x10 screen, slides at edges
+    e.behave(Player, {})
+  } else if (sp.kind === 2) {
+    e.setSprite(sprite_new(heart))
+    e.behave(Heart, {})
+  } else {
+    e.setSprite(sprite_new(villager))
+    e.behave(Villager, {})
+  }
+  si = si + 1
+}
+
+// Hearts HUD (top-left) — 3 heart containers drawn in SCREEN space (they stay put while the map
+// scrolls). Ui/Receptacle/Heart frames run 0=empty .. 4=full; show full / half / empty.
+let heartStates = [4, 2, 0]
+let hi: i32 = 0
+while (hi < 3) {
+  let hs = sprite_new(heartUi)
+  sprite_set_pos(hs, 4 + hi * 15, 4)
+  sprite_set_hud(hs, 1)
+  sprite_set_frame(hs, heartStates[hi])
+  hi = hi + 1
+}
+
+while (true) { step() }

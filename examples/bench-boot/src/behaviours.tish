@@ -1,0 +1,16 @@
+// Behaviours for the `mount` stage. `mount` walks a module's exports and registers everything that
+// looks like a behaviour, so its cost scales with the export COUNT — akari mounts a components module
+// with a dozen of them. These are deliberately trivial: the stage is measuring registration, not what
+// the hooks do, and a real `update` body would put game logic in a boot number.
+export const A = { update: ({ this }) => { } }
+export const B = { update: ({ this }) => { } }
+export const C = { start: ({ this }) => { } }
+export const D = { tick: ({ this }) => { } }
+export const E = { update: ({ this }) => { }, onCollide: ({ this, other }) => { } }
+export const F = { update: ({ this }) => { } }
+export const G = { onInteract: ({ this }) => { } }
+export const H = { update: ({ this }) => { } }
+export const I = { onDeath: ({ this }) => { } }
+export const J = { update: ({ this }) => { } }
+export const K = { update: ({ this }) => { } }
+export const L = { update: ({ this }) => { } }

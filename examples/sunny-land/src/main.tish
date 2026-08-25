@@ -1,0 +1,101 @@
+// Sunny Land — a classic side-scrolling platformer that shows off the reusable engine systems
+// with Luis Zuno's (Ansimuz) CC0 "Sunny Land" pixel art.
+//
+// Controls: d-pad move · A jump (hold = higher, tap = hop; Down+A = drop through a ledge) · B run.
+// Land on an opossum to stomp it (you bounce); touch its side and you take a hit. Grab cherries for
+// coins, and the purple gem to unlock a mid-air double jump. At 0 HP you respawn at the start.
+import { tileset } from 'background:../assets/tileset.png'
+import { playerSheet } from 'sheet32:../assets/player.png'
+import { opossumSheet } from 'sheet32:../assets/opossum.png'
+import { cherrySheet } from 'sheet:../assets/cherry.png'
+import { gemSheet } from 'sheet:../assets/gem.png'
+import { heartSheet } from 'sheet:../assets/heart.png'
+import { sprite_new, sprite_set_hud, sprite_set_pos } from 'cargo:tish_agb'
+import { mount, create, loadStreamMap, setupHearts, step, entityApi, entityForget } from '../../../packages/engine'
+import { level } from './maps'
+import * as components from './components'
+import { Player, Enemy, Cherry, Gem, TAG_PLAYER, fxInit, fxTick } from './components'
+
+// This is a platformer: it never calls a grid-step, a top-down move, a dialogue or a lifetime method.
+// Those groups are 23 of the entity wrapper's ~55 method closures, and this level spawns 18 entities on
+// a 157K heap — with the full API it ran out of memory mid-spawn and died before the first frame.
+entityApi({ grid: 0, topdown: 0, dialogue: 0, extra: 0 })
+
+mount(components)
+loadStreamMap(level, tileset)
+
+// Stomp puffs and pickup sparkles come from a pre-created sprite pool, not from spawned entities —
+// spawning one entity mid-play cost a whole frame. See the FX block in components.tish.
+fxInit()
+
+// Player: 32×32 fox drawn over a 16×16 hitbox (offset centres it, feet on the box), 6 hp (3 hearts),
+// tagged so pickups/enemies can tell it apart, camera follows it across the level.
+let hero = create()
+let spawnX = level.spawnCol * 16
+let spawnY = level.spawnRow * 16
+hero.setPos(spawnX, spawnY)
+hero.setSprite(sprite_new(playerSheet))
+hero.spriteOffset(-8, -16)
+hero.platformer(16, 16)
+hero.setHealth(6)
+hero.setTag(TAG_PLAYER)
+hero.behave(Player, { spawnX: spawnX, spawnY: spawnY })
+hero.follow()
+
+// HUD: hearts (top-left) + a cherry icon and coin counter (top-right).
+setupHearts(heartSheet, 3, 8, 8, 12)
+let coinIcon = sprite_new(cherrySheet)
+sprite_set_hud(coinIcon, 1)
+sprite_set_pos(coinIcon, 200, 6)
+
+// Opossum enemies: patrol NATIVELY via `e.patrol()`, 1 hp (one stomp). The component keeps only an
+// `onCollide` — a tish `tick` here cost more than everything else in the frame put together, and only
+// for on-screen enemies; see the note above `Enemy` in components.tish. (Loop counter is `ei`, not
+// `i`: a top-level mutable `i` collides with an imported function's parameter in tish codegen — #556.)
+let ei: i32 = 0
+while (ei < level.enemyCols.length) {
+  let e = create()
+  e.setPos(level.enemyCols[ei] * 16, level.enemyRows[ei] * 16)
+  e.setSprite(sprite_new(opossumSheet))
+  e.spriteOffset(-8, -16)
+  e.platformer(16, 16)
+  e.animate(6, 6)              // 6-frame walk cycle
+  e.setHealth(1)
+  e.patrol(1)                  // native walk + turn at walls/ledges; 1 = mirror when walking right
+  e.behave(Enemy, {})
+  entityForget(e)              // patrols run on the native `tick` path — nothing asks for a wrapper again
+  ei = ei + 1
+}
+
+// Cherries (coins): static 16×16 trigger colliders — no physics, just a pickup.
+let ci: i32 = 0
+while (ci < level.cherryCols.length) {
+  let c = create()
+  c.setPos(level.cherryCols[ci] * 16, level.cherryRows[ci] * 16)
+  c.setSprite(sprite_new(cherrySheet))
+  c.setCollider(16, 16)
+  c.animate(5, 6)              // spin (set here, not in a `start` hook — see entityForget below)
+  c.behave(Cherry, {})
+  // Hand the wrapper back: a coin is inert until it is touched, and 11 of them at ~6K each is most of
+  // this level's heap. Its `onCollide` rebuilds one on demand.
+  entityForget(c)
+  ci = ci + 1
+}
+
+// Gem(s): the double-jump powerup.
+let gi: i32 = 0
+while (gi < level.gemCols.length) {
+  let g = create()
+  g.setPos(level.gemCols[gi] * 16, level.gemRows[gi] * 16)
+  g.setSprite(sprite_new(gemSheet))
+  g.setCollider(16, 16)
+  g.animate(5, 6)
+  g.behave(Gem, {})
+  entityForget(g)
+  gi = gi + 1
+}
+
+while (true) {
+  step()
+  fxTick()
+}

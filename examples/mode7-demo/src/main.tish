@@ -1,0 +1,87 @@
+// mode7-demo — a real 3D ground plane on the GBA, and flat sprites standing on it.
+//
+// The floor is not a drawing of perspective; it is a plane being projected. Every scanline gets its
+// own affine transform, so scale changes with distance — which is what perspective IS, and what a
+// single affine matrix (an orthographic tilt) can never be. The camera orbits, and the world turns
+// underneath it because the camera is genuinely somewhere, pointing somewhere.
+//
+// The posts are BILLBOARDS: flat 32x32 sprites positioned by projecting their ground coordinates.
+// That is the whole trick behind 2D characters in a 3D scene — they do not rotate, they just stand
+// where the maths says, and the moving floor sells the rest.
+//
+// All of it goes through `packages/mode7`, which owns the camera and the projection; this file only
+// decides where the camera should be and what is standing around.
+//
+// Controls: START toggles orbit · Left/Right turn · Up/Down move · A/B raise and lower the camera.
+import { floor } from 'affine:../assets/floor.png'
+import { postArt } from 'sheet32:../assets/post.png'
+import {
+  sprite_new, sprite_set_hud, backdrop, frame, key_held, key_pressed, hud_text,
+} from 'cargo:tish_agb'
+import * as m7 from '../../../packages/mode7'
+
+let BTN_A: i32 = 0
+let BTN_B: i32 = 1
+let BTN_START: i32 = 3
+let BTN_UP: i32 = 6
+let BTN_DOWN: i32 = 7
+let BTN_LEFT: i32 = 8
+let BTN_RIGHT: i32 = 9
+
+// A 64x64-tile world of 8px tiles: 512x512 texture pixels, the source tiled across it.
+m7.m7Ground(floor, 64, 64)
+m7.m7Lens(56, 140.0)
+m7.m7Set(256.0, 256.0, 0, 24.0)
+backdrop(0x101828)
+
+// Four posts around the middle of the world, so there is something with a fixed place IN it — the
+// floor alone could be a clever scroll, but things that hold station while the camera moves cannot.
+let POST_X: f64[] = [200.0, 312.0, 200.0, 312.0]
+let POST_Z: f64[] = [200.0, 200.0, 312.0, 312.0]
+let POST_W: i32[] = [32, 32, 32, 32]
+let POST_H: i32[] = [32, 32, 32, 32]
+let NPOST: i32 = 4
+let posts: i32[] = []
+let i: i32 = 0
+while (i < NPOST) {
+  let s: i32 = sprite_new(postArt)
+  sprite_set_hud(s, 1)   // screen space: the package projects, the tile camera is not involved
+  m7.m7BillboardAt(m7.m7Billboard(s, 32, 32), POST_X[i], POST_Z[i])
+  posts.push(s)
+  i = i + 1
+}
+
+// Drawn ONCE, never rebuilt. A `hud_text` whose string changes re-lays-out and re-uploads glyphs
+// inside `commit()`, and agb arms the HBlank DMA *after* the object and background commits — so on a
+// heavy frame the affine table is armed after the screen has started drawing, and the top of the
+// floor renders with the wrong matrix. A live readout here glitched the floor every time it changed.
+hud_text(0, 6, 146, "START orbit  d-pad move  A/B height")
+
+interface Mode { orbit: i32 }
+let M: Mode = { orbit: 1 }
+
+while (true) {
+  if (key_pressed(BTN_START) > 0) {
+    if (M.orbit === 1) { M.orbit = 0 } else { M.orbit = 1 }
+  }
+
+  if (M.orbit === 1) {
+    // One number moves the whole shot: yaw is both where the camera sits on the circle and which way
+    // it looks. With no input at all this still turns, so a headless screenshot shows a moving 3D
+    // scene rather than a still that could just as well be a painted backdrop.
+    m7.m7Orbit(256.0, 256.0, 110.0, m7.m7Yaw() + 1)
+  } else {
+    if (key_held(BTN_LEFT) > 0) { m7.m7Turn(-2) }
+    if (key_held(BTN_RIGHT) > 0) { m7.m7Turn(2) }
+    if (key_held(BTN_UP) > 0) { m7.m7Move(2.0, 0.0) }
+    if (key_held(BTN_DOWN) > 0) { m7.m7Move(-2.0, 0.0) }
+  }
+  if (key_held(BTN_A) > 0) { m7.m7Height(90.0) }
+  if (key_held(BTN_B) > 0) { m7.m7Height(10.0) }
+
+  m7.m7Commit()
+
+  m7.m7DrawBillboards()
+
+  frame()
+}

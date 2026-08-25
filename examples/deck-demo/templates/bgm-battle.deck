@@ -1,0 +1,31 @@
+deck 1
+bpm 140
+
+track Lead id lead gen gameBoyDmg
+  gen type pulse duty 25 vol 13
+  gen arp_rate 8 arp_semis 7
+  note 60 0 0.25 v 120
+  note 60 0.5 0.25 v 120
+  note 63 1 0.25 v 120
+  note 65 1.5 0.25 v 120
+  note 67 2 0.5 v 127
+  note 65 3 0.5 v 110
+
+track Noise id drums gen gameBoyDmg
+  gen type noise noise_mode short vol 12 env_mode step
+  note 60 0 0.1 v 127
+  note 60 0.5 0.1 v 80
+  note 60 1 0.1 v 127
+  note 60 1.5 0.1 v 80
+  note 60 2 0.1 v 127
+  note 60 2.5 0.1 v 80
+  note 60 3 0.1 v 127
+  note 60 3.5 0.1 v 80
+
+track Hit id hit gen gbaDirectSound
+  gen waveform pulse duty 50 vol 14 pitch_drop -12 pitch_dec 0.06
+  adsr a 0 d 0.1 s 0 r 0.05
+  note 36 0 0.15 v 127
+  note 36 1 0.15 v 127
+  note 36 2 0.15 v 127
+  note 36 3 0.15 v 127

@@ -1,0 +1,182 @@
+{
+  "DN": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          9
+        ],
+        "angle": 0,
+        "src": "SpriteInHand"
+      },
+      "slash": null
+    },
+    {
+      "blade": null,
+      "slash": {
+        "piece": "DN",
+        "offset": [
+          -8,
+          -16
+        ]
+      }
+    },
+    {
+      "blade": {
+        "grip": [
+          8,
+          20
+        ],
+        "angle": 90,
+        "src": "SpriteInHand"
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "grip": [
+          8,
+          20
+        ],
+        "angle": 90,
+        "src": "SpriteInHand"
+      },
+      "slash": null
+    }
+  ],
+  "UP": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          8
+        ],
+        "angle": 0,
+        "src": "SpriteInHand"
+      },
+      "slash": null
+    },
+    {
+      "blade": null,
+      "slash": {
+        "piece": "UP",
+        "offset": [
+          -8,
+          -16
+        ]
+      }
+    },
+    {
+      "blade": {
+        "grip": [
+          16,
+          8
+        ],
+        "angle": 0,
+        "src": "SpriteInHand"
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "grip": [
+          16,
+          8
+        ],
+        "angle": 0,
+        "src": "SpriteInHand"
+      },
+      "slash": null
+    }
+  ],
+  "LF": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          8
+        ],
+        "angle": 0,
+        "src": "SpriteInHand"
+      },
+      "slash": null
+    },
+    {
+      "blade": null,
+      "slash": {
+        "piece": "LF",
+        "offset": [
+          -8,
+          -12
+        ]
+      }
+    },
+    {
+      "blade": {
+        "grip": [
+          8,
+          20
+        ],
+        "angle": 90,
+        "src": "SpriteInHand"
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "grip": [
+          8,
+          20
+        ],
+        "angle": 90,
+        "src": "SpriteInHand"
+      },
+      "slash": null
+    }
+  ],
+  "RT": [
+    {
+      "blade": {
+        "grip": [
+          16,
+          8
+        ],
+        "angle": 0,
+        "src": "SpriteInHand"
+      },
+      "slash": null
+    },
+    {
+      "blade": null,
+      "slash": {
+        "piece": "RT",
+        "offset": [
+          0,
+          -16
+        ]
+      }
+    },
+    {
+      "blade": {
+        "grip": [
+          24,
+          20
+        ],
+        "angle": -90,
+        "src": "SpriteInHand"
+      },
+      "slash": null
+    },
+    {
+      "blade": {
+        "grip": [
+          24,
+          20
+        ],
+        "angle": -90,
+        "src": "SpriteInHand"
+      },
+      "slash": null
+    }
+  ]
+}

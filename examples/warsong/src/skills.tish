@@ -1,0 +1,301 @@
+// skills.tish — real kit FX resolve + projectile pool (boot-allocated).
+
+import {
+  swing, set_hurt, set_body, set_transform, set_collider, set_tag,
+  pool_new, pool_arm, set_guard, set_stun, topdown_facing, entity_hp, entity_sprite
+} from 'cargo:tish_gba_game_engine'
+import { sprite_set_frame } from 'cargo:tish_agb'
+import { fxCastRing, fxSwing, fxHit, FXF_ORB } from './fx'
+import { POOL_ANY } from '../../../packages/pool'
+import { tdFacingDX, tdFacingDY } from '../../../packages/topdown'
+import {
+  UNITS, U_ENT, U_TEAM, U_ALIVE, U_TAG, U_POWER, U_CD, U_GCD, U_CAST, U_ABSORB, U_PET, U_SLOW,
+  U_CLASS, U_SPEC, U_ROLE, U_XS, U_YS, U_CDN,
+  foeTagFor, indexOfEnt, unitFacing, unitApplyDamage, unitHeal, posX, posY
+} from './units'
+import { statusAdd, ST_DOT, ST_HOT, ST_ABSORB, ST_ROOT, ST_SLOW, ST_STUN } from './status'
+import {
+  classSkill, classSkillFx, botSkillSlot, CLS_AUTO,
+  FX_MELEE, FX_BOLT, FX_AOE, FX_HEAL, FX_HOT, FX_DOT, FX_ABSORB,
+  FX_ROOT, FX_SLOW, FX_STUN, FX_BLINK, FX_CHARGE, FX_SPEED, FX_GUARD, FX_PET
+} from './classes'
+
+let WPN: i32 = 0 - 1
+let POOL_SZ: i32 = 8
+
+export function skillsBuild(sheet: i32) {
+  WPN = pool_new(POOL_SZ, sheet, 0 - 4, 0 - 4)
+}
+
+function skillDmg(id: i32): i32 {
+  if (id <= 3) { return 3 }
+  return 5 + (id % 5)
+}
+
+function skillCd(id: i32): i32 {
+  if (id <= 3) { return 18 }
+  return 36 + (id % 7) * 8
+}
+
+function skillCost(id: i32): i32 {
+  if (id <= 3) { return 0 }
+  return 6 + (id % 6) * 2
+}
+
+function fireBolt(caster: i32, foeTag: i32, dmg: i32) {
+  let e: i32 = pool_arm(WPN, POOL_ANY, 21, 45)
+  if (e < 0) { return }
+  let f: i32 = topdown_facing(U_ENT[caster])
+  let dx: i32 = tdFacingDX(f)
+  let dy: i32 = tdFacingDY(f)
+  let x: i32 = U_XS[caster] + Math.imul(dx, 10)
+  let y: i32 = U_YS[caster] + Math.imul(dy, 10)
+  // pool_arm's `kind` is a live flag, not a frame — without this the bolt draws whatever the slot
+  // last held (frame 0 = an alliance warrior).
+  sprite_set_frame(entity_sprite(e), FXF_ORB)
+  set_transform(e, x, y)
+  set_collider(e, 8, 8)
+  set_tag(e, U_TAG[caster])
+  set_hurt(e, dmg, foeTag, 1, 0)
+  set_body(e, Math.imul(dx, 3), Math.imul(dy, 3))
+}
+
+function aoeAround(caster: i32, foeTag: i32, dmg: i32, rad2: i32) {
+  let cx: i32 = U_XS[caster]
+  let cy: i32 = U_YS[caster]
+  let i: i32 = 0
+  while (i < UNITS) {
+    if (U_ALIVE[i] !== 0 && U_TAG[i] === foeTag) {
+      let dx: i32 = U_XS[i] - cx
+      let dy: i32 = U_YS[i] - cy
+      if (Math.imul(dx, dx) + Math.imul(dy, dy) <= rad2) { unitApplyDamage(i, dmg) }
+    }
+    i = i + 1
+  }
+}
+
+function nearestFoeUnit(caster: i32): i32 {
+  let foe: i32 = foeTagFor(U_TEAM[caster])
+  let best: i32 = 0 - 1
+  let bestD: i32 = 999999
+  let cx: i32 = U_XS[caster]
+  let cy: i32 = U_YS[caster]
+  let i: i32 = 0
+  while (i < UNITS) {
+    if (U_ALIVE[i] !== 0 && U_TAG[i] === foe) {
+      let dx: i32 = U_XS[i] - cx
+      let dy: i32 = U_YS[i] - cy
+      let d2: i32 = Math.imul(dx, dx) + Math.imul(dy, dy)
+      if (d2 < bestD) { best = i; bestD = d2 }
+    }
+    i = i + 1
+  }
+  return best
+}
+
+function nearestHurtAlly(caster: i32): i32 {
+  let team: i32 = U_TEAM[caster]
+  let best: i32 = caster
+  let bestHp: i32 = 999
+  let i: i32 = 0
+  while (i < UNITS) {
+    if (U_ALIVE[i] !== 0 && U_TEAM[i] === team) {
+      let hp: i32 = entity_hp(U_ENT[i])
+      if (hp < bestHp) { bestHp = hp; best = i }
+    }
+    i = i + 1
+  }
+  return best
+}
+
+function resolveFx(u: i32, id: i32, slot: i32): i32 {
+  if (slot >= 0) {
+    return classSkillFx(U_CLASS[u], U_SPEC[u], slot)
+  }
+  // Autos
+  if (id === 1) { return FX_MELEE }
+  if (id === 2 || id === 3) { return FX_BOLT }
+  return FX_MELEE
+}
+
+/// Cast skill `id` from unit `u` at soft-target entity id `tgtEnt` (-1 = facing/nearest rules).
+/// `slot` is chord slot 0..11 for CD + FX (-1 for auto).
+export function skillCast(u: i32, id: i32, tgtEnt: i32, slot: i32): i32 {
+  if (id <= 0) { return 0 }
+  if (U_ALIVE[u] === 0) { return 0 }
+  if (U_GCD[u] > 0) { return 0 }
+  if (U_STUN[u] > 0) { return 0 }
+  if (slot >= 0 && U_CD[Math.imul(u, 12) + slot] > 0) { return 0 }
+  let cost: i32 = skillCost(id)
+  if (U_POWER[u] < cost) { return 0 }
+
+  let fx: i32 = resolveFx(u, id, slot)
+  let dmg: i32 = skillDmg(id)
+  let foe: i32 = foeTagFor(U_TEAM[u])
+  let tgtU: i32 = indexOfEnt(tgtEnt)
+
+  // Soft-target fallbacks so casts actually land
+  if (fx === FX_HEAL || fx === FX_HOT) {
+    if (tgtU < 0 || U_TEAM[tgtU] !== U_TEAM[u]) { tgtU = nearestHurtAlly(u) }
+  } else if (fx === FX_DOT || fx === FX_ROOT || fx === FX_SLOW || fx === FX_STUN || fx === FX_CHARGE) {
+    if (tgtU < 0 || U_TAG[tgtU] !== foe) { tgtU = nearestFoeUnit(u) }
+    if (tgtU < 0) { return 0 }
+  }
+
+  U_POWER[u] = U_POWER[u] - cost
+  U_GCD[u] = 18
+  if (slot >= 0) {
+    let cdi: i32 = Math.imul(u, 12) + slot
+    if (U_CD[cdi] <= 0) { U_CDN[u] = U_CDN[u] + 1 }
+    U_CD[cdi] = skillCd(id)
+  }
+
+  // Every cast gets a tell at the caster; anything aimed at someone else also marks the victim,
+  // so a root / slow / stun / DoT is not an invisible state change.
+  fxCastRing(U_XS[u], U_YS[u])
+  if (tgtU >= 0 && tgtU !== u) {
+    if (fx === FX_DOT || fx === FX_ROOT || fx === FX_SLOW || fx === FX_STUN) {
+      fxHit(U_XS[tgtU], U_YS[tgtU])
+    }
+  }
+
+  if (fx === FX_MELEE) {
+    swing(U_ENT[u], foe, dmg, 2, 16, 12)
+    let mf: i32 = unitFacing(u)
+    fxSwing(U_XS[u], U_YS[u], tdFacingDX(mf), tdFacingDY(mf))
+    return 1
+  }
+  if (fx === FX_BOLT) {
+    fireBolt(u, foe, dmg)
+    return 1
+  }
+  if (fx === FX_AOE) {
+    aoeAround(u, foe, dmg, 48 * 48)
+    return 1
+  }
+  if (fx === FX_HEAL) {
+    unitHeal(tgtU, dmg + 4)
+    return 1
+  }
+  if (fx === FX_HOT) {
+    statusAdd(tgtU, ST_HOT, 150, 2, 30)
+    return 1
+  }
+  if (fx === FX_DOT) {
+    statusAdd(tgtU, ST_DOT, 180, 2, 30)
+    return 1
+  }
+  if (fx === FX_ABSORB) {
+    statusAdd(u, ST_ABSORB, 1, 14, 1)
+    return 1
+  }
+  if (fx === FX_ROOT) {
+    statusAdd(tgtU, ST_ROOT, 70, 0, 1)
+    return 1
+  }
+  if (fx === FX_SLOW) {
+    statusAdd(tgtU, ST_SLOW, 100, 0, 1)
+    fireBolt(u, foe, dmg)
+    return 1
+  }
+  if (fx === FX_STUN) {
+    statusAdd(tgtU, ST_STUN, 50, 0, 1)
+    set_stun(U_ENT[tgtU], 50)
+    return 1
+  }
+  if (fx === FX_BLINK) {
+    let f: i32 = unitFacing(u)
+    let nx: i32 = U_XS[u] + Math.imul(tdFacingDX(f), 48)
+    let ny: i32 = U_YS[u] + Math.imul(tdFacingDY(f), 48)
+    set_transform(U_ENT[u], nx, ny)
+    // keep the frame's position snapshot honest — everything downstream reads U_XS/U_YS
+    U_XS[u] = nx
+    U_YS[u] = ny
+    return 1
+  }
+  if (fx === FX_CHARGE) {
+    let cxg: i32 = U_XS[tgtU] - 8
+    let cyg: i32 = U_YS[tgtU]
+    set_transform(U_ENT[u], cxg, cyg)
+    U_XS[u] = cxg
+    U_YS[u] = cyg
+    swing(U_ENT[u], foe, dmg + 2, 2, 16, 10)
+    statusAdd(tgtU, ST_STUN, 35, 0, 1)
+    set_stun(U_ENT[tgtU], 35)
+    return 1
+  }
+  if (fx === FX_SPEED) {
+    U_SLOW[u] = 0
+    U_GCD[u] = 6
+    return 1
+  }
+  if (fx === FX_GUARD) {
+    set_guard(U_ENT[u], 4)
+    U_CAST[u] = 90
+    statusAdd(u, ST_ABSORB, 1, 10, 1)
+    return 1
+  }
+  if (fx === FX_PET) {
+    aoeAround(u, foe, dmg + 2, 56 * 56)
+    U_PET[u] = 120
+    return 1
+  }
+  // Unknown FX: still melee so the button never feels dead
+  swing(U_ENT[u], foe, dmg, 2, 14, 10)
+  return 1
+}
+
+export function skillAuto(u: i32, autoId: i32, tgtEnt: i32) {
+  if (U_GCD[u] > 0) { return }
+  if (tgtEnt < 0) { return }
+  let t: i32 = indexOfEnt(tgtEnt)
+  if (t < 0 || U_ALIVE[t] === 0) { return }
+  if (U_TAG[t] !== foeTagFor(U_TEAM[u])) { return }
+  let cx: i32 = U_XS[u]
+  let cy: i32 = U_YS[u]
+  let dx: i32 = U_XS[t] - cx
+  let dy: i32 = U_YS[t] - cy
+  let reach2: i32 = 28 * 28
+  if (autoId === 2 || autoId === 3) { reach2 = 88 * 88 }
+  if (Math.imul(dx, dx) + Math.imul(dy, dy) > reach2) { return }
+  skillCast(u, autoId, tgtEnt, 0 - 1)
+}
+
+/// One bot skill attempt: class kit + role pick a slot, cast at foe or ally.
+export function botTryCast(u: i32, frames: i32): i32 {
+  if (U_ALIVE[u] === 0) { return 0 }
+  if (U_GCD[u] > 0) { return 0 }
+  if (U_STUN[u] > 0) { return 0 }
+
+  let role: i32 = U_ROLE[u]
+  let cls: i32 = U_CLASS[u]
+  let spec: i32 = U_SPEC[u]
+  let slot: i32 = botSkillSlot(cls, spec, role, frames >> 4)
+  let sid: i32 = classSkill(cls, spec, slot)
+  if (sid <= 0) { return 0 }
+
+  let fx: i32 = classSkillFx(cls, spec, slot)
+  let tgtEnt: i32 = 0 - 1
+  if (fx === FX_HEAL || fx === FX_HOT) {
+    let a: i32 = nearestHurtAlly(u)
+    tgtEnt = U_ENT[a]
+  } else {
+    let f: i32 = nearestFoeUnit(u)
+    if (f < 0) {
+      // No foe: still allow self buffs
+      if (fx === FX_ABSORB || fx === FX_GUARD || fx === FX_SPEED || fx === FX_BLINK) {
+        return skillCast(u, sid, U_ENT[u], slot)
+      }
+      return 0
+    }
+    tgtEnt = U_ENT[f]
+  }
+  return skillCast(u, sid, tgtEnt, slot)
+}
+
+export function botTryAuto(u: i32): i32 {
+  let f: i32 = nearestFoeUnit(u)
+  if (f < 0) { return 0 }
+  skillAuto(u, CLS_AUTO[U_CLASS[u]], U_ENT[f])
+  return 1
+}

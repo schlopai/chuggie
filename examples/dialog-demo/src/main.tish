@@ -1,0 +1,175 @@
+// dialog-demo — a tour of the packages/dialog.tish CHAT DIALOG component in the styles common to
+// console RPGs. It cycles through five VARIATIONS, each captioned:
+//   1. SRPG        — portrait + name, multi-page, blinking continue arrow.
+//   2. FF7         — a borderless-name boxed prompt with a Yes/No choice menu.
+//   3. Visual novel — portrait on the RIGHT, bouncing arrow.
+//   4. Narration   — no portrait/name, box pinned to the TOP of the screen.
+//   5. Branch      — a three-way decision (portrait + name + choices).
+//
+// Everything is built on packages/ui.tish (portrait via the icon pool, body typed with uiReveal, the
+// ▼ arrow is the reusable makeArrow widget). Portraits are catalog facesets (Ninja Adventure) packed to
+// a sheet32: strip by gen_dialog_demo.py. This self-plays; play it for real with A + Up/Down.
+import { faces } from "sheet32:../assets/faces32.png"
+import { body } from "font:../../../assets/fonts/tinypixel.ttf@7"
+// Continue-arrow shares tinypixel@7 (native size — no squash). Previously monogram@8 under a 16-design.
+import { arrowFont } from "font:../../../assets/fonts/tinypixel.ttf@7"
+import { backdrop, frame, ui_text, text_width } from "cargo:tish_agb"
+import { uiInit } from "../../../packages/ui"
+import {
+  dialogInit, dialogSay, dialogUpdate, dialogActive, dialogPhase, dialogAdvance, dialogMove
+} from "../../../packages/dialog"
+
+// Portrait frame indices — must match scripts/gen_dialog_demo.py.
+let P_PRINCESS: i32 = 0
+let P_ELDER: i32 = 1
+let P_KNIGHT: i32 = 2
+let P_SORCERER: i32 = 3
+
+let SELF_PLAY: i32 = 1
+let C_CAPTION: i32 = 0xFFCE4A
+
+// Each variation is a captioned scene of one or more "beats". A beat opens one dialog box; optional
+// fields (side/pos/arrowAnim/choices) select the style.
+let VARIATIONS = [
+  {
+    label: "1. SRPG - portrait + name",
+    beats: [
+      {
+        speaker: "Elder", portrait: P_ELDER,
+        pages: [
+          "Traveler! The Great Glob oozes toward our village once more.",
+          "Only you can rally the four houses before nightfall."
+        ]
+      }
+    ]
+  },
+  {
+    label: "2. FF7 - boxed Yes / No",
+    beats: [
+      {
+        speaker: "", portrait: -1,
+        pages: ["Would you like to save your progress at this point?"],
+        choices: ["Yes", "No"]
+      }
+    ]
+  },
+  {
+    label: "3. Visual novel - right portrait",
+    beats: [
+      {
+        speaker: "Princess", portrait: P_PRINCESS, side: "right", arrowAnim: "bounce",
+        pages: [
+          "My people have endured the Glob's hunger for far too long.",
+          "Please... will you stand with us?"
+        ]
+      }
+    ]
+  },
+  {
+    label: "4. Narration - top banner",
+    beats: [
+      {
+        speaker: "", portrait: -1, pos: "top", arrowAnim: "bounce",
+        pages: ["The wind howls across the ruined square. Below the flagstones, something vast begins to stir."]
+      }
+    ]
+  },
+  {
+    label: "5. Branch - choose a path",
+    beats: [
+      {
+        speaker: "Mordecai", portrait: P_SORCERER,
+        pages: ["So... will you take up the blade and face the Glob?"],
+        choices: ["Yes, gladly", "Give me time", "Never!"]
+      }
+    ]
+  }
+]
+
+backdrop(0x0E0C16)
+uiInit({ font: body, sheet: faces, icons: 4 })
+dialogInit({ font: body, bodyW: 176, arrowFont: arrowFont, cursorSheet: faces, cursorFrame: 4 })
+
+let ST = { vi: 0, bi: 0, gap: 0, cstep: 0, cbeat: 0, chose: -1 }
+
+// A missing object property reads as `null` in tish's runtime (and typeof never returns "undefined"),
+// so "is this optional field present?" is a null check.
+function has(v) {
+  if (v === null) { return 0 }
+  return 1
+}
+
+function openCurrent() {
+  let B = VARIATIONS[ST.vi].beats[ST.bi]
+  let side = "left"
+  let pos = "bottom"
+  let anim = "blink"
+  let choices = null
+  if (has(B.side) > 0) { side = B.side }
+  if (has(B.pos) > 0) { pos = B.pos }
+  if (has(B.arrowAnim) > 0) { anim = B.arrowAnim }
+  if (has(B.choices) > 0) { choices = B.choices }
+  dialogSay(B.pages, {
+    speaker: B.speaker, portrait: B.portrait, portraitSize: 32,
+    side: side, pos: pos, arrowAnim: anim,
+    choices: choices, onChoose: (idx) => { ST.chose = idx }
+  })
+}
+
+// Draw the caption every frame (the dialog owns the canvas and clears it on discrete changes, so the
+// label must be re-asserted). Sits opposite the box: top for bottom-boxes, bottom for the top banner.
+function drawCaption() {
+  let B = VARIATIONS[ST.vi].beats[ST.bi]
+  let cy = 6
+  if (has(B.pos) > 0) { if (B.pos === "top") { cy = 150 } }
+  let cap = VARIATIONS[ST.vi].label
+  let w = text_width(body, cap)
+  ui_text(body, (240 - w) / 2, cy, cap, C_CAPTION, 512)
+}
+
+function nextBeat() {
+  ST.gap = 0
+  ST.cstep = 0
+  ST.bi = ST.bi + 1
+  if (ST.bi >= VARIATIONS[ST.vi].beats.length) {
+    ST.bi = 0
+    ST.vi = ST.vi + 1
+    if (ST.vi >= VARIATIONS.length) { ST.vi = 0 }
+  }
+  openCurrent()
+}
+
+openCurrent()
+
+while (true) {
+  dialogUpdate()
+  drawCaption()
+
+  if (SELF_PLAY > 0) {
+    if (dialogActive() > 0) {
+      let ph = dialogPhase()
+      if (ph === 1) {
+        // Page fully typed — pause to "read", then turn the page / close the box.
+        ST.gap = ST.gap + 1
+        if (ST.gap > 50) { ST.gap = 0; dialogAdvance() }
+      } else if (ph === 2) {
+        // Choice prompt: wander the cursor, then confirm — slowly, so a screenshot lands on it.
+        ST.cbeat = ST.cbeat + 1
+        if (ST.cbeat > 40) {
+          ST.cbeat = 0
+          if (ST.cstep === 0) { dialogMove(1); ST.cstep = 1 }
+          else if (ST.cstep === 1) { dialogMove(-1); ST.cstep = 2 }
+          else { dialogAdvance() }
+        }
+      } else {
+        ST.gap = 0
+      }
+    } else {
+      // Between beats: a short empty pause, then the next beat / variation.
+      ST.gap = ST.gap + 1
+      if (ST.gap > 30) { nextBeat() }
+    }
+  }
+
+  frame()
+}

@@ -1,0 +1,298 @@
+// The HUD — two health tracks, a stamina strip, stars, the round clock and the ten-count.
+//
+// ── WHY NOT `hud_bar` ─────────────────────────────────────────────────────────────────────────
+//
+// `hud_bar` clamps to 64 px and burns roughly a kilobyte of sprite VRAM per bar as a dynamically
+// drawn sprite. Two of those plus twelve heart pips would be most of the arena, competing with a
+// 96 px opponent. The tracks are `ui_rect` on the UI canvas instead, which is a different memory
+// pool and costs no sprite VRAM at all.
+//
+// ── AND WHY THE REPAINT IS DELTA-ONLY ─────────────────────────────────────────────────────────
+//
+// A full-width blit of a 100 px bar lands on exactly the frame that already has a hit, a spark, a
+// shake and a hit-stop on it — the busiest frame in the game is the only frame the bar ever needs
+// to change. So each track remembers what it drew and paints only the columns that moved, and the
+// heart strip paints only the pips that flipped.
+//
+// ── AND WHY THE NUMBERS ARE SPRITES ───────────────────────────────────────────────────────────
+//
+// `text_draw` is free while a string is unchanged and expensive the instant it changes: it
+// re-shapes the glyphs and allocates sprite VRAM per letter group. The clock changes every second
+// and the count changes every 48 frames. Anything that is a WORD goes on the canvas; anything that
+// is a NUMBER is a 16x16 digit sprite (docs/perf-rules.md §5).
+
+import { ui_rect, ui_clear_rect, sprite_new, sprite_set_pos, sprite_set_frame,
+         sprite_set_hud, sprite_set_visible, sprite_set_depth } from 'cargo:tish_agb'
+import { digitArt } from 'sheet:../assets/digits.png'
+
+// ⚠️ `ui_rect` takes 24-bit 0xRRGGBB, NOT the GBA's native BGR15. Hardware colours here compile,
+// run, and paint the wrong hue — 0x001F is pure red as BGR15 and near-black as RGB24, and the bar
+// that came out green looked like a palette bug rather than a units bug.
+let COL_BG: i32 = 0x1a1420
+let COL_OPP: i32 = 0xd83a2a      // red — the opponent's health
+let COL_OPP_D: i32 = 0x50384a
+let COL_PL: i32 = 0x58c8ff       // blue — the player's, matching the player's gloves
+let COL_PL_D: i32 = 0x2a3a50
+let COL_HEART: i32 = 0xffd24a    // gold
+let COL_HEART_OUT: i32 = 0x3a2a3a
+let COL_GASSED: i32 = 0xff7ab0   // pink — the exhaustion tell, unmissable
+let COL_STAR: i32 = 0xffe89a
+let COL_STAR_OUT: i32 = 0x3a2a3a
+let COL_METER: i32 = 0x7ce87c
+
+let OPP_BAR_X: i32 = 74
+let OPP_BAR_Y: i32 = 3
+let OPP_BAR_W: i32 = 100
+let BAR_H: i32 = 6
+
+let PL_BAR_X: i32 = 74
+let PL_BAR_Y: i32 = 12
+let PL_BAR_W: i32 = 100
+
+let HEART_X: i32 = 4
+let HEART_Y: i32 = 3
+let HEART_W: i32 = 4
+let HEART_PITCH: i32 = 5
+
+let STAR_X: i32 = 4
+let STAR_Y: i32 = 12
+
+// last-painted values, so every repaint is a delta
+let lastOpp: i32 = 0 - 1
+let lastPl: i32 = 0 - 1
+let lastHearts: i32 = 0 - 1
+let lastGassed: i32 = 0 - 1
+let lastStars: i32 = 0 - 1
+let lastMeter: i32 = 0 - 1
+
+let clockTens: i32 = 0
+let clockOnes: i32 = 0
+let countSpr: i32 = 0
+let roundSpr: i32 = 0
+let lastClock: i32 = 0 - 1
+let lastCount: i32 = 0 - 1
+let lastRound: i32 = 0 - 1
+
+let oppMax: i32 = 1
+let plMax: i32 = 1
+let heartMax: i32 = 12
+
+export function hudInit(oppMaxHp: i32, plMaxHp: i32, maxHearts: i32) {
+  oppMax = oppMaxHp
+  plMax = plMaxHp
+  heartMax = maxHearts
+  // the only two divisions in the whole game, and they run once
+  oppScale = (OPP_BAR_W << 12) / oppMaxHp
+  plScale = (PL_BAR_W << 12) / plMaxHp
+
+  clockTens = sprite_new(digitArt)
+  clockOnes = sprite_new(digitArt)
+  countSpr = sprite_new(digitArt)
+  roundSpr = sprite_new(digitArt)
+  sprite_set_hud(clockTens, 1)
+  sprite_set_hud(clockOnes, 1)
+  sprite_set_hud(countSpr, 1)
+  sprite_set_hud(roundSpr, 1)
+  sprite_set_pos(clockTens, 196, 2)
+  sprite_set_pos(clockOnes, 212, 2)
+  // ⚠️ IN FRONT, AND CLEAR OF THE OPPONENT. At (112, 56) the count digit was drawn behind Bruno's
+  // torso — the single most important number in the game, invisible for the whole eight seconds it
+  // mattered. It sits over the ropes instead, with an explicit depth so nothing can cover it.
+  sprite_set_pos(countSpr, 112, 112)
+  sprite_set_depth(countSpr, 0)
+  sprite_set_pos(roundSpr, 196, 20)
+  sprite_set_visible(countSpr, 0)
+}
+
+// Take the whole HUD off the screen for the title and result screens — the digits are sprites and
+// the tracks are canvas, so hiding it is two different operations and forgetting either leaves a
+// stale round clock sitting over the title.
+export function hudHide() {
+  sprite_set_visible(clockTens, 0)
+  sprite_set_visible(clockOnes, 0)
+  sprite_set_visible(countSpr, 0)
+  sprite_set_visible(roundSpr, 0)
+  ui_clear_rect(0, 0, 240, 22)
+  ui_clear_rect(70, 138, 104, 10)
+  hudDirty()
+}
+
+export function hudShow() {
+  sprite_set_visible(clockTens, 1)
+  sprite_set_visible(clockOnes, 1)
+  sprite_set_visible(roundSpr, 1)
+  hudDirty()
+}
+
+// Force the next paint to redraw everything — used after a mode change wipes the canvas.
+export function hudDirty() {
+  lastOpp = 0 - 1
+  lastPl = 0 - 1
+  lastHearts = 0 - 1
+  lastGassed = 0 - 1
+  lastStars = 0 - 1
+  lastMeter = 0 - 1
+  lastClock = 0 - 1
+  lastRound = 0 - 1
+}
+
+// A bar whose fill is a fraction of a max, painted as a delta.
+//
+// ⚠️ THE DIVISION HAPPENS ONCE, AT BOOT. `(hp * w) / max` on the hot path is a software division
+// call per bar per frame on a chip with no divide instruction — the trap that cost `motion.tish`
+// 1,400 of a 4,389-tick frame. Instead each bar precomputes a Q12 reciprocal-times-width at init,
+// and the per-frame cost is one multiply and one shift.
+//
+// ⚠️ And the multiply is `Math.imul`, not `*`. Plain `a * b` on i32 locals still lowers to
+// SOFT-FLOAT in this compiler even when both operands are typed — see docs/perf-rules.md. This is
+// the one arithmetic operator in the repo that does not follow the typed lowering.
+let oppScale: i32 = 0
+let plScale: i32 = 0
+
+function barFill(hp: i32, max: i32, scale: i32, w: i32): i32 {
+  if (hp <= 0) {
+    return 0
+  }
+  if (hp >= max) {
+    return w
+  }
+  let out: i32 = Math.imul(hp, scale) >> 12
+  if (out < 1) {
+    out = 1
+  }
+  return out
+}
+
+function paintBar(x: i32, y: i32, w: i32, was: i32, now: i32, col: i32, dark: i32) {
+  if (now > was) {
+    ui_rect(x + was, y, now - was, BAR_H, col, 1)
+  } else {
+    ui_rect(x + now, y, was - now, BAR_H, dark, 1)
+  }
+}
+
+export function hudUpdate(pv: i32, ov: i32, cv: i32, clockSec: i32, roundNo: i32) {
+  // unpack ONCE — three crossings into the package, then plain arithmetic
+  let php: i32 = pv & 511
+  let hearts: i32 = (pv >> 9) & 31
+  let stars: i32 = (pv >> 14) & 7
+  let pstate: i32 = (pv >> 17) & 15
+  let meter: i32 = (pv >> 23) & 255
+  let ohp: i32 = ov & 511
+  let countN: i32 = cv & 31
+
+  // ── health tracks
+  let ofill: i32 = barFill(ohp, oppMax, oppScale, OPP_BAR_W)
+  if (ofill !== lastOpp) {
+    if (lastOpp < 0) {
+      ui_rect(OPP_BAR_X, OPP_BAR_Y, OPP_BAR_W, BAR_H, COL_OPP_D, 1)
+      lastOpp = 0
+    }
+    paintBar(OPP_BAR_X, OPP_BAR_Y, OPP_BAR_W, lastOpp, ofill, COL_OPP, COL_OPP_D)
+    lastOpp = ofill
+  }
+  let pf: i32 = barFill(php, plMax, plScale, PL_BAR_W)
+  if (pf !== lastPl) {
+    if (lastPl < 0) {
+      ui_rect(PL_BAR_X, PL_BAR_Y, PL_BAR_W, BAR_H, COL_PL_D, 1)
+      lastPl = 0
+    }
+    paintBar(PL_BAR_X, PL_BAR_Y, PL_BAR_W, lastPl, pf, COL_PL, COL_PL_D)
+    lastPl = pf
+  }
+
+  // ── stamina. Only the pips that FLIPPED are repainted; twelve rects a frame would cost more
+  //    than the bars do, for a value that changes a handful of times a round.
+  let gassed: i32 = 0
+  if (pstate === 11) {
+    gassed = 1
+  }
+  if (hearts !== lastHearts || gassed !== lastGassed) {
+    let lo: i32 = hearts
+    let hi: i32 = lastHearts
+    if (lastHearts < 0 || gassed !== lastGassed) {
+      lo = 0
+      hi = heartMax
+    } else if (lastHearts < hearts) {
+      lo = lastHearts
+      hi = hearts
+    }
+    let live: i32 = COL_HEART
+    if (gassed === 1) {
+      live = COL_GASSED
+    }
+    let i: i32 = lo
+    while (i < hi) {
+      let c: i32 = COL_HEART_OUT
+      if (i < hearts) {
+        c = live
+      }
+      ui_rect(HEART_X + (i << 2) + i, HEART_Y, HEART_W, BAR_H, c, 1)
+      i = i + 1
+    }
+    lastHearts = hearts
+    lastGassed = gassed
+  }
+
+  // ── stars
+  if (stars !== lastStars) {
+    let i: i32 = 0
+    while (i < 3) {
+      let c: i32 = COL_STAR_OUT
+      if (i < stars) {
+        c = COL_STAR
+      }
+      ui_rect(STAR_X + (i << 3) + i, STAR_Y, 7, BAR_H, c, 1)
+      i = i + 1
+    }
+    lastStars = stars
+  }
+
+  // ── the get-up meter, only while the player is down
+  if (meter !== lastMeter) {
+    if (meter === 0 && lastMeter > 0) {
+      ui_clear_rect(70, 140, 100, 7)
+    } else if (meter > 0) {
+      let w: i32 = meter
+      if (w > 100) {
+        w = 100
+      }
+      ui_rect(70, 140, w, 7, COL_METER, 1)
+      ui_rect(70 + w, 140, 100 - w, 7, COL_BG, 1)
+    }
+    lastMeter = meter
+  }
+
+  // ── digits. Sprites, and only touched when the number actually changes.
+  if (clockSec !== lastClock) {
+    let t: i32 = clockSec
+    if (t < 0) {
+      t = 0
+    }
+    let tens: i32 = 0
+    while (t >= 10) {
+      t = t - 10
+      tens = tens + 1
+    }
+    sprite_set_frame(clockTens, tens)
+    sprite_set_frame(clockOnes, t)
+    lastClock = clockSec
+  }
+  if (roundNo !== lastRound) {
+    sprite_set_frame(roundSpr, roundNo)
+    lastRound = roundNo
+  }
+  if (countN !== lastCount) {
+    if (countN === 0) {
+      sprite_set_visible(countSpr, 0)
+    } else {
+      let c: i32 = countN
+      if (c > 9) {
+        c = 0
+      }
+      sprite_set_frame(countSpr, c)
+      sprite_set_visible(countSpr, 1)
+    }
+    lastCount = countN
+  }
+}

@@ -1,0 +1,1706 @@
+// blockfall — a falling-block puzzle game, in tish, on the guideline ruleset.
+//
+// WHY IT IS NOT BUILT ON packages/grid.tish, which is the repo's cell-grid kit and the obvious
+// candidate. That kit models PACKED COLUMNS: `gridDepth` is a count, `gridCollapse` closes every gap,
+// and grid-demo's own cascade selftest read 0 until its fixture stopped leaving a hole in a column,
+// because a board with a gap is not a board that kit models. A falling-block game is the opposite —
+// an overhang and the hole under it are the entire substance of the game, the thing you are punished
+// for and the thing the AI is scored on. So the board here is its own two arrays, and the honest
+// summary is that these two examples share a genre and not a core.
+//
+// ── THE BOARD IS TWO REPRESENTATIONS, ON PURPOSE ────────────────────────────────────────────────
+//
+//   MASK   one 10-bit occupancy word per row. THE AUTHORITY for every rule and every AI candidate.
+//          Collision is `(MASK[r] >> c) & 1`, a full row is `=== 1023`, and a whole board copy for
+//          the search is 24 words instead of 384.
+//   CELLS  one colour gid per cell. Painting only. Never consulted by a rule.
+//
+// The reason is the AI. A one-ply search over ~26 placements has to copy the board per candidate;
+// at one word per cell that is 384 writes a candidate and the search cannot fit a frame at any
+// budget. At one word per ROW it is 24, and the whole surface scan below becomes bitwise.
+//
+// ── THE INDEX RULE ─────────────────────────────────────────────────────────────────────────────
+//
+// `arr[(r << 4) | c]`, never `+`. `examples/bench-grid` measured `arr[(col << 5) + row]` at 20,318
+// ticks/1000 against 1,494 for `|`: `+` is not a ToInt32 context in JS so the chain leaves the
+// integer domain, while the shift has already cleared the low bits so `|` is exactly equivalent.
+// `verify.sh` lints this file for it, because it is worth 13x and is invisible.
+//
+// ── WHAT IS AT 8 PIXELS AND WHY IT NEEDED AN ENGINE CHANGE ─────────────────────────────────────
+//
+// Every other tilemap example paints 16px cells, because that is the only thing `tilemap_set`
+// addresses — it writes the 2x2 block at `(2*col, 2*row)`. A 10x20 well is 320px tall at 16px: it
+// does not fit the screen and it does not fit the map, whose background is 32x32 hardware tiles =
+// 16x16 of those cells. `tilemap_set8` was added to `crates/tish-agb` for this example and paints one
+// hardware tile, so the well is 80x160 and the HUD gets the other 144px.
+//
+// CONTROLS  Left/Right move · Down soft drop · Up hard drop · A rotate CW · B rotate CCW ·
+//           L or R hold · Start pause (and restart after a top-out).
+//
+// ATTRACT. Touch nothing and it plays itself, with a real budgeted search rather than a heuristic.
+// Touch anything and it never plays itself again — the rule the rest of this repo holds to, and what
+// lets a headless run cover the whole game with no key schedule.
+
+import { blocks } from 'background:../assets/blocks.png'
+import { pieces } from 'sheet8:../assets/pieces.png'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  backdrop, ui_begin, ui_text, ui_clear_rect, tilemap_new, tilemap_set8, frame,
+  keys_edge, key_held, log, timer_read, frame_stats,
+  sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_visible, sprite_set_hud
+} from 'cargo:tish_agb'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+import { chipPluck, chipBlip, chipChain, chipCancel, chipAccept } from '../../../packages/chipsfx'
+import {
+  searchBegin, searchStep, searchShortlist, searchTarget, searchCand, searchDone
+} from '../../../packages/search'
+
+// ── geometry ────────────────────────────────────────────────────────────────────────────────────
+let COLS: i32 = 10
+let VIS: i32 = 20          // visible rows
+let HID: i32 = 4           // hidden rows above the well, where a piece spawns
+let ROWS: i32 = 24         // HID + VIS — the stored height
+let FULLROW: i32 = 1023    // (1 << COLS) - 1
+let RSTRIDE: i32 = 16      // row stride for CELLS; a power of two so the index can use `|`
+let MSTRIDE: i32 = 32      // row stride for MASK's two slots
+
+let WELL_X: i32 = 2        // screen tile column of board column 0
+let HUD_X: i32 = 112       // pixel x where the HUD starts
+
+let LIVE: i32 = 0          // MASK slot 0 — the real board
+let SIM: i32 = 1           // MASK slot 1 — the search's scratch board
+let AI: i32 = 0            // search slot
+
+/// THE SEARCH'S COLUMN TARGETS ARE BIASED BY TWO, AND THE BUG THAT PROVES WHY.
+///
+/// A target is a `px` — the left edge of the piece's 4x4 rotation BOX, not of the piece. A vertical I
+/// occupies box column 2 alone, so putting it in board column 0 needs `px = -2`; a T in rotation 1
+/// occupies box columns 1 and 2, so it needs -1. The first version enumerated targets 0..9 as px
+/// directly, and the result was an AI that could never place a vertical I in either of the two
+/// leftmost columns — it simply had no candidate that reached them.
+///
+/// It did not look like a bug. It looked like a weak evaluator: the stack grew a ragged, holed left
+/// edge and the AI cleared one line every five or six pieces, which is exactly what bad weights look
+/// like, and the weights were the first thing suspected. Nothing asserts that a search space COVERS
+/// the moves the game can make, and a screenshot cannot show you a move that was never considered.
+///
+/// px therefore ranges over -2..9 — TWELVE targets for ten columns, not ten. Fixing only the left
+/// end was the second version of this bug and it survived the same way: an O occupies box columns 0
+/// and 1, so reaching board column 9 needs `px = 8`, which a 0..9 target set also cannot express.
+/// The out-of-range targets cost nothing, because `simDrop` rejects a placement before it copies the
+/// board.
+///
+/// `selftestReach` is the assertion this needed: for every piece, every rotation and every column,
+/// some target must produce a legal placement covering that column.
+let PXBIAS: i32 = 2
+let NTARGETS: i32 = 12
+
+// tileset gids, in the order scripts/gen_blockfall.py writes them
+let T_VOID: i32 = 1
+let T_PIECE0: i32 = 2      // piece p -> gid T_PIECE0 + p
+let T_GARBAGE: i32 = 9
+let T_WALL: i32 = 10
+let T_GHOST: i32 = 11
+let T_FLASH: i32 = 12
+
+// phases
+let PH_PLAY: i32 = 0
+let PH_FLASH: i32 = 1
+let PH_OVER: i32 = 2
+let PH_PAUSE: i32 = 3
+
+// button bits from keys_edge()
+let K_A: i32 = 1
+let K_B: i32 = 2
+let K_START: i32 = 8
+let K_L: i32 = 16
+let K_R: i32 = 32
+let K_UP: i32 = 64
+let K_DOWN: i32 = 128
+let K_LEFT: i32 = 256
+let K_RIGHT: i32 = 512
+// key_held() codes are the bit INDICES, not the bits.
+let C_DOWN: i32 = 7
+let C_LEFT: i32 = 8
+let C_RIGHT: i32 = 9
+
+// feel
+let DAS_DELAY: i32 = 12
+let DAS_REPEAT: i32 = 3
+let LOCK_DELAY: i32 = 24
+let LOCK_RESETS: i32 = 15
+let FLASH_FRAMES: i32 = 18
+let SOFT_FRAMES: i32 = 2
+
+// ── state ───────────────────────────────────────────────────────────────────────────────────────
+let MASK: i32[] = []       // 2 slots x 32 rows, index (slot << 5) | row
+let CELLS: i32[] = []      // 24 x 16, index (row << 4) | col
+let SHADOW: i32[] = []     // what each screen tile currently shows, index (y << 5) | x
+let TOPS: i32[] = []       // 2 slots x 16, the topmost occupied row per column (ROWS if empty)
+let POP: i32[] = []        // popcount of a 10-bit row mask — the surface scan is bitwise
+let BITCOL: i32[] = []     // an isolated bit -> its column index
+let SHAPES: i32[] = []     // 7 x 4 x 4 cells, each packed (y << 2) | x
+let PBOT: i32[] = []       // per (piece, rot, box column) the LOWEST cell's dy, or -1 if unused
+let PBOX: i32[] = []       // each piece's rotation box size
+let KICKS: i32[] = []      // SRS offsets, 8 transitions x 8 slots (5 used)
+let GRAV: i32[] = []       // frames per row, by level
+let QUEUE: i32[] = []      // the current piece plus the next three
+let BAG: i32[] = []        // the 7-bag
+let FLASHR: i32[] = []     // rows currently flashing
+let SPR: i32[] = []        // 8 sprite handles: 0-3 the ghost, 4-7 the falling piece
+let SHOWN: i32[] = []      // which piece each of the four preview boxes currently displays
+let HUDK: i32[] = []       // the value each HUD field currently displays
+
+interface Game {
+  piece: i32, rot: i32, px: i32, py: i32, ghost: i32,
+  hold: i32, holdUsed: i32, bagI: i32,
+  fall: i32, lock: i32, resets: i32, das: i32, dasDir: i32, soft: i32,
+  score: i32, lines: i32, level: i32, combo: i32, pieces: i32,
+  lastRot: i32, tspin: i32, spins: i32, quads: i32,
+  phase: i32, wait: i32, t: i32, human: i32, games: i32,
+  ovKey: i32, qslot: i32, overPainted: i32,
+  thinking: i32, planned: i32, want: i32, wantRot: i32, plans: i32,
+  peak: i32, spent: i32, frames: i32
+}
+let G: Game = {
+  piece: 0, rot: 0, px: 3, py: 2, ghost: 2,
+  hold: -1, holdUsed: 0, bagI: 7,
+  fall: 0, lock: 0, resets: 0, das: 0, dasDir: 0, soft: 0,
+  score: 0, lines: 0, level: 0, combo: 0, pieces: 0,
+  lastRot: 0, tspin: 0, spins: 0, quads: 0,
+  phase: 0, wait: 0, t: 0, human: 0, games: 0,
+  ovKey: -1, qslot: 0, overPainted: 0,
+  thinking: 0, planned: 0, want: -1, wantRot: 0, plans: 0,
+  peak: 0, spent: 0, frames: 0
+}
+
+// Surface features, written by scanBoard and read straight afterwards. Module globals rather than a
+// returned struct: a struct return boxes, and this runs once per AI candidate.
+let FT_AGG: i32 = 0
+let FT_HOLES: i32 = 0
+let FT_BUMP: i32 = 0
+// The topmost occupied row of the live board, and of the placement being simulated. Together they
+// bound the surface scan — see scanBoard.
+let LIVE_TOP: i32 = 0
+let SIM_LO: i32 = 0
+
+// ── tables ──────────────────────────────────────────────────────────────────────────────────────
+let i: i32 = 0
+while (i < 2 * MSTRIDE) { MASK.push(0) i = i + 1 }
+i = 0
+while (i < ROWS * RSTRIDE) { CELLS.push(0) i = i + 1 }
+i = 0
+while (i < 32 * 20) { SHADOW.push(0 - 1) i = i + 1 }
+i = 0
+while (i < 2 * RSTRIDE) { TOPS.push(ROWS) i = i + 1 }
+i = 0
+while (i < 4) { FLASHR.push(0 - 1) i = i + 1 }
+i = 0
+while (i < 4) { QUEUE.push(0) SHOWN.push(0 - 2) i = i + 1 }
+i = 0
+while (i < 5) { HUDK.push(0 - 2) i = i + 1 }
+i = 0
+while (i < 7) { BAG.push(0) i = i + 1 }
+
+// popcount, and the inverse of "isolate the lowest set bit". Two small tables buy a bitwise surface
+// scan: one pass over 24 row words instead of 240 per-cell reads, which is what makes a one-ply
+// search over 26 candidates fit inside a frame at all.
+i = 0
+while (i <= FULLROW) {
+  let n: i32 = 0
+  let v: i32 = i
+  while (v !== 0) {
+    n = n + (v & 1)
+    v = v >> 1
+  }
+  POP.push(n)
+  i = i + 1
+}
+i = 0
+while (i <= 512) { BITCOL.push(0) i = i + 1 }
+i = 0
+while (i < COLS) {
+  BITCOL[1 << i] = i
+  i = i + 1
+}
+
+// Frames per row, by level: the classic curve, flattening to one row per frame. Index is clamped.
+GRAV.push(48) GRAV.push(43) GRAV.push(38) GRAV.push(33) GRAV.push(28)
+GRAV.push(23) GRAV.push(18) GRAV.push(13) GRAV.push(8) GRAV.push(6)
+GRAV.push(5) GRAV.push(5) GRAV.push(5) GRAV.push(4) GRAV.push(4)
+GRAV.push(4) GRAV.push(3) GRAV.push(3) GRAV.push(3) GRAV.push(2)
+GRAV.push(2) GRAV.push(2) GRAV.push(2) GRAV.push(2) GRAV.push(1)
+
+// THE ROTATIONS ARE GENERATED, NOT TYPED. Seven pieces x four rotations x four cells is 112 numbers,
+// and a single transposed digit in that table is completely silent: the piece simply has a shape
+// nobody intended, in one rotation, and it plays. So only the spawn state is written down — in the
+// standard I O T S Z J L order, which is also the order gen_blockfall.py bakes the colours — and the
+// other three come from one rotation formula whose correctness the `rotcells` selftest checks.
+//
+// A cell is packed `(y << 2) | x` inside a box of side PBOX: 4 for I, 2 for O (which is why O is
+// rotation-invariant without a special case), 3 for the rest. That box is the SRS convention and it
+// is what makes the kick tables below the published ones rather than something hand-tuned.
+PBOX.push(4) PBOX.push(2) PBOX.push(3) PBOX.push(3) PBOX.push(3) PBOX.push(3) PBOX.push(3)
+let R0: i32[] = []
+// I  . . . .    O  # #     T  . # .     S  . # #     Z  # # .     J  # . .     L  . . #
+//    # # # #       # #        # # #        # # .        . # #        # # #        # # #
+R0.push(4) R0.push(5) R0.push(6) R0.push(7)          // I
+R0.push(0) R0.push(1) R0.push(4) R0.push(5)          // O
+R0.push(1) R0.push(4) R0.push(5) R0.push(6)          // T
+R0.push(1) R0.push(2) R0.push(4) R0.push(5)          // S
+R0.push(0) R0.push(1) R0.push(5) R0.push(6)          // Z
+R0.push(0) R0.push(4) R0.push(5) R0.push(6)          // J
+R0.push(2) R0.push(4) R0.push(5) R0.push(6)          // L
+
+i = 0
+while (i < 7 * 4 * 4) { SHAPES.push(0) i = i + 1 }
+i = 0
+while (i < 7 * 4 * 4) { PBOT.push(0 - 1) i = i + 1 }
+let p: i32 = 0
+while (p < 7) {
+  let n: i32 = PBOX[p]
+  let c: i32 = 0
+  while (c < 4) {
+    SHAPES[((p << 2) << 2) | c] = R0[(p << 2) | c]
+    c = c + 1
+  }
+  // CW inside the box: (x, y) -> (n-1-y, x). Applied three times, so r3 is r0 rotated CCW and the
+  // set is closed by construction.
+  let r: i32 = 1
+  while (r < 4) {
+    let src: i32 = ((p << 2) | (r - 1)) << 2
+    let dst: i32 = ((p << 2) | r) << 2
+    c = 0
+    while (c < 4) {
+      let cell: i32 = SHAPES[src | c]
+      let x: i32 = cell & 3
+      let y: i32 = cell >> 2
+      SHAPES[dst | c] = ((x) << 2) | (n - 1 - y)
+      c = c + 1
+    }
+    r = r + 1
+  }
+  // The bottom profile: per box column, the lowest cell's dy. The AI lands a piece from this and the
+  // column tops alone, with no drop loop — the difference between a 40-iteration descent per
+  // candidate and a handful of subtractions.
+  r = 0
+  while (r < 4) {
+    let base: i32 = ((p << 2) | r) << 2
+    c = 0
+    while (c < 4) {
+      let cell: i32 = SHAPES[base | c]
+      let x: i32 = cell & 3
+      let y: i32 = cell >> 2
+      if (y > PBOT[base | x]) { PBOT[base | x] = y }
+      c = c + 1
+    }
+    r = r + 1
+  }
+  p = p + 1
+}
+
+// SRS wall kicks, verbatim from the published tables and then negated in y, because SRS is written
+// with y pointing UP and every row index in this file points down. Five offsets are tried in order;
+// the first that fits wins, and if none do the rotation is refused.
+//
+// Rows are indexed `(fromRotation << 1) | direction`, direction 0 = clockwise, and each row is eight
+// slots wide with five used — a power-of-two stride so the index packs with `|`.
+function kickRow(row: i32, a: i32, b: i32, c: i32, d: i32, e: i32) {
+  KICKS[(row << 3) | 0] = a
+  KICKS[(row << 3) | 1] = b
+  KICKS[(row << 3) | 2] = c
+  KICKS[(row << 3) | 3] = d
+  KICKS[(row << 3) | 4] = e
+}
+// dx, dy packed as ((dx + 2) << 3) | (dy + 2); dy already flipped into screen space.
+function ko(dx: i32, dy: i32): i32 { return ((dx + 2) << 3) | (dy + 2) }
+
+let EMPTY: i32[] = []
+i = 0
+while (i < 2 * 8 * 8) { KICKS.push(ko(0, 0)) i = i + 1 }
+let KICK_I: i32 = 8        // the I piece's table starts at row 8
+
+// J L S T Z. 0>1 means "from spawn, clockwise".
+kickRow(0, ko(0, 0), ko(0 - 1, 0), ko(0 - 1, 0 - 1), ko(0, 2), ko(0 - 1, 2))       // 0>1
+kickRow(1, ko(0, 0), ko(1, 0), ko(1, 0 - 1), ko(0, 2), ko(1, 2))                   // 0>3
+kickRow(2, ko(0, 0), ko(1, 0), ko(1, 1), ko(0, 0 - 2), ko(1, 0 - 2))               // 1>2
+kickRow(3, ko(0, 0), ko(1, 0), ko(1, 1), ko(0, 0 - 2), ko(1, 0 - 2))               // 1>0
+kickRow(4, ko(0, 0), ko(1, 0), ko(1, 0 - 1), ko(0, 2), ko(1, 2))                   // 2>3
+kickRow(5, ko(0, 0), ko(0 - 1, 0), ko(0 - 1, 0 - 1), ko(0, 2), ko(0 - 1, 2))       // 2>1
+kickRow(6, ko(0, 0), ko(0 - 1, 0), ko(0 - 1, 1), ko(0, 0 - 2), ko(0 - 1, 0 - 2))   // 3>0
+kickRow(7, ko(0, 0), ko(0 - 1, 0), ko(0 - 1, 1), ko(0, 0 - 2), ko(0 - 1, 0 - 2))   // 3>2
+// I, whose kicks are two cells wide and are the reason it has a table of its own.
+kickRow(8, ko(0, 0), ko(0 - 2, 0), ko(1, 0), ko(0 - 2, 1), ko(1, 0 - 2))           // 0>1
+kickRow(9, ko(0, 0), ko(0 - 1, 0), ko(2, 0), ko(0 - 1, 0 - 2), ko(2, 1))           // 0>3
+kickRow(10, ko(0, 0), ko(0 - 1, 0), ko(2, 0), ko(0 - 1, 0 - 2), ko(2, 1))          // 1>2
+kickRow(11, ko(0, 0), ko(2, 0), ko(0 - 1, 0), ko(2, 0 - 1), ko(0 - 1, 2))          // 1>0
+kickRow(12, ko(0, 0), ko(2, 0), ko(0 - 1, 0), ko(2, 0 - 1), ko(0 - 1, 2))          // 2>3
+kickRow(13, ko(0, 0), ko(1, 0), ko(0 - 2, 0), ko(1, 2), ko(0 - 2, 0 - 1))          // 2>1
+kickRow(14, ko(0, 0), ko(1, 0), ko(0 - 2, 0), ko(1, 2), ko(0 - 2, 0 - 1))          // 3>0
+kickRow(15, ko(0, 0), ko(0 - 2, 0), ko(1, 0), ko(0 - 2, 1), ko(1, 0 - 2))          // 3>2
+
+// ── board primitives ────────────────────────────────────────────────────────────────────────────
+// No function calls inside a per-cell loop anywhere below: a user tish call has no native ABI on GBA
+// and costs several ticks, and these run per AI candidate.
+
+function collide(slot: i32, piece: i32, rot: i32, px: i32, py: i32): i32 {
+  let base: i32 = ((piece << 2) | rot) << 2
+  let sb: i32 = slot << 5
+  let c: i32 = 0
+  while (c < 4) {
+    let cell: i32 = SHAPES[base | c]
+    let cx: i32 = px + (cell & 3)
+    let cy: i32 = py + (cell >> 2)
+    if (cx < 0) { return 1 }
+    if (cx >= COLS) { return 1 }
+    if (cy >= ROWS) { return 1 }
+    if (cy >= 0) {
+      if (((MASK[sb | cy] >> cx) & 1) !== 0) { return 1 }
+    }
+    c = c + 1
+  }
+  return 0
+}
+
+/// Where the current piece would come to rest. Also the ghost.
+/// Where the current piece would come to rest — the ghost, and where a hard drop lands.
+///
+/// ⚠️ THIS WAS A 20-STEP DESCENT AND IT COST AS MUCH AS THE WHOLE AI. The obvious implementation
+/// walks down one row at a time calling `collide`, and it is called from `tryMove` and `tryRotate` —
+/// so once per frame while the attract player slides a piece across the board, and once per player
+/// input. On a nearly empty well that is twenty boxed calls of four array reads each, and
+/// `frame_stats` showed it: a periodic spike of six frames' worth of ticks and ~12% of frames dropped,
+/// on a game whose AI was comfortably inside its budget. Nothing about the symptom pointed here — the
+/// AI was instrumented and the ghost was not, so the search took the blame twice.
+///
+/// So the descent starts from the answer instead of looking for it: the piece's bottom profile resting
+/// on the column tops, exactly as `simDrop` computes it for the search. That is exact whenever the
+/// piece is above the stack, which is almost always.
+///
+/// The walk is still here, and it is not redundant. A piece inside a pocket — slid under an overhang,
+/// or kicked there by a rotation — has a true rest position BELOW what the column tops describe, and
+/// for it the profile answer is above the piece and meaningless. Clamping to the current row and
+/// walking from there is correct in both cases, and in the common one the loop runs zero times.
+function restRow(): i32 {
+  let base: i32 = ((G.piece << 2) | G.rot) << 2
+  let y: i32 = ROWS
+  let dx: i32 = 0
+  while (dx < 4) {
+    let bot: i32 = PBOT[base | dx]
+    if (bot >= 0) {
+      let cx: i32 = G.px + dx
+      if (cx >= 0 && cx < COLS) {
+        let cand: i32 = TOPS[cx] - 1 - bot
+        if (cand < y) { y = cand }
+      }
+    }
+    dx = dx + 1
+  }
+  if (y < G.py) { y = G.py }
+  while (collide(LIVE, G.piece, G.rot, G.px, y + 1) === 0) { y = y + 1 }
+  return y
+}
+
+/// The whole surface, in one bitwise pass over the row words.
+///
+/// The naive version is three loops of 10 columns x 24 rows. This is 24 iterations of two table
+/// reads, because a row word already IS the answer: OR it into `seen` and `POP[seen]` is the number
+/// of columns that have started, so summing that over rows gives the aggregate height; and
+/// `POP[seen & ~row]` is the number of columns that have started but are empty HERE, which is the
+/// definition of a hole. Writes FT_AGG / FT_HOLES / FT_BUMP and the slot's column tops.
+///
+/// `from` is the first row that can possibly hold anything. Every row above the stack contributes
+/// exactly nothing — `seen` is still 0, so both popcounts are 0 — so scanning them is pure waste, and
+/// on an empty-ish board that is most of the board. This is the difference between a search that
+/// spends a whole frame per candidate and one that does not; the caller passes a lower bound and
+/// being wrong only costs speed, never correctness.
+function scanBoard(slot: i32, from: i32) {
+  let sb: i32 = slot << 5
+  let tb: i32 = slot << 4
+  let c: i32 = 0
+  while (c < COLS) {
+    TOPS[tb | c] = ROWS
+    c = c + 1
+  }
+  let seen: i32 = 0
+  let agg: i32 = 0
+  let holes: i32 = 0
+  let r: i32 = from
+  if (r < 0) { r = 0 }
+  while (r < ROWS) {
+    let row: i32 = MASK[sb | r]
+    let fresh: i32 = row & (0 - 1 - seen)
+    seen = seen | row
+    agg = agg + POP[seen]
+    holes = holes + POP[seen & (FULLROW - (row & FULLROW))]
+    // At most ten bits are ever fresh across the whole pass, so this inner loop runs ten times in
+    // total rather than per row.
+    while (fresh !== 0) {
+      let bit: i32 = fresh & (0 - fresh)
+      TOPS[tb | BITCOL[bit]] = r
+      fresh = fresh ^ bit
+    }
+    r = r + 1
+  }
+  let bump: i32 = 0
+  c = 0
+  while (c < COLS - 1) {
+    let d: i32 = TOPS[tb | c] - TOPS[tb | (c + 1)]
+    if (d < 0) { d = 0 - d }
+    bump = bump + d
+    c = c + 1
+  }
+  FT_AGG = agg
+  FT_HOLES = holes
+  FT_BUMP = bump
+}
+
+/// Rescan the live board and remember where its stack starts, so every candidate the search
+/// evaluates can skip the empty rows above it.
+function rescanLive() {
+  scanBoard(LIVE, 0)
+  let top: i32 = ROWS
+  let c: i32 = 0
+  while (c < COLS) {
+    if (TOPS[c] < top) { top = TOPS[c] }
+    c = c + 1
+  }
+  LIVE_TOP = top
+}
+
+// ── the bag ─────────────────────────────────────────────────────────────────────────────────────
+/// A 7-bag: every piece appears once per seven draws. The reason it is not `rngBelow(7)` is the same
+/// reason every modern implementation uses it — uniform random deals four S/Z in a row often enough
+/// to be unplayable, and an attract-mode AI that dies to the deal proves nothing about the AI.
+function drawBag(): i32 {
+  if (G.bagI >= 7) {
+    let k: i32 = 0
+    while (k < 7) {
+      BAG[k] = k
+      k = k + 1
+    }
+    k = 6
+    while (k > 0) {
+      let j: i32 = rngBelow(0, k + 1)
+      let tmp: i32 = BAG[k]
+      BAG[k] = BAG[j]
+      BAG[j] = tmp
+      k = k - 1
+    }
+    G.bagI = 0
+  }
+  let out: i32 = BAG[G.bagI]
+  G.bagI = G.bagI + 1
+  return out
+}
+
+// ── painting ────────────────────────────────────────────────────────────────────────────────────
+// `w = h = 0` skips tilemap_new's own paint loop — every tile here is written by tilemap_set8 — but
+// still uploads the tileset's palettes and sets the backdrop, which is the part that is needed.
+let BG: i32 = tilemap_new(blocks, 6, 0, 0, EMPTY, 2)
+// AFTER tilemap_new, which rewrites all sixteen background palettes and re-derives the backdrop from
+// the tileset. Setting it first looks like it works and is silently undone.
+backdrop(0x08080e)
+ui_begin()
+
+// Eight sprites, made once and then only ever moved. The ghost frame is the last one in the sheet and
+// never changes; the piece's frame follows the piece. `sprite_set_hud` puts them in SCREEN space —
+// `sprite_set_pos` is world coordinates otherwise, and this game has no camera.
+let sp: i32 = 0
+while (sp < 8) {
+  let h: i32 = sprite_new(pieces)
+  sprite_set_hud(h, 1)
+  sprite_set_visible(h, 0)
+  if (sp < 4) { sprite_set_frame(h, 7) }
+  SPR.push(h)
+  sp = sp + 1
+}
+
+/// One screen tile, gated on what is already there. The gate is the whole paint budget: a settled
+/// frame writes nothing, and a moving piece writes at most sixteen tiles.
+function putTile(x: i32, y: i32, g: i32) {
+  let idx: i32 = (y << 5) | x
+  if (SHADOW[idx] === g) { return }
+  SHADOW[idx] = g
+  tilemap_set8(BG, blocks, x, y, g)
+}
+
+function paintWalls() {
+  let y: i32 = 0
+  while (y < VIS) {
+    putTile(WELL_X - 1, y, T_WALL)
+    putTile(WELL_X + COLS, y, T_WALL)
+    y = y + 1
+  }
+}
+
+/// Repaint board rows `from`..`to` (stored row indices) from CELLS.
+function paintRows(from: i32, to: i32) {
+  let r: i32 = from
+  if (r < HID) { r = HID }
+  while (r <= to) {
+    if (r >= ROWS) { return }
+    let y: i32 = r - HID
+    let c: i32 = 0
+    while (c < COLS) {
+      let g: i32 = CELLS[(r << 4) | c]
+      if (g === 0) { g = T_VOID }
+      putTile(WELL_X + c, y, g)
+      c = c + 1
+    }
+    r = r + 1
+  }
+}
+
+function paintBoard() { paintRows(HID, ROWS - 1) }
+
+/// The active piece and its ghost, as an overlay over the board tiles.
+///
+/// CHANGE-GATED ON A POSITION KEY, not redrawn every frame. Restoring eight cells and re-stamping
+/// eight is sixteen tilemap writes, each a context crossing; doing that on a frame where nothing
+/// moved is the commonest way a puzzle game spends its budget on a static picture.
+/// The falling piece and its ghost — EIGHT SPRITES, not tilemap writes.
+///
+/// ⚠️ THIS IS THE ONE PERFORMANCE DECISION THE GAME ACTUALLY TURNS ON, and it was measured rather
+/// than assumed. As tiles, a piece plus its ghost is eight cells that have to be erased back to the
+/// board and eight redrawn — and a `tilemap_set8` costs about 310 ticks on device (a boxed native
+/// call with five arguments, plus agb's own per-tile work). Sixteen of those is 4,952 ticks against a
+/// 4,389-tick frame, so EVERY HORIZONTAL MOVE DROPPED A FRAME, before the rules or the AI ran at all.
+/// `frame_stats` reported ~8% of frames dropped and the search was blamed twice.
+///
+/// A sprite moves by writing its position: four `sprite_set_pos` calls for the piece, four for the
+/// ghost, no erase pass at all, and roughly a fifth of the cost. It is also simply what the hardware
+/// is for — the stack is static and belongs in a tilemap, the falling piece is a moving object and
+/// belongs in OAM. Both draw the same art (`scripts/gen_blockfall.py` bakes one from the other), so
+/// the handover at the instant of a lock is invisible.
+function paintPiece() {
+  let key: i32 = ((((G.px + 4) * 32 + G.py) * 4 + G.rot) * 8 + G.piece) * 32 + G.ghost
+  if (G.phase !== PH_PLAY) { key = 0 - 2 }
+  if (key === G.ovKey) { return }
+  G.ovKey = key
+  if (G.phase !== PH_PLAY) {
+    // Hidden rather than moved off-screen: an OBJ parked outside the view still costs OAM bandwidth.
+    let h: i32 = 0
+    while (h < 8) {
+      sprite_set_visible(SPR[h], 0)
+      h = h + 1
+    }
+    return
+  }
+  let base: i32 = ((G.piece << 2) | G.rot) << 2
+  let c: i32 = 0
+  while (c < 4) {
+    let cell: i32 = SHAPES[base | c]
+    let x: i32 = (WELL_X + G.px + (cell & 3)) << 3
+    // The ghost, in the low four slots.
+    let gy: i32 = G.ghost + (cell >> 2)
+    if (gy >= HID) {
+      sprite_set_visible(SPR[c], 1)
+      sprite_set_pos(SPR[c], x, (gy - HID) << 3)
+    } else {
+      sprite_set_visible(SPR[c], 0)
+    }
+    // The piece itself, in the high four, drawn after so it wins where they overlap.
+    let py: i32 = G.py + (cell >> 2)
+    if (py >= HID) {
+      sprite_set_visible(SPR[4 | c], 1)
+      sprite_set_frame(SPR[4 | c], G.piece)
+      sprite_set_pos(SPR[4 | c], x, (py - HID) << 3)
+    } else {
+      sprite_set_visible(SPR[4 | c], 0)
+    }
+    c = c + 1
+  }
+}
+
+/// A 4x2 tile preview box at (tx, ty). `piece` of -1 clears it.
+function paintPreview(tx: i32, ty: i32, piece: i32) {
+  let y: i32 = 0
+  while (y < 2) {
+    let x: i32 = 0
+    while (x < 4) {
+      putTile(tx + x, ty + y, 0)
+      x = x + 1
+    }
+    y = y + 1
+  }
+  if (piece < 0) { return }
+  let base: i32 = (piece << 2) << 2
+  let c: i32 = 0
+  while (c < 4) {
+    let cell: i32 = SHAPES[base | c]
+    putTile(tx + (cell & 3), ty + (cell >> 2), T_PIECE0 + piece)
+    c = c + 1
+  }
+}
+
+/// The hold box and the next three, gated on their contents.
+/// The hold box and the next three — AT MOST ONE OF THEM PER FRAME, round-robin.
+///
+/// ⚠️ A TILEMAP WRITE COSTS ~250-300 TICKS AND THAT IS THE REAL BUDGET OF THIS GAME. `tilemap_set8` is
+/// a boxed native call with five arguments — roughly 42 ticks of call plus 28 per boxed argument — and
+/// `putTile` wraps it in another. So the number that matters is not how much work the rules do, it is
+/// how many tiles change.
+///
+/// This function repainted all four previews on the frame the queue shifted, which is once per piece:
+/// four boxes of twelve tiles is 14,500 ticks, or three and a half frames, measured. The AI was under
+/// 2,600 the whole time. `frame_stats` reported ~8% of frames dropped and three separate guesses at
+/// the cause — the search, the clear's collapse, the logging — were all wrong, because a periodic
+/// spike that happens once per piece looks like whatever else happens once per piece.
+///
+/// One slot per frame costs a quarter of that and the queue is still fully repainted within four
+/// frames, which nobody can see. `SHOWN` is what each slot currently displays, so a slot that did not
+/// change is a single comparison.
+function paintQueue() {
+  let slot: i32 = G.qslot
+  G.qslot = (slot + 1) & 3
+  let want: i32 = G.hold
+  if (slot > 0) { want = QUEUE[slot] }
+  if (SHOWN[slot] === want) { return }
+  SHOWN[slot] = want
+  let ty: i32 = 9
+  if (slot > 0) { ty = 11 + slot * 2 }
+  paintPreview(15, ty, want)
+}
+
+/// CHANGE-GATED. Eight `ui_text` calls is glyph shaping plus a tile blit each; grid-demo measured
+/// roughly a third of its frame rate going to an ungated HUD, and blamed its AI first.
+/// One HUD FIELD, gated on its own value.
+///
+/// ⚠️ ONE GATE FOR THE WHOLE HUD IS NOT ENOUGH, and the difference is a dropped frame per row of a
+/// soft drop. `ui_text` is glyph shaping plus a tile blit, and five of them behind one composite key
+/// measured 3,680 ticks — so every change to ANY field repainted all of them. Score changes every row
+/// while the player holds down, which put 3,680 + the piece's 780 over a 4,389-tick frame and dropped
+/// one frame in two for as long as the key was held. Per-field, a score change costs a clear and one
+/// `ui_text`.
+///
+/// grid-demo's HUD is a single composite key and this is the same lesson one step further on: it
+/// found that an ungated HUD costs a third of the frame rate, and stopped there because nothing in it
+/// changes every frame.
+function hudField(slot: i32, y: i32, text: string, colour: i32, value: i32) {
+  if (HUDK[slot] === value) { return }
+  HUDK[slot] = value
+  // ⚠️ EXACTLY ONE TILE ROW, and the fields are spaced eight pixels for the same reason.
+  // `ui_clear_rect` blanks every whole 8x8 tile the rectangle touches, so fields nine pixels apart
+  // share a tile row and repainting the score erases the top of the line count.
+  ui_clear_rect(HUD_X, y, 128, 8)
+  if (value === 0 - 1) { return }
+  ui_text(body, HUD_X + 2, y, text, colour)
+}
+
+function paintHud() {
+  hudField(0, 8, "SCORE " + G.score, 0xF0E060, G.score)
+  hudField(1, 16, "LINES " + G.lines, 0xC8C8D8, G.lines)
+  hudField(2, 24, "LEVEL " + G.level, 0x70D0F0, G.level)
+  let combo: i32 = 0 - 1
+  if (G.combo > 1) { combo = G.combo }
+  hudField(3, 32, "COMBO " + combo, 0x50D070, combo)
+  let paused: i32 = 0 - 1
+  if (G.phase === PH_PAUSE) { paused = 1 }
+  hudField(4, 40, "PAUSED", 0xF08040, paused)
+}
+
+/// The one thing drawn over the well: the top-out banner. Only ever painted on a phase change, and
+/// the well is cleared underneath it so the stack does not read through the text.
+function paintOver() {
+  if (G.overPainted !== 0) { return }
+  G.overPainted = 1
+  ui_clear_rect(8, 60, 96, 32)
+  ui_text(body, 18, 64, "GAME OVER", 0xF04040)
+  ui_text(body, 12, 76, "START to retry", 0xC8C8D8)
+}
+
+// ── the rules ───────────────────────────────────────────────────────────────────────────────────
+function refreshGhost() { G.ghost = restRow() }
+
+function spawn() {
+  G.piece = QUEUE[0]
+  QUEUE[0] = QUEUE[1]
+  QUEUE[1] = QUEUE[2]
+  QUEUE[2] = QUEUE[3]
+  QUEUE[3] = drawBag()
+  G.rot = 0
+  G.px = 3
+  if (PBOX[G.piece] === 2) { G.px = 4 }
+  G.py = HID - 2
+  G.fall = 0
+  G.lock = 0
+  G.resets = 0
+  G.holdUsed = 0
+  G.lastRot = 0
+  G.tspin = 0
+  G.thinking = 0
+  G.planned = 0
+  // TOP-OUT. The spawn box overlapping the stack is the loss condition, and it is checked here
+  // rather than at the ceiling row: a stack that reaches row HID is still legal to play on, and a
+  // game that ends there ends one row early.
+  if (collide(LIVE, G.piece, G.rot, G.px, G.py) !== 0) {
+    G.phase = PH_OVER
+    chipCancel()
+    log("GAMEOVER score " + G.score + " lines " + G.lines + " level " + G.level
+      + " pieces " + G.pieces + " spins " + G.spins + " quads " + G.quads)
+    return
+  }
+  refreshGhost()
+}
+
+function tryMove(dx: i32): i32 {
+  if (collide(LIVE, G.piece, G.rot, G.px + dx, G.py) !== 0) { return 0 }
+  G.px = G.px + dx
+  G.lastRot = 0
+  refreshGhost()
+  if (G.lock > 0 && G.resets < LOCK_RESETS) {
+    G.lock = 0
+    G.resets = G.resets + 1
+  }
+  return 1
+}
+
+/// SRS rotation. `dir` 0 = clockwise.
+function tryRotate(dir: i32): i32 {
+  let nr: i32 = (G.rot + 1) & 3
+  if (dir !== 0) { nr = (G.rot + 3) & 3 }
+  let row: i32 = (G.rot << 1) | dir
+  if (G.piece === 0) { row = KICK_I + row }
+  let k: i32 = 0
+  while (k < 5) {
+    let off: i32 = KICKS[(row << 3) | k]
+    let dx: i32 = (off >> 3) - 2
+    let dy: i32 = (off & 7) - 2
+    if (collide(LIVE, G.piece, nr, G.px + dx, G.py + dy) === 0) {
+      G.rot = nr
+      G.px = G.px + dx
+      G.py = G.py + dy
+      G.lastRot = 1
+      if (k > 0) { G.lastRot = 2 }
+      refreshGhost()
+      if (G.lock > 0 && G.resets < LOCK_RESETS) {
+        G.lock = 0
+        G.resets = G.resets + 1
+      }
+      return 1
+    }
+    k = k + 1
+  }
+  return 0
+}
+
+/// The three-corner rule: a T that arrived by rotation with three of its box's corners filled did
+/// something no drop could have done. Walls and the floor count as filled, which is what makes a
+/// spin in the corner of the well detectable at all.
+function isTspin(): i32 {
+  if (G.piece !== 2) { return 0 }
+  if (G.lastRot === 0) { return 0 }
+  let n: i32 = 0
+  let dy: i32 = 0
+  while (dy <= 2) {
+    let dx: i32 = 0
+    while (dx <= 2) {
+      let cx: i32 = G.px + dx
+      let cy: i32 = G.py + dy
+      let filled: i32 = 0
+      if (cx < 0) { filled = 1 }
+      if (cx >= COLS) { filled = 1 }
+      if (cy >= ROWS) { filled = 1 }
+      if (filled === 0 && cy >= 0) {
+        if (((MASK[cy] >> cx) & 1) !== 0) { filled = 1 }
+      }
+      n = n + filled
+      dx = dx + 2
+    }
+    dy = dy + 2
+  }
+  if (n >= 3) { return 1 }
+  return 0
+}
+
+function hold() {
+  if (G.holdUsed !== 0) { return }
+  let swap: i32 = G.hold
+  G.hold = G.piece
+  if (swap < 0) {
+    G.piece = QUEUE[0]
+    QUEUE[0] = QUEUE[1]
+    QUEUE[1] = QUEUE[2]
+    QUEUE[2] = QUEUE[3]
+    QUEUE[3] = drawBag()
+  } else {
+    G.piece = swap
+  }
+  G.rot = 0
+  G.px = 3
+  if (PBOX[G.piece] === 2) { G.px = 4 }
+  G.py = HID - 2
+  G.lock = 0
+  G.resets = 0
+  G.holdUsed = 1
+  G.lastRot = 0
+  G.thinking = 0
+  G.planned = 0
+  chipAccept()
+  refreshGhost()
+}
+
+/// Commit the piece to the board and decide what happens next.
+function lockPiece() {
+  let spin: i32 = isTspin()
+  let base: i32 = ((G.piece << 2) | G.rot) << 2
+  let lo: i32 = ROWS
+  let hi: i32 = 0
+  let gid: i32 = T_PIECE0 + G.piece
+  let c: i32 = 0
+  while (c < 4) {
+    let cell: i32 = SHAPES[base | c]
+    let cx: i32 = G.px + (cell & 3)
+    let cy: i32 = G.py + (cell >> 2)
+    if (cy >= 0) {
+      MASK[cy] = MASK[cy] | (1 << cx)
+      CELLS[(cy << 4) | cx] = gid
+      if (cy < lo) { lo = cy }
+      if (cy > hi) { hi = cy }
+    }
+    c = c + 1
+  }
+  G.pieces = G.pieces + 1
+  G.tspin = spin
+  chipPluck()
+  // Which of the touched rows are full. At most four, so there is no reason to scan the board.
+  let n: i32 = 0
+  let r: i32 = lo
+  while (r <= hi) {
+    if ((MASK[r] & FULLROW) === FULLROW) {
+      FLASHR[n] = r
+      n = n + 1
+    }
+    r = r + 1
+  }
+  if (n > 0) {
+    G.phase = PH_FLASH
+    G.wait = 0
+    let k: i32 = 0
+    while (k < n) {
+      let fr: i32 = FLASHR[k]
+      let cc: i32 = 0
+      while (cc < COLS) {
+        CELLS[(fr << 4) | cc] = T_FLASH
+        cc = cc + 1
+      }
+      k = k + 1
+    }
+    while (n < 4) {
+      FLASHR[n] = 0 - 1
+      n = n + 1
+    }
+    paintRows(lo, hi)
+    return
+  }
+  G.combo = 0
+  rescanLive()
+  // Only the four cells that changed, not the rows they sit in. `paintRows` walks ten tiles a row and
+  // even a shadow-gated no-op is a function call; four writes is four writes.
+  let pc: i32 = 0
+  while (pc < 4) {
+    let cell: i32 = SHAPES[base | pc]
+    let cy: i32 = G.py + (cell >> 2)
+    if (cy >= HID) { putTile(WELL_X + G.px + (cell & 3), cy - HID, gid) }
+    pc = pc + 1
+  }
+  spawn()
+}
+
+/// Remove the flashing rows, pay for them, and deal the next piece.
+function resolveClear() {
+  let n: i32 = 0
+  let lowest: i32 = 0
+  let k: i32 = 0
+  while (k < 4) {
+    if (FLASHR[k] >= 0) {
+      n = n + 1
+      if (FLASHR[k] > lowest) { lowest = FLASHR[k] }
+    }
+    k = k + 1
+  }
+  // The repaint below is bounded to what the collapse can actually move: everything from the old
+  // stack top down to the LOWEST cleared row. Rows under that one do not shift and repainting them is
+  // 10 tilemap writes each, of which every one is a context crossing.
+  // The top of the band, found here rather than taken from LIVE_TOP.
+  //
+  // ⚠️ LIVE_TOP WOULD BE STALE AND THE STALENESS IS INVISIBLE. It is refreshed when a piece locks
+  // WITHOUT clearing; a piece that does clear goes straight to the flash phase and then to here, so
+  // LIVE_TOP still describes the board before that piece landed — and the piece is usually the highest
+  // thing on it. A band starting below the piece's own rows would leave them behind while everything
+  // under them shifted down, which is a corrupt board rather than a slow one. Twenty-four reads of one
+  // array is not the part of this function that was expensive.
+  let repaintTop: i32 = 0
+  while (repaintTop < ROWS) {
+    if (MASK[repaintTop] !== 0) { break }
+    repaintTop = repaintTop + 1
+  }
+  // Collapse: one pass UP THE SHIFTING BAND with a write cursor. Rows above a cleared row move down,
+  // which is exactly the write cursor lagging the read cursor.
+  //
+  // ⚠️ THE BAND IS THE WHOLE COST. This ran over all 24 rows, and each row copies ten CELLS entries —
+  // 480 boxed array operations, which `frame_stats` measured as a single frame of ~30,000 ticks, or
+  // seven frames' worth, twice per three hundred frames. Nothing below `lowest` can move and nothing
+  // above the old stack top holds anything, so the band is the stack height: typically a third of
+  // that. It is still the game's worst frame, and it happens during the clear's flash pause, where a
+  // hitch is indistinguishable from the animation.
+  let top: i32 = repaintTop
+  if (top < 0) { top = 0 }
+  let w: i32 = lowest
+  let r: i32 = lowest
+  while (r >= top) {
+    if ((MASK[r] & FULLROW) !== FULLROW) {
+      if (w !== r) {
+        MASK[w] = MASK[r]
+        let c: i32 = 0
+        while (c < COLS) {
+          CELLS[(w << 4) | c] = CELLS[(r << 4) | c]
+          c = c + 1
+        }
+      }
+      w = w - 1
+    }
+    r = r - 1
+  }
+  while (w >= top) {
+    MASK[w] = 0
+    let c: i32 = 0
+    while (c < COLS) {
+      CELLS[(w << 4) | c] = 0
+      c = c + 1
+    }
+    w = w - 1
+  }
+  // Scoring. A T-spin is worth far more than the same lines dropped in, which is the whole reason
+  // the three-corner rule is tracked at all.
+  let mult: i32 = G.level + 1
+  let gain: i32 = 0
+  if (G.tspin !== 0) {
+    G.spins = G.spins + 1
+    if (n === 1) { gain = 800 }
+    else if (n === 2) { gain = 1200 }
+    else if (n === 3) { gain = 1600 }
+    else { gain = 400 }
+  } else {
+    if (n === 1) { gain = 100 }
+    else if (n === 2) { gain = 300 }
+    else if (n === 3) { gain = 500 }
+    else { gain = 800 }
+  }
+  if (n >= 4) { G.quads = G.quads + 1 }
+  G.combo = G.combo + 1
+  if (G.combo > 1) { gain = gain + 50 * (G.combo - 1) }
+  G.score = G.score + gain * mult
+  G.lines = G.lines + n
+  let lvl: i32 = (G.lines / 10) | 0
+  if (lvl > G.level) {
+    G.level = lvl
+    log("LEVEL " + G.level + " lines " + G.lines)
+  }
+  chipChain(n)
+  let tag: i32 = 0
+  if (G.tspin !== 0) { tag = 1 }
+  log("CLEAR " + n + " TSPIN " + tag + " COMBO " + G.combo + " SCORE " + G.score)
+  G.tspin = 0
+  rescanLive()
+  paintRows(repaintTop, lowest)
+  G.phase = PH_PLAY
+  spawn()
+}
+
+function newGame() {
+  let r: i32 = 0
+  while (r < ROWS) {
+    MASK[r] = 0
+    let c: i32 = 0
+    while (c < COLS) {
+      CELLS[(r << 4) | c] = 0
+      c = c + 1
+    }
+    r = r + 1
+  }
+  G.score = 0
+  G.lines = 0
+  G.level = 0
+  G.combo = 0
+  G.pieces = 0
+  G.spins = 0
+  G.quads = 0
+  G.hold = 0 - 1
+  G.bagI = 7
+  let sh: i32 = 0
+  while (sh < 4) { SHOWN[sh] = 0 - 2 sh = sh + 1 }
+  sh = 0
+  while (sh < 5) { HUDK[sh] = 0 - 2 sh = sh + 1 }
+  G.phase = PH_PLAY
+  G.wait = 0
+  G.overPainted = 0
+  G.games = G.games + 1
+  QUEUE[0] = drawBag()
+  QUEUE[1] = drawBag()
+  QUEUE[2] = drawBag()
+  QUEUE[3] = drawBag()
+  rescanLive()
+  paintBoard()
+  paintWalls()
+  ui_clear_rect(8, 56, 104, 40)
+  spawn()
+  log("BLOCKFALL GAME " + G.games + " cols " + COLS + " rows " + VIS)
+}
+
+// ── the attract player ──────────────────────────────────────────────────────────────────────────
+// A REAL SEARCH on packages/search.tish, driven from this module so the evaluator is a direct call.
+// The candidate space is (rotation, column); the search hands out one pair at a time and this module
+// scores it, which is the inversion that keeps an AI affordable — a boxed scoring callback would cost
+// more per candidate than the evaluation.
+
+/// Copy the live board into the scratch slot, drop `(rot, px)` onto it, clear what fills, and leave
+/// the result in slot SIM. Returns the number of lines cleared, or -1 if the placement is illegal.
+///
+/// No drop loop: the resting row comes from the column tops and the piece's bottom profile in one
+/// pass over four box columns. A descent per candidate was the first version and it is 40 iterations
+/// of `collide` — around 25x this.
+function simDrop(rot: i32, px: i32): i32 {
+  let base: i32 = ((G.piece << 2) | rot) << 2
+  let py: i32 = ROWS
+  let dx: i32 = 0
+  while (dx < 4) {
+    let bot: i32 = PBOT[base | dx]
+    if (bot >= 0) {
+      let cx: i32 = px + dx
+      if (cx < 0) { return 0 - 1 }
+      if (cx >= COLS) { return 0 - 1 }
+      // TOPS slot LIVE is 0, so the slot base is 0. It stays valid for the whole decision: only
+      // scanBoard(SIM) runs during a search, and that writes slot 1.
+      let cand: i32 = TOPS[cx] - 1 - bot
+      if (cand < py) { py = cand }
+    }
+    dx = dx + 1
+  }
+  // Rejected BEFORE the copy, not after: a placement that does not fit is the common case near the
+  // walls, and paying 24 writes to discover it is a quarter of the evaluation.
+  let lo: i32 = ROWS
+  let hi: i32 = 0
+  let c: i32 = 0
+  while (c < 4) {
+    let cell: i32 = SHAPES[base | c]
+    let cy: i32 = py + (cell >> 2)
+    if (cy < 0) { return 0 - 1 }
+    if (cy < lo) { lo = cy }
+    if (cy > hi) { hi = cy }
+    c = c + 1
+  }
+  // The lower bound the surface scan needs: nothing above this row is occupied on either the live
+  // board or after this placement.
+  SIM_LO = lo
+  if (LIVE_TOP < SIM_LO) { SIM_LO = LIVE_TOP }
+  let r: i32 = 0
+  while (r < ROWS) {
+    MASK[MSTRIDE | r] = MASK[r]
+    r = r + 1
+  }
+  c = 0
+  while (c < 4) {
+    let cell: i32 = SHAPES[base | c]
+    let cy: i32 = py + (cell >> 2)
+    MASK[MSTRIDE | cy] = MASK[MSTRIDE | cy] | (1 << (px + (cell & 3)))
+    c = c + 1
+  }
+  let n: i32 = 0
+  r = lo
+  while (r <= hi) {
+    if ((MASK[MSTRIDE | r] & FULLROW) === FULLROW) { n = n + 1 }
+    r = r + 1
+  }
+  if (n > 0) {
+    let w: i32 = ROWS - 1
+    r = ROWS - 1
+    while (r >= 0) {
+      if ((MASK[MSTRIDE | r] & FULLROW) !== FULLROW) {
+        MASK[MSTRIDE | w] = MASK[MSTRIDE | r]
+        w = w - 1
+      }
+      r = r - 1
+    }
+    while (w >= 0) {
+      MASK[MSTRIDE | w] = 0
+      w = w - 1
+    }
+  }
+  return n
+}
+
+/// The cheap tier: place, clear, score the surface.
+///
+/// The weights are the well-known four-feature set (aggregate height, lines, holes, bumpiness) scaled
+/// to integers. They are not tuned here and should not be: a hand-tuned set that beats them on one
+/// board usually loses on another, and the point of this example is the search plumbing, not a
+/// better player.
+function evalPlace(rot: i32, px: i32): i32 {
+  let n: i32 = simDrop(rot, px)
+  if (n < 0) { return 0 - 1000000 }
+  scanBoard(SIM, SIM_LO)
+  // Anything that leaves a cell in the hidden rows is a near-loss, and no surface score should be
+  // able to outweigh that.
+  let ceiling: i32 = 0
+  let r: i32 = 0
+  while (r < HID) {
+    if (MASK[MSTRIDE | r] !== 0) { ceiling = 1 }
+    r = r + 1
+  }
+  let sc: i32 = 760 * n - 510 * FT_AGG - 356 * FT_HOLES - 184 * FT_BUMP
+  if (ceiling !== 0) { sc = sc - 200000 }
+  if (n > 0) {
+    // Worth a second look: only a placement that clears can set up the follow-up the deep tier
+    // checks for.
+    searchShortlist(AI)
+  }
+  return sc
+}
+
+/// The deep tier: the same placement, plus "can the NEXT piece clear a line on the board this
+/// leaves?" — a real second ply, worth a flat bonus.
+///
+/// ⚠️ IT IS AN EARLY-EXIT PROBE AND NOT A SECOND FULL SEARCH, and the reason is the budget's one
+/// weakness: `searchStep` checks the budget BEFORE handing out a pair and cannot preempt the
+/// evaluation that follows, so the worst frame is the budget plus one whole evaluation. A genuine
+/// two-ply would run ~26 inner `evalPlace` calls inside a single un-preemptable evaluation, which is
+/// several frames in one call — a spike no budget can absorb. So the inner sweep computes a resting
+/// row and tests four row words for fullness, and stops at the first that clears.
+///
+/// The bonus is FLAT AND NON-NEGATIVE deliberately. `search.tish` banks both tiers into the same
+/// best-score register with a strictly-greater comparison, so a deep score on a different scale from
+/// the cheap ones would make shortlisting change the ranking rather than refine it.
+function evalDeep(rot: i32, px: i32): i32 {
+  let sc: i32 = evalPlace(rot, px)
+  if (sc < 0 - 500000) { return sc }
+  // scanBoard(SIM) inside evalPlace already left the scratch board's column tops in TOPS slot 1.
+  let nxt: i32 = QUEUE[1]
+  let tb: i32 = SIM << 4
+  // ONE ROTATION — the next piece AS IT ARRIVES — and the bound is the point.
+  //
+  // Measured on device: with the probe removed entirely the search peaked at 2,027 ticks a frame and
+  // averaged 1,362. With a probe over all four rotations it peaked at 4,019 against a 4,389-tick
+  // frame, which is 370 ticks of headroom for the rest of the game — the input, the rules and sixteen
+  // tilemap writes. That is not a margin, and narrowing the sweep to the piece's DISTINCT rotations
+  // barely moved it (3,858): the cost is the sweep, not the duplicates.
+  //
+  // So the probe answers the cheapest true form of the two-ply question and does not pretend to
+  // answer more. It is a bonus term, not coverage of a space, so a partial sweep is a weaker hint
+  // rather than a wrong answer — which is exactly the property that makes it safe to bound, and why
+  // `selftestReach` guards the OUTER space and there is no equivalent here.
+  let nr: i32 = 0
+  while (nr < 1) {
+    let base: i32 = ((nxt << 2) | nr) << 2
+    // The same biased range as the outer space, for the same reason: a box left edge of 0 cannot put
+    // an O against the right wall or a vertical I against the left one.
+    let nx: i32 = 0 - PXBIAS
+    while (nx < COLS) {
+      let py: i32 = ROWS
+      let ok: i32 = 1
+      let dx: i32 = 0
+      while (dx < 4) {
+        let bot: i32 = PBOT[base | dx]
+        if (bot >= 0) {
+          let cx: i32 = nx + dx
+          if (cx < 0) { ok = 0 }
+          else if (cx >= COLS) { ok = 0 }
+          else {
+            let cand: i32 = TOPS[tb | cx] - 1 - bot
+            if (cand < py) { py = cand }
+          }
+        }
+        dx = dx + 1
+      }
+      if (ok !== 0) {
+        // Four row words, OR-ed with this placement's bits, tested for fullness. No board copy.
+        let a0: i32 = 0
+        let a1: i32 = 0
+        let a2: i32 = 0
+        let a3: i32 = 0
+        let c: i32 = 0
+        while (c < 4) {
+          let cell: i32 = SHAPES[base | c]
+          let bit: i32 = 1 << (nx + (cell & 3))
+          let dy: i32 = cell >> 2
+          if (dy === 0) { a0 = a0 | bit }
+          else if (dy === 1) { a1 = a1 | bit }
+          else if (dy === 2) { a2 = a2 | bit }
+          else { a3 = a3 | bit }
+          c = c + 1
+        }
+        let hit: i32 = 0
+        if (py >= 0 && py < ROWS) {
+          if (((MASK[MSTRIDE | py] | a0) & FULLROW) === FULLROW && a0 !== 0) { hit = 1 }
+        }
+        if (py + 1 >= 0 && py + 1 < ROWS) {
+          if (((MASK[MSTRIDE | (py + 1)] | a1) & FULLROW) === FULLROW && a1 !== 0) { hit = 1 }
+        }
+        if (py + 2 >= 0 && py + 2 < ROWS) {
+          if (((MASK[MSTRIDE | (py + 2)] | a2) & FULLROW) === FULLROW && a2 !== 0) { hit = 1 }
+        }
+        if (py + 3 >= 0 && py + 3 < ROWS) {
+          if (((MASK[MSTRIDE | (py + 3)] | a3) & FULLROW) === FULLROW && a3 !== 0) { hit = 1 }
+        }
+        if (hit !== 0) { return sc + 3000 }
+      }
+      nx = nx + 1
+    }
+    nr = nr + 1
+  }
+  return sc
+}
+
+/// Drain as much of the current decision as the tick budget allows. Sets G.want / G.wantRot when a
+/// decision completes.
+function think() {
+  if (G.thinking === 0) {
+    // ONLY THE ROTATIONS THE PIECE ACTUALLY HAS. O is rotation-invariant and I, S and Z repeat after
+    // two, so a flat 4 x 10 space evaluates the same board up to four times — three quarters of the
+    // candidates for an O, and the search has no way to know that: the space is the game's to
+    // describe. Narrowing it here took the decision from 40 candidates to 10, 20 or 40 by piece.
+    let nrot: i32 = 4
+    if (G.piece === 1) { nrot = 1 }
+    else if (G.piece === 0 || G.piece === 3 || G.piece === 4) { nrot = 2 }
+    searchBegin(AI, nrot, NTARGETS, 600)
+    G.thinking = 1
+  }
+  let sw0: i32 = timer_read()
+  let pair: i32 = searchStep(AI, 0)
+  let guard: i32 = 0
+  while (pair >= 0 && guard < 64) {
+    let rot: i32 = (pair / 256) | 0
+    let col: i32 = pair & 255
+    let sc: i32 = 0 - 1000000
+    if (searchDone(AI) === 0) { sc = evalDeep(rot, col - PXBIAS) }
+    pair = searchStep(AI, sc)
+    guard = guard + 1
+  }
+  if (pair === (0 - 2)) {
+    let col: i32 = searchTarget(AI)
+    if (col >= 0) {
+      G.want = col - PXBIAS
+      G.planned = 1
+      G.wantRot = searchCand(AI)
+      G.plans = G.plans + 1
+    }
+    G.thinking = 0
+  }
+  let swt: i32 = (timer_read() - sw0) & 65535
+  if (swt > G.peak) { G.peak = swt }
+  G.spent = G.spent + swt
+  G.frames = G.frames + 1
+}
+
+/// One frame of the attract player: rotate toward the plan, slide toward the column, then hard drop.
+function attractAct() {
+  if (G.planned === 0) { return }
+  if (G.rot !== G.wantRot) {
+    if (tryRotate(0) === 0) {
+      // Cornered — take whatever the board allows rather than stalling forever.
+      G.wantRot = G.rot
+    }
+    return
+  }
+  if (G.px < G.want) {
+    if (tryMove(1) === 0) { G.want = G.px }
+    return
+  }
+  if (G.px > G.want) {
+    if (tryMove(0 - 1) === 0) { G.want = G.px }
+    return
+  }
+  G.score = G.score + 2 * (G.ghost - G.py)
+  G.py = G.ghost
+  lockPiece()
+}
+
+// ── boot selftests ──────────────────────────────────────────────────────────────────────────────
+// Every rule that has no visible symptom when it is wrong, asserted before a frame is drawn. A
+// mistyped rotation or a kick row in the wrong slot does not crash and does not look broken — the
+// game simply plays a slightly different game, which is exactly what a screenshot cannot catch.
+
+/// Every rotation must have four cells inside its box, and rotating four times must return the piece
+/// to where it started. The second half is what checks the rotation FORMULA rather than the table:
+/// `(x, y) -> (n-1-y, x)` with the wrong term negated still produces four legal-looking cells.
+function selftestRotations(): i32 {
+  let bad: i32 = 0
+  let pp: i32 = 0
+  while (pp < 7) {
+    let n: i32 = PBOX[pp]
+    let rr: i32 = 0
+    while (rr < 4) {
+      let base: i32 = ((pp << 2) | rr) << 2
+      let seen: i32 = 0
+      let cc: i32 = 0
+      while (cc < 4) {
+        let cell: i32 = SHAPES[base | cc]
+        let x: i32 = cell & 3
+        let y: i32 = cell >> 2
+        if (x >= n) { bad = bad + 1 }
+        if (y >= n) { bad = bad + 1 }
+        if ((seen & (1 << cell)) !== 0) { bad = bad + 1 }
+        seen = seen | (1 << cell)
+        cc = cc + 1
+      }
+      if (POP[seen & FULLROW] + POP[(seen >> 10) & FULLROW] !== 4) { bad = bad + 1 }
+      rr = rr + 1
+    }
+    // r3 rotated once more must be r0. Compared as a SET, since the cell order need not survive.
+    let s0: i32 = 0
+    let s4: i32 = 0
+    let cc2: i32 = 0
+    while (cc2 < 4) {
+      s0 = s0 | (1 << SHAPES[((pp << 2) | 0) << 2 | cc2])
+      let cell: i32 = SHAPES[(((pp << 2) | 3) << 2) | cc2]
+      let x: i32 = cell & 3
+      let y: i32 = cell >> 2
+      s4 = s4 | (1 << (((x) << 2) | (n - 1 - y)))
+      cc2 = cc2 + 1
+    }
+    if (s0 !== s4) { bad = bad + 1 }
+    pp = pp + 1
+  }
+  return bad
+}
+
+/// THE SEARCH SPACE MUST COVER THE GAME'S MOVES. For every piece, every rotation and every board
+/// column, some target must produce a legal placement that occupies that column.
+///
+/// This is the assertion the `PXBIAS` comment describes the absence of. A search whose space is
+/// missing moves does not fail — it quietly plays a smaller game, and the symptom (a ragged left
+/// edge, one line every six pieces) points at the evaluator's weights instead. Nothing else in this
+/// file or in `packages/search.tish` can notice: the search only ever knows how MANY candidates there
+/// are, by design, so what they mean is entirely the game's business.
+function selftestReach(): i32 {
+  let miss: i32 = 0
+  let pp: i32 = 0
+  while (pp < 7) {
+    let rr: i32 = 0
+    while (rr < 4) {
+      let base: i32 = ((pp << 2) | rr) << 2
+      let cc: i32 = 0
+      while (cc < COLS) {
+        let found: i32 = 0
+        let t: i32 = 0
+        while (t < NTARGETS) {
+          let px: i32 = t - PXBIAS
+          let ok: i32 = 1
+          let hit: i32 = 0
+          let c: i32 = 0
+          while (c < 4) {
+            let x: i32 = px + (SHAPES[base | c] & 3)
+            if (x < 0) { ok = 0 }
+            if (x >= COLS) { ok = 0 }
+            if (x === cc) { hit = 1 }
+            c = c + 1
+          }
+          if (ok !== 0) {
+            if (hit !== 0) { found = 1 }
+          }
+          t = t + 1
+        }
+        if (found === 0) { miss = miss + 1 }
+        cc = cc + 1
+      }
+      rr = rr + 1
+    }
+    pp = pp + 1
+  }
+  return miss
+}
+
+/// The three surface numbers the AI is scored on, on an authored board: a floor row missing column 0,
+/// with a single cell above the gap. That is one hole, an aggregate height of 11 (two for column 0,
+/// one for each of the other nine) and a bumpiness of 1.
+///
+/// Worth asserting because the whole scan is bitwise and none of it is legible: `POP[seen & ~row]` is
+/// the hole count only if `seen` means "columns that have started", and a version that OR-ed the row
+/// in after counting instead of before is off by exactly one row per column with no visible symptom
+/// beyond an AI that tolerates holes.
+function selftestFeatures(): i32 {
+  let r: i32 = 0
+  while (r < ROWS) { MASK[r] = 0 r = r + 1 }
+  MASK[ROWS - 1] = FULLROW - 1
+  MASK[ROWS - 2] = 1
+  rescanLive()
+  return FT_AGG * 10000 + FT_HOLES * 100 + FT_BUMP
+}
+
+function selftestBag(): i32 {
+  G.bagI = 7
+  let seen: i32 = 0
+  let k: i32 = 0
+  while (k < 7) {
+    seen = seen | (1 << drawBag())
+    k = k + 1
+  }
+  return seen
+}
+
+/// The canonical I kick. A vertical I in rotation 1 sits in box column 2, so at px = 7 it occupies
+/// board column 9 — flush against the right wall. Rotating clockwise to the horizontal r2 wants
+/// columns 7..10, which does not exist; SRS's second offset for 1>2 is (-1, 0), so the piece must
+/// come to rest at px = 6. A table shifted by one row kicks the other way and this reads 8.
+function selftestKick(): i32 {
+  let r: i32 = 0
+  while (r < ROWS) { MASK[r] = 0 r = r + 1 }
+  G.piece = 0
+  G.rot = 1
+  G.px = 7
+  G.py = 8
+  tryRotate(0)
+  return G.px
+}
+
+/// A row full but for one cell, filled by a dropped piece, must clear — and the cell above the gap
+/// must fall INTO the cleared row. The second half is the collapse's write cursor; a version that
+/// cleared correctly and did not move the survivors passed a "did it clear" check for a while.
+function selftestClear(): i32 {
+  let r: i32 = 0
+  while (r < ROWS) { MASK[r] = 0 r = r + 1 }
+  r = 0
+  while (r < ROWS * RSTRIDE) { CELLS[r] = 0 r = r + 1 }
+  MASK[ROWS - 1] = FULLROW - (1 << 4)
+  MASK[ROWS - 2] = 1 << 4
+  CELLS[((ROWS - 2) << 4) | 4] = T_GARBAGE
+  MASK[ROWS - 1] = MASK[ROWS - 1] | (1 << 4)
+  FLASHR[0] = ROWS - 1
+  FLASHR[1] = 0 - 1
+  FLASHR[2] = 0 - 1
+  FLASHR[3] = 0 - 1
+  G.tspin = 0
+  G.combo = 0
+  G.piece = 1
+  resolveClear()
+  return MASK[ROWS - 1]
+}
+
+/// Four rows at once. Also the only place the 800-point line score is checked, and the multiplier
+/// with it: at level 0 the multiplier is ONE, not zero, and the first version of this scored nothing
+/// for a perfect clear.
+function selftestQuad(): i32 {
+  let r: i32 = 0
+  while (r < ROWS) { MASK[r] = 0 r = r + 1 }
+  r = ROWS - 4
+  while (r < ROWS) {
+    MASK[r] = FULLROW
+    FLASHR[r - (ROWS - 4)] = r
+    r = r + 1
+  }
+  G.tspin = 0
+  G.combo = 0
+  G.score = 0
+  G.level = 0
+  G.lines = 0
+  resolveClear()
+  return G.score
+}
+
+/// Three corners plus a rotation. Asserted BOTH ways: the same board reached by a slide must not
+/// count, or every flat T lock in the corner of the well scores like a spin.
+function selftestTspin(): i32 {
+  let r: i32 = 0
+  while (r < ROWS) { MASK[r] = 0 r = r + 1 }
+  G.piece = 2
+  G.rot = 0
+  G.px = 4
+  G.py = ROWS - 3
+  MASK[ROWS - 3] = (1 << 4) | (1 << 6)
+  MASK[ROWS - 1] = FULLROW
+  G.lastRot = 1
+  let spun: i32 = isTspin()
+  G.lastRot = 0
+  let slid: i32 = isTspin()
+  return spun * 10 + slid
+}
+
+function selftestTopout(): i32 {
+  let r: i32 = 0
+  while (r < ROWS) { MASK[r] = 0 r = r + 1 }
+  r = 0
+  while (r < ROWS) {
+    MASK[r] = FULLROW
+    r = r + 1
+  }
+  G.phase = PH_PLAY
+  QUEUE[0] = 2
+  spawn()
+  if (G.phase === PH_OVER) { return 1 }
+  return 0
+}
+
+rngSeed(0, 20260810)
+
+log("SELFTEST rotcells=" + selftestRotations() + " (want 0)")
+log("SELFTEST reach=" + selftestReach() + " (want 0)")
+log("SELFTEST feats=" + selftestFeatures() + " (want 110101)")
+log("SELFTEST bag=" + selftestBag() + " (want 127)")
+log("SELFTEST kick=" + selftestKick() + " (want 6)")
+log("SELFTEST clear=" + selftestClear() + " (want 16)")
+log("SELFTEST quad=" + selftestQuad() + " (want 800)")
+log("SELFTEST tspin=" + selftestTspin() + " (want 10)")
+log("SELFTEST topout=" + selftestTopout() + " (want 1)")
+
+// ── go ──────────────────────────────────────────────────────────────────────────────────────────
+rngSeed(0, 20260810)
+G.games = 0
+newGame()
+// The two static labels, drawn once. `paintHud` clears only the top 60 pixels of the HUD column, so
+// these survive every redraw below them.
+ui_text(body, HUD_X + 2, 0, "BLOCKFALL", 0xC8C8D8)
+ui_text(body, HUD_X + 2, 64, "HOLD", 0x808094)
+ui_text(body, HUD_X + 2, 96, "NEXT", 0x808094)
+paintHud()
+paintQueue()
+
+while (true) {
+  G.t = G.t + 1
+
+  let k: i32 = keys_edge()
+  if (k !== 0) {
+    if (G.human === 0) {
+      G.human = 1
+      log("PLAYER INPUT")
+    }
+    if ((k & K_START) !== 0) {
+      if (G.phase === PH_OVER) {
+        newGame()
+      } else if (G.phase === PH_PAUSE) {
+        G.phase = PH_PLAY
+      } else if (G.phase === PH_PLAY) {
+        G.phase = PH_PAUSE
+      }
+    }
+    if (G.phase === PH_PLAY) {
+      if ((k & K_A) !== 0) {
+        if (tryRotate(0) !== 0) { chipBlip() }
+      }
+      if ((k & K_B) !== 0) {
+        if (tryRotate(1) !== 0) { chipBlip() }
+      }
+      if ((k & K_LEFT) !== 0) {
+        tryMove(0 - 1)
+        G.das = 0
+        G.dasDir = 0 - 1
+      }
+      if ((k & K_RIGHT) !== 0) {
+        tryMove(1)
+        G.das = 0
+        G.dasDir = 1
+      }
+      if ((k & K_L) !== 0) { hold() }
+      if ((k & K_R) !== 0) { hold() }
+      if ((k & K_UP) !== 0) {
+        // Hard drop: two points a row, and it locks immediately — no lock delay, which is the
+        // difference between a hard drop and a very fast soft one.
+        G.score = G.score + 2 * (G.ghost - G.py)
+        G.py = G.ghost
+        lockPiece()
+      }
+    }
+  }
+
+  if (G.phase === PH_PLAY) {
+    // DAS. Two `key_held` crossings, not ten: each is a context crossing of its own.
+    if (G.human !== 0) {
+      let hl: i32 = key_held(C_LEFT)
+      let hr: i32 = key_held(C_RIGHT)
+      let dir: i32 = 0
+      if (hl !== 0) { dir = 0 - 1 }
+      if (hr !== 0) { dir = 1 }
+      if (dir === 0) {
+        G.das = 0
+        G.dasDir = 0
+      } else {
+        if (dir !== G.dasDir) {
+          G.das = 0
+          G.dasDir = dir
+        }
+        G.das = G.das + 1
+        if (G.das > DAS_DELAY) {
+          if (((G.das - DAS_DELAY) % DAS_REPEAT) === 0) { tryMove(dir) }
+        }
+      }
+    }
+
+    // Gravity. Soft drop replaces the interval rather than adding to it, so holding down at level 20
+    // is never slower than not holding it.
+    let lvl: i32 = G.level
+    if (lvl > 24) { lvl = 24 }
+    let interval: i32 = GRAV[lvl]
+    let soft: i32 = 0
+    if (G.human !== 0) {
+      if (key_held(C_DOWN) !== 0) { soft = 1 }
+    }
+    if (soft !== 0) {
+      if (interval > SOFT_FRAMES) { interval = SOFT_FRAMES }
+    }
+    // Resting or not — asked ONCE. The gravity step and the lock-delay tick both need the answer and
+    // the first version asked twice, which is a boxed call and a fifth of `collide`'s per-frame cost
+    // for nothing. `G.ghost` already holds it: the piece rests exactly when it is standing on its own
+    // drop target.
+    G.fall = G.fall + 1
+    let resting: i32 = 0
+    if (G.py >= G.ghost) { resting = 1 }
+    if (G.fall >= interval) {
+      G.fall = 0
+      if (resting === 0) {
+        G.py = G.py + 1
+        G.lastRot = 0
+        if (soft !== 0) { G.score = G.score + 1 }
+        if (G.py >= G.ghost) { resting = 1 }
+      }
+    }
+    // Lock delay, so a piece can still be slid or spun after it touches down. It only ticks while
+    // the piece is actually resting — `G.lock` is reset by every accepted move up to LOCK_RESETS.
+    if (resting !== 0) {
+      G.lock = G.lock + 1
+      if (G.lock >= LOCK_DELAY) { lockPiece() }
+    } else {
+      G.lock = 0
+    }
+
+    // autoadvance-ok: G.human gates the search and the move; a player's game never plays itself.
+    if (G.human === 0) {
+      // `think` only while there is no plan. Without the guard it calls `searchBegin` again the frame
+      // after a decision completes and throws the answer away, so the AI re-decides for ever and
+      // never acts.
+      if (G.planned === 0) { think() }
+      attractAct()
+    }
+  } else if (G.phase === PH_FLASH) {
+    G.wait = G.wait + 1
+    if (G.wait >= FLASH_FRAMES) { resolveClear() }  // autoadvance-ok: a fixed clear animation — it does not skip anything a player is reading
+  } else if (G.phase === PH_OVER) {
+    paintOver()
+    // The attract loop restarts itself so a headless run covers a whole game and the next one; a
+    // player is asked, and START is the only way past this screen for them.
+    G.wait = G.wait + 1
+    if (G.human === 0 && G.wait >= 90) {
+      G.wait = 0
+      newGame()
+    }
+  }
+
+  paintPiece()
+  paintQueue()
+  paintHud()
+
+  if ((G.t % 300) === 0) {
+    let avg: i32 = 0
+    if (G.frames > 0) { avg = (G.spent / G.frames) | 0 }
+    log("TICK " + G.t + " score " + G.score + " lines " + G.lines + " level " + G.level
+      + " pieces " + G.pieces + " plans " + G.plans + " games " + G.games)
+    // The AI's own cost, which is what decides whether this design fits a frame. One frame is 4389
+    // ticks, and the PEAK is the number that matters: a tick budget is checked before a pair is
+    // handed out and cannot preempt the evaluation that follows.
+    log("  AI ticks: peak " + G.peak + " avg " + avg + " over " + G.frames + " thinking frames")
+    // THE GROUND TRUTH, next to the arithmetic. A tick budget plus a measured evaluation cost is a
+    // model of whether the frame fits; `frame_stats` is the hardware's own answer, and its `dN` is
+    // the number of frames actually dropped. Reading it resets the maxima, so this is the only caller.
+    log("  frame: " + frame_stats())
+  }
+  frame()
+}

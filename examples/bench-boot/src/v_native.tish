@@ -1,0 +1,9 @@
+// Variant: FLOOR + the NATIVE engine crate (`cargo:tish_gba_game_engine`) and NOT the tish
+// `packages/engine` wrapper around it. This is the fork in the road: `v_engine` costs 4.3s and has no
+// top-level statements at all, so the price is either the Rust crate coming to life or the tish module
+// that wraps it. One of these two variants pays it.
+import { log, frame } from 'cargo:tish_agb'
+import { spawn, world_step, grid_setup } from 'cargo:tish_gba_game_engine'
+
+log("BB native fns=" + (typeof spawn) + (typeof world_step) + (typeof grid_setup))
+while (true) { frame() }

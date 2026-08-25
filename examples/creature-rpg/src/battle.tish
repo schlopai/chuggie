@@ -1,0 +1,320 @@
+// The turn engine. 1v1, speed-ordered, fight or flee.
+//
+// THREE CONVENTIONS, borrowed from `packages/battle.tish` (the SRPG grid-battle engine, which is
+// the wrong shape to import here but the right shape to copy):
+//
+//   1. `battleTick(keys)` TAKES INPUT AS AN ARGUMENT and never reads the pad itself. That is what
+//      makes a battle testable without a controller — you can drive a whole fight from a table.
+//   2. It NEVER DRAWS. The caller owns presentation; this file owns what is true.
+//   3. `battleStart` RESETS EVERYTHING up front. A second battle inheriting the first one's state
+//      is the classic bug in this repo — an SRPG campaign demo shipped it, and lap 2 opened with lap 1's
+//      dead still dead.
+//
+// Species ids are the order of ROSTER in scripts/gen_creature_rpg.py, and the creature sheet's
+// frames are laid out `species * 2 + view` (0 = front, 1 = back). Keep the three in step.
+import { rngBelow, rngChance } from '../../../packages/rng'
+
+// ── species ──────────────────────────────────────────────────────────────────────────────────
+export let SP_NAME: string[] = ["KAPPLING", "SLIMELET", "CAPSHROOM", "NIGHTWING",
+                                "GILDPAW", "SCALETAIL", "FINNIKIN"]
+// Tuned by simulating the exact arithmetic below over 6,000 fights per matchup (see the README):
+// picking the right move wins 89-100% and picking the wrong one can lose badly, with every fight
+// running three to five turns. The first pass had BOULDERMOLE at a 65% LOSS — a wall three steps
+// into the first patch of grass — and three others as free wins, which is the same bug twice: the
+// choice between two moves did not matter.
+let SP_HP: i32[] = [34, 34, 36, 32, 30, 34, 34]
+let SP_ATK: i32[] = [14, 13, 12, 13, 15, 13, 11]
+let SP_DEF: i32[] = [10, 12, 14, 9, 8, 11, 13]
+let SP_SPD: i32[] = [13, 8, 7, 16, 15, 12, 6]
+// Two moves per species, flat pairs: species `s` has moves SP_MOVE[s*2] and SP_MOVE[s*2+1].
+// Every species opens with TACKLE, which is why buffing TACKLE during tuning buffed all six
+// opponents at once and made the game harder rather than easier — see the note on the stats.
+let SP_MOVE: i32[] = [0, 2, 0, 5, 0, 3, 0, 4, 0, 1, 0, 1, 0, 5]
+
+let MV_NAME: string[] = ["TACKLE", "BITE", "BUBBLE", "SPORE", "GUST", "SPLASH"]
+let MV_POWER: i32[] = [10, 13, 14, 12, 12, 11]
+
+// ── state ────────────────────────────────────────────────────────────────────────────────────
+export let BS_INTRO: i32 = 0     // "A wild X appeared!"
+export let BS_MENU: i32 = 1      // FIGHT / RUN
+export let BS_MOVES: i32 = 2     // pick one of two
+export let BS_ACT: i32 = 3       // an actor's turn resolves (no input)
+export let BS_MSG: i32 = 4       // showing what just happened
+export let BS_END: i32 = 5       // final message
+export let BS_DONE: i32 = 6      // the caller may tear the screen down
+
+export let OUT_NONE: i32 = 0
+export let OUT_WIN: i32 = 1
+export let OUT_LOSE: i32 = 2
+export let OUT_FLED: i32 = 3
+export let OUT_CAUGHT: i32 = 4
+
+// Input bits, so the caller can build them from anything — a pad, or a test table.
+export let K_A: i32 = 1
+export let K_B: i32 = 2
+export let K_UP: i32 = 4
+export let K_DOWN: i32 = 8
+
+let bState: i32 = 0
+let bCursor: i32 = 0
+let bOutcome: i32 = 0
+let pSpec: i32 = 0
+let eSpec: i32 = 1
+let pHp: i32 = 0
+let pMax: i32 = 0
+let eHp: i32 = 0
+let eMax: i32 = 0
+let pMove: i32 = 0
+let actor: i32 = 0        // whose action BS_ACT will resolve (0 player, 1 enemy)
+let second: i32 = 0       // who acts after them, or -1 when the turn is a single action
+let bMsg = ""
+// The last blow landed, for the caller's screen shake. Reported rather than acted on: a shake is
+// presentation, and this file does not do presentation (convention 2). `lastHurt` is who TOOK it.
+let lastDmg: i32 = 0
+let lastHurt: i32 = 0
+let hitSeq: i32 = 0       // bumped on every blow, so the caller can tell a new hit from a redraw
+
+// ── catching ─────────────────────────────────────────────────────────────────────────────────
+// Balls and the caught list OUTLIVE a battle — they are the run, not the fight — so `battleStart`
+// deliberately does NOT reset them, which is the one exception to convention 3.
+let balls: i32 = 12
+let caught: i32[] = [0, 0, 0, 0, 0, 0, 0]
+export function battleBalls(): i32 { return balls }
+export function battleGiveBalls(n: i32) { balls = balls + n }
+export function battleCaught(species: i32): i32 { return caught[species] }
+export function battleCaughtCount(): i32 {
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < caught.length) {
+    n = n + caught[i]
+    i = i + 1
+  }
+  return n
+}
+// The odds a throw sticks: poor at full health, good once it is nearly down. That gradient is the
+// whole reason a capture mechanic makes you fight first instead of throwing on turn one.
+export function battleCatchOdds(): i32 {
+  return 15 + (65 * (eMax - eHp)) / eMax
+}
+
+// ── reads, for the caller's renderer ─────────────────────────────────────────────────────────
+export function battleState(): i32 { return bState }
+export function battleOutcome(): i32 { return bOutcome }
+export function battleCursor(): i32 { return bCursor }
+export function battleMessage() { return bMsg }
+export function battlePlayerSpecies(): i32 { return pSpec }
+export function battleEnemySpecies(): i32 { return eSpec }
+export function battlePlayerHp(): i32 { return pHp }
+export function battlePlayerMax(): i32 { return pMax }
+export function battleEnemyHp(): i32 { return eHp }
+export function battleEnemyMax(): i32 { return eMax }
+export function battleLastDamage(): i32 { return lastDmg }
+export function battleLastHurt(): i32 { return lastHurt }
+export function battleHitSeq(): i32 { return hitSeq }
+
+// How many options the current menu has, and what they read as. Returning the labels from here
+// keeps the renderer from having to know that "RUN" is index 1 of the root menu.
+export function battleMenuCount(): i32 {
+  if (bState === BS_MENU) { return 3 }
+  if (bState === BS_MOVES) { return 2 }
+  return 0
+}
+export function battleMenuLabel(i: i32) {
+  if (bState === BS_MENU) {
+    if (i === 0) { return "FIGHT" }
+    if (i === 1) { return "BALL" }
+    return "RUN"
+  }
+  if (bState === BS_MOVES) { return MV_NAME[SP_MOVE[pSpec * 2 + i]] }
+  return ""
+}
+
+// Throw a ball. A miss costs you the turn — the wild one acts while you are picking the next one,
+// which is what makes throwing early a real gamble rather than a free action.
+function throwBall() {
+  if (balls <= 0) {
+    bMsg = "No balls left!"
+    second = 0 - 1                 // costs nothing; you simply cannot
+    bState = BS_MSG
+    return
+  }
+  balls = balls - 1
+  if (rngChance(0, battleCatchOdds()) > 0) {
+    caught[eSpec] = 1
+    bOutcome = OUT_CAUGHT
+    bMsg = "Gotcha! " + SP_NAME[eSpec] + " was caught!"
+    bState = BS_END
+    return
+  }
+  second = 1                       // it breaks free and gets its swing
+  bMsg = "It broke free!"
+  bState = BS_MSG
+}
+
+// ── the fight ────────────────────────────────────────────────────────────────────────────────
+
+// Enough that a fight runs four to six turns at these stats, and never zero.
+function damage(atk: i32, def: i32, power: i32): i32 {
+  let base: i32 = (power * atk) / (def + 8) + 2
+  let d: i32 = (base * (85 + rngBelow(0, 16))) / 100
+  if (d < 1) { d = 1 }
+  return d
+}
+
+export function battleStart(playerSpecies: i32, wildSpecies: i32) {
+  pSpec = playerSpecies
+  eSpec = wildSpecies
+  pMax = SP_HP[pSpec]
+  eMax = SP_HP[eSpec]
+  pHp = pMax                       // a full heal on start — see convention 3
+  eHp = eMax
+  bOutcome = OUT_NONE
+  bCursor = 0
+  lastDmg = 0
+  lastHurt = 0
+  hitSeq = 0
+  pMove = 0
+  actor = 0
+  second = 0 - 1
+  bState = BS_INTRO
+  bMsg = "A wild " + SP_NAME[eSpec] + " appeared!"
+}
+
+// Run `actor`'s action and put the result in `bMsg`. Returns nothing — the caller advances.
+function resolveAction() {
+  if (actor === 0) {
+    let mv: i32 = SP_MOVE[pSpec * 2 + pMove]
+    let d: i32 = damage(SP_ATK[pSpec], SP_DEF[eSpec], MV_POWER[mv])
+    eHp = eHp - d
+    if (eHp < 0) { eHp = 0 }
+    lastDmg = d
+    lastHurt = 1
+    hitSeq = hitSeq + 1
+    bMsg = SP_NAME[pSpec] + " used " + MV_NAME[mv] + "!"
+  } else {
+    // The wild one picks between its two moves at random. That is the whole AI, and at two moves
+    // a cleverer one would not be visible.
+    let mv: i32 = SP_MOVE[eSpec * 2 + rngBelow(0, 2)]
+    let d: i32 = damage(SP_ATK[eSpec], SP_DEF[pSpec], MV_POWER[mv])
+    pHp = pHp - d
+    if (pHp < 0) { pHp = 0 }
+    lastDmg = d
+    lastHurt = 0
+    hitSeq = hitSeq + 1
+    bMsg = "Wild " + SP_NAME[eSpec] + " used " + MV_NAME[mv] + "!"
+  }
+  bState = BS_MSG
+}
+
+// After a message is dismissed: end the fight if someone is down, else hand over or return to the
+// menu. Checking KOs here rather than inside `resolveAction` is what lets the losing blow's message
+// be read before the screen changes.
+function afterMessage() {
+  if (eHp === 0) {
+    bOutcome = OUT_WIN
+    bMsg = "Wild " + SP_NAME[eSpec] + " fainted!"
+    bState = BS_END
+    return
+  }
+  if (pHp === 0) {
+    bOutcome = OUT_LOSE
+    bMsg = SP_NAME[pSpec] + " fainted!"
+    bState = BS_END
+    return
+  }
+  if (second >= 0) {
+    actor = second
+    second = 0 - 1
+    resolveAction()
+    return
+  }
+  bCursor = 0
+  toMenu()
+}
+
+// The root menu asks a question rather than leaving the last thing that happened on screen, which
+// otherwise reads as if the message never cleared.
+function toMenu() {
+  bCursor = 0
+  bMsg = "What will " + SP_NAME[pSpec] + " do?"
+  bState = BS_MENU
+}
+
+function beginTurn() {
+  // Speed decides who swings first. A tie goes to the player, which is the convention players
+  // expect and costs nothing.
+  if (SP_SPD[eSpec] > SP_SPD[pSpec]) {
+    actor = 1
+    second = 0
+  } else {
+    actor = 0
+    second = 1
+  }
+  resolveAction()
+}
+
+// One frame of the fight. `keys` is edge-triggered presses as K_* bits — see convention 1.
+export function battleTick(keys: i32) {
+  if (bState === BS_INTRO) {
+    if ((keys & K_A) > 0) { toMenu() }
+    return
+  }
+
+  if (bState === BS_MENU || bState === BS_MOVES) {
+    let n: i32 = battleMenuCount()
+    if ((keys & K_UP) > 0) {
+      bCursor = bCursor - 1
+      if (bCursor < 0) { bCursor = n - 1 }
+    }
+    if ((keys & K_DOWN) > 0) {
+      bCursor = bCursor + 1
+      if (bCursor >= n) { bCursor = 0 }
+    }
+    if (bState === BS_MOVES) {
+      if ((keys & K_B) > 0) {
+        toMenu()
+        return
+      }
+      if ((keys & K_A) > 0) {
+        pMove = bCursor
+        beginTurn()
+      }
+      return
+    }
+    if ((keys & K_A) > 0) {
+      if (bCursor === 0) {
+        bCursor = 0
+        bState = BS_MOVES
+        return
+      }
+      if (bCursor === 1) {
+        throwBall()
+        return
+      }
+      // Running is a coin flip weighted your way. A failed escape costs you the turn: the wild one
+      // gets a free hit, which is what makes the choice a choice.
+      if (rngChance(0, 55) > 0) {
+        bOutcome = OUT_FLED
+        bMsg = "Got away safely!"
+        bState = BS_END
+        return
+      }
+      // `second`, not `actor`: `afterMessage` hands over to `second` and ignores `actor`, so
+      // setting `actor` here meant a failed escape cost you nothing at all.
+      second = 1
+      bMsg = "Could not get away!"
+      bState = BS_MSG
+    }
+    return
+  }
+
+  if (bState === BS_MSG) {
+    if ((keys & K_A) > 0) { afterMessage() }
+    return
+  }
+
+  if (bState === BS_END) {
+    if ((keys & K_A) > 0) { bState = BS_DONE }
+    return
+  }
+}

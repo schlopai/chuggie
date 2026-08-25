@@ -1,0 +1,1038 @@
+// beatemup.tish — a Final Fight-shaped brawler engine: N actors on a road with depth.
+//
+// The sibling of `packages/fighter.tish`, and deliberately NOT built on it. A versus fighter is two
+// actors on a line; a brawler is four on a plane, and the two differences — the loop over actors and
+// the depth test in every hit — are exactly the things you would not want to pay for in a game that
+// has neither. What IS shared is the part that generalises: the 24-pose sheet layout (one bake, see
+// scripts/fighter_art.py), the frame-data table, and `packages/motion.tish` for input.
+//
+//   import * as bu from '../../../packages/beatemup'
+//
+//   bu.beatemupDefChar(0, heroArt, 60, 300, 190, 0 - 900, 58, 11, 40)
+//   bu.beatemupDefMove(0, bu.MV_L, F_ATK1, 3, 3, 3, 7, 6, 0)
+//   bu.beatemupDefBox (0, bu.MV_L, 8, 34, 30, 22, 12, 220, 4)
+//   bu.beatemupSpawn(0, 0, 40, 124, bodySpr, fxSpr, shadowSpr, 1)
+//   ...
+//   let ev: i32 = bu.beatemupTick()
+//   bu.beatemupDraw(shakeX, shakeY)
+//
+// ── The third axis is the whole genre ────────────────────────────────────────────────────────────
+// `y` is not a screen row, it is the actor's position ACROSS the road — its depth. It decides three
+// things at once and they must agree or the game feels broken:
+//
+//   1. Where it draws (screen row = y - z), and IN WHAT ORDER (`sprite_set_depth(spr, y)`, so a
+//      character further down the road is nearer and covers one further up).
+//   2. Whether a punch connects: |attacker.y - victim.y| <= DEPTH_TOL. This is the rule the old
+//      version of this example was missing, and without it you hit people standing behind you.
+//   3. Where the AI has to stand before it can attack, which is why enemies converge on your lane
+//      rather than swarming your x.
+//
+// `z` is height off the ground, for jumps and for the arc of a knockdown. It moves the SPRITE but
+// never the shadow — see beatemupDraw.
+import { sprite_set_frame, sprite_set_pos, sprite_set_flip, sprite_set_visible,
+         sprite_set_depth, sprite_set_sheet } from 'cargo:tish_agb'
+import { motionFrame, DASH_FWD, DASH_BACK, BTN_LP, BTN_HP, BTN_LK, BTN_HK } from './motion'
+
+// The pad, in this game's terms. `motion.tish` names its four attack bits after a fighting game's
+// punches and kicks; a brawler wants one of them to be JUMP.
+export let BTN_ATTACK: i32 = 2        // A
+export let BTN_JUMP: i32 = 1          // B
+export let BTN_HEAVY: i32 = 8         // L
+export let BTN_GRAB: i32 = 4          // R
+
+// ── states ───────────────────────────────────────────────────────────────────────────────────────
+export let BU_IDLE: i32 = 0
+export let BU_WALK: i32 = 1
+export let BU_JUMP: i32 = 2
+export let BU_ATTACK: i32 = 3
+export let BU_HIT: i32 = 4
+export let BU_DOWN: i32 = 5           // knocked off the ground: an arc, then a landing
+export let BU_RISE: i32 = 6           // getting up, and invulnerable while it does
+export let BU_DEAD: i32 = 7
+export let BU_FROZEN: i32 = 8         // spawned but not yet in play
+export let BU_RUN: i32 = 9            // a dash that keeps going while forward is held
+
+// ── move slots ───────────────────────────────────────────────────────────────────────────────────
+export let MV_L: i32 = 0              // light — chains into itself
+export let MV_H: i32 = 1              // heavy — knocks down
+export let MV_AIR: i32 = 2            // jump attack
+export let MV_SPECIAL: i32 = 3        // the panic move: hits all around, costs health
+export let MV_GRAB: i32 = 4           // close range, unblockable, and it throws
+let MOVES: i32 = 5
+
+// ── events from beatemupTick ─────────────────────────────────────────────────────────────────────
+export let EV_HIT: i32 = 1            // the player connected
+export let EV_TAKEN: i32 = 2          // the player was hit
+export let EV_KO: i32 = 4             // an enemy died
+export let EV_BLOCKED: i32 = 8        // reserved: an enemy shrugged off a light hit
+export let EV_PLAYER_DEAD: i32 = 16
+export let EV_CLEARED: i32 = 32       // no enemies left alive
+
+let NCHAR: i32 = 4
+export let ACTORS: i32 = 4            // the player plus three. See the note in beatemupDraw on VRAM.
+export let PLAYER: i32 = 0
+
+// ── character table ──────────────────────────────────────────────────────────────────────────────
+let CW: i32 = 9
+let C_SHEET: i32 = 0
+let C_MAXHP: i32 = 1
+let C_WALKX: i32 = 2                  // 8.8 px/frame along the road
+let C_WALKY: i32 = 3                  // 8.8 px/frame across it — always SLOWER, or the road feels flat
+let C_JUMPVZ: i32 = 4
+let C_GRAV: i32 = 5
+let C_HALFW: i32 = 6
+let C_TALL: i32 = 7
+let C_SCORE: i32 = 8                  // points for killing one
+let CH: i32[] = []
+
+// ── move table ───────────────────────────────────────────────────────────────────────────────────
+let MW: i32 = 17
+let M_CLIP: i32 = 0
+let M_CLIPN: i32 = 1
+let M_START: i32 = 2
+let M_ACTIVE: i32 = 3
+let M_RECOV: i32 = 4
+let M_HBX: i32 = 5                    // near edge, px in front of the actor's centre
+let M_HBY: i32 = 6                    // top edge, px above the feet
+let M_HBW: i32 = 7
+let M_HBH: i32 = 8
+let M_DMG: i32 = 9
+let M_HSTUN: i32 = 10
+let M_PUSH: i32 = 11
+let M_HSTOP: i32 = 12
+let M_KNOCK: i32 = 13                 // 1 = knocks the victim down
+let M_BTN: i32 = 14
+let M_DEFINED: i32 = 15
+let M_COST: i32 = 16                  // health the move spends — the genre's panic button
+let MT: i32[] = []
+
+// FX overlay window per attack pose, in cell units — see scripts/fighter_art.py.
+let FXX: i32[] = []
+let FXY: i32[] = []
+
+// ── actor state ──────────────────────────────────────────────────────────────────────────────────
+let AW: i32 = 31
+let A_LIVE: i32 = 0                   // 0 empty, 1 in play
+let A_CHR: i32 = 1
+let A_BODY: i32 = 2
+let A_FX: i32 = 3
+let A_SHADOW: i32 = 4
+let A_X: i32 = 5                      // 8.8, along the road
+let A_Y: i32 = 6                      // 8.8, across it — the depth axis
+let A_Z: i32 = 7                      // 8.8, height off the ground
+let A_VX: i32 = 8
+let A_VZ: i32 = 9
+let A_FACE: i32 = 10
+let A_STATE: i32 = 11
+let A_HP: i32 = 12
+let A_MOVE: i32 = 13
+let A_PHASE: i32 = 14
+let A_PHASET: i32 = 15
+let A_HITDONE: i32 = 16
+let A_STUN: i32 = 17
+let A_POSE: i32 = 18
+let A_ANIMT: i32 = 19
+let A_AI: i32 = 20
+let A_AIT: i32 = 21
+let A_CHAIN: i32 = 22                 // how far into the light-attack chain this actor is
+let A_CHAINT: i32 = 23                // frames left to continue the chain
+let A_FOE: i32 = 24                   // who this actor is fighting (the player, for enemies)
+let A_RNG: i32 = 25
+let A_LASTPOSE: i32 = 26              // what the sprite is already showing, so the draw can skip it
+let A_LASTFLIP: i32 = 27
+let A_LASTSHD: i32 = 28               // and the shadow's size, which changes only while jumping
+let A_LASTFX: i32 = 29
+let A_INVULN: i32 = 30             // frames of mercy after being hit
+let A: i32[] = []
+
+// ── globals ──────────────────────────────────────────────────────────────────────────────────────
+let G_FREEZE: i32 = 0
+let G_LEFT: i32 = 1
+let G_RIGHT: i32 = 2
+let G_LANE_T: i32 = 3
+let G_LANE_B: i32 = 4
+let G_EV: i32 = 5
+let G_HITX: i32 = 6
+let G_HITY: i32 = 7
+let G_SCORE: i32 = 8
+let G_COMBO: i32 = 9
+let G_COMBOT: i32 = 10
+let G_SEED: i32 = 11
+let G_TOKEN: i32 = 12              // which enemy currently has permission to attack, or -1
+let G_TOKENT: i32 = 13             // how long it keeps it
+let G_FXSPR: i32 = 14              // ONE overlay sprite, shared by whoever is swinging
+let G_FXCLAIM: i32 = 15            // has anyone taken it this frame?
+let G: i32[] = [0, 8, 232, 106, 144, 0, 0, 0, 0, 0, 0, 0x1234567, 0 - 1, 0, 0 - 1, 0]
+
+// Body poses — these mirror the generated frames.tish and the two must agree.
+let P_IDLE: i32 = 0
+let P_WALK: i32 = 4
+let P_JUMP: i32 = 8
+let P_FALL: i32 = 9
+let P_CROUCH: i32 = 10
+let P_FX_FIRST: i32 = 11
+let P_FX_LAST: i32 = 20
+let P_GUARD: i32 = 21
+let P_HIT: i32 = 22
+let P_KO: i32 = 23
+let P_FX_CELL: i32 = 24
+
+// ⚠️ How close in DEPTH two actors have to be for a punch to land. Too tight and the game feels
+// broken; too loose and the road stops being a road. 12px against a 38px-deep street is about
+// a third of the walkable band, which is what every arcade brawler settles on.
+let DEPTH_TOL: i32 = 12
+let PUSH_X: i32 = 30                  // bodies may not stand closer than this along the road
+let PUSH_Y: i32 = 9
+let CHAIN_WINDOW: i32 = 22            // frames to continue a light chain after one connects
+let CHAIN_MAX: i32 = 3
+let DOWN_FRAMES: i32 = 34             // lying on the ground after a knockdown
+let RISE_FRAMES: i32 = 16             // ... and getting up, invulnerable
+let COMBO_HOLD: i32 = 90              // frames the on-screen combo count survives without a new hit
+let PLAYER_IFRAMES: i32 = 28          // mercy after the player is hit, so a crowd cannot loop them
+let TOKEN_HOLD: i32 = 34              // how long one enemy keeps the right to attack
+
+// Dash/run
+let RUN_MUL: i32 = 2
+let RUN_FRAMES: i32 = 10              // a dash lasts this long unless forward is still held
+
+let i: i32 = 0
+while (i < NCHAR * CW) { CH.push(0) i = i + 1 }
+i = 0
+while (i < NCHAR * MOVES * MW) { MT.push(0) i = i + 1 }
+i = 0
+while (i < NCHAR * 10) { FXX.push(0) FXY.push(0) i = i + 1 }
+i = 0
+while (i < ACTORS * AW) { A.push(0) i = i + 1 }
+
+// ── authoring ────────────────────────────────────────────────────────────────────────────────────
+export function beatemupDefChar(chr: i32, sheet: i32, maxHp: i32, walkX: i32, walkY: i32,
+                                jumpVz: i32, grav: i32, halfW: i32, tall: i32, score: i32) {
+  let b: i32 = chr * CW
+  CH[b + C_SHEET] = sheet
+  CH[b + C_MAXHP] = maxHp
+  CH[b + C_WALKX] = walkX
+  CH[b + C_WALKY] = walkY
+  CH[b + C_JUMPVZ] = jumpVz
+  CH[b + C_GRAV] = grav
+  CH[b + C_HALFW] = halfW
+  CH[b + C_TALL] = tall
+  CH[b + C_SCORE] = score
+}
+
+export function beatemupDefMove(chr: i32, mv: i32, clip: i32, clipn: i32, startup: i32,
+                                active: i32, recovery: i32, dmg: i32, knock: i32, btn: i32) {
+  let b: i32 = (chr * MOVES + mv) * MW
+  MT[b + M_CLIP] = clip
+  MT[b + M_CLIPN] = clipn
+  MT[b + M_START] = startup
+  MT[b + M_ACTIVE] = active
+  MT[b + M_RECOV] = recovery
+  MT[b + M_DMG] = dmg
+  MT[b + M_KNOCK] = knock
+  MT[b + M_BTN] = btn
+  MT[b + M_DEFINED] = 1
+}
+
+// Split from `beatemupDefMove` because tish does not check arity, and one call with fifteen
+// arguments is one dropped comma away from a silently harmless attack.
+export function beatemupDefBox(chr: i32, mv: i32, hbX: i32, hbY: i32, hbW: i32, hbH: i32,
+                               hitStun: i32, push: i32, hitStop: i32) {
+  let b: i32 = (chr * MOVES + mv) * MW
+  MT[b + M_HBX] = hbX
+  MT[b + M_HBY] = hbY
+  MT[b + M_HBW] = hbW
+  MT[b + M_HBH] = hbH
+  MT[b + M_HSTUN] = hitStun
+  MT[b + M_PUSH] = push
+  MT[b + M_HSTOP] = hitStop
+}
+
+// What a move costs its owner in health. Final Fight's answer to being surrounded: a move that
+// always works, always hits everyone, and always costs you for using it.
+export function beatemupDefCost(chr: i32, mv: i32, cost: i32) {
+  MT[(chr * MOVES + mv) * MW + M_COST] = cost
+}
+
+export function beatemupDefFxCell(chr: i32, pose: i32, dx: i32, dy: i32) {
+  FXX[chr * 10 + (pose - P_FX_FIRST)] = dx
+  FXY[chr * 10 + (pose - P_FX_FIRST)] = dy
+}
+
+// The walkable band across the road, in screen rows — the depth axis.
+export function beatemupSetRoad(laneTop: i32, laneBottom: i32) {
+  G[G_LANE_T] = laneTop
+  G[G_LANE_B] = laneBottom
+}
+
+// The camera lock. A brawler is a corridor of rooms: the walls close behind you until the wave is
+// dead, which is the only reason a wave is a wave rather than a suggestion.
+export function beatemupSetBounds(left: i32, right: i32) {
+  G[G_LEFT] = left
+  G[G_RIGHT] = right
+}
+
+// ── lifecycle ────────────────────────────────────────────────────────────────────────────────────
+export function beatemupClear() {
+  let s: i32 = 0
+  while (s < ACTORS) {
+    A[s * AW + A_LIVE] = 0
+    sprite_set_visible(A[s * AW + A_BODY], 0)
+    sprite_set_visible(A[s * AW + A_SHADOW], 0)
+    s = s + 1
+  }
+  if (G[G_FXSPR] >= 0) { sprite_set_visible(G[G_FXSPR], 0) }
+  G[G_TOKEN] = 0 - 1
+  G[G_FREEZE] = 0
+  G[G_COMBO] = 0
+}
+
+// Bind a slot to a character and its three sprites, and put it on the road.
+// The attack overlay is ONE sprite for the whole cast, re-pointed at whoever is currently swinging.
+//
+// ⚠️ Four 64x64 overlays is 8 KB of the 32 KB of sprite VRAM held permanently, on top of four
+// bodies — and `sprite_set_visible(h, 0)` does NOT release a sprite's Object, so hiding them
+// reclaims nothing. With HUD text also taking sprite VRAM this overflowed and the ROM died on
+// `have space for sprites: SpriteFull`. At most one swing is on screen at a time in practice, so
+// one sprite is not a compromise.
+export function beatemupSetFxSprite(spr: i32) { G[G_FXSPR] = spr }
+
+export function beatemupSpawn(slot: i32, chr: i32, x: i32, y: i32,
+                              bodySpr: i32, shadowSpr: i32) {
+  let b: i32 = slot * AW
+  A[b + A_LIVE] = 1
+  A[b + A_CHR] = chr
+  A[b + A_BODY] = bodySpr
+  A[b + A_SHADOW] = shadowSpr
+  A[b + A_X] = x << 8
+  A[b + A_Y] = y << 8
+  A[b + A_Z] = 0
+  A[b + A_VX] = 0
+  A[b + A_VZ] = 0
+  A[b + A_FACE] = 1
+  if (slot !== PLAYER) { A[b + A_FACE] = 0 - 1 }
+  A[b + A_STATE] = BU_IDLE
+  A[b + A_HP] = CH[chr * CW + C_MAXHP]
+  A[b + A_MOVE] = 0 - 1
+  A[b + A_PHASE] = 0
+  A[b + A_PHASET] = 0
+  A[b + A_HITDONE] = 0
+  A[b + A_STUN] = 0
+  A[b + A_POSE] = P_IDLE
+  A[b + A_ANIMT] = slot * 7
+  A[b + A_AI] = 0
+  A[b + A_AIT] = 8 + slot * 11
+  A[b + A_CHAIN] = 0
+  A[b + A_CHAINT] = 0
+  A[b + A_FOE] = PLAYER
+  A[b + A_RNG] = 0x2545F49 + slot * 2654435
+  A[b + A_LASTPOSE] = 0 - 1
+  A[b + A_LASTFLIP] = 0 - 1
+  A[b + A_LASTSHD] = 0 - 1
+  A[b + A_INVULN] = 0
+  sprite_set_visible(bodySpr, 1)
+}
+
+export function beatemupFreeze(frames: i32) { G[G_FREEZE] = frames }
+export function beatemupSetFrozen(slot: i32, on: i32) {
+  let b: i32 = slot * AW
+  if (on === 1) { A[b + A_STATE] = BU_FROZEN }
+  else if (A[b + A_STATE] === BU_FROZEN) { A[b + A_STATE] = BU_IDLE }
+}
+
+// ── reads ────────────────────────────────────────────────────────────────────────────────────────
+export function beatemupAlive(slot: i32): i32 { return A[slot * AW + A_LIVE] }
+export function beatemupHp(slot: i32): i32 { return A[slot * AW + A_HP] }
+export function beatemupMaxHp(slot: i32): i32 { return CH[A[slot * AW + A_CHR] * CW + C_MAXHP] }
+export function beatemupX(slot: i32): i32 { return A[slot * AW + A_X] >> 8 }
+export function beatemupY(slot: i32): i32 { return A[slot * AW + A_Y] >> 8 }
+export function beatemupState(slot: i32): i32 { return A[slot * AW + A_STATE] }
+export function beatemupScore(): i32 { return G[G_SCORE] }
+export function beatemupCombo(): i32 { return G[G_COMBO] }
+export function beatemupLastHitX(): i32 { return G[G_HITX] }
+export function beatemupLastHitY(): i32 { return G[G_HITY] }
+export function beatemupFrozen(): i32 { return G[G_FREEZE] }
+
+// How many enemy slots are still standing — what a wave controller waits on.
+export function beatemupEnemies(): i32 {
+  let n: i32 = 0
+  let s: i32 = 1
+  while (s < ACTORS) {
+    if (A[s * AW + A_LIVE] === 1) { n = n + 1 }
+    s = s + 1
+  }
+  return n
+}
+
+// Everything the HUD wants, in one crossing: hp | maxHp << 8 | combo << 16.
+// ⚠️ A call from one tish module into another is a boxed `Value` dispatch — measured at ~117 Timer2
+// ticks against a 4,389-tick frame. Six separate getters a frame is most of a HUD's budget spent
+// asking questions rather than drawing.
+export function beatemupHudView(): i32 {
+  let hp: i32 = A[PLAYER * AW + A_HP]
+  if (hp < 0) { hp = 0 }
+  let c: i32 = G[G_COMBO]
+  if (c > 99) { c = 99 }
+  return hp | (CH[A[PLAYER * AW + A_CHR] * CW + C_MAXHP] << 8) | (c << 16)
+}
+
+// ── the frame ────────────────────────────────────────────────────────────────────────────────────
+export function beatemupTick(): i32 {
+  if (G[G_FREEZE] > 0) {
+    G[G_FREEZE] = G[G_FREEZE] - 1
+    return 0
+  }
+  G[G_EV] = 0
+
+  if (G[G_COMBOT] > 0) {
+    G[G_COMBOT] = G[G_COMBOT] - 1
+    if (G[G_COMBOT] === 0) { G[G_COMBO] = 0 }
+  }
+
+  // The attack token expires on its own, so an enemy that takes it and then runs away cannot hold
+  // the whole wave hostage.
+  if (G[G_TOKENT] > 0) {
+    G[G_TOKENT] = G[G_TOKENT] - 1
+    if (G[G_TOKENT] === 0) { G[G_TOKEN] = 0 - 1 }
+  }
+
+  let s: i32 = 0
+  while (s < ACTORS) {
+    if (A[s * AW + A_LIVE] === 1) {
+      if (A[s * AW + A_INVULN] > 0) { A[s * AW + A_INVULN] = A[s * AW + A_INVULN] - 1 }
+      stepActor(s)
+    }
+    s = s + 1
+  }
+
+  // Contact, then separation. Resolving first means a hit that kills lands before the corpse is
+  // pushed out of the way, which is what stops a knockdown from teleporting.
+  s = 0
+  while (s < ACTORS) {
+    if (A[s * AW + A_LIVE] === 1) { resolve(s) }
+    s = s + 1
+  }
+  pushApart()
+  poseAll()
+
+  if (A[PLAYER * AW + A_LIVE] === 1) {
+    if (A[PLAYER * AW + A_HP] <= 0) {
+      if (A[PLAYER * AW + A_STATE] !== BU_DEAD) {
+        A[PLAYER * AW + A_STATE] = BU_DEAD
+        G[G_EV] = G[G_EV] | EV_PLAYER_DEAD
+      }
+    }
+  }
+  if (beatemupEnemies() === 0) { G[G_EV] = G[G_EV] | EV_CLEARED }
+  return G[G_EV]
+}
+
+function stepActor(s: i32) {
+  let b: i32 = s * AW
+  let st: i32 = A[b + A_STATE]
+  A[b + A_ANIMT] = A[b + A_ANIMT] + 1
+  if (A[b + A_CHAINT] > 0) {
+    A[b + A_CHAINT] = A[b + A_CHAINT] - 1
+    if (A[b + A_CHAINT] === 0) { A[b + A_CHAIN] = 0 }
+  }
+
+  if (st === BU_DEAD) { return }
+  if (st === BU_FROZEN) { return }
+
+  if (st === BU_DOWN) {
+    // The knockdown arc: it keeps its horizontal speed until it lands, then lies there.
+    if (A[b + A_Z] > 0 || A[b + A_VZ] !== 0) {
+      A[b + A_Z] = A[b + A_Z] + A[b + A_VZ]
+      A[b + A_VZ] = A[b + A_VZ] + CH[A[b + A_CHR] * CW + C_GRAV]
+      A[b + A_X] = A[b + A_X] + A[b + A_VX]
+      if (A[b + A_X] < (G[G_LEFT] << 8)) { A[b + A_X] = G[G_LEFT] << 8 }
+      if (A[b + A_X] > (G[G_RIGHT] << 8)) { A[b + A_X] = G[G_RIGHT] << 8 }
+      if (A[b + A_Z] <= 0) {
+        A[b + A_Z] = 0
+        A[b + A_VZ] = 0
+        A[b + A_VX] = 0
+        A[b + A_STUN] = DOWN_FRAMES
+      }
+    } else {
+      A[b + A_STUN] = A[b + A_STUN] - 1
+      if (A[b + A_STUN] <= 0) {
+        if (A[b + A_HP] <= 0) { die(s) }
+        else { A[b + A_STATE] = BU_RISE A[b + A_STUN] = RISE_FRAMES }
+      }
+    }
+    return
+  }
+
+  if (st === BU_RISE) {
+    A[b + A_STUN] = A[b + A_STUN] - 1
+    if (A[b + A_STUN] <= 0) { A[b + A_STATE] = BU_IDLE }
+    return
+  }
+
+  if (st === BU_HIT) {
+    A[b + A_STUN] = A[b + A_STUN] - 1
+    A[b + A_X] = A[b + A_X] + A[b + A_VX]
+    A[b + A_VX] = (A[b + A_VX] * 7) >> 3
+    if (A[b + A_X] < (G[G_LEFT] << 8)) { A[b + A_X] = G[G_LEFT] << 8 }
+    if (A[b + A_X] > (G[G_RIGHT] << 8)) { A[b + A_X] = G[G_RIGHT] << 8 }
+    if (A[b + A_STUN] <= 0) {
+      if (A[b + A_HP] <= 0) { die(s) } else { A[b + A_STATE] = BU_IDLE }
+    }
+    return
+  }
+
+  if (st === BU_ATTACK) {
+    A[b + A_PHASET] = A[b + A_PHASET] - 1
+    gravity(s)
+    if (A[b + A_PHASET] <= 0) {
+      let mb: i32 = (A[b + A_CHR] * MOVES + A[b + A_MOVE]) * MW
+      let ph: i32 = A[b + A_PHASE] + 1
+      A[b + A_PHASE] = ph
+      if (ph === 1) { A[b + A_PHASET] = MT[mb + M_ACTIVE] }
+      else if (ph === 2) { A[b + A_PHASET] = MT[mb + M_RECOV] }
+      else {
+        A[b + A_STATE] = BU_IDLE
+        A[b + A_MOVE] = 0 - 1
+        if (G[G_TOKEN] === s) { G[G_TOKEN] = 0 - 1 G[G_TOKENT] = 0 }
+      }
+    }
+    return
+  }
+
+  if (s === PLAYER) { stepPlayer(s, b) } else { stepEnemy(s, b) }
+}
+
+// ── the player ───────────────────────────────────────────────────────────────────────────────────
+function stepPlayer(s: i32, b: i32) {
+  // ONE crossing into motion for the whole pad — see the note on motionFrame.
+  let w: i32 = motionFrame(PLAYER, A[b + A_FACE])
+  let dir: i32 = w & 15
+  let edge: i32 = (w >> 4) & 15
+  let dash: i32 = (w >> 20) & 3
+
+  if (tryStart(s, edge) === 1) { return }
+
+  let dx: i32 = DIRX[dir]
+  let dy: i32 = DIRY[dir]
+  let st: i32 = A[b + A_STATE]
+
+  if (st === BU_RUN) {
+    A[b + A_X] = A[b + A_X] + A[b + A_VX]
+    A[b + A_STUN] = A[b + A_STUN] - 1
+    // The run continues while forward is still held — a dash that stops after ten frames is a
+    // twitch, and a run you cannot stop is a nuisance.
+    if (dx * A[b + A_FACE] > 0) { A[b + A_STUN] = RUN_FRAMES }
+    if (A[b + A_STUN] <= 0) { A[b + A_STATE] = BU_IDLE A[b + A_VX] = 0 }
+    if (dy !== 0) {
+      A[b + A_Y] = A[b + A_Y] + (0 - dy) * CH[A[b + A_CHR] * CW + C_WALKY]
+  if (A[b + A_Y] < (G[G_LANE_T] << 8)) { A[b + A_Y] = G[G_LANE_T] << 8 }
+  if (A[b + A_Y] > (G[G_LANE_B] << 8)) { A[b + A_Y] = G[G_LANE_B] << 8 }
+  }
+    if (A[b + A_X] < (G[G_LEFT] << 8)) { A[b + A_X] = G[G_LEFT] << 8 }
+    if (A[b + A_X] > (G[G_RIGHT] << 8)) { A[b + A_X] = G[G_RIGHT] << 8 }
+    return
+  }
+
+  if (A[b + A_Z] > 0) {
+    gravity(s)
+    if (dx !== 0) { A[b + A_X] = A[b + A_X] + dx * (CH[A[b + A_CHR] * CW + C_WALKX] >> 1) }
+    if (A[b + A_X] < (G[G_LEFT] << 8)) { A[b + A_X] = G[G_LEFT] << 8 }
+    if (A[b + A_X] > (G[G_RIGHT] << 8)) { A[b + A_X] = G[G_RIGHT] << 8 }
+    return
+  }
+
+  if (dash !== 0) {
+    A[b + A_STATE] = BU_RUN
+    A[b + A_STUN] = RUN_FRAMES
+    if (dash === DASH_FWD) { A[b + A_VX] = A[b + A_FACE] * CH[A[b + A_CHR] * CW + C_WALKX] * RUN_MUL }
+    else { A[b + A_VX] = 0 - A[b + A_FACE] * CH[A[b + A_CHR] * CW + C_WALKX] * RUN_MUL }
+    return
+  }
+
+  // ⚠️ JUMP IS A BUTTON, NOT UP. Up has to walk up the road — it is the depth axis, and the whole
+  // genre lives on it. Binding jump to it meant the player could only ever walk DOWN the street,
+  // which quietly halved the playfield.
+  if ((edge & BTN_JUMP) > 0) {
+    A[b + A_VZ] = CH[A[b + A_CHR] * CW + C_JUMPVZ]
+    A[b + A_STATE] = BU_JUMP
+    A[b + A_Z] = 1
+    return
+  }
+
+  if (dx !== 0) {
+    A[b + A_X] = A[b + A_X] + dx * CH[A[b + A_CHR] * CW + C_WALKX]
+    A[b + A_FACE] = dx
+    A[b + A_STATE] = BU_WALK
+  } else {
+    A[b + A_STATE] = BU_IDLE
+  }
+  // Down on the pad walks TOWARDS the camera, which is down the screen, which is +y.
+  if (dy < 0) {
+      A[b + A_Y] = A[b + A_Y] + (1) * CH[A[b + A_CHR] * CW + C_WALKY]
+  if (A[b + A_Y] < (G[G_LANE_T] << 8)) { A[b + A_Y] = G[G_LANE_T] << 8 }
+  if (A[b + A_Y] > (G[G_LANE_B] << 8)) { A[b + A_Y] = G[G_LANE_B] << 8 }
+    A[b + A_STATE] = BU_WALK
+  }
+  else if (dy > 0) {
+      A[b + A_Y] = A[b + A_Y] + (0 - 1) * CH[A[b + A_CHR] * CW + C_WALKY]
+  if (A[b + A_Y] < (G[G_LANE_T] << 8)) { A[b + A_Y] = G[G_LANE_T] << 8 }
+  if (A[b + A_Y] > (G[G_LANE_B] << 8)) { A[b + A_Y] = G[G_LANE_B] << 8 }
+    A[b + A_STATE] = BU_WALK
+  }
+  if (A[b + A_X] < (G[G_LEFT] << 8)) { A[b + A_X] = G[G_LEFT] << 8 }
+  if (A[b + A_X] > (G[G_RIGHT] << 8)) { A[b + A_X] = G[G_RIGHT] << 8 }
+}
+
+// ── the enemies ──────────────────────────────────────────────────────────────────────────────────
+// Each one converges on the player's LANE first and its distance second, because an enemy that
+// closes in x while ignoring depth walks past you forever. Attacks fire from an intent timer rather
+// than a distance test, so they commit and can be punished.
+let AI_APPROACH: i32 = 0
+let AI_CIRCLE: i32 = 1
+let AI_ATTACK: i32 = 2
+let AI_BACK: i32 = 3
+let AI_WAIT: i32 = 4
+
+function stepEnemy(s: i32, b: i32) {
+  let pb: i32 = PLAYER * AW
+  if (A[pb + A_LIVE] !== 1) { A[b + A_STATE] = BU_IDLE return }
+
+  let px: i32 = A[pb + A_X] >> 8
+  let py: i32 = A[pb + A_Y] >> 8
+  let mx: i32 = A[b + A_X] >> 8
+  let my: i32 = A[b + A_Y] >> 8
+  let gapX: i32 = px - mx
+  let gapY: i32 = py - my
+  let absX: i32 = gapX
+  if (absX < 0) { absX = 0 - absX }
+  let absY: i32 = gapY
+  if (absY < 0) { absY = 0 - absY }
+
+  A[b + A_FACE] = 1
+  if (gapX < 0) { A[b + A_FACE] = 0 - 1 }
+
+  A[b + A_AIT] = A[b + A_AIT] - 1
+  if (A[b + A_AIT] <= 0) {
+    let r: i32 = rnd(s, 100)
+    if (absX < 34 && absY <= DEPTH_TOL) {
+      if (r < 62) { A[b + A_AI] = AI_ATTACK A[b + A_AIT] = 12 }
+      else if (r < 82) { A[b + A_AI] = AI_BACK A[b + A_AIT] = 20 + rnd(s, 16) }
+      else { A[b + A_AI] = AI_CIRCLE A[b + A_AIT] = 24 + rnd(s, 20) }
+    } else {
+      if (r < 78) { A[b + A_AI] = AI_APPROACH A[b + A_AIT] = 20 + rnd(s, 24) }
+      else { A[b + A_AI] = AI_WAIT A[b + A_AIT] = 16 + rnd(s, 20) }
+    }
+  }
+
+  let intent: i32 = A[b + A_AI]
+  if (intent === AI_ATTACK) {
+    if (A[b + A_AIT] === 6) {
+      if (absY <= DEPTH_TOL) {
+        // ⚠️ ONE AT A TIME. The oldest rule in the genre: however many enemies are on screen, only
+        // one may be committed to an attack. Four independent attackers is not four times as hard,
+        // it is unplayable — there is no gap to move or hit back in.
+        if (G[G_TOKEN] < 0 || G[G_TOKEN] === s) {
+          G[G_TOKEN] = s
+          G[G_TOKENT] = TOKEN_HOLD
+          startMove(s, MV_L)
+          return
+        }
+      }
+    }
+    A[b + A_STATE] = BU_IDLE
+    return
+  }
+  if (intent === AI_WAIT) { A[b + A_STATE] = BU_IDLE return }
+
+  let sx: i32 = 0
+  let sy: i32 = 0
+  if (intent === AI_APPROACH) {
+    // Depth first: line up the lane, then close.
+    if (absY > 3) { sy = 1 if (gapY < 0) { sy = 0 - 1 } }
+    if (absX > 26) { sx = 1 if (gapX < 0) { sx = 0 - 1 } }
+  } else if (intent === AI_BACK) {
+    sx = 0 - 1
+    if (gapX < 0) { sx = 1 }
+  } else {
+    sy = 1
+    if ((A[b + A_AIT] & 8) === 0) { sy = 0 - 1 }
+  }
+
+  if (sx !== 0) { A[b + A_X] = A[b + A_X] + sx * CH[A[b + A_CHR] * CW + C_WALKX] }
+  if (sy !== 0) {
+      A[b + A_Y] = A[b + A_Y] + (sy) * CH[A[b + A_CHR] * CW + C_WALKY]
+  if (A[b + A_Y] < (G[G_LANE_T] << 8)) { A[b + A_Y] = G[G_LANE_T] << 8 }
+  if (A[b + A_Y] > (G[G_LANE_B] << 8)) { A[b + A_Y] = G[G_LANE_B] << 8 }
+  }
+  if (A[b + A_X] < (G[G_LEFT] << 8)) { A[b + A_X] = G[G_LEFT] << 8 }
+  if (A[b + A_X] > (G[G_RIGHT] << 8)) { A[b + A_X] = G[G_RIGHT] << 8 }
+  if (sx !== 0 || sy !== 0) { A[b + A_STATE] = BU_WALK } else { A[b + A_STATE] = BU_IDLE }
+}
+
+// xorshift per actor, so two enemies spawned on the same frame do not move as one.
+function rnd(s: i32, n: i32): i32 {
+  let b: i32 = s * AW
+  let x: i32 = A[b + A_RNG]
+  x = x ^ (x << 13)
+  x = x ^ ((x >> 17) & 0x7FFF)
+  x = x ^ (x << 5)
+  A[b + A_RNG] = x & 0x3FFFFFFF
+  return ((A[b + A_RNG] >> 5) & 1023) * n >> 10
+}
+
+// ── shared movement ──────────────────────────────────────────────────────────────────────────────
+function gravity(s: i32) {
+  let b: i32 = s * AW
+  if (A[b + A_Z] <= 0) { if (A[b + A_VZ] === 0) { return } }
+  A[b + A_Z] = A[b + A_Z] + A[b + A_VZ]
+  A[b + A_VZ] = A[b + A_VZ] + CH[A[b + A_CHR] * CW + C_GRAV]
+  if (A[b + A_Z] <= 0) {
+    A[b + A_Z] = 0
+    A[b + A_VZ] = 0
+    if (A[b + A_STATE] === BU_JUMP) { A[b + A_STATE] = BU_IDLE }
+    if (A[b + A_STATE] === BU_ATTACK) { A[b + A_STATE] = BU_IDLE A[b + A_MOVE] = 0 - 1 }
+  }
+}
+
+// ── attacks ──────────────────────────────────────────────────────────────────────────────────────
+// The light chain is the genre's signature: press it again while the last one is still out and the
+// next link comes out faster and the third knocks down. It is the same `A_CHAIN` counter picking a
+// different row of the same table, not three separate moves.
+function tryStart(s: i32, edge: i32): i32 {
+  if (edge === 0) { return 0 }
+  let b: i32 = s * AW
+  let chr: i32 = A[b + A_CHR]
+  let air: i32 = 0
+  if (A[b + A_Z] > 0) { air = 1 }
+
+  let mv: i32 = 0 - 1
+  let m: i32 = 0
+  while (m < MOVES) {
+    let mb: i32 = (chr * MOVES + m) * MW
+    if (MT[mb + M_DEFINED] === 1) {
+      if ((edge & MT[mb + M_BTN]) > 0) { mv = m m = MOVES }
+    }
+    m = m + 1
+  }
+  if (mv < 0) { return 0 }
+  if (air === 1) { mv = MV_AIR }
+  else if (mv === MV_AIR) { return 0 }
+  let mb: i32 = (chr * MOVES + mv) * MW
+  if (MT[mb + M_DEFINED] === 0) { return 0 }
+  // A move that costs more health than is left is a move that kills you for pressing a button.
+  if (MT[mb + M_COST] > 0) {
+    if (A[b + A_HP] <= MT[mb + M_COST]) { return 0 }
+    A[b + A_HP] = A[b + A_HP] - MT[mb + M_COST]
+  }
+  startMove(s, mv)
+  return 1
+}
+
+function startMove(s: i32, mv: i32) {
+  let b: i32 = s * AW
+  let mb: i32 = (A[b + A_CHR] * MOVES + mv) * MW
+  A[b + A_STATE] = BU_ATTACK
+  A[b + A_MOVE] = mv
+  A[b + A_PHASE] = 0
+  A[b + A_PHASET] = MT[mb + M_START]
+  A[b + A_HITDONE] = 0
+  A[b + A_VX] = 0
+}
+
+function resolve(a: i32) {
+  let ab: i32 = a * AW
+  if (A[ab + A_STATE] !== BU_ATTACK) { return }
+  if (A[ab + A_PHASE] !== 1) { return }
+  if (A[ab + A_HITDONE] === 1) { return }
+
+  let chr: i32 = A[ab + A_CHR]
+  let mv: i32 = A[ab + A_MOVE]
+  let mb: i32 = (chr * MOVES + mv) * MW
+  // The light chain's later links reach a little further and hit a little harder; the third knocks
+  // down. One row, three modifiers.
+  let link: i32 = A[ab + A_CHAIN]
+  let ax: i32 = A[ab + A_X] >> 8
+  let ay: i32 = A[ab + A_Y] >> 8
+  let az: i32 = A[ab + A_Z] >> 8
+  let face: i32 = A[ab + A_FACE]
+  let e0: i32 = ax + face * MT[mb + M_HBX]
+  let e1: i32 = ax + face * (MT[mb + M_HBX] + MT[mb + M_HBW] + link * 3)
+  let hx0: i32 = e0
+  let hx1: i32 = e1
+  if (e1 < e0) { hx0 = e1 hx1 = e0 }
+  // The panic move is the one attack that does not care which way you are facing.
+  if (mv === MV_SPECIAL) {
+    hx0 = ax - MT[mb + M_HBW]
+    hx1 = ax + MT[mb + M_HBW]
+  }
+  let hy1: i32 = az + MT[mb + M_HBY]
+  let hy0: i32 = hy1 - MT[mb + M_HBH]
+
+  let d: i32 = 0
+  while (d < ACTORS) {
+    if (d !== a) {
+      if (A[d * AW + A_LIVE] === 1) {
+        if (friendly(a, d) === 0) { tryHit(a, ab, d, mb, link, hx0, hx1, hy0, hy1, ay) }
+      }
+    }
+    d = d + 1
+  }
+}
+
+// The player fights everyone; enemies fight only the player. Without this every wave beats itself
+// up while you watch, which is funny once.
+function friendly(a: i32, d: i32): i32 {
+  if (a === PLAYER) { return 0 }
+  if (d === PLAYER) { return 0 }
+  return 1
+}
+
+function tryHit(a: i32, ab: i32, d: i32, mb: i32, link: i32,
+                hx0: i32, hx1: i32, hy0: i32, hy1: i32, ay: i32) {
+  let db: i32 = d * AW
+  let dstate: i32 = A[db + A_STATE]
+  if (dstate === BU_DEAD) { return }
+  if (dstate === BU_DOWN) { return }
+  if (dstate === BU_RISE) { return }          // getting up is invulnerable
+  if (A[db + A_INVULN] > 0) { return }        // ... and so is the moment after being hit
+
+  // ⚠️ THE DEPTH TEST. Without it a punch lands on anyone sharing your column of the screen, however
+  // far up or down the road they are standing — which is the single thing that makes a brawler feel
+  // like a brawler rather than like a side-scroller with extra sprites.
+  let dy: i32 = (A[db + A_Y] >> 8) - ay
+  if (dy < 0) { dy = 0 - dy }
+  if (dy > DEPTH_TOL) { return }
+
+  let dx: i32 = A[db + A_X] >> 8
+  let dz: i32 = A[db + A_Z] >> 8
+  let half: i32 = CH[A[db + A_CHR] * CW + C_HALFW]
+  let tall: i32 = CH[A[db + A_CHR] * CW + C_TALL]
+  if (hx1 < dx - half) { return }
+  if (hx0 > dx + half) { return }
+  if (hy1 < dz) { return }
+  if (hy0 > dz + tall) { return }
+
+  if (A[ab + A_MOVE] !== MV_SPECIAL) { A[ab + A_HITDONE] = 1 }
+  G[G_HITX] = (hx0 + hx1) >> 1
+  G[G_HITY] = (A[db + A_Y] >> 8) - dz - (tall >> 1)
+
+  let dmg: i32 = MT[mb + M_DMG] + link * 2
+  A[db + A_HP] = A[db + A_HP] - dmg
+  A[db + A_VX] = A[ab + A_FACE] * MT[mb + M_PUSH]
+  A[db + A_MOVE] = 0 - 1
+  G[G_FREEZE] = MT[mb + M_HSTOP]
+
+  let knock: i32 = MT[mb + M_KNOCK]
+  if (link >= CHAIN_MAX - 1) { knock = 1 }
+  if (A[db + A_HP] <= 0) { knock = 1 }
+
+  // ⚠️ THE WINCE. Being hit cancels whatever the victim was doing AND gives up its permission to
+  // attack, so a wave cannot trade blow for blow with you while you are mid-combo. Without this the
+  // correct play is to never approach anything, because three enemies swinging through their own
+  // hitstun will out-damage anything the player can do.
+  A[db + A_MOVE] = 0 - 1
+  A[db + A_PHASE] = 0
+  if (G[G_TOKEN] === d) { G[G_TOKEN] = 0 - 1 G[G_TOKENT] = 0 }
+
+  if (knock === 1) {
+    A[db + A_STATE] = BU_DOWN
+    A[db + A_VZ] = 0 - 620
+    A[db + A_Z] = 1
+    A[db + A_VX] = A[ab + A_FACE] * (MT[mb + M_PUSH] + 90)
+  } else {
+    A[db + A_STATE] = BU_HIT
+    A[db + A_STUN] = MT[mb + M_HSTUN]
+  }
+
+  if (a !== PLAYER) { A[db + A_INVULN] = PLAYER_IFRAMES }
+
+  if (a === PLAYER) {
+    G[G_EV] = G[G_EV] | EV_HIT
+    G[G_COMBO] = G[G_COMBO] + 1
+    G[G_COMBOT] = COMBO_HOLD
+    // Continue the chain: the window opens on CONTACT, so a whiffed jab does not extend it.
+    if (A[ab + A_MOVE] === MV_L) {
+      if (A[ab + A_CHAIN] < CHAIN_MAX - 1) { A[ab + A_CHAIN] = A[ab + A_CHAIN] + 1 }
+      else { A[ab + A_CHAIN] = 0 }
+      A[ab + A_CHAINT] = CHAIN_WINDOW
+    }
+  } else {
+    G[G_EV] = G[G_EV] | EV_TAKEN
+    G[G_COMBO] = 0
+  }
+}
+
+function die(s: i32) {
+  let b: i32 = s * AW
+  A[b + A_STATE] = BU_DEAD
+  if (s !== PLAYER) {
+    A[b + A_LIVE] = 0
+    if (G[G_TOKEN] === s) { G[G_TOKEN] = 0 - 1 }
+    sprite_set_visible(A[b + A_BODY], 0)
+    sprite_set_visible(A[b + A_SHADOW], 0)
+    G[G_SCORE] = G[G_SCORE] + CH[A[b + A_CHR] * CW + C_SCORE]
+    G[G_EV] = G[G_EV] | EV_KO
+  }
+}
+
+// Bodies may not stand on top of each other. Split in BOTH axes, weighted so the one that is
+// attacking holds its ground — otherwise a crowd shoves the player out of their own combo.
+function pushApart() {
+  let a: i32 = 0
+  while (a < ACTORS) {
+    if (A[a * AW + A_LIVE] === 1) {
+      let d: i32 = a + 1
+      while (d < ACTORS) {
+        if (A[d * AW + A_LIVE] === 1) {
+          if (A[a * AW + A_STATE] !== BU_DOWN) {
+            if (A[d * AW + A_STATE] !== BU_DOWN) { separate(a, d) }
+          }
+        }
+        d = d + 1
+      }
+    }
+    a = a + 1
+  }
+}
+
+function separate(a: i32, d: i32) {
+  let ab: i32 = a * AW
+  let db: i32 = d * AW
+  let dy: i32 = (A[db + A_Y] >> 8) - (A[ab + A_Y] >> 8)
+  if (dy > PUSH_Y) { return }
+  if (dy < 0 - PUSH_Y) { return }
+  let dx: i32 = (A[db + A_X] >> 8) - (A[ab + A_X] >> 8)
+  let sign: i32 = 1
+  let mag: i32 = dx
+  if (mag < 0) { sign = 0 - 1 mag = 0 - mag }
+  if (mag >= PUSH_X) { return }
+  let fix: i32 = ((PUSH_X - mag) << 8) >> 1
+  A[ab + A_X] = A[ab + A_X] - sign * fix
+  A[db + A_X] = A[db + A_X] + sign * fix
+  if (A[ab + A_X] < (G[G_LEFT] << 8)) { A[ab + A_X] = G[G_LEFT] << 8 }
+  if (A[ab + A_X] > (G[G_RIGHT] << 8)) { A[ab + A_X] = G[G_RIGHT] << 8 }
+  if (A[db + A_X] < (G[G_LEFT] << 8)) { A[db + A_X] = G[G_LEFT] << 8 }
+  if (A[db + A_X] > (G[G_RIGHT] << 8)) { A[db + A_X] = G[G_RIGHT] << 8 }
+}
+
+// ── presentation ─────────────────────────────────────────────────────────────────────────────────
+//                  0   1   2   3   4  5  6  7  8  9
+let DIRX: i32[] = [ 0, 0 - 1, 0, 1, 0 - 1, 0, 1, 0 - 1, 0, 1]
+let DIRY: i32[] = [ 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 1, 1, 1]
+
+// The pose loop, with the per-actor body inlined: four calls a frame into a function that reads a
+// module array is ~480 ticks of dispatch to pick four sprite indices.
+function poseAll() {
+  let s: i32 = 0
+  while (s < ACTORS) {
+    if (A[s * AW + A_LIVE] === 1) { poseOne(s) }
+    s = s + 1
+  }
+}
+
+function poseOne(s: i32) {
+  let b: i32 = s * AW
+  let st: i32 = A[b + A_STATE]
+  let t: i32 = A[b + A_ANIMT]
+  if (st === BU_ATTACK) {
+    let mb: i32 = (A[b + A_CHR] * MOVES + A[b + A_MOVE]) * MW
+    let step: i32 = A[b + A_PHASE]
+    if (step >= MT[mb + M_CLIPN]) { step = MT[mb + M_CLIPN] - 1 }
+    A[b + A_POSE] = MT[mb + M_CLIP] + step
+  }
+  else if (st === BU_HIT) { A[b + A_POSE] = P_HIT }
+  else if (st === BU_DOWN) { A[b + A_POSE] = P_KO }
+  else if (st === BU_DEAD) { A[b + A_POSE] = P_KO }
+  else if (st === BU_RISE) { A[b + A_POSE] = P_CROUCH }
+  else if (st === BU_JUMP) {
+    if (A[b + A_VZ] < 0) { A[b + A_POSE] = P_JUMP } else { A[b + A_POSE] = P_FALL } }
+  else if (st === BU_RUN) { A[b + A_POSE] = P_WALK + ((t >> 1) & 3) }
+  else if (st === BU_WALK) { A[b + A_POSE] = P_WALK + ((t >> 2) & 3) }
+  else { A[b + A_POSE] = P_IDLE + ((t >> 3) & 3) }
+}
+
+// Place everything, in WORLD coordinates.
+//
+// ⚠️ DO NOT SUBTRACT THE CAMERA HERE. `sprite_set_pos` takes world coordinates for a non-HUD sprite
+// and the engine subtracts `camera_x` itself when it builds the draw list. Doing it here as well
+// worked fine in examples/versus, where the camera only ever travels sixteen pixels — and then hid
+// every character off the left of the screen the moment this game's camera reached the second
+// arena. The shake is a genuine offset and stays.
+//
+// ⚠️ Three sprites per actor — body, FX overlay, shadow — is why ACTORS is 4 and not 8. Four 64x64
+// bodies plus four overlays is 16 KB of the GBA's 32 KB sprite VRAM before the shadows, the impact
+// burst and the HUD digits get any.
+export function beatemupDraw(ox: i32, oy: i32) {
+  G[G_FXCLAIM] = 0
+  if (G[G_FXSPR] >= 0) { sprite_set_visible(G[G_FXSPR], 0) }
+  let s: i32 = 0
+  while (s < ACTORS) {
+    let b: i32 = s * AW
+    if (A[b + A_LIVE] === 1) { drawOne(s, b, ox, oy) }
+    s = s + 1
+  }
+}
+
+function drawOne(s: i32, b: i32, ox: i32, oy: i32) {
+  let x: i32 = (A[b + A_X] >> 8) + ox
+  let y: i32 = A[b + A_Y] >> 8
+  let z: i32 = A[b + A_Z] >> 8
+  let feet: i32 = y - z + oy
+  let pose: i32 = A[b + A_POSE]
+  let face: i32 = A[b + A_FACE]
+  let flip: i32 = 0
+  if (face < 0) { flip = 1 }
+
+  // Depth-sorted by the actor's position on the ROAD, not by its drawn row: a jumping character
+  // must stay behind whoever is standing nearer the camera, and its feet row is lying about where
+  // it is standing for the whole jump.
+  sprite_set_depth(A[b + A_BODY], y)
+  sprite_set_pos(A[b + A_BODY], x - 32, feet - 62)
+  if (A[b + A_LASTPOSE] !== pose) {
+    A[b + A_LASTPOSE] = pose
+    sprite_set_visible(A[b + A_BODY], 1)
+    sprite_set_frame(A[b + A_BODY], pose)
+  }
+  if (A[b + A_LASTFLIP] !== flip) {
+    A[b + A_LASTFLIP] = flip
+    sprite_set_flip(A[b + A_BODY], flip)
+  }
+
+  // The shadow stays on the GROUND while the body rises, and shrinks with height. It is the only
+  // thing on screen that distinguishes "far away" from "in the air".
+  let shrink: i32 = z >> 3
+  if (shrink > 3) { shrink = 3 }
+  sprite_set_depth(A[b + A_SHADOW], y - 1)
+  sprite_set_pos(A[b + A_SHADOW], x - 8, y - 12 + oy)
+  if (A[b + A_LASTSHD] !== shrink) {
+    A[b + A_LASTSHD] = shrink
+    sprite_set_visible(A[b + A_SHADOW], 1)
+    sprite_set_frame(A[b + A_SHADOW], shrink)
+  }
+
+  let fdx: i32 = 0
+  let fdy: i32 = 0
+  if (pose >= P_FX_FIRST) {
+    if (pose <= P_FX_LAST) {
+      fdx = FXX[A[b + A_CHR] * 10 + (pose - P_FX_FIRST)]
+      fdy = FXY[A[b + A_CHR] * 10 + (pose - P_FX_FIRST)]
+    }
+  }
+  if (fdx === 0) {
+    if (fdy === 0) { return }
+  }
+  // First claim wins the shared overlay for this frame; a second attacker simply goes without one,
+  // which nobody has ever noticed in a brawl.
+  if (G[G_FXCLAIM] === 1) { return }
+  G[G_FXCLAIM] = 1
+  let spr: i32 = G[G_FXSPR]
+  if (spr < 0) { return }
+  let fx: i32 = x - 32 + fdx * 64
+  let fflip: i32 = 0
+  if (face < 0) { fx = x - 32 - fdx * 64 fflip = 1 }
+  sprite_set_depth(spr, y)
+  sprite_set_pos(spr, fx, feet - 62 + fdy * 64)
+  sprite_set_visible(spr, 1)
+  sprite_set_flip(spr, fflip)
+  // Re-point at the swinging character's own sheet — each has its own palette and its own arcs.
+  sprite_set_sheet(spr, CH[A[b + A_CHR] * CW + C_SHEET], P_FX_CELL + (pose - P_FX_FIRST))
+}

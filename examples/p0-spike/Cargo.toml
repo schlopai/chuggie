@@ -1,0 +1,24 @@
+[package]
+name = "p0-spike"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# P0a de-risking spike. This is a HAND-WRITTEN mock of what the tish `Gba` emit
+# mode will generate. It exists to prove — on a real thumbv4t build that boots in
+# mGBA — that the "zero-churn" tricks and the dynamic-Value core survive no_std +
+# no-atomics, BEFORE any change lands in the tish compiler. Throwaway once P2 ships.
+
+[dependencies]
+agb = { path = "../../../agb/agb" }
+# Dynamic-Value core deps (the pieces that must replace std HashMap/ahash/ArcStr).
+# NOTE (P0 finding): foldhash 0.1 pulls core::sync::atomic::AtomicUsize in its
+# seed module and does NOT compile on the no-atomics thumbv4t target. FxHasher
+# (rustc-hash) is atomics-free and is exactly what agb's own agb_hashmap uses on
+# GBA — so the portable tish_core must standardize on it, not foldhash/ahash.
+hashbrown = { version = "0.15", default-features = false }
+rustc-hash = { version = "2", default-features = false }
+libm = "0.2"
+
+[features]
+default = []

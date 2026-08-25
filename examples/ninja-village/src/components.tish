@@ -1,0 +1,41 @@
+// Reuses the exact ninja-adventure player pattern: the ninja sheet is 5 frames per row
+// (idle + 4 walk) and 4 rows (down, up, left, right — explicit left AND right, no flipping).
+import { input_x, input_y } from 'cargo:tish_agb'
+
+function animate(e) {
+  let base = e.facing() * 5           // 0 down, 1 up, 2 left, 3 right -> row start
+  if (e.gridMoving()) {
+    e.play(base + 1, 4, 6, true)      // walk cycle (4 frames)
+  } else {
+    e.play(base, 1, 1, false)         // idle frame
+  }
+}
+
+export const Player = {
+  update: ({ this }) => {
+    if (!this.gridMoving()) {
+      this.gridStep(input_x(), input_y())
+    }
+    animate(this)
+  }
+}
+
+// Heart pickup — bobs gently in place. A stateful component: it captures its resting Y on the first
+// tick (a non-moving grid entity's transform is left alone by the engine, so our per-frame offset
+// sticks) and floats up and down with a small triangle wave.
+export const Heart = {
+  update: ({ this }) => {
+    if (!this.data.ready) { this.data.baseY = this.y; this.data.t = 0; this.data.ready = true }
+    this.data.t = this.data.t + 1
+    let p = this.data.t % 48
+    let rise = p
+    if (p >= 24) { rise = 48 - p }            // triangle: 0 → 24 → 0
+    this.setPos(this.x, this.data.baseY - rise / 6)   // float up to ~4 px and back
+  }
+}
+
+// Villager NPC — a component (spawned via `behave`) so wander / face-player / dialogue behaviour
+// drops in here later without touching main. Static for now.
+export const Villager = {
+  update: ({ this }) => {}
+}

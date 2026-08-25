@@ -1,0 +1,24 @@
+[package]
+name = "agb_floor"
+version = "0.1.0"
+edition = "2021"
+
+# Standalone workspace, matching the crate the tish toolchain generates: the repo above this is a
+# cargo workspace and would otherwise try to absorb it.
+[workspace]
+
+[[bin]]
+name = "agb_floor"
+path = "src/main.rs"
+
+[dependencies]
+agb = { path = "../../../../agb/agb" }
+
+# Identical to the generated crate's profiles, so the comparison is not measuring optimisation flags.
+[profile.release]
+opt-level = 3
+lto = "fat"
+debug = true
+
+[profile.release.build-override]
+opt-level = 3

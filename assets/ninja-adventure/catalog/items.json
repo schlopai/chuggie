@@ -1,0 +1,1406 @@
+{
+ "group": "Items",
+ "count": 140,
+ "assets": [
+  {
+   "file": "Items/Action/Hit.png",
+   "name": "Hit",
+   "category": "Action",
+   "dims": [
+    15,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Action/Interact.png",
+   "name": "Interact",
+   "category": "Action",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/AllPreview.png",
+   "name": "AllPreview",
+   "category": "Items",
+   "dims": [
+    867,
+    925
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Food/Beaf.png",
+   "name": "Beaf",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Calamari.png",
+   "name": "Calamari",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Fish.png",
+   "name": "Fish",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/FortuneCookie.png",
+   "name": "FortuneCookie",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Honey.png",
+   "name": "Honey",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Meat.png",
+   "name": "Meat",
+   "category": "Food",
+   "dims": [
+    15,
+    15
+   ],
+   "type": "icon-15"
+  },
+  {
+   "file": "Items/Food/Noodle.png",
+   "name": "Noodle",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Nut.png",
+   "name": "Nut",
+   "category": "Food",
+   "dims": [
+    15,
+    15
+   ],
+   "type": "icon-15"
+  },
+  {
+   "file": "Items/Food/Nut2.png",
+   "name": "Nut2",
+   "category": "Food",
+   "dims": [
+    15,
+    15
+   ],
+   "type": "icon-15"
+  },
+  {
+   "file": "Items/Food/Octopus.png",
+   "name": "Octopus",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Onigiri.png",
+   "name": "Onigiri",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Seed1.png",
+   "name": "Seed1",
+   "category": "Food",
+   "dims": [
+    8,
+    8
+   ],
+   "type": "icon-8"
+  },
+  {
+   "file": "Items/Food/Seed2.png",
+   "name": "Seed2",
+   "category": "Food",
+   "dims": [
+    8,
+    8
+   ],
+   "type": "icon-8"
+  },
+  {
+   "file": "Items/Food/Seed3.png",
+   "name": "Seed3",
+   "category": "Food",
+   "dims": [
+    8,
+    8
+   ],
+   "type": "icon-8"
+  },
+  {
+   "file": "Items/Food/SeedBig1.png",
+   "name": "SeedBig1",
+   "category": "Food",
+   "dims": [
+    10,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Food/SeedBig2.png",
+   "name": "SeedBig2",
+   "category": "Food",
+   "dims": [
+    10,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Food/SeedBig3.png",
+   "name": "SeedBig3",
+   "category": "Food",
+   "dims": [
+    10,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Food/SeedLarge.png",
+   "name": "SeedLarge",
+   "category": "Food",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Food/SeedLargeWhite.png",
+   "name": "SeedLargeWhite",
+   "category": "Food",
+   "dims": [
+    14,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Food/Shrimp.png",
+   "name": "Shrimp",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Sushi.png",
+   "name": "Sushi",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Sushi2.png",
+   "name": "Sushi2",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/TeaLeaf.png",
+   "name": "TeaLeaf",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Food/Yakitori.png",
+   "name": "Yakitori",
+   "category": "Food",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/Bag.png",
+   "name": "Bag",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/Book.png",
+   "name": "Book",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/CrateEmpty.png",
+   "name": "CrateEmpty",
+   "category": "Object",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Object/Dice 20.png",
+   "name": "Dice 20",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/Dice 4.png",
+   "name": "Dice 4",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/Dice 6.png",
+   "name": "Dice 6",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/Dice 8.png",
+   "name": "Dice 8",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/Gourd.png",
+   "name": "Gourd",
+   "category": "Object",
+   "dims": [
+    14,
+    14
+   ],
+   "type": "icon-14"
+  },
+  {
+   "file": "Items/Object/Hourglass.png",
+   "name": "Hourglass",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Object/MoneyBag.png",
+   "name": "MoneyBag",
+   "category": "Object",
+   "dims": [
+    14,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Object/PanFlute.png",
+   "name": "PanFlute",
+   "category": "Object",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Other/Letter.png",
+   "name": "Letter",
+   "category": "Other",
+   "dims": [
+    12,
+    9
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Other/Letter2.png",
+   "name": "Letter2",
+   "category": "Other",
+   "dims": [
+    12,
+    7
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Other/Letter3.png",
+   "name": "Letter3",
+   "category": "Other",
+   "dims": [
+    12,
+    7
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Other/Stamp.png",
+   "name": "Stamp",
+   "category": "Other",
+   "dims": [
+    9,
+    9
+   ],
+   "type": "icon-9"
+  },
+  {
+   "file": "Items/Potion/EmptyPot.png",
+   "name": "EmptyPot",
+   "category": "Potion",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Potion/Heart.png",
+   "name": "Heart",
+   "category": "Potion",
+   "dims": [
+    9,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Potion/LifePot.png",
+   "name": "LifePot",
+   "category": "Potion",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Potion/Medipack.png",
+   "name": "Medipack",
+   "category": "Potion",
+   "dims": [
+    10,
+    10
+   ],
+   "type": "icon-10"
+  },
+  {
+   "file": "Items/Potion/MilkPot.png",
+   "name": "MilkPot",
+   "category": "Potion",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Potion/WaterPot.png",
+   "name": "WaterPot",
+   "category": "Potion",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Projectile/Arrow.png",
+   "name": "Arrow",
+   "category": "Projectile",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Projectile/Bomb.png",
+   "name": "Bomb",
+   "category": "Projectile",
+   "dims": [
+    12,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Projectile/Caltrop.png",
+   "name": "Caltrop",
+   "category": "Projectile",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Projectile/CrateDynamite.png",
+   "name": "CrateDynamite",
+   "category": "Projectile",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Projectile/Dynamite.png",
+   "name": "Dynamite",
+   "category": "Projectile",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Projectile/Kunai.png",
+   "name": "Kunai",
+   "category": "Projectile",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Projectile/Shuriken.png",
+   "name": "Shuriken",
+   "category": "Projectile",
+   "dims": [
+    15,
+    15
+   ],
+   "type": "icon-15"
+  },
+  {
+   "file": "Items/Resource/BarCopper.png",
+   "name": "BarCopper",
+   "category": "Resource",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Resource/BarGold.png",
+   "name": "BarGold",
+   "category": "Resource",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Resource/BarIron.png",
+   "name": "BarIron",
+   "category": "Resource",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Resource/BarMithril.png",
+   "name": "BarMithril",
+   "category": "Resource",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Resource/BarPurple.png",
+   "name": "BarPurple",
+   "category": "Resource",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Resource/BarSilver.png",
+   "name": "BarSilver",
+   "category": "Resource",
+   "dims": [
+    16,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Resource/Branch.png",
+   "name": "Branch",
+   "category": "Resource",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Resource/GemGreen.png",
+   "name": "GemGreen",
+   "category": "Resource",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Resource/GemPurple.png",
+   "name": "GemPurple",
+   "category": "Resource",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Resource/GemRed.png",
+   "name": "GemRed",
+   "category": "Resource",
+   "dims": [
+    15,
+    15
+   ],
+   "type": "icon-15"
+  },
+  {
+   "file": "Items/Resource/GemYellow.png",
+   "name": "GemYellow",
+   "category": "Resource",
+   "dims": [
+    14,
+    14
+   ],
+   "type": "icon-14"
+  },
+  {
+   "file": "Items/Resource/Grass.png",
+   "name": "Grass",
+   "category": "Resource",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Resource/Rock.png",
+   "name": "Rock",
+   "category": "Resource",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Resource/Water.png",
+   "name": "Water",
+   "category": "Resource",
+   "dims": [
+    14,
+    14
+   ],
+   "type": "icon-14"
+  },
+  {
+   "file": "Items/Resource/feather.png",
+   "name": "feather",
+   "category": "Resource",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Scroll/Scroll.png",
+   "name": "Scroll",
+   "category": "Scroll",
+   "dims": [
+    14,
+    14
+   ],
+   "type": "icon-14"
+  },
+  {
+   "file": "Items/Scroll/ScrollEmpty.png",
+   "name": "ScrollEmpty",
+   "category": "Scroll",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Scroll/ScrollFire.png",
+   "name": "ScrollFire",
+   "category": "Scroll",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Scroll/ScrollIce.png",
+   "name": "ScrollIce",
+   "category": "Scroll",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Scroll/ScrollPlant.png",
+   "name": "ScrollPlant",
+   "category": "Scroll",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Scroll/ScrollRock.png",
+   "name": "ScrollRock",
+   "category": "Scroll",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Scroll/ScrollThunder.png",
+   "name": "ScrollThunder",
+   "category": "Scroll",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Anvil.png",
+   "name": "Anvil",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Axe.png",
+   "name": "Axe",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Hammer.png",
+   "name": "Hammer",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Hoe.png",
+   "name": "Hoe",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Pickaxe.png",
+   "name": "Pickaxe",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Shovel.png",
+   "name": "Shovel",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/Sickle.png",
+   "name": "Sickle",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Tool/WateringCan.png",
+   "name": "WateringCan",
+   "category": "Tool",
+   "dims": [
+    16,
+    16
+   ],
+   "type": "icon-16"
+  },
+  {
+   "file": "Items/Treasure/BigTreasureChest.png",
+   "name": "BigTreasureChest",
+   "category": "Treasure",
+   "dims": [
+    32,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Treasure/Coin2.png",
+   "name": "Coin2",
+   "category": "Treasure",
+   "dims": [
+    40,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Treasure/GoldCoin.png",
+   "name": "GoldCoin",
+   "category": "Treasure",
+   "dims": [
+    7,
+    7
+   ],
+   "type": "icon-7"
+  },
+  {
+   "file": "Items/Treasure/GoldCup.png",
+   "name": "GoldCup",
+   "category": "Treasure",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Treasure/GoldKey.png",
+   "name": "GoldKey",
+   "category": "Treasure",
+   "dims": [
+    12,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Treasure/LittleTreasureChest.png",
+   "name": "LittleTreasureChest",
+   "category": "Treasure",
+   "dims": [
+    32,
+    16
+   ],
+   "type": "strip-h(2)"
+  },
+  {
+   "file": "Items/Treasure/SilverCoin.png",
+   "name": "SilverCoin",
+   "category": "Treasure",
+   "dims": [
+    6,
+    6
+   ],
+   "type": "icon-6"
+  },
+  {
+   "file": "Items/Treasure/SilverCup.png",
+   "name": "SilverCup",
+   "category": "Treasure",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Treasure/SilverKey.png",
+   "name": "SilverKey",
+   "category": "Treasure",
+   "dims": [
+    12,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/WeaponPreview2.png",
+   "name": "WeaponPreview2",
+   "category": "Items",
+   "dims": [
+    160,
+    30
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Axe/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Axe",
+   "dims": [
+    11,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Axe/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Axe",
+   "dims": [
+    11,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/AxeTool/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/AxeTool",
+   "dims": [
+    9,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/AxeTool/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/AxeTool",
+   "dims": [
+    9,
+    9
+   ],
+   "type": "icon-9"
+  },
+  {
+   "file": "Items/Weapons/BigSword/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/BigSword",
+   "dims": [
+    7,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/BigSword/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/BigSword",
+   "dims": [
+    7,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Bone/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Bone",
+   "dims": [
+    7,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Bone/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Bone",
+   "dims": [
+    7,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Book/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Book",
+   "dims": [
+    9,
+    9
+   ],
+   "type": "icon-9"
+  },
+  {
+   "file": "Items/Weapons/Book/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Book",
+   "dims": [
+    12,
+    9
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Bow/Arrow.png",
+   "name": "Arrow",
+   "category": "Weapons/Bow",
+   "dims": [
+    13,
+    5
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Bow/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Bow",
+   "dims": [
+    15,
+    7
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Bow2/Arrow.png",
+   "name": "Arrow",
+   "category": "Weapons/Bow2",
+   "dims": [
+    13,
+    5
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Bow2/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Bow2",
+   "dims": [
+    15,
+    7
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Club/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Club",
+   "dims": [
+    8,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Club/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Club",
+   "dims": [
+    8,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Fishing Rod/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Fishing Rod",
+   "dims": [
+    10,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Fork/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Fork",
+   "dims": [
+    7,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Fork/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Fork",
+   "dims": [
+    7,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Hammer/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Hammer",
+   "dims": [
+    9,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Hammer/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Hammer",
+   "dims": [
+    9,
+    9
+   ],
+   "type": "icon-9"
+  },
+  {
+   "file": "Items/Weapons/Katana/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Katana",
+   "dims": [
+    6,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Katana/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Katana",
+   "dims": [
+    6,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Lance/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Lance",
+   "dims": [
+    6,
+    23
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Lance/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Lance",
+   "dims": [
+    6,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Lance2/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Lance2",
+   "dims": [
+    7,
+    21
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Lance2/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Lance2",
+   "dims": [
+    7,
+    14
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/MagicWand/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/MagicWand",
+   "dims": [
+    5,
+    18
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/MagicWand/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/MagicWand",
+   "dims": [
+    5,
+    10
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Ninjaku/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Ninjaku",
+   "dims": [
+    7,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Ninjaku/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Ninjaku",
+   "dims": [
+    3,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Pickaxe/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Pickaxe",
+   "dims": [
+    11,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Pickaxe/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Pickaxe",
+   "dims": [
+    11,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Rapier/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Rapier",
+   "dims": [
+    10,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Rapier/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Rapier",
+   "dims": [
+    9,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Sai/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Sai",
+   "dims": [
+    7,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Sai/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Sai",
+   "dims": [
+    7,
+    8
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Stick/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Stick",
+   "dims": [
+    3,
+    16
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Stick/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Stick",
+   "dims": [
+    3,
+    12
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Sword/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Sword",
+   "dims": [
+    6,
+    17
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Sword/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Sword",
+   "dims": [
+    6,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Sword2/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Sword2",
+   "dims": [
+    6,
+    15
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Sword2/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Sword2",
+   "dims": [
+    6,
+    11
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Whip/Sprite.png",
+   "name": "Sprite",
+   "category": "Weapons/Whip",
+   "dims": [
+    9,
+    13
+   ],
+   "type": "irregular"
+  },
+  {
+   "file": "Items/Weapons/Whip/SpriteInHand.png",
+   "name": "SpriteInHand",
+   "category": "Weapons/Whip",
+   "dims": [
+    3,
+    14
+   ],
+   "type": "irregular"
+  }
+ ]
+}

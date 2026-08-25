@@ -1,0 +1,6 @@
+// Variant: FLOOR + packages/dialog only.
+import { log, frame } from 'cargo:tish_agb'
+import { dialogInit } from '../../../packages/dialog'
+
+log("BB dialog fn=" + (typeof dialogInit))
+while (true) { frame() }

@@ -1,0 +1,86 @@
+// Sunnyside de-risk 1 (examples/sunnyside/SPEC.md §ladder): prove the baked
+// character sheets.  The pack draws every action facing RIGHT on a 96x64
+// canvas; the baker crops to 64x32 (player) / 32x32 (NPCs) with the feet on a
+// fixed row, so direction is a single sprite_set_flip — no 4-dir sheets.
+//
+// Controls: left/right = walk + face, A = next player action, B = previous.
+// The three NPC sheets idle on the right side of the screen.
+import {
+  frame, log, backdrop, hud_text,
+  sprite_new, sprite_set_pos, sprite_set_frame, sprite_set_flip,
+  key_pressed, key_held,
+} from 'cargo:tish_agb'
+import { player } from 'sheet6432:../../../assets/sunnyside/baked/char_player.png'
+import { npcLong } from 'sheet32:../../../assets/sunnyside/baked/char_npc_long.png'
+import { npcBowl } from 'sheet32:../../../assets/sunnyside/baked/char_npc_bowl.png'
+import { npcGoblin } from 'sheet32:../../../assets/sunnyside/baked/char_npc_goblin.png'
+import {
+  ANIM_PLAYER_NAME, ANIM_PLAYER_START, ANIM_PLAYER_LEN,
+  ANIM_NPC_LONG_START, ANIM_NPC_LONG_LEN,
+} from '../../sunnyside/src/data_anim.tish'
+
+let BTN_A: i32 = 0
+let BTN_B: i32 = 1
+let BTN_LEFT: i32 = 8
+let BTN_RIGHT: i32 = 9
+
+let ACTIONS: i32 = 13
+let TICKS_PER_FRAME: i32 = 3
+
+backdrop(0x88cc66)
+hud_text(0, 4, 4, "SUNNYSIDE SHEET")
+
+let p: i32 = sprite_new(player, 0)
+let n0: i32 = sprite_new(npcLong, 0)
+let n1: i32 = sprite_new(npcBowl, 0)
+let n2: i32 = sprite_new(npcGoblin, 0)
+sprite_set_pos(n0, 180, 40)
+sprite_set_pos(n1, 180, 76)
+sprite_set_pos(n2, 180, 112)
+
+let act: i32 = 0
+let tick: i32 = 0
+let cell: i32 = 0
+let px: i32 = 60
+let flip: i32 = 0
+let ntick: i32 = 0
+let ncell: i32 = 0
+
+function actionLabel(a: i32): void {
+  hud_text(1, 4, 20, ANIM_PLAYER_NAME[a])
+}
+actionLabel(0)
+log("SHEET OK actions=" + ACTIONS)
+
+while (true) {
+  if (key_pressed(BTN_A) > 0) { act = (act + 1) % ACTIONS; tick = 0; cell = 0; actionLabel(act) }
+  if (key_pressed(BTN_B) > 0) { act = (act + ACTIONS - 1) % ACTIONS; tick = 0; cell = 0; actionLabel(act) }
+  if (key_held(BTN_LEFT) > 0) { flip = 1; px = px - 1 }
+  if (key_held(BTN_RIGHT) > 0) { flip = 0; px = px + 1 }
+  if (px < 8) { px = 8 }
+  if (px > 140) { px = 140 }
+
+  tick = tick + 1
+  if (tick >= TICKS_PER_FRAME) {
+    tick = 0
+    cell = cell + 1
+    if (cell >= ANIM_PLAYER_LEN[act]) { cell = 0 }
+  }
+  sprite_set_frame(p, ANIM_PLAYER_START[act] + cell)
+  sprite_set_flip(p, flip)
+  // the 64px frame is asymmetric (tool swings reach right): the body sits at
+  // frame x23, so a mirrored frame puts it at x41 — draw 18px further left
+  // when flipped or the character jumps sideways on every turn
+  sprite_set_pos(p, px - flip * 18, 70)
+
+  ntick = ntick + 1
+  if (ntick >= 4) {
+    ntick = 0
+    ncell = ncell + 1
+    if (ncell >= ANIM_NPC_LONG_LEN[0]) { ncell = 0 }
+    sprite_set_frame(n0, ANIM_NPC_LONG_START[0] + ncell)
+    sprite_set_frame(n1, ANIM_NPC_LONG_START[0] + ncell)
+    sprite_set_frame(n2, ANIM_NPC_LONG_START[0] + ncell)
+  }
+  frame()
+}

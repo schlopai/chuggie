@@ -1,0 +1,485 @@
+// topdown.tish — the shared top-down kit: movers, tile/room arithmetic, warps, context actions.
+//
+// This file used to be one stick machine and nothing else, which is why both top-down action-RPGs
+// in this repo had grown their own copies of the same six or seven things — facing→tile
+// arithmetic seven times over in one of them alone, `pxTile` byte-identical in both, and two independent
+// room-streaming machines with different bugs. What is here now is the part of a top-down game that
+// is not about any particular game.
+//
+// Sections:
+//   1. movers      — free (walk/dash/run) and lane (the NES model)
+//   2. geometry    — pixels → tiles → rooms, and facing → offsets
+//   3. rooms       — spawn only the room you are standing in, and park the rest
+//   4. warps       — the latch that stops a doorway re-firing every frame
+//   5. actions     — interact-then-attack, in the right order
+//   6. targeting   — soft-target cycle over SoA columns (tab-target)
+//   7. chords      — L/R skill banks + A/B/D-pad edges (caller must gate mover)
+//
+// ── 1. movers ──────────────────────────────────────────────────────────────────────────────────
+//
+// Walk / double-tap dash / hold-to-run, on top of the engine's `C_TOPDOWN` (collision, facing,
+// knockback stay native). Games attach a component as usual and call these helpers from `start` /
+// `update` instead of re-rolling the stick machine per example:
+//
+//     import { topdownMoverInit, topdownMoverDrive, TD_WALK_SPEED, TD_DASH, TD_RUN } from '...'
+//     start: ({ this }) => { topdownMoverInit(this.data, TD_WALK_SPEED) }
+//     update: ({ this }) => {
+//       let mode = topdownMoverDrive(this, this.data, input_x(), input_y(), this.data.atk > 0)
+//       if (mode === TD_DASH) { /* fast walk anim */ return }
+//       // ... attack / interact ...
+//       // walk or run anim from `mode`
+//     }
+//
+// Dash: tap a direction, release, tap the SAME direction inside TAP_WINDOW → a short locked-in
+// burst. Holding a direction never dashes by itself.
+// Run: when the dash ends, if the stick is still held, speed settles to RUN and stays there until
+// the stick is released (free steering while running — not locked like the dash).
+
+// Imported directly, not passed in. An earlier version took `entity_x`/`entity_y`/`set_transform`
+// as arguments so the package would not depend on the engine crate by name; that turns three
+// TYPED externs into three boxed `value_call`s on every frame of every walking character, and it
+// was enough to slow the lane mover measurably — a walk timed in frames stopped covering the
+// ground it used to. Every other package in this directory imports the crate; so does this one.
+// ⚠️ NO CRATE IMPORT. Ten of this package's twelve exports are pure integer logic — facing maths,
+// tile-of, room-of, room indexing, warp arming, the context-action probe — and they are the fiddly
+// parts worth sharing. Three natives, used by the two `*Drive` functions alone, made all twelve
+// unusable to a `tish_agb`-only ROM, which is why `card-gba` hand-rolled fourteen functions
+// re-implementing this file's job (schlopai/chuggie-engine#68).
+//
+// Same remedy as `packages/cutscene-core.tish`: the actor's position is read and written through a
+// hook. A game with entities passes the engine natives; a `scene:` game passes `sprite_set_pos` and
+// its own position arrays.
+//
+//     topdownSetActor(entity_x, entity_y, set_transform)
+let ACTOR = { readX: null, readY: null, write: null }
+
+/// `readX(e)`, `readY(e)`, `write(e, x, y)`. Without them the drives are no-ops rather than a crash:
+/// a game that forgot to install them gets an actor that does not move, which is debuggable, where a
+/// null call is a panic on the first frame.
+export function topdownSetActor(readX, readY, write) {
+  ACTOR.readX = readX
+  ACTOR.readY = readY
+  ACTOR.write = write
+}
+
+function actorX(e): i32 { if (ACTOR.readX !== null) { return ACTOR.readX(e) } return 0 }
+function actorY(e): i32 { if (ACTOR.readY !== null) { return ACTOR.readY(e) } return 0 }
+function actorPut(e, x, y) { if (ACTOR.write !== null) { ACTOR.write(e, x, y) } }
+
+export const TD_WALK_SPEED = 1.4   // px/frame — also the speed factories should spawn the hero at
+export const TD_DASH_SPEED = 3.6   // px/frame during the locked burst (~2.5× walk)
+export const TD_RUN_SPEED = 2.2    // px/frame after a dash while the stick stays held
+export let TD_DASH_FRAMES: i32 = 10   // ≈ 36px travelled, a bit over two tiles
+export let TD_TAP_WINDOW: i32 = 12    // frames the first tap stays armed (~0.2s)
+
+// Modes returned by `topdownMoverDrive` — for animation (idle / walk / dash / run).
+export let TD_IDLE: i32 = 0
+export let TD_WALK: i32 = 1
+export let TD_DASH: i32 = 2
+export let TD_RUN: i32 = 3
+
+// Seed the mover fields on a component's `data`. Call once from `start` (or whenever a fresh
+// behaviour is attached). `walkSpeed` defaults to TD_WALK_SPEED when omitted / 0.
+export function topdownMoverInit(data, walkSpeed) {
+  let walk = walkSpeed
+  if (walk === 0) { walk = TD_WALK_SPEED }
+  data.tdWalk = walk
+  data.dash = 0
+  data.ddx = 0
+  data.ddy = 0
+  data.tap = 0
+  data.tx = 0
+  data.ty = 0
+  data.pix = 0
+  data.piy = 0
+  data.run = 0
+}
+
+// One frame of walk / dash / run. Always updates the double-tap history (so a press during an
+// attack still counts toward a later dash); when `busy` is true (mid-swing, cutscene freeze, …)
+// it does NOT move or tick the dash. Returns TD_IDLE / TD_WALK / TD_DASH / TD_RUN.
+export function topdownMoverDrive(this_, data, ix, iy, busy) {
+  if (data.tap > 0) { data.tap = data.tap - 1 }
+
+  let fresh = (ix !== 0 || iy !== 0) && data.pix === 0 && data.piy === 0
+  if (fresh) {
+    // Second tap in the same direction, not busy, not already dashing → launch the burst.
+    if (data.tap > 0 && ix === data.tx && iy === data.ty && busy === 0 && data.dash <= 0) {
+      data.dash = TD_DASH_FRAMES
+      data.ddx = ix
+      data.ddy = iy
+      data.tap = 0
+      data.run = 0
+      this_.moveSpeed(TD_DASH_SPEED)
+    } else {
+      data.tap = TD_TAP_WINDOW
+      data.tx = ix
+      data.ty = iy
+    }
+  }
+  data.pix = ix
+  data.piy = iy
+
+  if (busy !== 0) { return TD_IDLE }
+
+  // ── dash: locked direction at dash speed ──
+  if (data.dash > 0) {
+    data.dash = data.dash - 1
+    this_.go(data.ddx, data.ddy)
+    if (data.dash <= 0) {
+      // Dash over: stick still held → settle into a run; released → drop to walk.
+      if (ix !== 0 || iy !== 0) {
+        data.run = 1
+        this_.moveSpeed(TD_RUN_SPEED)
+      } else {
+        data.run = 0
+        this_.moveSpeed(data.tdWalk)
+      }
+    }
+    return TD_DASH
+  }
+
+  // ── run: free steer at run speed until the stick is released ──
+  if (data.run !== 0) {
+    if (ix === 0 && iy === 0) {
+      data.run = 0
+      this_.moveSpeed(data.tdWalk)
+      return TD_IDLE
+    }
+    this_.go(ix, iy)
+    return TD_RUN
+  }
+
+  // ── walk ──
+  this_.go(ix, iy)
+  if (ix !== 0 || iy !== 0) { return TD_WALK }
+  return TD_IDLE
+}
+
+// ── 1b. the lane mover: the NES model ──────────────────────────────────────────────────────────
+//
+// A second mover, not a replacement. `topdownMoverDrive` above is a modern free-roaming stick with a
+// dash; this is what the NES actually did, and a game aiming at that feel needs the difference:
+//
+//   * ONE AXIS AT A TIME, but never a stand-still. Holding two perpendicular directions resolves to
+//     one — he keeps the axis he is already walking while it is still held, and takes the other
+//     otherwise. Cancelling instead (which is what a `moving vertical && !moving horizontal` pair of
+//     guards does) freezes him mid-press, and then the whole lane correction he could not make while
+//     frozen comes out at once the moment he is released. That is the diagonal twitch.
+//   * The grid discipline is on the OTHER axis. While he walks along one, his coordinate on the
+//     perpendicular one is drawn toward the tile grid a pixel per frame, so a turn drops him into
+//     the lane rather than leaving him wedged between two. That is the whole of the "snapping".
+//   * A reversal is instant, because nothing was ever committed to. This is NOT `topdownSnap(2)`:
+//     tile stepping commits to a whole cell and belongs to the monsters.
+//   * The alignment pull runs at the SAME TIME as the walk, one pixel each, so it reads as part of
+//     the turn instead of the character wandering on his own.
+//
+// The lane pitch must equal the collision box. A 16px box on an 8px lane straddles two tiles at
+// every odd half-step, and a one-tile gap becomes impassable with no way for the player to work out
+// why — measured, a 16px box on an 8px lane held UP against a one-tile gap for 240 frames and never
+// moved.
+export let TD_LANE: i32 = 16
+
+// Modes are shared with the free mover: TD_IDLE / TD_WALK. A lane walker never dashes or runs.
+export function topdownLaneInit(data) {
+  data.axis = 0        // 0 none, 1 horizontal, 2 vertical — the only state there is
+  data.lastX = -1
+  data.lastY = -1
+}
+
+// One pixel toward the nearer lane line, or stay put if already on it. Nudging toward the middle of
+// the tile the box is already mostly in can never carry it into a new tile, which is why this needs
+// no collision check of its own.
+function laneStep(v: i32): i32 {
+  let off = v % TD_LANE
+  if (off === 0) { return v }
+  if (off < TD_LANE / 2) { return v - 1 }
+  return v + 1
+}
+
+// One frame. `busy` (mid-swing, cutscene) holds still; there is no step in flight to worry about,
+// because there are no steps.
+export function topdownLaneDrive(this_, data, ix, iy, busy) {
+  if (busy !== 0) { return TD_IDLE }
+  if (ix === 0 && iy === 0) {
+    data.axis = 0
+    return TD_IDLE
+  }
+  let px = actorX(this_.id)
+  let py = actorY(this_.id)
+  // Did last frame's pixel happen? If not he is pushing on a wall, and a wall must not win an
+  // argument against a direction that is free: holding into a corner with a perpendicular direction
+  // has to slide him along it, not pin him.
+  let stuck = 0
+  if (data.axis !== 0 && px === data.lastX && py === data.lastY) { stuck = 1 }
+  data.lastX = px
+  data.lastY = py
+
+  if (ix !== 0 && iy !== 0) {
+    if (data.axis === 2 && stuck === 0) { ix = 0 }
+    else if (data.axis === 1 && stuck === 0) { iy = 0 }
+    else if (data.axis === 2) { iy = 0 }
+    else { ix = 0 }
+  }
+  if (ix !== 0) { data.axis = 1 } else { data.axis = 2 }
+
+  // The walk goes through the engine so it resolves against walls, doors and NPCs.
+  this_.go(ix, iy)
+
+  // The lane pull, on the axis he is NOT walking, same frame and same pixel budget. Straight to the
+  // transform: it is at most a pixel toward the middle of a tile the box already occupies, so it
+  // cannot enter anything new, and routing it through the mover would have cost a diagonal's worth
+  // of speed and left him on fractional pixels the lane test cannot read.
+  if (ix !== 0) {
+    let ny = laneStep(py)
+    if (ny !== py) { actorPut(this_.id, px, ny) }
+  } else {
+    let nx = laneStep(px)
+    if (nx !== px) { actorPut(this_.id, nx, py) }
+  }
+  return TD_WALK
+}
+
+// ── 2. geometry ────────────────────────────────────────────────────────────────────────────────
+//
+// facing4 is 0 down / 1 up / 2 left / 3 right. The `if (f === 0) { row = row + 1 } …` chain that
+// turns that into an offset appeared SEVEN times in the topdown RPG port (sword beam, bracelet push, bomb, candle,
+// arrow, boomerang, flame) and once more in akari, each a fresh chance to get a sign wrong.
+export function tdFacingDX(f: i32): i32 {
+  if (f === 2) { return -1 }
+  if (f === 3) { return 1 }
+  return 0
+}
+
+export function tdFacingDY(f: i32): i32 {
+  if (f === 0) { return 1 }
+  if (f === 1) { return -1 }
+  return 0
+}
+
+// Pixel → tile. Entity positions are fixed-point, so the sub-pixel part has to go before the divide
+// or the tile is wrong for every entity that is not exactly on a pixel boundary.
+//
+// NOT annotated `: i32`. The argument is a fixed-point position, and annotating the return makes
+// this a scalar-in/scalar-out function that tish lowers with an i32 parameter — the fixed value is
+// reinterpreted on the way in and every tile it returns is garbage. It fails silently: the
+// overworld still walks (movement never asks), and only the things that compare a tile against a
+// table — warp pads, room changes — quietly stop matching anything.
+export function tdTileOf(px) {
+  let frac = px % 1
+  let ipx = px - frac
+  let m = ipx % 16
+  return (ipx - m) / 16
+}
+
+// Tile → which room-sized screen it is in. `size` is the room's width or height in tiles.
+export function tdRoomOf(tile: i32, size: i32): i32 {
+  return (tile - (tile % size)) / size
+}
+
+// A room's id in a 16-wide grid, which is how both the NES's own tables and these games key rooms.
+export function tdRoomIndex(roomCol: i32, roomRow: i32): i32 {
+  return roomRow * 16 + roomCol
+}
+
+// ── 4. warps ───────────────────────────────────────────────────────────────────────────────────
+//
+// A doorway is a TILE, and standing on it lasts many frames, so the naive "if on a warp tile, warp"
+// fires every one of them. Both games discovered this and both hand-rolled the same latch —
+// the topdown RPG port at eight separate sites, akari as a bare `latched` bool.
+//
+// The rule: arm on entering a warp tile, disarm on leaving one. `tdWarpArm` returns 1 when the warp
+// should fire THIS frame and 0 otherwise, so the caller reads as a plain question.
+export function tdWarpInit(data) { data.warpLatch = 0 }
+
+export function tdWarpArm(data, onWarpTile: i32): i32 {
+  if (onWarpTile === 0) {
+    data.warpLatch = 0
+    return 0
+  }
+  if (data.warpLatch !== 0) { return 0 }
+  data.warpLatch = 1
+  return 1
+}
+
+// ── 5. actions ─────────────────────────────────────────────────────────────────────────────────
+//
+// A is "do the thing in front of me": talk to it if it will talk, hit it otherwise. The ORDER and
+// the early return are the point — the topdown RPG port called `interactTD` and then threw the result away, so
+// pressing A next to an old man both started his dialogue and swung the sword through him on the
+// same frame. akari had it right and the two never got reconciled.
+//
+// Returns 1 if something was interacted with (and no attack happened), 0 if it swung.
+export function tdContextAction(this_, reach: i32, canAttack: i32, targetTag: i32,
+                                damage: i32, hitReach: i32, size: i32, ttl: i32): i32 {
+  if (this_.interactTD(reach)) { return 1 }
+  if (canAttack === 0) { return 0 }
+  this_.attack(targetTag, damage, hitReach, size, ttl)
+  return 0
+}
+
+// ── 6. soft targeting ──────────────────────────────────────────────────────────
+//
+// Tab-target for action games: the game owns the current target id (`-1` = none). These helpers
+// only pick the next/prev living foe from parallel SoA columns the caller already has. Nothing
+// here reads the engine crate — pass positions and tags in.
+//
+// Cycle order: nearest-first among candidates farther than the current target's distance (or
+// closer when walking backward), with a facing bias so "next" prefers what you look at.
+export let TD_TGT_NONE: i32 = 0 - 1
+
+function tdAbs(v: i32): i32 { if (v < 0) { return 0 - v } return v }
+
+/// Squared distance in pixels (no soft divide).
+export function tdDist2(ax: i32, ay: i32, bx: i32, by: i32): i32 {
+  let dx: i32 = ax - bx
+  let dy: i32 = ay - by
+  return dx * dx + dy * dy
+}
+
+/// Pick next (`dir > 0`) or previous (`dir < 0`) foe. `xs`/`ys`/`tags`/`alive` length `n`.
+/// `foeTag` is an exact tag match (engine tags are not bitmasks). Returns entity id or -1.
+export function tdTargetCycle(
+  ents: i32[], xs: i32[], ys: i32[], tags: i32[], alive: i32[], n: i32,
+  selfId: i32, foeTag: i32, fromX: i32, fromY: i32, cur: i32, dir: i32
+): i32 {
+  if (n <= 0) { return TD_TGT_NONE }
+  let best: i32 = TD_TGT_NONE
+  let bestScore: i32 = 0
+  let haveBest: i32 = 0
+  let curD2: i32 = 0
+  let haveCur: i32 = 0
+  if (cur >= 0) {
+    let ci: i32 = 0
+    while (ci < n) {
+      if (ents[ci] === cur && alive[ci] !== 0) {
+        curD2 = tdDist2(fromX, fromY, xs[ci], ys[ci])
+        haveCur = 1
+      }
+      ci = ci + 1
+    }
+  }
+  let i: i32 = 0
+  while (i < n) {
+    if (alive[i] !== 0 && ents[i] !== selfId && tags[i] === foeTag) {
+      let d2: i32 = tdDist2(fromX, fromY, xs[i], ys[i])
+      let ok: i32 = 1
+      if (haveCur !== 0) {
+        if (dir > 0) {
+          if (d2 <= curD2) { ok = 0 }
+        } else {
+          if (d2 >= curD2) { ok = 0 }
+        }
+        if (ents[i] === cur) { ok = 0 }
+      }
+      if (ok !== 0) {
+        // Prefer nearer when cycling forward with no current; farther when going back.
+        let score: i32 = d2
+        if (haveBest === 0) {
+          best = ents[i]
+          bestScore = score
+          haveBest = 1
+        } else if (dir > 0) {
+          if (score < bestScore) { best = ents[i]; bestScore = score }
+        } else {
+          if (score > bestScore) { best = ents[i]; bestScore = score }
+        }
+      }
+    }
+    i = i + 1
+  }
+  // Wrap: no candidate past current → take nearest (forward) or farthest (back).
+  if (haveBest === 0) {
+    i = 0
+    while (i < n) {
+      if (alive[i] !== 0 && ents[i] !== selfId && tags[i] === foeTag) {
+        let d2w: i32 = tdDist2(fromX, fromY, xs[i], ys[i])
+        if (haveBest === 0) {
+          best = ents[i]
+          bestScore = d2w
+          haveBest = 1
+        } else if (dir > 0) {
+          if (d2w < bestScore) { best = ents[i]; bestScore = d2w }
+        } else {
+          if (d2w > bestScore) { best = ents[i]; bestScore = d2w }
+        }
+      }
+      i = i + 1
+    }
+  }
+  return best
+}
+
+/// True when `cur` is still a living foe in the list.
+export function tdTargetValid(
+  ents: i32[], tags: i32[], alive: i32[], n: i32, cur: i32, foeTag: i32
+): i32 {
+  if (cur < 0) { return 0 }
+  let i: i32 = 0
+  while (i < n) {
+    if (ents[i] === cur && alive[i] !== 0 && tags[i] === foeTag) { return 1 }
+    i = i + 1
+  }
+  return 0
+}
+
+// ── 7. chorded L/R skill wheel ─────────────────────────────────────────────────
+//
+// Hold L or R to open a skill bank; while open, an edge on Up/Down/Left/Right/A/B fires a slot.
+// The mover does NOT mute the d-pad — callers MUST zero ix/iy and set busy while a bank is open
+// or the hero walks and arms a dash under the chord.
+//
+// Button codes (tish-agb): A=0 B=1 Select=2 Start=3 L=4 R=5 Up=6 Down=7 Left=8 Right=9
+// Bank: 0 = none, 1 = L, 2 = R. L wins if both shoulders held.
+// Slot: -1 = none; else 0..5 = Up Down Left Right A B.
+
+export let TD_BANK_NONE: i32 = 0
+export let TD_BANK_L: i32 = 1
+export let TD_BANK_R: i32 = 2
+export let TD_SLOT_NONE: i32 = 0 - 1
+
+let TD_KEY_A: i32 = 0
+let TD_KEY_B: i32 = 1
+let TD_KEY_L: i32 = 4
+let TD_KEY_R: i32 = 5
+let TD_KEY_UP: i32 = 6
+let TD_KEY_DOWN: i32 = 7
+let TD_KEY_LEFT: i32 = 8
+let TD_KEY_RIGHT: i32 = 9
+
+export function tdChordBank(held: i32): i32 {
+  let l: i32 = (held >> TD_KEY_L) & 1
+  let r: i32 = (held >> TD_KEY_R) & 1
+  if (l !== 0) { return TD_BANK_L }
+  if (r !== 0) { return TD_BANK_R }
+  return TD_BANK_NONE
+}
+
+/// Slot from edge bits while a bank is open. Returns -1 if bank is none or no edge.
+export function tdChordSlot(bank: i32, edge: i32): i32 {
+  if (bank === TD_BANK_NONE) { return TD_SLOT_NONE }
+  if (((edge >> TD_KEY_UP) & 1) !== 0) { return 0 }
+  if (((edge >> TD_KEY_DOWN) & 1) !== 0) { return 1 }
+  if (((edge >> TD_KEY_LEFT) & 1) !== 0) { return 2 }
+  if (((edge >> TD_KEY_RIGHT) & 1) !== 0) { return 3 }
+  if (((edge >> TD_KEY_A) & 1) !== 0) { return 4 }
+  if (((edge >> TD_KEY_B) & 1) !== 0) { return 5 }
+  return TD_SLOT_NONE
+}
+
+/// Packed poll: high nibble = bank (0..2), low nibble = slot+1 (0 = none, 1..6 = slots 0..5).
+/// Unpack with `tdChordUnpackBank` / `tdChordUnpackSlot`. Avoids a boxed `{bank,slot}` on the pad path.
+export function tdChordPoll(held: i32, edge: i32): i32 {
+  let bank: i32 = tdChordBank(held)
+  let slot: i32 = tdChordSlot(bank, edge)
+  let s: i32 = 0
+  if (slot >= 0) { s = slot + 1 }
+  return (bank << 4) | s
+}
+
+export function tdChordUnpackBank(packed: i32): i32 { return (packed >> 4) & 15 }
+export function tdChordUnpackSlot(packed: i32): i32 {
+  let s: i32 = packed & 15
+  if (s === 0) { return TD_SLOT_NONE }
+  return s - 1
+}

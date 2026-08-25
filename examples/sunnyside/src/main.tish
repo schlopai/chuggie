@@ -1,0 +1,874 @@
+// sunnyside — a Harvest-Moon-style farming life-sim on a generated island.
+//
+// The flagship of the sunnyside-* family (SPEC.md in this directory); every
+// mechanism here was de-risked in its own ROM first:
+//   sheets & hflip facing   -> sunnyside-sheet
+//   lip autotiling, 1 upload-> sunnyside-terrain
+//   the island vs its twin  -> sunnyside-worldgen (scripts/procgen/sunnyside.py)
+//   farming via patches     -> sunnyside-farm
+//   clock/night/sleep       -> sunnyside-day
+//   the SRAM schema         -> sunnyside-save
+//
+// A day on the island: wake at 06:00 in front of the barn, hoe and water the
+// plot (stamina!), buy seeds from the shopkeeper at the big orange store,
+// chat with the villagers — the goblin wants three carrots — and be in bed
+// before 02:00.  Watered crops grow while you sleep; the scythe turns stage-
+// five plants into produce; the shop turns produce into gold.
+//
+// Controls: D-pad walk, L/R tool cycle (hoe/can/seeds/scythe), SELECT crop
+// cycle, A = use tool / talk / sleep at the barn door, B advances dialog.
+import { world } from 'bgtiles:../../../assets/sunnyside/baked/world_tiles.png'
+import { player } from 'sheet6432:../../../assets/sunnyside/baked/char_player.png'
+import { npcLong } from 'sheet32:../../../assets/sunnyside/baked/char_npc_long.png'
+import { npcBowl } from 'sheet32:../../../assets/sunnyside/baked/char_npc_bowl.png'
+import { npcGoblin } from 'sheet32:../../../assets/sunnyside/baked/char_npc_goblin.png'
+import { icons } from 'sheet:../../../assets/sunnyside/baked/icons16.png'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { arrowFont } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  frame, log, backdrop, hud_text, heap_free, key_pressed, key_held, fade, input_x, input_y,
+  bg_set_tile, sprite_new, sprite_set_frame, sprite_set_flip, sprite_set_pos,
+} from 'cargo:tish_agb'
+import {
+  spawn, set_transform, set_collider, set_topdown, topdown_speed, topdown_moving, topdown_move,
+  topdown_facing, attach_sprite, set_sprite_offset, set_camera_target, world_step,
+  entity_x, entity_y, set_blocker, grid_set_solid,
+} from 'cargo:tish_gba_game_engine'
+import {
+  ssgenGenerate, ssgenUpload, ssgenFarmX, ssgenFarmY, ssgenFarmW, ssgenFarmH,
+  ssgenDoorX, ssgenDoorY, ssgenIsTree, ssgenClearTree, ssgenTreeTopX, ssgenTreeTopY,
+  ssgenTerrAt, ssgenSolidAt,
+} from './worldgen.tish'
+import {
+  GID_TILLED, GID_PLANTED, GID_WATERED, GID_SOIL, GID_GRASS, GID_MUSHROOM,
+  CROP_TILE_GID,
+} from './data_world.tish'
+import { ANIM_PLAYER_START, ANIM_PLAYER_LEN, ANIM_NPC_LONG_START, ANIM_NPC_LONG_LEN } from './data_anim.tish'
+import { uiInit } from '../../../packages/ui'
+import {
+  dialogInit, dialogSay, dialogActive, dialogUpdate, dialogResult, dialogFree,
+} from '../../../packages/dialog'
+import { shopInit, shopOpen, shopUpdate, shopActive } from '../../../packages/shop'
+import { prefsInit, prefsGet, prefsSet, prefsSave, prefsFresh } from '../../../packages/prefs'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+
+// ── constants ──────────────────────────────────────────────────────────────
+let TILE: i32 = 16
+let KA: i32 = 0
+let KB: i32 = 1
+let KSEL: i32 = 2
+let KSTART: i32 = 3
+let KL: i32 = 4
+let KR: i32 = 5
+let WORLD_SEED: i32 = 7
+
+// crops: type CropDef = { name, seedCost, sellPrice, daysPerStage, bakedIdx }
+// lowered as parallel typed arrays (rows read inline by index — see SPEC)
+let CROP_NAME: string[] = ['CARROT', 'POTATO', 'PUMPKIN']
+let CROP_SEED_COST: i32[] = [10, 25, 60]
+let CROP_SELL: i32[] = [25, 60, 150]
+let CROP_DAYS: i32[] = [1, 2, 3]
+let CROP_BAKED: i32[] = [2, 6, 7]
+let NCROPS: i32 = 3
+let STAGES: i32 = 6
+
+let TOOL_HOE: i32 = 0
+let TOOL_CAN: i32 = 1
+let TOOL_SEED: i32 = 2
+let TOOL_SCYTHE: i32 = 3
+let TOOL_AXE: i32 = 4
+let TOOL_ROD: i32 = 5
+let NTOOLS: i32 = 6
+// prices for the gathered goods
+let PRICE_WOOD: i32 = 8
+let PRICE_FISH: i32 = 40
+let PRICE_MUSH: i32 = 15
+// the pack's fishing actions in the baked sheet
+let ACT_AXE: i32 = 5
+let ACT_CAST: i32 = 10
+let ACT_REEL: i32 = 11
+let ACT_CAUGHT: i32 = 12
+// rng stream 1 belongs to play-time rolls (bites, mushroom spots) — stream 0
+// is the worldgen contract and must never see these draws
+let PLAY_RNG: i32 = 1
+
+let P_SOIL: i32 = 0
+let P_TILLED: i32 = 1
+let P_PLANTED: i32 = 2
+
+// prefs slots: 0..23 plot (8 bits/cell, 4 cells/slot), then scalars
+let S_DAY: i32 = 24
+let S_GOLD: i32 = 25
+let S_QUEST: i32 = 26   // 0 unmet, 1 accepted, 2 rewarded
+let S_INV: i32 = 27     // produce counts, 10 bits per crop
+let S_SEEDS: i32 = 28   // seed counts, 10 bits per crop
+let S_INV2: i32 = 29    // wood + fish + mushrooms, 10 bits each
+
+// ── farm state (parallel typed arrays; the save payload) ───────────────────
+let PSTATE: i32[] = []
+let PSTAGE: i32[] = []
+let PWET: i32[] = []
+let PCROP: i32[] = []
+let zf: i32 = 0
+while (zf < 96) { PSTATE.push(0); zf = zf + 1 }
+zf = 0
+while (zf < 96) { PSTAGE.push(0); zf = zf + 1 }
+zf = 0
+while (zf < 96) { PWET.push(0); zf = zf + 1 }
+zf = 0
+while (zf < 96) { PCROP.push(0); zf = zf + 1 }
+
+// crop tile gids, all crops x 6 stages x dry/wet, copied local once
+let CROPG: i32[] = []
+let cg: i32 = 0
+while (cg < NCROPS) {
+  let s: i32 = 0
+  while (s < 12) {
+    CROPG.push(CROP_TILE_GID[CROP_BAKED[cg] * 12 + s])
+    s = s + 1
+  }
+  cg = cg + 1
+}
+
+// ── world + hero state ─────────────────────────────────────────────────────
+let FX: i32 = 0
+let FY: i32 = 0
+let FW: i32 = 0
+let FH: i32 = 0
+let day: i32 = 1
+let qclock: i32 = 1440
+let gold: i32 = 120
+let stamina: i32 = 100
+let tool: i32 = 0
+let cropSel: i32 = 0
+let seeds0: i32 = 3
+let seeds1: i32 = 0
+let seeds2: i32 = 0
+let inv0: i32 = 0
+let inv1: i32 = 0
+let inv2: i32 = 0
+let quest: i32 = 0
+let sleeping: i32 = 0
+let acting: i32 = 0
+let actAnim: i32 = 0
+let pendingQuest: i32 = 0
+
+let wood: i32 = 0
+let fish: i32 = 0
+let mush: i32 = 0
+// chopping: three hits fell a tree; the target is the block's top-left
+let chopX: i32 = 0 - 1
+let chopY: i32 = 0 - 1
+let chopHits: i32 = 0
+// fishing: 0 idle, 1 casting, 2 waiting, 3 bite window, 4 reeling in
+let fishState: i32 = 0
+let fishTimer: i32 = 0
+// forage spots (repopulated daily)
+let MUSH_N: i32 = 5
+let MUSH_X: i32[] = [0, 0, 0, 0, 0]
+let MUSH_Y: i32[] = [0, 0, 0, 0, 0]
+let MUSH_LIVE: i32[] = [0, 0, 0, 0, 0]
+
+let hero: i32 = 0 - 1
+let heroSpr: i32 = 0 - 1
+
+function seedsOf(c: i32): i32 {
+  if (c === 0) { return seeds0 }
+  if (c === 1) { return seeds1 }
+  return seeds2
+}
+function addSeeds(c: i32, d: i32) {
+  if (c === 0) { seeds0 = seeds0 + d }
+  if (c === 1) { seeds1 = seeds1 + d }
+  if (c === 2) { seeds2 = seeds2 + d }
+}
+function invOf(c: i32): i32 {
+  if (c === 0) { return inv0 }
+  if (c === 1) { return inv1 }
+  return inv2
+}
+function addInv(c: i32, d: i32) {
+  if (c === 0) { inv0 = inv0 + d }
+  if (c === 1) { inv1 = inv1 + d }
+  if (c === 2) { inv2 = inv2 + d }
+}
+
+// ── HUD ────────────────────────────────────────────────────────────────────
+function hudTool() {
+  let t: string = 'HOE'
+  if (tool === TOOL_CAN) { t = 'CAN' }
+  if (tool === TOOL_SEED) { t = 'SEED ' + CROP_NAME[cropSel] + ' x' + seedsOf(cropSel) }
+  if (tool === TOOL_SCYTHE) { t = 'SCYTHE' }
+  if (tool === TOOL_AXE) { t = 'AXE' }
+  if (tool === TOOL_ROD) { t = 'ROD' }
+  hud_text(1, 4, 148, t)
+}
+function hudClock() {
+  let h: i32 = qclock / 240
+  let mm: i32 = (qclock / 4) % 60
+  if (mm < 10) {
+    hud_text(2, 168, 4, 'D' + day + ' ' + h + ':0' + mm)
+  } else {
+    hud_text(2, 168, 4, 'D' + day + ' ' + h + ':' + mm)
+  }
+}
+function hudGold() { hud_text(3, 4, 4, gold + 'G') }
+function hudStamina() { hud_text(4, 60, 4, 'E' + stamina) }
+let hudOn: i32 = 1
+function hideHud() {
+  hudOn = 0
+  hud_text(1, 0, 0, '')
+  hud_text(2, 0, 0, '')
+  hud_text(3, 0, 0, '')
+  hud_text(4, 0, 0, '')
+  hud_text(6, 0, 0, '')
+}
+function showHud() {
+  hudOn = 1
+  hudTool()
+  hudClock()
+  hudGold()
+  hudStamina()
+  hudBasket()
+}
+function hudBasket() { hud_text(6, 4, 20, 'W' + wood + ' F' + fish + ' M' + mush) }
+
+// ── save schema (proved in sunnyside-save; v2 adds the crop id) ────────────
+function cellPacked(i: i32): i32 {
+  return PSTATE[i] * 64 + PCROP[i] * 16 + PSTAGE[i] * 2 + PWET[i]
+}
+function saveGame() {
+  let s: i32 = 0
+  while (s < 24) {
+    let v: i32 = 0
+    let k: i32 = 3
+    while (k >= 0) {
+      let i: i32 = s * 4 + k
+      v = v * 256
+      if (i < 96) { v = v + cellPacked(i) }
+      k = k - 1
+    }
+    prefsSet(s, v)
+    s = s + 1
+  }
+  prefsSet(S_DAY, day)
+  prefsSet(S_GOLD, gold)
+  prefsSet(S_QUEST, quest)
+  prefsSet(S_INV, inv0 + inv1 * 1024 + inv2 * 1048576)
+  prefsSet(S_SEEDS, seeds0 + seeds1 * 1024 + seeds2 * 1048576)
+  prefsSet(S_INV2, wood + fish * 1024 + mush * 1048576)
+  prefsSave()
+  log('SAVED day=' + day + ' gold=' + gold + ' w=' + wood + ' f=' + fish + ' m=' + mush)
+}
+function loadGame() {
+  let s: i32 = 0
+  while (s < 24) {
+    let v: i32 = prefsGet(s)
+    let k: i32 = 0
+    while (k < 4) {
+      let i: i32 = s * 4 + k
+      if (i < 96) {
+        let c: i32 = v % 256
+        PSTATE[i] = c / 64
+        PCROP[i] = (c / 16) % 4
+        PSTAGE[i] = (c / 2) % 8
+        PWET[i] = c % 2
+      }
+      v = v / 256
+      k = k + 1
+    }
+    s = s + 1
+  }
+  day = prefsGet(S_DAY)
+  gold = prefsGet(S_GOLD)
+  quest = prefsGet(S_QUEST)
+  let iv: i32 = prefsGet(S_INV)
+  inv0 = iv % 1024
+  inv1 = (iv / 1024) % 1024
+  inv2 = (iv / 1048576) % 1024
+  let sv: i32 = prefsGet(S_SEEDS)
+  seeds0 = sv % 1024
+  seeds1 = (sv / 1024) % 1024
+  seeds2 = (sv / 1048576) % 1024
+  let gv: i32 = prefsGet(S_INV2)
+  wood = gv % 1024
+  fish = (gv / 1024) % 1024
+  mush = (gv / 1048576) % 1024
+  log('LOADED day=' + day + ' gold=' + gold + ' quest=' + quest + ' w=' + wood + ' f=' + fish + ' m=' + mush)
+}
+
+// ── plot painting ──────────────────────────────────────────────────────────
+function cellGid(i: i32): i32 {
+  let st: i32 = PSTATE[i]
+  if (st === P_SOIL) { return GID_SOIL }
+  if (st === P_TILLED) {
+    if (PWET[i] > 0) { return GID_WATERED }
+    return GID_TILLED
+  }
+  return CROPG[PCROP[i] * 12 + PSTAGE[i] * 2 + PWET[i]]
+}
+function repaintCell(i: i32) {
+  bg_set_tile(0, FX + (i % FW), FY + i / FW, cellGid(i))
+}
+function repaintPlot() {
+  let i: i32 = 0
+  let n: i32 = FW * FH
+  while (i < n) {
+    if (PSTATE[i] > P_SOIL) { repaintCell(i) }
+    i = i + 1
+  }
+}
+
+// ── the day ────────────────────────────────────────────────────────────────
+function fadeLevel(): i32 {
+  let h: i32 = qclock / 240
+  if (h >= 6 && h < 17) { return 0 }
+  if (h === 17) { return 2 }
+  if (h === 18) { return 4 }
+  if (h === 19) { return 5 }
+  return 7
+}
+
+/// Daily forage: clear yesterday's mushrooms, roll five fresh spots on
+/// plain walkable grass (play-rng stream — never the worldgen stream).
+function respawnMushrooms() {
+  let i: i32 = 0
+  while (i < MUSH_N) {
+    if (MUSH_LIVE[i] > 0) { bg_set_tile(0, MUSH_X[i], MUSH_Y[i], GID_GRASS) }
+    MUSH_LIVE[i] = 0
+    i = i + 1
+  }
+  i = 0
+  let tries: i32 = 0
+  while (i < MUSH_N && tries < 40) {
+    let mx: i32 = 4 + rngBelow(PLAY_RNG, 56)
+    let my: i32 = 4 + rngBelow(PLAY_RNG, 40)
+    if (ssgenTerrAt(mx, my) === 1 && ssgenSolidAt(mx, my) === 0
+        && ssgenTerrAt(mx, my - 1) !== 0 && ssgenTerrAt(mx, my + 1) !== 0
+        && ssgenTerrAt(mx - 1, my) !== 0 && ssgenTerrAt(mx + 1, my) !== 0) {
+      MUSH_X[i] = mx
+      MUSH_Y[i] = my
+      MUSH_LIVE[i] = 1
+      bg_set_tile(0, mx, my, GID_MUSHROOM)
+      i = i + 1
+    }
+    tries = tries + 1
+  }
+  log('MUSH spawned=' + i)
+}
+
+function mushAt(cx: i32, cy: i32): i32 {
+  let i: i32 = 0
+  while (i < MUSH_N) {
+    if (MUSH_LIVE[i] > 0 && MUSH_X[i] === cx && MUSH_Y[i] === cy) { return i }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+/// Sleep: crops grow (watered cells only, at their crop's pace via a
+/// day-counter trick: a crop with daysPerStage=k advances when the new day
+/// index divides by k), everything dries, stamina refills, the game saves.
+function advanceDay(passout: i32) {
+  day = day + 1
+  let grown: i32 = 0
+  let i: i32 = 0
+  let n: i32 = FW * FH
+  while (i < n) {
+    let changed: i32 = 0
+    if (PSTATE[i] === P_PLANTED && PWET[i] > 0 && PSTAGE[i] < STAGES - 1) {
+      if (day % CROP_DAYS[PCROP[i]] === 0 || CROP_DAYS[PCROP[i]] === 1) {
+        PSTAGE[i] = PSTAGE[i] + 1
+        grown = grown + 1
+        changed = 1
+      }
+    }
+    if (PWET[i] > 0) { PWET[i] = 0; changed = 1 }
+    if (changed > 0) { repaintCell(i) }
+    i = i + 1
+  }
+  stamina = 100
+  if (passout > 0) { stamina = 60 }
+  qclock = 1440
+  respawnMushrooms()
+  log('DAY day=' + day + ' grown=' + grown + ' passout=' + passout)
+  saveGame()
+  log('HEAP ' + heap_free())
+  hudClock()
+  hudStamina()
+}
+
+function startSleep(passout: i32) {
+  sleeping = 64
+  if (passout > 0) { sleeping = 65 }   // odd = passout, even = bed
+}
+
+// ── tools ──────────────────────────────────────────────────────────────────
+function useTool() {
+  if (stamina <= 0) { return }
+  // target from the collider centre COLUMN but the FEET row: the 8px box
+  // can straddle a tile boundary, and the cell the farmer visually stands
+  // on is the one under the feet — centre-row targeting tilled the row
+  // behind the sprite whenever the box crossed a boundary
+  let px: i32 = entity_x(hero) + 4
+  let py: i32 = entity_y(hero) + 7
+  let cx: i32 = px / TILE
+  let cy: i32 = py / TILE
+  let f: i32 = topdown_facing(hero)
+  if (f === 0) { cy = cy + 1 }
+  if (f === 1) { cy = cy - 1 }
+  if (f === 2) { cx = cx - 1 }
+  if (f === 3) { cx = cx + 1 }
+  // forage first: a mushroom on the faced OR standing cell, any tool
+  let mi: i32 = mushAt(cx, cy)
+  if (mi < 0) {
+    mi = mushAt(px / TILE, py / TILE)
+    if (mi >= 0) { cx = px / TILE; cy = py / TILE }
+  }
+  if (mi >= 0) {
+    MUSH_LIVE[mi] = 0
+    bg_set_tile(0, cx, cy, GID_GRASS)
+    mush = mush + 1
+    log('FORAGE mush=' + mush)
+    hudBasket()
+    acting = 20
+    actAnim = 8
+    return
+  }
+  // the axe fells trees: three hits on the same tree
+  if (tool === TOOL_AXE) {
+    if (ssgenIsTree(cx, cy) > 0) {
+      let tx: i32 = ssgenTreeTopX(cx, cy)
+      let ty: i32 = ssgenTreeTopY(cx, cy)
+      if (tx !== chopX || ty !== chopY) { chopX = tx; chopY = ty; chopHits = 0 }
+      chopHits = chopHits + 1
+      acting = 30
+      actAnim = ACT_AXE
+      stamina = stamina - 4
+      if (stamina < 0) { stamina = 0 }
+      hudStamina()
+      if (chopHits >= 3) {
+        ssgenClearTree(cx, cy)
+        // repaint the block grass and open the walk grid
+        let dy: i32 = 0
+        while (dy < 3) {
+          let dx: i32 = 0
+          while (dx < 2) {
+            if (ssgenSolidAt(tx + dx, ty + dy) === 0 && ssgenTerrAt(tx + dx, ty + dy) === 1) {
+              bg_set_tile(0, tx + dx, ty + dy, GID_GRASS)
+              grid_set_solid(tx + dx, ty + dy, 0)
+            }
+            dx = dx + 1
+          }
+          dy = dy + 1
+        }
+        wood = wood + 2
+        chopHits = 0
+        chopX = 0 - 1
+        log('CHOP wood=' + wood)
+        hudBasket()
+      }
+      if (stamina === 0) { startSleep(1) }
+    }
+    return
+  }
+  // the rod casts at water
+  if (tool === TOOL_ROD) {
+    if (ssgenTerrAt(cx, cy) === 0 && fishState === 0) {
+      fishState = 1
+      fishTimer = 40
+      acting = 0
+    }
+    return
+  }
+  if (cx < FX || cx >= FX + FW || cy < FY || cy >= FY + FH) { return }
+  let i: i32 = (cy - FY) * FW + (cx - FX)
+  let hit: i32 = 0
+  if (tool === TOOL_HOE && PSTATE[i] === P_SOIL) {
+    PSTATE[i] = P_TILLED
+    hit = 1
+    actAnim = 3
+  }
+  if (tool === TOOL_SEED && PSTATE[i] === P_TILLED && seedsOf(cropSel) > 0) {
+    PSTATE[i] = P_PLANTED
+    PCROP[i] = cropSel
+    PSTAGE[i] = 0
+    addSeeds(cropSel, 0 - 1)
+    hit = 1
+    actAnim = 8
+  }
+  if (tool === TOOL_CAN && PSTATE[i] > P_SOIL && PWET[i] === 0) {
+    PWET[i] = 1
+    hit = 1
+    actAnim = 4
+  }
+  if (tool === TOOL_SCYTHE && PSTATE[i] === P_PLANTED && PSTAGE[i] === STAGES - 1) {
+    addInv(PCROP[i], 1)
+    log('HARVEST crop=' + PCROP[i] + ' inv=' + invOf(PCROP[i]))
+    PSTATE[i] = P_TILLED
+    PSTAGE[i] = 0
+    hit = 1
+    actAnim = 6
+  }
+  if (hit > 0) {
+    repaintCell(i)
+    acting = 30
+    stamina = stamina - 4
+    if (stamina < 0) { stamina = 0 }
+    hudStamina()
+    hudTool()
+    if (stamina === 0) { startSleep(1) }
+  }
+}
+
+// ── NPCs ───────────────────────────────────────────────────────────────────
+// type NpcDef = { kind, doorBld, ent, spr } as parallel arrays; they idle at
+// the doors of their buildings (0 shop keeper, 1 villager, 2 goblin).  They
+// are ENTITIES with attached sprites — the engine then handles camera-space
+// placement (with edge clamping) and set_blocker stops walk-throughs.
+let NPC_ENT: i32[] = [0 - 1, 0 - 1, 0 - 1]
+let NPC_SPR: i32[] = [0 - 1, 0 - 1, 0 - 1]
+let NPC_X: i32[] = [0, 0, 0]
+let NPC_Y: i32[] = [0, 0, 0]
+
+function placeNpcs() {
+  let n: i32 = 0
+  while (n < 3) {
+    // beside the door of building n (shop/house/house2), on the path row
+    NPC_X[n] = (ssgenDoorX(n) + 1) * TILE + 4
+    NPC_Y[n] = ssgenDoorY(n) * TILE + 4
+    let e: i32 = spawn()
+    set_collider(e, 8, 8)
+    set_transform(e, NPC_X[n], NPC_Y[n])
+    set_blocker(e)
+    NPC_ENT[n] = e
+    n = n + 1
+  }
+}
+
+function nearNpc(): i32 {
+  let px: i32 = entity_x(hero) + 4
+  let py: i32 = entity_y(hero) + 4
+  let n: i32 = 0
+  while (n < 3) {
+    let dx: i32 = px - NPC_X[n] - 4
+    let dy: i32 = py - NPC_Y[n] - 4
+    if (dx < 0) { dx = 0 - dx }
+    if (dy < 0) { dy = 0 - dy }
+    if (dx <= 20 && dy <= 20) { return n }
+    n = n + 1
+  }
+  return 0 - 1
+}
+
+// ── the store (packages/shop) ──────────────────────────────────────────────
+// wares: ids 0-2 seeds (buy), 3-5 crops, 6 wood, 7 fish, 8 mushrooms (sell)
+let SHOP_STOCK = [
+  { id: 0, name: 'Carrot seeds', icon: 0, price: 10, desc: 'Sprouts in a day. Water it!' },
+  { id: 1, name: 'Potato seeds', icon: 0, price: 25, desc: 'Two days a stage, worth it.' },
+  { id: 2, name: 'Pumpkin seeds', icon: 0, price: 60, desc: 'Slow, heavy, and dear.' },
+]
+function shopBag() {
+  let out = []
+  if (inv0 > 0) { out.push({ id: 3, name: 'Carrot', icon: 1, price: CROP_SELL[0], qty: inv0, desc: 'Crunchy and honest.' }) }
+  if (inv1 > 0) { out.push({ id: 4, name: 'Potato', icon: 2, price: CROP_SELL[1], qty: inv1, desc: 'The island staple.' }) }
+  if (inv2 > 0) { out.push({ id: 5, name: 'Pumpkin', icon: 3, price: CROP_SELL[2], qty: inv2, desc: 'Prize-fair material.' }) }
+  if (wood > 0) { out.push({ id: 6, name: 'Wood', icon: 4, price: PRICE_WOOD, qty: wood, desc: 'Fresh off the axe.' }) }
+  if (fish > 0) { out.push({ id: 7, name: 'Fish', icon: 5, price: PRICE_FISH, qty: fish, desc: 'Still wriggling.' }) }
+  if (mush > 0) { out.push({ id: 8, name: 'Mushroom', icon: 6, price: PRICE_MUSH, qty: mush, desc: 'Foraged this morning.' }) }
+  return out
+}
+let shopGold = () => { return gold }
+let shopBuy = (id, qty, cost) => {
+  if (gold < cost) { return 0 }
+  gold = gold - cost
+  addSeeds(id, qty)
+  log('BOUGHT crop=' + id + ' qty=' + qty + ' gold=' + gold)
+  return 1
+}
+let shopSell = (id, qty, gain) => {
+  if (id === 3) { if (inv0 < qty) { return 0 } inv0 = inv0 - qty }
+  if (id === 4) { if (inv1 < qty) { return 0 } inv1 = inv1 - qty }
+  if (id === 5) { if (inv2 < qty) { return 0 } inv2 = inv2 - qty }
+  if (id === 6) { if (wood < qty) { return 0 } wood = wood - qty }
+  if (id === 7) { if (fish < qty) { return 0 } fish = fish - qty }
+  if (id === 8) { if (mush < qty) { return 0 } mush = mush - qty }
+  gold = gold + gain
+  log('SOLD id=' + id + ' qty=' + qty + ' gold=' + gold)
+  return 1
+}
+let SHOP_KEEPER = {
+  name: 'SHOPKEEPER', portrait: 0 - 1,
+  greet: ['Welcome to the store!', 'Seeds to plant, coin for your basket.'],
+  thanks: 'A pleasure. Come back soon!',
+}
+
+function talkTo(n: i32) {
+  if (n === 0) {
+    shopOpen({
+      title: 'General Store', keeper: SHOP_KEEPER, mode: 'greet', cur: 'G',
+      stock: SHOP_STOCK, bag: shopBag, gold: shopGold, onBuy: shopBuy, onSell: shopSell,
+    })
+    return
+  }
+  if (n === 1) {
+    dialogSay(['Lovely weather for the fields.',
+      'Water everything before dark — crops only grow on watered soil.'],
+      { speaker: 'MARA' })
+    return
+  }
+  // the goblin's fetch quest
+  if (quest === 0) {
+    pendingQuest = 1
+    dialogSay(['Grrl. Goblin hungry. Bring three carrots?',
+      'Goblin pays 200G. Goblin good for it.'],
+      { speaker: 'GOBLIN', choices: ['Deal', 'Not now'] })
+    return
+  }
+  if (quest === 1) {
+    if (inv0 >= 3) {
+      inv0 = inv0 - 3
+      gold = gold + 200
+      quest = 2
+      hudGold()
+      log('QUEST DONE gold=' + gold)
+      dialogSay('CRUNCH. Goblin happy! Take 200G.', { speaker: 'GOBLIN' })
+    } else {
+      dialogSay('Three carrots. Goblin counted ' + inv0 + '. Grr.', { speaker: 'GOBLIN' })
+    }
+    return
+  }
+  dialogSay('Goblin full. Goblin nap now.', { speaker: 'GOBLIN' })
+}
+
+
+// ── boot ───────────────────────────────────────────────────────────────────
+backdrop(0x2090e8)
+log('BOOT modinit heap=' + heap_free())
+// oakhollow's measured world-shop settings: reserve 320 sits PAST agb's
+// 512-tile doubling boundary (trips at 307), so the 20KB tile-map growth is
+// paid here at boot on an empty heap instead of at the shop counter on a
+// heap the streamed world has already carved up — which was a crash.
+// cacheShapes 0: a solved dialog shape is 15-20KB held forever, and this
+// game opens many differently-shaped boxes.
+uiInit({ font: body, sheet: icons, icons: 8, iconSize: 16, tileReserve: 320 })
+log('BOOT ui heap=' + heap_free())
+dialogInit({ font: body, bodyW: 176, arrowFont: arrowFont, cacheShapes: 0, cursorSheet: icons, cursorFrame: 7 })
+// the buy/sell UI is packages/shop — the same component shop-demo and
+// oakhollow use; the keeper's greeting box is injected, not imported (the
+// 38KB lesson in shop.tish's header)
+shopInit({ font: body, cursorSheet: icons, cursorFrame: 7,
+  dialog: { say: dialogSay, update: dialogUpdate, active: dialogActive, free: dialogFree } })
+log('BOOT dialog heap=' + heap_free())
+prefsInit({ magic: 0x5347, version: 2, count: 32 })   // "GS" v2
+
+hud_text(0, 60, 60, 'SUNNYSIDE')
+hud_text(5, 44, 80, 'PRESS START')
+let waiting: i32 = 1
+while (waiting > 0) {
+  if (key_pressed(KSTART) > 0) { waiting = 0 }
+  frame()
+}
+hud_text(0, 0, 0, '')
+hud_text(5, 0, 0, '')
+
+hero = spawn()
+set_collider(hero, 8, 8)
+set_topdown(hero)
+topdown_speed(hero, 2)
+heroSpr = sprite_new(player, 0)
+attach_sprite(hero, heroSpr)
+// the 64px frame is asymmetric (tool swings reach right), so the body is
+// NOT at the frame centre: flipping the frame moves it 18px. The offset
+// compensates per facing — see the flip block in the loop.
+set_sprite_offset(hero, 0 - 19, 0 - 21)
+set_camera_target(hero)
+
+ssgenGenerate(WORLD_SEED)
+ssgenUpload(world, 3)
+FX = ssgenFarmX()
+FY = ssgenFarmY()
+FW = ssgenFarmW()
+FH = ssgenFarmH()
+placeNpcs()
+NPC_SPR[0] = sprite_new(npcBowl, 0)
+NPC_SPR[1] = sprite_new(npcLong, 0)
+NPC_SPR[2] = sprite_new(npcGoblin, 0)
+let na: i32 = 0
+while (na < 3) {
+  attach_sprite(NPC_ENT[na], NPC_SPR[na])
+  set_sprite_offset(NPC_ENT[na], 0 - 12, 0 - 21)
+  na = na + 1
+}
+
+if (prefsFresh() === 0) {
+  loadGame()
+  repaintPlot()
+} else {
+  saveGame()
+}
+set_transform(hero, ssgenDoorX(3) * TILE + 4, (ssgenDoorY(3) + 1) * TILE + 4)
+rngSeed(PLAY_RNG, day * 7919 + 13)
+respawnMushrooms()
+hudGold()
+hudBasket()
+hudStamina()
+hudClock()
+hudTool()
+log('SUNNYSIDE READY day=' + day + ' heap=' + heap_free())
+// ── the day loop ───────────────────────────────────────────────────────────
+let tick: i32 = 0
+let cell: i32 = 0
+let npcCell: i32 = 0
+let lastHour: i32 = 0 - 1
+while (true) {
+  if (sleeping > 0) {
+    let passout: i32 = sleeping % 2
+    sleeping = sleeping - 2
+    if (sleeping >= 32) { fade((64 - sleeping) / 2) }
+    if (sleeping < 34 && sleeping >= 32) { advanceDay(passout) }
+    if (sleeping < 32) { fade(sleeping / 2) }
+    if (sleeping <= 0) { sleeping = 0; lastHour = 0 - 1 }
+    world_step()
+  } else if (shopActive() > 0) {
+    if (hudOn === 1) { hideHud() }
+    shopUpdate()
+    world_step()
+  } else if (dialogActive() > 0) {
+    dialogUpdate()
+    if (dialogActive() === 0) {
+      let r: i32 = dialogResult()
+      if (pendingQuest > 0) {
+        pendingQuest = 0
+        if (r === 0) { quest = 1; log('QUEST ACCEPTED') }
+      }
+    }
+    world_step()
+  } else {
+    if (hudOn === 0) { showHud() }
+    // clock
+    qclock = qclock + 1
+    if (qclock >= 5760) { qclock = 0 }
+    let h: i32 = qclock / 240
+    if (h !== lastHour) {
+      lastHour = h
+      fade(fadeLevel())
+      hudClock()
+      log('CLOCK day=' + day + ' h=' + h)
+    }
+    if ((qclock % 120) === 0) { hudClock() }
+    if (h === 2) { startSleep(1) }
+
+    // input
+    if (key_pressed(KL) > 0) { tool = (tool + NTOOLS - 1) % NTOOLS; hudTool() }
+    if (key_pressed(KR) > 0) { tool = (tool + 1) % NTOOLS; hudTool() }
+    if (key_pressed(KSEL) > 0) { cropSel = (cropSel + 1) % NCROPS; hudTool() }
+    // fishing runs its own little machine; A advances it, B walks away
+    if (fishState > 0) {
+      fishTimer = fishTimer - 1
+      if (fishState === 1 && fishTimer <= 0) {
+        fishState = 2
+        fishTimer = 90 + rngBelow(PLAY_RNG, 150)
+      } else if (fishState === 2) {
+        if (key_pressed(KA) > 0) {
+          // yanked too early — the fish laughs
+          fishState = 0
+          log('FISH EARLY')
+        } else if (fishTimer <= 0) {
+          fishState = 3
+          fishTimer = 35
+          hud_text(5, 116, 60, '!')
+        }
+      } else if (fishState === 3) {
+        if (key_pressed(KA) > 0) {
+          fishState = 4
+          fishTimer = 40
+          hud_text(5, 116, 60, '')
+          fish = fish + 1
+          log('FISH CAUGHT fish=' + fish)
+          hudBasket()
+          stamina = stamina - 4
+          if (stamina < 0) { stamina = 0 }
+          hudStamina()
+        } else if (fishTimer <= 0) {
+          fishState = 0
+          hud_text(5, 116, 60, '')
+          log('FISH MISS')
+        }
+      } else if (fishState === 4 && fishTimer <= 0) {
+        fishState = 0
+        if (stamina === 0) { startSleep(1) }
+      }
+      if (key_pressed(KB) > 0) {
+        fishState = 0
+        hud_text(5, 116, 60, '')
+      }
+    } else if (key_pressed(KA) > 0 && acting === 0) {
+      let n: i32 = nearNpc()
+      if (n >= 0) {
+        talkTo(n)
+      } else {
+        // bed check: near the barn door
+        let px: i32 = (entity_x(hero) + 4) / TILE
+        let py: i32 = (entity_y(hero) + 4) / TILE
+        let dx: i32 = px - ssgenDoorX(3)
+        let dy: i32 = py - ssgenDoorY(3)
+        if (dx < 0) { dx = 0 - dx }
+        if (dy < 0) { dy = 0 - dy }
+        if (dx <= 2 && dy <= 2) {
+          startSleep(0)
+        } else {
+          useTool()
+        }
+      }
+    }
+    world_step()
+  }
+
+  // walk only while awake, out of dialog, and not mid-action — a tool
+  // swing plays out with the feet planted, or the struck cell and the
+  // animation drift apart; topdown_move each frame is what actually moves
+  // the body (set_topdown only gives it one)
+  if (sleeping === 0 && dialogActive() === 0 && shopActive() === 0 && fishState === 0 && acting === 0) {
+    topdown_move(hero, input_x(), input_y())
+  } else {
+    topdown_move(hero, 0, 0)
+  }
+
+  // animation (runs in every mode so dialog doesn't freeze the world)
+  tick = tick + 1
+  if (tick >= 3) {
+    tick = 0
+    cell = cell + 1
+    npcCell = npcCell + 1
+    if (npcCell >= ANIM_NPC_LONG_LEN[0]) { npcCell = 0 }
+    let n: i32 = 0
+    while (n < 3) {
+      sprite_set_frame(NPC_SPR[n], ANIM_NPC_LONG_START[0] + npcCell)
+      n = n + 1
+    }
+  }
+  let act: i32 = 0
+  if (fishState === 1) {
+    act = ACT_CAST
+  } else if (fishState === 2 || fishState === 3) {
+    act = ACT_REEL
+  } else if (fishState === 4) {
+    act = ACT_CAUGHT
+  } else if (acting > 0) {
+    act = actAnim
+    acting = acting - 1
+  } else if (topdown_moving(hero) > 0) {
+    act = 1
+  }
+  let len: i32 = ANIM_PLAYER_LEN[act]
+  sprite_set_frame(heroSpr, ANIM_PLAYER_START[act] + (cell % len))
+  if (topdown_facing(hero) === 2) {
+    sprite_set_flip(heroSpr, 1)
+    set_sprite_offset(hero, 0 - 37, 0 - 21)
+  }
+  if (topdown_facing(hero) === 3) {
+    sprite_set_flip(heroSpr, 0)
+    set_sprite_offset(hero, 0 - 19, 0 - 21)
+  }
+}

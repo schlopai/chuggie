@@ -1,0 +1,607 @@
+// grid-demo — a floor-stacked match-3 on packages/grid.tish.
+//
+// WHY IT IS THIS GAME AND NOT MAGICAL DROP. `packages/grid.tish` was extracted from the Magical
+// Drop rules, so a Magical Drop demo would prove nothing: it would pass whether the kit were
+// generic or merely the old code with a new name. So this is the OPPOSITE board — gravity toward
+// the floor instead of the ceiling, gems dropped in from the top instead of pulled from the bottom,
+// runs cleared where they land. The same `gridCollapse`, `gridSeedRuns`, `gridSpread` and
+// `gridPaint` serve both, and `anchor: 1` is the only difference in the setup.
+//
+// WHAT IT DEMONSTRATES, each one a claim the kit makes:
+//
+//   the packed word     one i32 per cell carrying the cell byte, the engine planes and a cached
+//                       match mask. Matching in the hot loop is `(w >> 16) & class` — no call, no
+//                       second array read. A boxed callback would cost several hundred ticks
+//                       against a ~6-per-frame budget; a flood fill touches hundreds of cells.
+//   table not predicate the vocabulary is registered ONCE with `gridDefineCell`, and `gridSet`
+//                       folds the mask into the word. The game never supplies a per-cell function.
+//   the causality plane a run only clears if a SEED touches it. `gridSet` is inert, `gridPush`
+//                       seeds — so the board dealt at boot does not detonate itself, and only what
+//                       the player drops can start a chain.
+//   cascades            `gridCollapse` re-seeds every survivor that MOVED, so the next pass sees it
+//                       as player-caused and the chain continues on its own.
+//   the anchor          `anchor: 1` packs toward the last row and `gridPaint` flips the draw. Same
+//                       kit, upside-down game.
+//
+// AND IT IS A GAME, not only a fixture. It began as a proof that the kit is generic and had nothing
+// to lose to: no ending, no escalation, no way to start again. The three that fix that are all kit
+// calls no example was using — `gridFeed` for a rising garbage floor (the anchor end, so garbage
+// arrives UNDER the stack and pushes it at the ceiling), `gridAnyOver` for the loss, and a level
+// counted in cleared CELLS so a chain advances it faster than the same cells cleared singly.
+//
+// ⚠️ The difficulty has to actually catch up with the player. At a 120-frame feed interval the attract
+// player survived nine thousand frames without ever topping out, which is a rising floor that does not
+// rise — indistinguishable, from the outside, from having no game layer at all.
+//
+// CONTROLS  Left/Right move the dropper · A or Down drops · Start deals a fresh board, or begins a
+//           new run after a top-out.
+//
+// ATTRACT. Touch nothing and it plays itself. Touch anything and it never advances on its own
+// again — the rule the rest of this repo holds to, and what lets a headless run cover every branch
+// with no key schedule.
+
+import { gems } from 'background:../assets/gems.png'
+import { body } from 'font:../../../assets/fonts/04b03.ttf@8'
+import {
+  backdrop, ui_begin, ui_text, ui_clear_rect, tilemap_new, frame, keys_edge, log, timer_read
+} from 'cargo:tish_agb'
+import {
+  gridDefineCell, gridInit, gridClear, gridSet, gridPush, gridRecount, gridDepth,
+  gridGet, gridSeedRuns, gridMarkByMask, gridScanMarked, gridCollapse, gridClearMarks, gridClearSeeds,
+  gridPaint, gridPaintTarget, gridRepaint, gridPopCount, gridVersion, gridCols, gridRows, gridCopyState,
+  gridAnyOver, gridFeed
+} from '../../../packages/grid'
+import { rngSeed, rngBelow } from '../../../packages/rng'
+import {
+  searchBegin, searchStep, searchShortlist, searchTarget, searchDone, searchBestScore
+} from '../../../packages/search'
+
+// ── the game's vocabulary ───────────────────────────────────────────────────────────────────────
+// Five gems. Cell byte 1..5, match class 1<<(n-1), gid n. Registered once; after this the kit never
+// asks the game anything per cell.
+let COLOURS: i32 = 5
+let BOARD: i32 = 0
+let COLS: i32 = 8
+let ROWS: i32 = 9
+let CELLPX: i32 = 16
+let OX: i32 = 1
+let OY: i32 = 1
+
+let RNG: i32 = 0
+let SIM: i32 = 1     // grid slot 1 — the search's scratch board
+let AI: i32 = 0      // search slot
+
+interface Game {
+  col: i32, next: i32, t: i32, human: i32,
+  chain: i32, cleared: i32, score: i32, best: i32,
+  phase: i32, wait: i32, dirty: i32, deals: i32, kinds: i32, thinking: i32, plans: i32,
+  hudKey: i32, shownCol: i32, peak: i32, spent: i32, frames: i32,
+  level: i32, feeds: i32, sinceFeed: i32, games: i32, overPainted: i32
+}
+let G: Game = {
+  col: 3, next: 1, t: 0, human: 0,
+  chain: 0, cleared: 0, score: 0, best: 0,
+  phase: 0, wait: 0, dirty: 1, deals: 0, kinds: 0, thinking: 0, plans: 0,
+  hudKey: -1, shownCol: -1, peak: 0, spent: 0, frames: 0,
+  level: 0, feeds: 0, sinceFeed: 0, games: 0, overPainted: 0
+}
+
+// phases
+let PH_PLAY: i32 = 0
+let PH_SETTLE: i32 = 1
+let PH_OVER: i32 = 2
+
+// ── the game layer ──────────────────────────────────────────────────────────────────────────────
+// What this demo was missing to be a game rather than a fixture for the kit: something to lose to,
+// something that gets harder, and a way to start again. All three are `packages/grid.tish` calls that
+// no example exercised.
+//
+// Every level clears sooner and feeds sooner. LEVEL_CELLS is in CLEARED CELLS rather than clears, so
+// a chain that removes fifteen advances three times as fast as three singles — which is the same
+// thing the score already rewards.
+let LEVEL_CELLS: i32 = 12
+let FEED_BASE: i32 = 420       // frames between garbage rows at level 0
+// ⚠️ THE FLOOR HAS TO BE LOW ENOUGH TO ACTUALLY WIN. At 120 frames the attract player survived a
+// 9,000-frame run without ever topping out — the rising floor was a difficulty curve that flattened
+// out below the rate a competent player clears at, which is a game with no ending. A match-3 with a
+// rising floor should eventually take you.
+let FEED_FLOOR: i32 = 45       // and the fastest it ever gets
+
+backdrop(0x101018)
+
+let i: i32 = 0
+while (i < COLS * ROWS) {
+  i = i + 1
+}
+
+// A blank map; every cell is written by gridPaint's diff.
+let MAP: i32[] = []
+let mi: i32 = 0
+while (mi < 30 * 20) {
+  MAP.push(0)
+  mi = mi + 1
+}
+let BG: i32 = tilemap_new(gems, 8, 30, 20, MAP, 2)
+
+ui_begin()
+
+let c: i32 = 1
+while (c <= COLOURS) {
+  // matchMask = 1<<(c-1), grabMask the same, no props, not wild, gid = c
+  gridDefineCell(c, 1 << (c - 1), 1 << (c - 1), 0, 0, c)
+  c = c + 1
+}
+// The well floor, gid 6: matches nothing, so a run can never include it.
+gridDefineCell(9, 0, 0, 2, 0, 6)
+
+rngSeed(RNG, 20260805)
+gridInit(BOARD, COLS, ROWS, 1)
+// Where the painter draws. Bound once — see `gridPaintTarget`: passing these five every frame cost
+// ~28 ticks apiece in argument marshalling.
+gridPaintTarget(BOARD, BG, gems, 8, OX, OY)
+
+// ── dealing ─────────────────────────────────────────────────────────────────────────────────────
+// Authored with `gridSet`, which is INERT — it writes no seeds. That is why a freshly dealt board
+// does not immediately detonate itself even when it happens to contain a run of three, and it is
+// the same distinction the Magical Drop core draws between an authored board and a thrown balloon.
+function deal() {
+  gridClear(BOARD)
+  let cc: i32 = 0
+  while (cc < COLS) {
+    let n: i32 = 2 + rngBelow(RNG, 3)
+    let rr: i32 = 0
+    while (rr < n) {
+      gridSet(BOARD, cc, rr, 1 + rngBelow(RNG, COLOURS))
+      rr = rr + 1
+    }
+    cc = cc + 1
+  }
+  gridRecount(BOARD)
+  gridClearSeeds(BOARD)
+  gridRepaint(BOARD)
+  G.deals = G.deals + 1
+  G.dirty = 1
+  log("DEAL " + G.deals)
+}
+
+/// A RISING GARBAGE ROW — one unmatched-looking gem per column, arriving at the FLOOR.
+///
+/// `gridFeed` is the other end from `gridPush`, and on this board that is the whole point: with
+/// `anchor: 1` the anchor is the floor, so a fed cell arrives underneath the stack and pushes it
+/// toward the ceiling. It is what makes a board that is merely untidy become a board that kills you.
+///
+/// It arrives UNSEEDED, which the kit does deliberately: an incoming row that happens to complete a
+/// run must not detonate on arrival, because a clear is something the player CAUSED. It can still be
+/// completed by the next drop, which is what makes it dangerous rather than merely inconvenient.
+function feedGarbage() {
+  let cc: i32 = 0
+  while (cc < COLS) {
+    gridFeed(BOARD, cc, 1 + rngBelow(RNG, COLOURS))
+    cc = cc + 1
+  }
+  G.feeds = G.feeds + 1
+  G.sinceFeed = 0
+  G.dirty = 1
+  log("FEED " + G.feeds + " level " + G.level)
+}
+
+/// How long between garbage rows, at this level. Shortens with the level and then stops.
+function feedInterval(): i32 {
+  let iv: i32 = FEED_BASE - G.level * 30
+  if (iv < FEED_FLOOR) { iv = FEED_FLOOR }
+  return iv
+}
+
+/// ⚠️ `gridAnyOver`, NOT `gridAnyFull`, and the kit is explicit about the difference: a board filled
+/// exactly to its last row is full but still playable, and a game that ends there ends one row early.
+/// The loss here is "something was pushed past the field", which is what a rising floor does.
+function checkOver(): i32 {
+  if (gridAnyOver(BOARD) === 0) { return 0 }
+  G.phase = PH_OVER
+  G.wait = 0
+  G.overPainted = 0
+  log("GAMEOVER score " + G.score + " cleared " + G.cleared + " level " + G.level
+    + " feeds " + G.feeds + " best " + G.best)
+  return 1
+}
+
+function paintOver() {
+  if (G.overPainted !== 0) { return }
+  G.overPainted = 1
+  ui_clear_rect(16, 60, 120, 32)
+  ui_text(body, 30, 64, "GAME OVER", 0xF04040)
+  ui_text(body, 22, 76, "START to retry", 0xC8C8D8)
+}
+
+function newRun() {
+  G.score = 0
+  G.cleared = 0
+  G.chain = 0
+  G.level = 0
+  G.feeds = 0
+  G.sinceFeed = 0
+  G.phase = PH_PLAY
+  G.wait = 0
+  G.thinking = 0
+  G.overPainted = 0
+  G.games = G.games + 1
+  ui_clear_rect(16, 56, 120, 40)
+  deal()
+  log("RUN " + G.games + " begins")
+}
+
+// ── one resolve pass ────────────────────────────────────────────────────────────────────────────
+// Returns the number of cells cleared. One PASS, not a full resolve — the caller runs one per frame
+// so a long chain reads as a chain instead of resolving invisibly inside a single step. That pacing
+// is only reachable because the rules are in tish where the frame loop can see them.
+function resolvePass(): i32 {
+  gridClearMarks(BOARD)
+  let hit: i32 = 0
+  let k: i32 = 0
+  while (k < COLOURS) {
+    hit = hit + gridSeedRuns(BOARD, 1 << k, 3, 1)
+    k = k + 1
+  }
+  if (hit === 0) { return 0 }
+  // Scanned BEFORE the collapse: after it the marked cells no longer exist, and the first version
+  // of this logged `KINDS 0` on every clear.
+  G.kinds = gridScanMarked(BOARD)
+  let removed: i32 = gridCollapse(BOARD)
+  return removed
+}
+
+// ── the AI's evaluator ──────────────────────────────────────────────────────────────────────────
+// Called DIRECTLY by the frame loop, in this module, once per candidate the search hands out. The
+// search never calls into here — that inversion is what keeps the AI affordable, since a boxed
+// callback would cost more per candidate than the whole evaluation.
+//
+// Cheap tier: copy the board, drop, resolve one pass, score what cleared. A target that cleared
+// anything is shortlisted for a second pass, which is where a cascade shows up — that is the same
+// cheap-filter/expensive-verify split the Rust uses, and the reason its search fits a frame at all.
+function evalDrop(target: i32): i32 {
+  if (gridDepth(BOARD, target) >= ROWS) { return 0 - 1000 }
+  gridCopyState(SIM, BOARD)
+  gridPush(SIM, target, G.next, 1)
+  // No gridClearMarks here: gridCopyState strips the planes on the way across (KEEP_ON_SIM), so the
+  // scratch board arrives already clean. Clearing it again was a whole extra pass per candidate.
+  // ONE class, not all five. A dropped gem can only complete a run of ITS OWN colour, so scanning
+  // the other four is pure waste — and it was expensive waste: measured at 6,502 ticks average
+  // against a 4,389-tick frame, the AI alone was costing one and a half frames per decision step
+  // and the budget could not help, because a tick budget cannot preempt a single evaluation.
+  // Scoring one class brings a candidate inside the budget's granularity. The deep tier below still
+  // resolves every colour, which is where a cross-colour cascade is found.
+  let hit: i32 = gridSeedRuns(SIM, 1 << (G.next - 1), 3, 1)
+  let removed: i32 = 0
+  if (hit > 0) {
+    removed = gridCollapse(SIM)
+    // Worth a deeper look: only a board that just cleared can cascade.
+    searchShortlist(AI)
+  }
+  // Prefer clearing, then BUILDING, then keeping the stack low.
+  //
+  // The connection term is what makes a one-ply search playable. Without it the AI scores every
+  // non-clearing move identically and falls back to "stack the shallowest column", which is exactly
+  // the spreading behaviour that never forms a vertical three — it scored 40 against the greedy
+  // heuristic's 200. A search that cannot see two moves ahead has to be told that adjacency is
+  // worth something, or it will never set anything up.
+  let h: i32 = gridDepth(SIM, target)
+  let land: i32 = h - 1
+  let touch: i32 = 0
+  if (land > 0) {
+    if (gridGet(SIM, target, land - 1) === G.next) { touch = touch + 1 }
+  }
+  if (target > 0) {
+    if (gridGet(SIM, target - 1, land) === G.next) { touch = touch + 1 }
+  }
+  if (target + 1 < COLS) {
+    if (gridGet(SIM, target + 1, land) === G.next) { touch = touch + 1 }
+  }
+  return removed * 100 + touch * 25 - h * 3
+}
+
+// Deep tier: the same move, but resolve to a fixpoint so a cascade is counted.
+function evalDeep(target: i32): i32 {
+  if (gridDepth(BOARD, target) >= ROWS) { return 0 - 1000 }
+  gridCopyState(SIM, BOARD)
+  gridPush(SIM, target, G.next, 1)
+  let total: i32 = 0
+  let links: i32 = 0
+  let guard: i32 = 0
+  // Four links, not eight. A chain past four is vanishingly rare in this ruleset and the cap is
+  // what keeps one deep evaluation inside a frame.
+  while (guard < 4) {
+    gridClearMarks(SIM)
+    let hit: i32 = 0
+    let k: i32 = 0
+    while (k < COLOURS) {
+      hit = hit + gridSeedRuns(SIM, 1 << k, 3, 1)
+      k = k + 1
+    }
+    if (hit === 0) { guard = 99 } else {
+      total = total + gridCollapse(SIM)
+      links = links + 1
+      guard = guard + 1
+    }
+  }
+  // A chain is worth far more than its cells, which is what makes the AI set them up.
+  return total * 100 + links * links * 250 - gridDepth(SIM, target) * 3
+}
+
+// CHANGE-GATED. Eight `ui_text` calls is glyph shaping plus a tile blit each, and calling them on
+// every board change cost this demo roughly a third of its frame rate — the AI was blamed first.
+// One composite key covers every value on screen; if it has not moved, nothing is drawn.
+function paintHud() {
+  let key: i32 = G.score * 64 + G.cleared + G.chain * 1048576 + G.best * 16777216
+    + G.level * 4096 + G.feeds * 65536 + G.phase
+  if (key === G.hudKey) { return }
+  G.hudKey = key
+  ui_clear_rect(152, 0, 88, 64)
+  ui_text(body, 154, 4, "GRID DEMO", 0xC8C8D8)
+  ui_text(body, 154, 16, "SCORE " + G.score, 0xF0E060)
+  ui_text(body, 154, 26, "CLEAR " + G.cleared, 0xC8C8D8)
+  ui_text(body, 154, 36, "CHAIN " + G.chain, 0x50D070)
+  ui_text(body, 154, 46, "BEST  " + G.best, 0x606074)
+  ui_text(body, 154, 56, "LEVEL " + G.level, 0x70D0F0)
+  ui_text(body, 154, 66, "RISE  " + G.feeds, 0xF08040)
+  ui_text(body, 154, 140, "A drop", 0x606074)
+  ui_text(body, 154, 150, "L/R move", 0x606074)
+}
+
+// The dropper: a marker row above the well showing the column and the next gem.
+function paintDropper() {
+  if (G.col === G.shownCol) { return }
+  G.shownCol = G.col
+  ui_clear_rect(0, 0, 152, 8)
+  ui_text(body, OX * CELLPX + G.col * CELLPX + 5, 0, "v", 0xF0E060)
+}
+
+function drop() {
+  if (gridDepth(BOARD, G.col) >= ROWS) { return }
+  // gridPush SEEDS — this is the player's action, so anything it completes may clear.
+  gridPush(BOARD, G.col, G.next, 1)
+  G.next = 1 + rngBelow(RNG, COLOURS)
+  G.chain = 0
+  G.phase = PH_SETTLE
+  G.wait = 0
+  G.dirty = 1
+}
+
+// ── boot self-test ────────────────────────────────────────────────────────────────────────────
+// The smallest possible proof the kit works: two authored gems (INERT — gridSet seeds nothing),
+// then a seeded push that completes the run. Asserts both halves of the causality rule in one go —
+// the authored pair must NOT clear on its own, and the push must clear all three.
+gridClear(BOARD)
+gridSet(BOARD, 0, 0, 1)
+gridSet(BOARD, 0, 1, 1)
+gridRecount(BOARD)
+gridClearSeeds(BOARD)
+let t0: i32 = resolvePass()
+log("SELFTEST inert=" + t0 + " (want 0)")
+gridPush(BOARD, 0, 1, 1)
+let t1: i32 = resolvePass()
+log("SELFTEST seeded=" + t1 + " (want 3)")
+
+// Cascade: a run of 2s with two 1s stacked above it and one below. Clearing the 2s drops the upper
+// 1s onto the lower one, forming a vertical three — and gridCollapse re-seeds anything that MOVED,
+// so the new run counts as player-caused and the chain continues without another input.
+// Columns are PACKED — no gaps. The first version of this fixture left row 3 empty, so
+// `gridRecount` reported a depth that closed over the hole and the push landed on top of the gem
+// it was meant to sit beside. A board with a gap is not a board this kit models.
+//
+//   col1  2 2 1 1 1   (bottom -> top)
+//   col2  2 2         + a pushed 2
+//
+// The push completes col2's vertical three. The flood spreads sideways into col1's two 2s, which
+// sit UNDER three 1s — so removing them drops the 1s into a fresh vertical three, re-seeded by
+// gridCollapse, and the chain continues with no second input.
+gridClear(BOARD)
+gridSet(BOARD, 1, 0, 2)
+gridSet(BOARD, 1, 1, 2)
+gridSet(BOARD, 1, 2, 1)
+gridSet(BOARD, 1, 3, 1)
+gridSet(BOARD, 1, 4, 1)
+gridSet(BOARD, 2, 0, 2)
+gridSet(BOARD, 2, 1, 2)
+gridRecount(BOARD)
+gridClearSeeds(BOARD)
+gridPush(BOARD, 2, 2, 1)
+let c1: i32 = resolvePass()
+let c2: i32 = resolvePass()
+log("SELFTEST cascade link1=" + c1 + " link2=" + c2 + " (want 5 then 3)")
+
+// The loss rule, and the distinction the kit draws between its two full-board tests. A column packed
+// to exactly ROWS is FULL but still playable; only a column pushed PAST the field is a top-out. A
+// game whose loss is `gridAnyFull` ends one row early, and nothing about that looks like a bug.
+gridClear(BOARD)
+let oc: i32 = 0
+while (oc < ROWS) {
+  gridSet(BOARD, 0, oc, 1)
+  oc = oc + 1
+}
+gridRecount(BOARD)
+let exact: i32 = gridAnyOver(BOARD)
+gridPush(BOARD, 0, 1, 1)
+let past: i32 = gridAnyOver(BOARD)
+log("SELFTEST over=" + (exact * 10 + past) + " (want 1)")
+
+newRun()
+paintHud()
+paintDropper()
+log("GRID DEMO START cols=" + gridCols(BOARD) + " rows=" + gridRows(BOARD))
+
+while (true) {
+  G.t = G.t + 1
+
+  let k: i32 = keys_edge()
+  if (k !== 0) {
+    if (G.human === 0) {
+      G.human = 1
+      log("PLAYER INPUT")
+    }
+    if ((k & 256) !== 0) {
+      G.col = G.col - 1
+      if (G.col < 0) { G.col = COLS - 1 }
+      G.dirty = 1
+    }
+    if ((k & 512) !== 0) {
+      G.col = G.col + 1
+      if (G.col >= COLS) { G.col = 0 }
+      G.dirty = 1
+    }
+    if ((k & 1) !== 0 || (k & 128) !== 0) {
+      if (G.phase === PH_PLAY) { drop() }
+    }
+    if ((k & 8) !== 0) {
+      if (G.phase === PH_OVER) { newRun() } else { deal() }
+    }
+  }
+
+  // ── attract ───────────────────────────────────────────────────────────────
+  // autoadvance-ok: gated on G.human, which latches on the first key and never clears.
+  //
+  // A REAL SEARCH, not a heuristic. `searchBegin` opens a decision over 1 candidate (the gem in
+  // hand) x COLS targets; each frame the loop below drains as many as the tick budget allows and
+  // stops cleanly when it runs out.
+  //
+  // 700 TICKS IS THE HAND-OUT BUDGET, NOT A CEILING ON THE FRAME, and the difference is worth being
+  // precise about because the comment here used to claim the latter — "the AI can never be the
+  // reason a frame is missed, however expensive the position" — which measurement flatly
+  // contradicted. A budget is checked BEFORE a pair is handed out and cannot preempt the evaluation
+  // that follows, so a frame costs 700 plus one whole `evalDrop`. When `evalDrop` was ~4,000 ticks
+  // the AI averaged 4,463 a frame and peaked at 5,672 — over a frame, from a budget of 700.
+  //
+  // What actually bounds the frame is the cost of ONE evaluation, so that is what got cheaper:
+  // 2,336 average and 3,176 peak now, comfortably inside 4,389. The budget's real job is capping how
+  // many evaluations share a frame, and at this granularity that is one.
+  if (G.human === 0 && G.phase === PH_PLAY) {
+    if (G.thinking === 0) {
+      searchBegin(AI, 1, COLS, 700)
+      G.thinking = 1
+    }
+    let sw0: i32 = timer_read()
+    let pair: i32 = searchStep(AI, 0)
+    let guard: i32 = 0
+    while (pair >= 0 && guard < 64) {
+      let target: i32 = pair & 255
+      let sc: i32 = 0
+      if (searchDone(AI) === 0) { sc = evalDrop(target) }
+      pair = searchStep(AI, sc)
+      guard = guard + 1
+    }
+    if (pair === (0 - 2)) {
+      let want: i32 = searchTarget(AI)
+      if (want >= 0) {
+        G.col = want
+        G.plans = G.plans + 1
+        drop()
+      }
+      G.thinking = 0
+    }
+    let sw1: i32 = timer_read()
+    let swt: i32 = (sw1 - sw0) & 65535
+    if (swt > G.peak) { G.peak = swt }
+    G.spent = G.spent + swt
+    G.frames = G.frames + 1
+  }
+  if (G.human === 0 && G.phase === PH_PLAY && 0 === 1) {
+    if ((G.t % 40) === 0) {
+      // Aim at a column whose TOP gem already matches what is about to drop, so the demo builds
+      // runs instead of spreading. The first version aimed at the shallowest column, which keeps
+      // the board tidy and almost never forms a vertical three — it ran for 900 frames and cleared
+      // nothing. Falls back to the shallowest column when nothing matches.
+      let bestc: i32 = 0
+      let bestd: i32 = 999
+      let matched: i32 = 0
+      let cc: i32 = 0
+      while (cc < COLS) {
+        let d: i32 = gridDepth(BOARD, cc)
+        if (d > 0 && d < ROWS && matched === 0) {
+          if (gridGet(BOARD, cc, d - 1) === G.next) {
+            bestc = cc
+            matched = 1
+          }
+        }
+        if (matched === 0 && d < bestd) {
+          bestd = d
+          bestc = cc
+        }
+        cc = cc + 1
+      }
+      G.col = bestc
+      drop()
+    }
+  }
+
+  // ── the rising floor ──────────────────────────────────────────────────────
+  // Only during PH_PLAY: feeding a board mid-chain would move cells out from under a resolve pass
+  // that has already marked them, and the cascade would clear the wrong things.
+  if (G.phase === PH_PLAY) {
+    G.sinceFeed = G.sinceFeed + 1
+    if (G.sinceFeed >= feedInterval()) {  // autoadvance-ok: the difficulty clock IS the game, and it runs for a player too
+      feedGarbage()
+      checkOver()
+    }
+  }
+
+  // ── settling ──────────────────────────────────────────────────────────────
+  // One pass per 8 frames, so the cascade is visible. A chain that resolved inside one frame would
+  // be correct and unreadable.
+  if (G.phase === PH_SETTLE) {
+    G.wait = G.wait + 1
+    if (G.wait >= 8) {
+      G.wait = 0
+      let removed: i32 = resolvePass()
+      if (removed > 0) {
+        G.chain = G.chain + 1
+        G.cleared = G.cleared + removed
+        G.score = G.score + removed * 10 * G.chain
+        if (G.chain > G.best) { G.best = G.chain }
+        log("CLEAR " + removed + " CHAIN " + G.chain + " KINDS " + G.kinds + " SCORE " + G.score)
+        let lvl: i32 = (G.cleared / LEVEL_CELLS) | 0
+        if (lvl > G.level) {
+          G.level = lvl
+          log("LEVEL " + G.level + " cleared " + G.cleared + " feed every " + feedInterval())
+        }
+        G.dirty = 1
+      } else {
+        // Chain over. Wipe the causal round so the next drop starts fresh.
+        gridClearSeeds(BOARD)
+        gridClearMarks(BOARD)
+        G.phase = PH_PLAY
+        if (G.chain > 1) { log("CHAIN DONE " + G.chain) }
+        G.dirty = 1
+        checkOver()
+      }
+    }
+  }
+
+  if (G.phase === PH_OVER) {
+    paintOver()
+    // The attract loop starts the next run by itself so a headless pass covers a whole game AND the
+    // one after it; a player is asked, and START is their only way past.
+    G.wait = G.wait + 1
+    if (G.human === 0 && G.wait >= 90) { newRun() }
+  }
+
+  // Board is painted only when something changed; the shadow inside gridPaint means a quiet frame
+  // writes zero tiles even when this fires.
+  if (G.dirty === 1) {
+    G.dirty = 0
+    let wrote: i32 = gridPaint(BOARD)
+    paintHud()
+    paintDropper()
+    if (wrote > 0) { G.wait = G.wait }
+  }
+
+  if ((G.t % 300) === 0) {
+    log("TICK " + G.t + " score " + G.score + " cleared " + G.cleared
+      + " best " + G.best + " deals " + G.deals + " plans " + G.plans
+      + " v" + gridVersion(BOARD))
+    // The AI's own cost, which is the number that decides whether this design fits a frame.
+    // One frame is 4389 ticks.
+    let avg: i32 = 0
+    if (G.frames > 0) { avg = (G.spent / G.frames) | 0 }
+    log("  AI ticks: peak " + G.peak + " avg " + avg + " over " + G.frames + " thinking frames")
+  }
+  frame()
+}

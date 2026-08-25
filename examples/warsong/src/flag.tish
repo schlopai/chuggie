@@ -1,0 +1,172 @@
+// flag.tish — Warsong Gulch CTF: pickup, carry, drop, capture, score.
+
+import {
+  spawn, set_transform, set_collider, attach_sprite, set_sprite_offset
+} from 'cargo:tish_gba_game_engine'
+import { sprite_new, sprite_set_frame, sprite_set_visible } from 'cargo:tish_agb'
+import {
+  FLAG_A_X, FLAG_A_Y, FLAG_H_X, FLAG_H_Y,
+  inAllianceBase, inHordeBase
+} from './arena'
+import {
+  UNITS, U_ENT, U_TEAM, U_ALIVE, TEAM_A, TEAM_H, posX, posY
+} from './units'
+
+export let SCORE_A: i32 = 0
+export let SCORE_H: i32 = 0
+export let SCORE_MAX: i32 = 3
+
+// Flag state: 0 home, 1 carried, 2 dropped
+export let FS_HOME: i32 = 0
+export let FS_CARRY: i32 = 1
+export let FS_DROP: i32 = 2
+
+export let F_STATE: i32[] = [0, 0]   // per team flag (0=A flag, 1=H flag)
+export let F_CARRIER: i32[] = [0 - 1, 0 - 1]
+export let F_ENT: i32[] = [0, 0]
+export let F_SPR: i32[] = [0, 0]
+export let F_X: i32[] = [0, 0]
+export let F_Y: i32[] = [0, 0]
+
+let PICK_R2: i32 = 14 * 14
+
+export function flagInit(sheet: i32) {
+  SCORE_A = 0
+  SCORE_H = 0
+  let t: i32 = 0
+  while (t < 2) {
+    F_ENT[t] = spawn()
+    F_SPR[t] = sprite_new(sheet)
+    let fr: i32 = 18
+    if (t === 1) { fr = 19 }
+    sprite_set_frame(F_SPR[t], fr)
+    attach_sprite(F_ENT[t], F_SPR[t])
+    set_sprite_offset(F_ENT[t], 0 - 8, 0 - 8)
+    set_collider(F_ENT[t], 8, 8)
+    flagReturnHome(t)
+    t = t + 1
+  }
+}
+
+export function flagReturnHome(teamFlag: i32) {
+  F_STATE[teamFlag] = FS_HOME
+  F_CARRIER[teamFlag] = 0 - 1
+  if (teamFlag === 0) {
+    F_X[0] = FLAG_A_X
+    F_Y[0] = FLAG_A_Y
+  } else {
+    F_X[1] = FLAG_H_X
+    F_Y[1] = FLAG_H_Y
+  }
+  set_transform(F_ENT[teamFlag], F_X[teamFlag], F_Y[teamFlag])
+  sprite_set_visible(F_SPR[teamFlag], 1)
+}
+
+export function flagCarrierOf(u: i32): i32 {
+  if (F_CARRIER[0] === u) { return 0 }
+  if (F_CARRIER[1] === u) { return 1 }
+  return 0 - 1
+}
+
+export function flagIsCarrying(u: i32): i32 {
+  if (flagCarrierOf(u) >= 0) { return 1 }
+  return 0
+}
+
+export function flagDrop(teamFlag: i32) {
+  let c: i32 = F_CARRIER[teamFlag]
+  F_STATE[teamFlag] = FS_DROP
+  F_CARRIER[teamFlag] = 0 - 1
+  if (c >= 0) {
+    F_X[teamFlag] = posX(U_ENT[c])
+    F_Y[teamFlag] = posY(U_ENT[c])
+  }
+  set_transform(F_ENT[teamFlag], F_X[teamFlag], F_Y[teamFlag])
+  sprite_set_visible(F_SPR[teamFlag], 1)
+}
+
+export function flagOnDeath(u: i32) {
+  let f: i32 = flagCarrierOf(u)
+  if (f >= 0) { flagDrop(f) }
+}
+
+function tryPickup(teamFlag: i32) {
+  if (F_STATE[teamFlag] === FS_CARRY) { return }
+  let fx: i32 = F_X[teamFlag]
+  let fy: i32 = F_Y[teamFlag]
+  // Enemy of the flag's team can pick up; own team returns dropped flag.
+  let i: i32 = 0
+  while (i < UNITS) {
+    if (U_ALIVE[i] !== 0) {
+      let dx: i32 = posX(U_ENT[i]) - fx
+      let dy: i32 = posY(U_ENT[i]) - fy
+      if (dx * dx + dy * dy <= PICK_R2) {
+        if (U_TEAM[i] === teamFlag) {
+          // Return own dropped flag
+          if (F_STATE[teamFlag] === FS_DROP) { flagReturnHome(teamFlag) }
+        } else {
+          // Steal
+          if (flagCarrierOf(i) < 0) {
+            F_STATE[teamFlag] = FS_CARRY
+            F_CARRIER[teamFlag] = i
+            sprite_set_visible(F_SPR[teamFlag], 0)
+          }
+        }
+      }
+    }
+    i = i + 1
+  }
+}
+
+function tryCapture() {
+  // Cap Alliance flag (index 0) into Horde base by Horde carrier while Horde flag home
+  if (F_STATE[0] === FS_CARRY && F_STATE[1] === FS_HOME) {
+    let c: i32 = F_CARRIER[0]
+    if (c >= 0 && U_TEAM[c] === TEAM_H) {
+      let x: i32 = posX(U_ENT[c])
+      let y: i32 = posY(U_ENT[c])
+      if (inHordeBase(x, y) !== 0) {
+        SCORE_H = SCORE_H + 1
+        flagReturnHome(0)
+      }
+    }
+  }
+  // Cap Horde flag into Alliance base
+  if (F_STATE[1] === FS_CARRY && F_STATE[0] === FS_HOME) {
+    let c2: i32 = F_CARRIER[1]
+    if (c2 >= 0 && U_TEAM[c2] === TEAM_A) {
+      let x2: i32 = posX(U_ENT[c2])
+      let y2: i32 = posY(U_ENT[c2])
+      if (inAllianceBase(x2, y2) !== 0) {
+        SCORE_A = SCORE_A + 1
+        flagReturnHome(1)
+      }
+    }
+  }
+}
+
+export function flagTick() {
+  // Follow carriers (marker hidden; could show mark sprite — keep simple)
+  let t: i32 = 0
+  while (t < 2) {
+    if (F_STATE[t] === FS_CARRY) {
+      let c: i32 = F_CARRIER[t]
+      if (c < 0 || U_ALIVE[c] === 0) {
+        flagDrop(t)
+      } else {
+        F_X[t] = posX(U_ENT[c])
+        F_Y[t] = posY(U_ENT[c])
+      }
+    }
+    t = t + 1
+  }
+  tryPickup(0)
+  tryPickup(1)
+  tryCapture()
+}
+
+export function flagMatchOver(): i32 {
+  if (SCORE_A >= SCORE_MAX) { return 1 }
+  if (SCORE_H >= SCORE_MAX) { return 1 }
+  return 0
+}

@@ -1,0 +1,337 @@
+// dungeon.tish — a BSP dungeon generated ON the cartridge, from a seed.
+//
+// ⚠️⚠️ THIS FILE HAS A TWIN: `scripts/procgen/rooms.py`. The order and count of `rngBelow` draws is
+// a CONTRACT between them, so the same seed produces the same dungeon in both. That is what makes a
+// procedural level testable at all — `examples/roguelike`'s verifier re-derives the expected layout
+// in Python and diffs the cartridge's own report against it, headlessly, over a hundred seeds.
+//
+// Adding a draw, reordering two, or short-circuiting one on a branch the other side does not take
+// will desync them — silently, and only for some seeds, which is the worst way for this to break.
+//
+// ── Why it is generated here and not baked ────────────────────────────────
+//
+// Every hand-authored map in this repo is a Tiled `.tmj`, and that rule is not negotiable for maps
+// a person drew. A roguelike's map is not one: it does not exist until the run starts. Baking N
+// variants would make it a shuffle with a visible period, which is a different game.
+//
+// What is still authored is the VOCABULARY — the tileset comes from the vendored pack as a
+// `background:` import, and this file only decides which authored tile goes in which cell. Nothing
+// forks the map pipeline.
+//
+// ── Why the whole map is one array and one call ───────────────────────────
+//
+// The grid is handed to the engine as ONE `grid_from_gids` call and one `tilemap_stream` call.
+// `examples/bench-boot` measured a per-tile tish loop that calls a native per cell at ~0.175 frames
+// PER TILE — a 40x26 dungeon would be 180 frames of black screen. One boxed call with the whole
+// array is the fast path, and it is why `TILES` and `SOLID` are built with `push()` rather than
+// written as literals.
+
+import { rngSeed, rngBelow } from './rng'
+import { tilemap_stream } from 'cargo:tish_agb'
+// ⚠️ NO CRATE IMPORT. Collision marking is the only thing here that needed the game engine, and it
+// is one call — so it is supplied instead (schlopai/chuggie-engine#68). A game with the engine passes
+// `grid_from_gids`; a `scene:` or raw-sprite game passes its own collision sink, or none at all and
+// reads walkability with `dungeonAt`.
+let SINK = { collide: null }
+
+/// `fn(w, h, gids, solidGids)` — e.g. `dungeonSetCollider(grid_from_gids)`.
+export function dungeonSetCollider(fn) { SINK.collide = fn }
+
+export let WALL: i32 = 0
+export let FLOOR: i32 = 1
+
+// The map, as flat typed columns. Sized once at `dungeonInit` and reused for every level after —
+// a fresh array per level would be a ~4 KB allocation on the frame a run starts.
+//
+// ⚠️⚠️ TWO ARRAYS, AND THAT IS A WORKAROUND FOR A COMPILER BUG — tishlang/tish#663.
+//
+// `TILES` is the working map: every generation pass reads and writes it, so it must stay a native
+// `Vec<i32>`. `UPLOAD` is the copy handed to `tilemap_stream` and `grid_from_gids`.
+//
+// They cannot be the same array. Passing a typed module array to a native makes EVERY read of it
+// take the boxed `get_index(&vm_read(..), &Value::Number(i as f64))` path — everywhere in the
+// program, not just at the call. `examples/probe-arrayarg` isolates it to a single variable and
+// measures 5.87 ticks a read against 1.55 for an identical array that is never passed. The cost
+// lands on the generation loops, which sweep 1,040 cells several times per level, while the call
+// that caused it happens once — and a full `dungeonGen` overran the 16-bit Timer2 because of it.
+//
+// So the handoff copies: O(n) once per level at ~1.35 ticks an element, against ~4.3 extra ticks on
+// every read for the life of the ROM. The copy also replaces the separate paint pass rather than
+// adding to it, so it is free.
+//
+// ⚠️ Four other explanations were tested first and every one was wrong — `export`, the fill site,
+// the fill loop's bound, and "packages are just like this". Do not re-litigate them from the source;
+// `examples/probe-arrayarg/verify.sh` pins the real cause against the generated Rust.
+let MAXCELLS: i32 = 2048
+let TILES: i32[] = []
+// The upload copy. Never read by the generator — only written, then handed over.
+let UPLOAD: i32[] = []
+let uf: i32 = 0
+while (uf < 2048) { UPLOAD.push(0); uf = uf + 1 }
+// ⚠️⚠️ FILLED AT MODULE SCOPE, NOT IN `dungeonInit`, AND THAT IS THE WHOLE DIFFERENCE.
+//
+// A module array only stays a native `Vec<i32>` if it is BUILT at module scope. Filled from inside
+// a function — which is what `dungeonInit(w, h)` did, so the size could be a parameter — the
+// compiler cannot keep it typed and every index lowers to
+//
+//     get_index(&vm_read(&TILES), &Value::Number(i as f64))
+//
+// a clone of the whole Value plus an f64 round-trip, PER CELL. Measured: a 1,040-cell count loop
+// cost ~14,000 ticks (three frames) and a whole generation overran the 16-bit timer. Nothing about
+// the loops changed; only where the array was filled.
+//
+// So the size is a compile-time maximum here and `dungeonInit` only records the dimensions.
+let tf: i32 = 0
+while (tf < 2048) { TILES.push(0); tf = tf + 1 }
+// `grid_from_gids` takes a LIST OF SOLID GIDs, not a per-cell plane — it tests `solid.contains(gid)`
+// per cell. So this is one entry long, and it is the wall's gid.
+let SOLIDG: i32[] = []
+let sg: i32 = 0
+while (sg < 1) { SOLIDG.push(0); sg = sg + 1 }
+let W: i32 = 0
+let H: i32 = 0
+
+// Rooms, as four parallel columns. `MAXR` is 2^depth and the depth is capped at 4, so 16.
+let MAXR: i32 = 16
+let RX: i32[] = []
+let RY: i32[] = []
+let RW: i32[] = []
+let RH: i32[] = []
+let RN: i32 = 0
+
+// Regions during the split. Two buffers, swapped by parity, so a split allocates nothing.
+let AX: i32[] = []
+let AY: i32[] = []
+let AW: i32[] = []
+let AH: i32[] = []
+let BX: i32[] = []
+let BY: i32[] = []
+let BW: i32[] = []
+let BH: i32[] = []
+let rf: i32 = 0
+while (rf < MAXR) {
+  RX.push(0); RY.push(0); RW.push(0); RH.push(0)
+  AX.push(0); AY.push(0); AW.push(0); AH.push(0)
+  BX.push(0); BY.push(0); BW.push(0); BH.push(0)
+  rf = rf + 1
+}
+
+/// Size the buffers. Call ONCE, at boot — never per level.
+export function dungeonInit(w: i32, h: i32) {
+  W = w
+  H = h
+  // The buffers are already sized (module scope, above). This only records the dimensions, and
+  // refuses a map bigger than the fixed arrays — silently generating into a too-small buffer would
+  // corrupt whatever follows it.
+  if (w * h > MAXCELLS) { W = 0; H = 0 }
+}
+
+export function dungeonW(): i32 { return W }
+export function dungeonH(): i32 { return H }
+export function dungeonRooms(): i32 { return RN }
+export function dungeonRoomX(i: i32): i32 { return RX[i] }
+export function dungeonRoomY(i: i32): i32 { return RY[i] }
+export function dungeonRoomW(i: i32): i32 { return RW[i] }
+export function dungeonRoomH(i: i32): i32 { return RH[i] }
+export function dungeonRoomCX(i: i32): i32 { return RX[i] + ((RW[i] / 2) | 0) }
+export function dungeonRoomCY(i: i32): i32 { return RY[i] + ((RH[i] / 2) | 0) }
+export function dungeonAt(col: i32, row: i32): i32 {
+  if (col < 0 || row < 0 || col >= W || row >= H) { return WALL }
+  return TILES[row * W + col]
+}
+
+function carveRect(x: i32, y: i32, w: i32, h: i32) {
+  // Bounds and constants hoisted for the same reason as above: the inner condition runs once per
+  // cell and every module read in it is paid that many times.
+  let mw: i32 = W
+  let mh: i32 = H
+  let fl: i32 = FLOOR
+  let r1: i32 = y + h
+  let c1: i32 = x + w
+  let r: i32 = y
+  while (r < r1) {
+    if (r >= 0 && r < mh) {
+      let base: i32 = r * mw
+      let c: i32 = x
+      while (c < c1) {
+        if (c >= 0 && c < mw) { TILES[base + c] = fl }
+        c = c + 1
+      }
+    }
+    r = r + 1
+  }
+}
+
+/// Generate a dungeon from `seed` at `depth` splits (2^depth rooms, depth capped at 4).
+///
+/// Every `rngBelow` below has a matching call in `scripts/procgen/rooms.py`, in this order:
+///   per split, per region: ONE draw for the cut
+///   per region:            FOUR draws — room w, room h, offset x, offset y
+export function dungeonGen(seed: i32, depth: i32) {
+  rngSeed(0, seed)
+  let d: i32 = depth
+  if (d < 1) { d = 1 }
+  if (d > 4) { d = 4 }
+
+  // ⚠️ HOIST THE BOUND. `while (i < W * H)` re-reads two module scalars and multiplies them on
+  // EVERY iteration — the loop condition is the hot path, not the body. Left in place this loop and
+  // its siblings cost ~13.8 ticks a cell against the ~1.35 a module array write should be, and one
+  // generation overran the 16-bit timer. Same finding drop-gba's optimisation ladder opens with.
+  let cells: i32 = W * H
+  let wallT: i32 = WALL
+  let i: i32 = 0
+  while (i < cells) { TILES[i] = wallT; i = i + 1 }
+
+  // One region: the interior, inset by the wall ring.
+  AX[0] = 1
+  AY[0] = 1
+  AW[0] = W - 2
+  AH[0] = H - 2
+  let n: i32 = 1
+
+  let step: i32 = 0
+  while (step < d) {
+    let m: i32 = 0
+    let k: i32 = 0
+    while (k < n) {
+      // Read from A, write to B on even steps; the reverse on odd. Two fixed buffers, no allocation.
+      let x: i32 = AX[k]
+      let y: i32 = AY[k]
+      let rw: i32 = AW[k]
+      let rh: i32 = AH[k]
+      if (step % 2 === 1) { x = BX[k]; y = BY[k]; rw = BW[k]; rh = BH[k] }
+
+      // The axis is decided by SHAPE, not by a draw — a coin flip here would be one more thing the
+      // two implementations must agree about, for nothing.
+      if (rw >= rh) {
+        let half: i32 = (rw / 2) | 0
+        if (half < 1) { half = 1 }
+        let cut: i32 = ((rw / 4) | 0) + rngBelow(0, half)
+        if (cut < 2) { cut = 2 }
+        if (cut > rw - 2) { cut = rw - 2 }
+        if (step % 2 === 1) {
+          AX[m] = x; AY[m] = y; AW[m] = cut; AH[m] = rh
+          AX[m + 1] = x + cut; AY[m + 1] = y; AW[m + 1] = rw - cut; AH[m + 1] = rh
+        } else {
+          BX[m] = x; BY[m] = y; BW[m] = cut; BH[m] = rh
+          BX[m + 1] = x + cut; BY[m + 1] = y; BW[m + 1] = rw - cut; BH[m + 1] = rh
+        }
+      } else {
+        let half: i32 = (rh / 2) | 0
+        if (half < 1) { half = 1 }
+        let cut: i32 = ((rh / 4) | 0) + rngBelow(0, half)
+        if (cut < 2) { cut = 2 }
+        if (cut > rh - 2) { cut = rh - 2 }
+        if (step % 2 === 1) {
+          AX[m] = x; AY[m] = y; AW[m] = rw; AH[m] = cut
+          AX[m + 1] = x; AY[m + 1] = y + cut; AW[m + 1] = rw; AH[m + 1] = rh - cut
+        } else {
+          BX[m] = x; BY[m] = y; BW[m] = rw; BH[m] = cut
+          BX[m + 1] = x; BY[m + 1] = y + cut; BW[m + 1] = rw; BH[m + 1] = rh - cut
+        }
+      }
+      m = m + 2
+      k = k + 1
+    }
+    n = m
+    step = step + 1
+  }
+
+  // One room per region, four draws each — always four, even when the region cannot vary, or the
+  // stream desyncs from Python on exactly the small regions nobody looks at.
+  RN = n
+  let j: i32 = 0
+  while (j < n) {
+    let x: i32 = AX[j]
+    let y: i32 = AY[j]
+    let rw: i32 = AW[j]
+    let rh: i32 = AH[j]
+    if (d % 2 === 1) { x = BX[j]; y = BY[j]; rw = BW[j]; rh = BH[j] }
+
+    let maxw: i32 = rw - 2
+    if (maxw < 2) { maxw = 2 }
+    let maxh: i32 = rh - 2
+    if (maxh < 2) { maxh = 2 }
+    let a: i32 = maxw - 1
+    if (a < 1) { a = 1 }
+    let b: i32 = maxh - 1
+    if (b < 1) { b = 1 }
+    let w2: i32 = 2 + rngBelow(0, a)
+    let h2: i32 = 2 + rngBelow(0, b)
+    let sx: i32 = rw - w2
+    if (sx < 1) { sx = 1 }
+    let sy: i32 = rh - h2
+    if (sy < 1) { sy = 1 }
+    let ox: i32 = rngBelow(0, sx)
+    let oy: i32 = rngBelow(0, sy)
+
+    RX[j] = x + ox
+    RY[j] = y + oy
+    RW[j] = w2
+    RH[j] = h2
+    carveRect(RX[j], RY[j], RW[j], RH[j])
+    j = j + 1
+  }
+
+  // L-corridors between consecutive rooms, horizontal then vertical. No draws: the elbow is fixed,
+  // so the two implementations cannot disagree about it.
+  j = 0
+  while (j < n - 1) {
+    let ax: i32 = RX[j] + ((RW[j] / 2) | 0)
+    let ay: i32 = RY[j] + ((RH[j] / 2) | 0)
+    let bx: i32 = RX[j + 1] + ((RW[j + 1] / 2) | 0)
+    let by: i32 = RY[j + 1] + ((RH[j + 1] / 2) | 0)
+    let c0: i32 = ax
+    let c1: i32 = bx
+    if (c1 < c0) { c0 = bx; c1 = ax }
+    let c: i32 = c0
+    while (c <= c1) { TILES[ay * W + c] = FLOOR; c = c + 1 }
+    let r0: i32 = ay
+    let r1: i32 = by
+    if (r1 < r0) { r0 = by; r1 = ay }
+    let r: i32 = r0
+    while (r <= r1) { TILES[r * W + bx] = FLOOR; r = r + 1 }
+    j = j + 1
+  }
+
+}
+
+/// Paint the classes into gids and hand the map to the engine: the tile layer and the collision
+/// grid, one native call each.
+///
+/// This lives HERE rather than in the game because the map array must not cross a module boundary —
+/// see the note on `TILES`. Two calls, no per-cell native crossing: `examples/bench-boot` measured
+/// the per-cell alternative at ~0.175 frames PER TILE, which for a 40x26 dungeon is 180 frames of
+/// black screen.
+export function dungeonUpload(tileset: i32, cols: i32, wallGid: i32, floorGid: i32, priority: i32) {
+  SOLIDG[0] = wallGid
+  // Paint straight into the UPLOAD copy, so the working array is never handed to a native and stays
+  // on the typed read path. One pass, and it replaces the separate paint pass rather than adding to
+  // it — the copy is free.
+  let cells: i32 = W * H
+  let fl: i32 = FLOOR
+  let i: i32 = 0
+  while (i < cells) {
+    if (TILES[i] === fl) { UPLOAD[i] = floorGid } else { UPLOAD[i] = wallGid }
+    i = i + 1
+  }
+  tilemap_stream(tileset, cols, W, H, UPLOAD, priority)
+  if (SINK.collide !== null) { SINK.collide(W, H, UPLOAD, SOLIDG) }
+}
+
+/// How many floor cells — the cheapest possible summary, and enough for a verifier to diff two
+/// implementations without shipping the whole grid over the log.
+/// How many floor cells — the cheapest possible summary, and enough for a verifier to diff two
+/// implementations without shipping the whole grid over the log. Counted BEFORE `dungeonPaint`,
+/// while TILES still holds classes rather than gids.
+export function dungeonFloors(): i32 {
+  let cells: i32 = W * H
+  let fl: i32 = FLOOR
+  let n: i32 = 0
+  let i: i32 = 0
+  while (i < cells) {
+    if (TILES[i] === fl) { n = n + 1 }
+    i = i + 1
+  }
+  return n
+}

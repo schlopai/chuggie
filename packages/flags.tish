@@ -1,0 +1,235 @@
+// flags.tish — the world's memory: "chest 14 opened, boss 3 dead, ability 2 granted".
+//
+// ── WHY THIS EXISTS ───────────────────────────────────────────────────────────────────────────
+//
+// `save.tish` and `prefs.tish` handle BYTES. Neither owns the question a progression-driven game
+// actually asks, which is not "what is in slot 7" but "has this specific thing happened yet". Every
+// game in this repo that needs one has grown its own: `metroidvania` gates abilities by hand,
+// both topdown RPG ports (since moved to their own repo) each carried a private bitfield, and
+// `save.tish` offers exactly ONE 32-bit `flags` int per slot for a game to pack its whole story
+// into. Thirty-two bits is a reasonable NES-era budget and a poor 2026 one — one of those ports
+// alone tracked OPENED and TAKEN per room.
+//
+// This is the missing layer, and it is deliberately thin: a named bitset over `prefs.tish`'s
+// versioned, checksummed SRAM block, plus the one piece of behaviour that a bitset alone cannot
+// give you — a way to be TOLD when something flips.
+//
+// ── 1,024 FLAGS, AND WHERE THEY LIVE ──────────────────────────────────────────────────────────
+//
+// `prefs.tish` owns up to 32 slots of 32 bits. `flags.tish` claims a contiguous run of them, so the
+// ceiling is 32 x 32 = **1,024 flags**, checksummed and version-gated for free — a wrong-version
+// cartridge reads as blank rather than as somebody else's story. A game that wants fewer claims
+// fewer and leaves the rest of prefs for volume, difficulty and high scores.
+//
+// ⚠️ THE SLOT MATH IS SHIFTS, NOT DIVISION. `id >> 5` and `id & 31`, never `id / 32` and `id % 32`.
+// The GBA has no divide instruction (`docs/MEMORY.md`), a `%` on a hot path is a software routine,
+// and a flag read is exactly the kind of thing a game does in a room-load loop. 32 bits per slot is
+// a power of two precisely so this is two instructions.
+//
+// ── WATCHES ARE DRAINED FROM A CHANGE RING, NOT POLLED ────────────────────────────────────────
+//
+// The obvious `flagWatch` implementation compares every watched flag against its previous value
+// once a frame. That is a scan of the whole watch table per frame, forever, to observe something
+// that happens a few dozen times in a whole playthrough — and each comparison that DOES fire calls
+// a tish callback at ~117 ticks (`docs/perf-rules.md`).
+//
+// A flag can only change through `flagSet`, so the change is known at the moment it happens. Every
+// flip pushes the id into a small ring; `flagsPump()` drains it. The cost is therefore proportional
+// to what actually CHANGED, and a frame in which nothing happens costs one compare of a ring index.
+// This is the same reasoning `packages/feel.tish` uses for its event channel.
+//
+//     flagsInit({ magic: 0xF1A6, version: 1, count: 8 })   // 8 slots = 256 flags
+//     if (flagsFresh() === 1) { /* new cartridge */ }
+//
+//     flagSet(CHEST_14, 1)          // opens it, and queues the change
+//     if (flagOn(BOSS_3) === 1) { … }
+//     flagsPump()                   // fires watches for anything that flipped this frame
+//     flagsSave()                   // commits to the cartridge (no-op when nothing is dirty)
+
+import { prefsInit, prefsBit, prefsSetBit, prefsSave, prefsFresh, prefsClear } from './prefs'
+
+let SLOT_BITS: i32 = 32
+let SLOT_SHIFT: i32 = 5          // id >> 5 = slot
+let SLOT_MASK: i32 = 31          // id & 31 = bit
+export let FLAGS_MAX_SLOTS: i32 = 32
+export let FLAGS_MAX: i32 = 1024 // FLAGS_MAX_SLOTS * SLOT_BITS
+
+// One typed array, not a set of module scalars: a mutable module-level scalar lowers to a boxed
+// VmRef, and `count` is read on every single flag access.
+//   0 slots claimed  1 base slot in prefs  2 ready  3 fresh  4 ring head  5 ring len  6 changes
+let F: i32[] = [0, 0, 0, 1, 0, 0, 0]
+let F_SLOTS: i32 = 0
+let F_BASE: i32 = 1
+let F_READY: i32 = 2
+let F_FRESH: i32 = 3
+let F_HEAD: i32 = 4
+let F_LEN: i32 = 5
+let F_CHANGES: i32 = 6
+
+// The change ring. A POWER OF TWO with a mask, because a `% RING` on this path measured 1,400 of a
+// 4,389-tick frame elsewhere in this repo (`docs/perf-rules.md` §5).
+let RING: i32 = 32
+let RING_MASK: i32 = 31
+let CHANGED: i32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+// Watches: parallel columns, appended in registration order. Fixed capacity — a watch is a design
+// decision, not a runtime population, so there is no growth path and no allocation after boot.
+let WATCH_MAX: i32 = 24
+let wId: i32[] = []
+let wFn = []
+let wCount: i32 = 0
+
+// Optional debug names, for a UI or a log. Untyped on purpose: `Value::String` is an ArcStr and an
+// index read is a refcount bump, where a `: string[]` annotation lowers to `Vec<String>` and
+// DEEP-COPIES on every read (`examples/solitaire` records the same finding).
+let NAMES = []
+let NAME_ID: i32[] = []
+let nameCount: i32 = 0
+
+/// Claim `cfg.count` prefs slots (32 flags each) and read them back off the cartridge.
+///
+/// `magic`/`version` are passed straight through to `prefs.tish`: bump `version` and every existing
+/// cartridge reads as fresh, which is what you want when the MEANING of a flag id changes.
+/// Returns 1 when a valid block was loaded, 0 when this is a new or invalidated cartridge.
+export function flagsInit(cfg): i32 {
+  let slots: i32 = 8
+  if (cfg.count !== null) { slots = cfg.count }
+  if (slots > FLAGS_MAX_SLOTS) { slots = FLAGS_MAX_SLOTS }
+  if (slots < 1) { slots = 1 }
+  let base: i32 = 0
+  if (cfg.base !== null) { base = cfg.base }
+
+  let ok: i32 = prefsInit({ magic: cfg.magic, version: cfg.version, count: base + slots, base: 0 })
+  F[F_SLOTS] = slots
+  F[F_BASE] = base
+  F[F_READY] = 1
+  F[F_FRESH] = prefsFresh()
+  F[F_HEAD] = 0
+  F[F_LEN] = 0
+  F[F_CHANGES] = 0
+  return ok
+}
+
+/// 1 when the block was blank or invalidated at init — i.e. a new game.
+export function flagsFresh(): i32 { return F[F_FRESH] }
+
+/// How many flags this game claimed.
+export function flagsCapacity(): i32 { return Math.imul(F[F_SLOTS], SLOT_BITS) }
+
+/// Read one flag. The hot path, and two shifts plus a mask — see the header.
+export function flagOn(id: i32): i32 {
+  if (F[F_READY] === 0) { return 0 }
+  if (id < 0 || id >= Math.imul(F[F_SLOTS], SLOT_BITS)) { return 0 }
+  return prefsBit(F[F_BASE] + (id >> SLOT_SHIFT), id & SLOT_MASK)
+}
+
+/// Set or clear one flag. Queues the change for `flagsPump` ONLY when the value actually differs —
+/// re-setting a flag that is already set is not an event, and a room that re-asserts its state on
+/// every entry would otherwise fire a trigger every time you walked in.
+export function flagSet(id: i32, on: i32) {
+  if (F[F_READY] === 0) { return }
+  if (id < 0 || id >= Math.imul(F[F_SLOTS], SLOT_BITS)) { return }
+  let want: i32 = 0
+  if (on !== 0) { want = 1 }
+  if (prefsBit(F[F_BASE] + (id >> SLOT_SHIFT), id & SLOT_MASK) === want) { return }
+  prefsSetBit(F[F_BASE] + (id >> SLOT_SHIFT), id & SLOT_MASK, want)
+  F[F_CHANGES] = F[F_CHANGES] + 1
+  // Ring full: drop the OLDEST. A dropped trigger is a bug either way, but dropping the oldest keeps
+  // the most recent (and most likely to be on screen) events, and `flagsOverflow` reports it rather
+  // than hiding it.
+  if (F[F_LEN] < RING) { F[F_LEN] = F[F_LEN] + 1 }
+  CHANGED[F[F_HEAD] & RING_MASK] = id
+  F[F_HEAD] = (F[F_HEAD] + 1) & RING_MASK
+}
+
+/// Flip a flag. Returns the new value.
+export function flagToggle(id: i32): i32 {
+  let v: i32 = 1 - flagOn(id)
+  flagSet(id, v)
+  return v
+}
+
+/// Every flag set, over the claimed range — "chests found 7/12". Walks slots, not bits: 32 flags per
+/// iteration, and a popcount per slot rather than a shift per flag.
+export function flagsCount(): i32 {
+  if (F[F_READY] === 0) { return 0 }
+  let n: i32 = 0
+  let s: i32 = 0
+  while (s < F[F_SLOTS]) {
+    let b: i32 = 0
+    while (b < SLOT_BITS) {
+      n = n + prefsBit(F[F_BASE] + s, b)
+      b = b + 1
+    }
+    s = s + 1
+  }
+  return n
+}
+
+/// How many flags have flipped since boot — a cheap "did anything happen" for a save prompt.
+export function flagsChanges(): i32 { return F[F_CHANGES] }
+
+/// Register a trigger. `fn` is called as `fn(id, value)` when that flag CHANGES, from `flagsPump`.
+/// Boxed, and deliberately so: this fires a few dozen times in a playthrough, never per frame.
+export function flagWatch(id: i32, fn) {
+  if (wCount >= WATCH_MAX) { return }
+  wId.push(id)
+  wFn.push(fn)
+  wCount = wCount + 1
+}
+
+/// Drain the change ring, firing watches. Call it once a frame. A frame in which nothing flipped
+/// costs one compare.
+export function flagsPump() {
+  if (F[F_LEN] === 0) { return }
+  let n: i32 = F[F_LEN]
+  // Oldest first: the ring head has already advanced past the newest entry.
+  let start: i32 = (F[F_HEAD] - n) & RING_MASK
+  F[F_LEN] = 0
+  let k: i32 = 0
+  while (k < n) {
+    let id: i32 = CHANGED[(start + k) & RING_MASK]
+    let v: i32 = flagOn(id)
+    let w: i32 = 0
+    while (w < wCount) {
+      if (wId[w] === id) {
+        let f = wFn[w]
+        f(id, v)
+      }
+      w = w + 1
+    }
+    k = k + 1
+  }
+}
+
+/// Commit to the cartridge. Returns 1 if it wrote, 0 if nothing was dirty. `prefs.tish` owns the
+/// checksum, so a half-written block reads back as fresh rather than as a corrupt story.
+export function flagsSave(): i32 { return prefsSave() }
+
+/// Wipe every flag — a New Game. Does NOT write; call `flagsSave` to make it stick.
+export function flagsReset() {
+  prefsClear()
+  F[F_HEAD] = 0
+  F[F_LEN] = 0
+  F[F_CHANGES] = 0
+  F[F_FRESH] = 1
+}
+
+/// Give a flag a name, for a log line or a debug screen. Optional: a game that never calls this
+/// pays nothing, and no name table is built.
+export function flagName(id: i32, name) {
+  NAME_ID.push(id)
+  NAMES.push(name)
+  nameCount = nameCount + 1
+}
+
+/// The name for `id`, or "" if it was never named.
+export function flagNameOf(id: i32) {
+  let i: i32 = 0
+  while (i < nameCount) {
+    if (NAME_ID[i] === id) { return NAMES[i] }
+    i = i + 1
+  }
+  return ""
+}

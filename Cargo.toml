@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "examples/p0-spike",
+]
+# tish-agb/tish-gba-game-engine link agb + the runtime facade and build only for thumbv4t (and
+# only as a path dependency of a generated game ROM crate), so they are not plain workspace
+# members — excluded so standalone `cargo` invocations don't try to absorb or host-compile them.
+#
+# tish-gba-scenepack is the opposite case: a proc-macro crate (see .cargo/config.toml's own note)
+# that must build for the HOST, but this workspace's default `[build] target = thumbv4t-none-eabi`
+# would apply to it as a plain member too. Same fix, opposite direction — excluded, consumed only
+# as a path dependency of a generated game ROM crate (via package.json `tish.rustDependencies`),
+# never as a top-level workspace member.
+exclude = [
+    "crates/tish-agb",
+    "crates/tish-agb-sio",
+    "crates/tish-gba-game-engine",
+    "crates/tish-gba-scenepack",
+]
+
+# GBA code is unusably slow unoptimized — opt-level 3 even in dev, matching the
+# agb template. Debug info stays in the ELF (mGBA/gdb use it); agb-gbafix strips
+# it from the shipped ROM.
+[profile.dev]
+opt-level = 3
+debug = true
+
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+debug = true
+
+[profile.release.build-override]
+opt-level = 3

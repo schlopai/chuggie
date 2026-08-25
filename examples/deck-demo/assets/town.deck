@@ -1,0 +1,71 @@
+# Harbor Walk — town theme (4 bars, loops). Soft pulse + sine bass + light PCM hat.
+deck 1
+bpm 96
+
+track Lead id lead gen gameBoyDmg * 4
+  gen type pulse duty 50 env_mode constant vol 11
+  gen vib_rate 4 vib_amt 8
+  note 64 0 0.5 v 100
+  note 67 0.5 0.5 v 95
+  note 71 1 0.75 v 110
+  note 67 1.75 0.25 v 90
+  note 64 2 0.5 v 100
+  note 62 2.5 0.5 v 90
+  note 60 3 1 v 105
+  note 67 4 0.5 v 110
+  note 69 4.5 0.5 v 100
+  note 71 5 0.5 v 115
+  note 74 5.5 0.5 v 110
+  note 71 6 0.5 v 100
+  note 69 6.5 0.5 v 95
+  note 67 7 1 v 105
+  note 64 8 0.5 v 100
+  note 60 8.5 0.5 v 95
+  note 62 9 0.5 v 100
+  note 64 9.5 0.5 v 105
+  note 67 10 1 v 115
+  note 64 11 1 v 100
+  note 62 12 0.5 v 95
+  note 60 12.5 0.5 v 90
+  note 59 13 0.5 v 85
+  note 60 13.5 0.5 v 95
+  note 62 14 1 v 100
+  note 64 15 1 v 110
+
+track Pad id pad gen gameBoyDmg * 4
+  gen type pulse duty 12_5 env_mode constant vol 5
+  note 52 0 4 v 70
+  note 55 4 4 v 75
+  note 57 8 4 v 70
+  note 52 12 4 v 80
+
+track Bass id bass gen gameBoyDmg * 4
+  gen type wave wave_shape sine vol 14
+  note 36 0 2 v 110
+  note 40 2 2 v 100
+  note 43 4 2 v 110
+  note 40 6 2 v 100
+  note 36 8 2 v 110
+  note 38 10 2 v 100
+  note 35 12 2 v 105
+  note 36 14 2 v 115
+
+track Hat id hat gen gbaDirectSound * 4
+  gen waveform triangle vol 7 bitcrush true
+  adsr a 0 d 0.04 s 0 r 0.02
+  note 84 0.5 0.06 v 70
+  note 84 1.5 0.06 v 60
+  note 84 2.5 0.06 v 70
+  note 84 3.5 0.06 v 65
+  note 84 4.5 0.06 v 70
+  note 84 5.5 0.06 v 60
+  note 84 6.5 0.06 v 70
+  note 84 7.5 0.08 v 80
+  note 84 8.5 0.06 v 70
+  note 84 9.5 0.06 v 60
+  note 84 10.5 0.06 v 70
+  note 84 11.5 0.06 v 65
+  note 84 12.5 0.06 v 70
+  note 84 13.5 0.06 v 60
+  note 84 14.5 0.06 v 70
+  note 84 15.5 0.08 v 75

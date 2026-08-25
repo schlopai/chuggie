@@ -1,0 +1,241 @@
+// packages/kart — a KART RACER: physics, surfaces, laps, standings and opponents.
+//
+// The genre kit that sits on packages/mode7. mode7 gives you a ground plane and things standing on
+// it; this gives you a race over one.
+//
+//     import * as m7 from '../../../packages/mode7'
+//     import * as kart from '../../../packages/kart'
+//     import { SURF, WPX, WPZ, CPX, CPZ, GRIDX, GRIDZ, START_YAW, CELLS, CELL_PX } from './track'
+//
+//     let bg = m7.m7Ground(trackTex, 64, 64)
+//     m7.m7Lens(HORIZON, 132.0)
+//     kart.kartTrack(SURF, CELLS, CELL_PX)
+//     kart.kartWaypoints(WPX, WPZ)
+//     kart.kartCheckpoints(CPX, CPZ, 30, 3)
+//     let me = kart.kartAddRacer(sprite, GRIDX[0], GRIDZ[0], START_YAW)   // index 0 is the player
+//     ...
+//     kart.kartGo(1)
+//     while (true) {
+//       kart.kartDrive(0, throttle, steer, drift)
+//       kart.kartStep()
+//       kart.kartPresent(bg, 44, 26.0)
+//       frame()
+//     }
+//
+// ── Where the work happens, and why it is not here ──────────────────────────────────────────────
+// Everything per-frame is ONE native call. Four karts each need a heading rotation, a grip solve, a
+// surface lookup and a checkpoint test; that is over a hundred arithmetic operations a frame, and
+// this CPU has no FPU, so in tish each one would be a software float routine. The repo has measured
+// this shape twice — four billboards projected in tish took a frame from 4589 ticks to 8611, and one
+// divide per prompt icon cost the rhythm game twelve frames a second.
+//
+// So `kartStep` is the simulation, `kartPresent` is the camera and every sprite, and neither takes a
+// per-kart argument. Read-backs are one call each and are meant for the HUD — call them when the
+// value is drawn, not to drive the frame.
+import {
+  kart_track, kart_waypoints, kart_checkpoints, kart_reset, kart_add, kart_set_ai, kart_start,
+  kart_input, kart_step, kart_bump, kart_draw, kart_camera, kart_cam_x, kart_cam_z, kart_cam_yaw,
+  kart_count, kart_x, kart_z, kart_yaw, kart_speed, kart_lap, kart_rank, kart_boost, kart_charge,
+  kart_surface, kart_finished, kart_events, kart_drifting, kart_surface_at,
+  kart_item_boxes, kart_use, kart_item, kart_hazards, kart_hazard_slots, kart_draw_items,
+  sprite_set_hud,
+} from 'cargo:tish_agb'
+import { m7Billboard, m7Set, m7Commit, m7DrawBillboards } from './mode7'
+
+// ── Surfaces. Must match SURF_* in crates/tish-agb/src/kart.rs and the class values that
+//    scripts/gen_kart_circuit.py packs into the mask. ─────────────────────────────────────────────
+export let SURF_GRASS: i32 = 0
+export let SURF_ROAD: i32 = 1
+export let SURF_KERB: i32 = 2
+export let SURF_BOOST: i32 = 3
+export let SURF_FINISH: i32 = 4
+
+// ── Per-frame events, as a bitmask from `kartEvents(i)`. ────────────────────────────────────────
+export let EV_LAP: i32 = 1        // completed a lap (all gates, in order)
+export let EV_BOOST_PAD: i32 = 2  // drove onto a boost strip
+export let EV_MINI_TURBO: i32 = 4 // released a charged drift
+export let EV_FINISH: i32 = 8     // completed the final lap
+export let EV_OFFROAD: i32 = 16   // left the track this frame
+export let EV_PICKUP: i32 = 32    // collected an item box
+export let EV_HIT: i32 = 64       // was spun out by a shell or a banana
+
+// ── Items. Must match ITEM_* in crates/tish-agb/src/kart.rs AND the frame order of the item
+//    sheet: 0 box · 1 banana · 2 shell. ────────────────────────────────────────────────────────
+export let ITEM_NONE: i32 = 0
+export let ITEM_BOOST: i32 = 1
+export let ITEM_SHELL: i32 = 2
+export let ITEM_BANANA: i32 = 3
+
+// Sheet handles and the first billboard index, so `kartPresent` needs no arguments about art.
+interface Art {
+  near: i32, far: i32, nearSize: i32, farSize: i32, farDist: i32,
+  bbFirst: i32, n: i32,
+  itemFirst: i32,   // billboard index of the first item box; the hazard slots follow the boxes
+  itemSize: i32
+}
+let ART: Art = {
+  near: -1, far: -1, nearSize: 32, farSize: 16, farDist: 150,
+  bbFirst: -1, n: 0, itemFirst: -1, itemSize: 16
+}
+
+// ── Building a race ──────────────────────────────────────────────────────────────────────────────
+
+/// Install the surface map: `mask` packed four bits per cell, `cells` per axis, `cellPx` wide.
+/// This is exactly what `scripts/gen_kart_circuit.py` emits into `track.tish`.
+export function kartTrack(mask: i32[], cells: i32, cellPx: i32) {
+  kart_track(mask, cells, cellPx)
+}
+
+/// The racing line the opponents follow.
+export function kartWaypoints(xs: i32[], zs: i32[]) {
+  kart_waypoints(xs, zs)
+}
+
+/// The ordered gates that validate a lap, plus how many laps make a race.
+///
+/// ⚠️ A lap counts only when every gate has been passed IN SEQUENCE. A counter that just watches the
+/// finish line lets a kart turn round and farm laps by crossing it repeatedly — which is the first
+/// thing anyone tries.
+export function kartCheckpoints(xs: i32[], zs: i32[], radius: i32, laps: i32) {
+  kart_checkpoints(xs, zs, radius, laps)
+}
+
+/// Which sheets the karts are drawn from, and when to swap between them.
+///
+/// ⚠️ Two sizes is not decoration. The GBA cannot scale a sprite, so without a far tier a kart four
+/// hundred pixels away is drawn exactly as large as one forty away. `farDist` is in world pixels.
+/// Frames must be laid out racer-major, eight headings each — heading 0 driving away from camera.
+export function kartArt(nearSheet: i32, farSheet: i32, nearSize: i32, farSize: i32, farDist: i32) {
+  ART.near = nearSheet
+  ART.far = farSheet
+  ART.nearSize = nearSize
+  ART.farSize = farSize
+  ART.farDist = farDist
+}
+
+/// Put a racer on the grid and give it a sprite. Returns its index; **index 0 is the player**, which
+/// is what the rubber band measures against and what `kartPresent` puts the camera behind.
+export function kartAddRacer(sprite: i32, x: i32, z: i32, yaw: i32): i32 {
+  let idx: i32 = kart_add(x, z, yaw)
+  // ⚠️ Register a billboard ONCE per racer, not once per race. The billboard array only ever grows —
+  // `bg_clear` does not touch it — so re-registering on a rematch left the previous race's four
+  // still being projected onto the same sprites, and the third race had three karts fighting over
+  // each one. A rematch is `kartClear` plus these calls again, and this is what makes that safe.
+  if (idx >= ART.n) {
+    // Billboards are screen-space, so their sprites must be HUD sprites: the tile camera must not
+    // be applied on top of a projection that already produced screen coordinates.
+    sprite_set_hud(sprite, 1)
+    let bb: i32 = m7Billboard(sprite, ART.nearSize, ART.nearSize)
+    if (ART.bbFirst < 0) { ART.bbFirst = bb }
+    ART.n = ART.n + 1
+  }
+  return idx
+}
+
+/// Make a racer drive itself. `skill` 0..100 is how tightly it holds the line and how much it trusts
+/// a corner; `rubber` 0..100 is how hard the field is pulled back toward the player — 0 lets a good
+/// player lap them, 100 keeps them in the mirror all race.
+export function kartSetAi(i: i32, skill: i32, rubber: i32) {
+  kart_set_ai(i, skill, rubber)
+}
+
+/// Release the field (1) or hold it on the grid (0), for a countdown.
+export function kartGo(on: i32) {
+  kart_start(on)
+}
+
+/// Clear the field. The track, waypoints and gates stay loaded, so a rematch is this plus the
+/// `kartAddRacer` calls again.
+export function kartClear() {
+  // Deliberately does NOT forget the billboards — see `kartAddRacer`. Only the race is cleared.
+  kart_reset()
+}
+
+/// Where the item boxes are. Collected boxes come back on their own.
+export function kartItemBoxes(xs: i32[], zs: i32[]) {
+  kart_item_boxes(xs, zs)
+}
+
+/// How many spare billboards to register after the boxes, for shells and bananas in flight.
+export function kartHazardSlots(): i32 { return kart_hazard_slots() }
+
+/// Register the billboards that draw the boxes and the hazards.
+///
+/// ⚠️ Call this AFTER every `kartAddRacer` and AFTER `kartItemBoxes`. Billboard indices are handed
+/// out in registration order and the native drawing walks them positionally, so a sprite created out
+/// of turn silently draws the wrong thing somewhere else on the track.
+export function kartItemArt(sprites: i32[], size: i32) {
+  ART.itemSize = size
+  let i: i32 = 0
+  while (i < sprites.length) {
+    sprite_set_hud(sprites[i], 1)
+    let bb: i32 = m7Billboard(sprites[i], size, size)
+    if (ART.itemFirst < 0) { ART.itemFirst = bb }
+    i = i + 1
+  }
+}
+
+// ── The frame ────────────────────────────────────────────────────────────────────────────────────
+
+/// One racer's intent this frame: `throttle` -1..1, `steer` -1..1, `drift` 0/1. Ignored for AI.
+export function kartDrive(i: i32, throttle: i32, steer: i32, drift: i32) {
+  kart_input(i, throttle, steer, drift)
+}
+
+/// Advance the whole field one frame. Returns how many racers have finished.
+export function kartStep(): i32 {
+  return kart_step()
+}
+
+/// Fire whatever racer `i` is holding. Does nothing if empty; opponents fire on their own.
+export function kartUse(i: i32) {
+  kart_use(i)
+}
+
+/// Spin a racer out for `frames` — an item hit, or a collision you decided was heavy.
+export function kartBump(i: i32, frames: i32) {
+  kart_bump(i, frames)
+}
+
+/// Put the camera behind the player and draw every racer. Call once, just before `frame()`.
+///
+/// `back` is how far behind the kart the camera stands, `height` how far above the ground.
+///
+/// ⚠️ Keep `height` CONSTANT. The renderer caches its per-scanline depth column keyed on height and
+/// horizon, so a camera that bobs with speed rebuilds 160 fixed-point divisions every frame it
+/// moves. A speed-sensitive camera is the one effect this renderer genuinely cannot afford.
+export function kartPresent(bg: i32, back: i32, height: f64) {
+  kart_camera(0, back)
+  m7Set(kart_cam_x(), kart_cam_z(), kart_cam_yaw(), height)
+  m7Commit()
+  kart_draw(bg, ART.bbFirst, ART.near, ART.far, ART.farDist, ART.nearSize, ART.farSize)
+  if (ART.itemFirst >= 0) { kart_draw_items(ART.itemFirst, ART.itemSize) }
+  m7DrawBillboards()
+}
+
+// ── Read-back (one boxed call each — for the HUD, not for the frame path) ────────────────────────
+
+export function kartCount(): i32 { return kart_count() }
+export function kartX(i: i32): f64 { return kart_x(i) }
+export function kartZ(i: i32): f64 { return kart_z(i) }
+export function kartYaw(i: i32): i32 { return kart_yaw(i) }
+/// Speed in hundredths of a pixel per frame, as an integer — so a HUD needs no float maths.
+export function kartSpeed(i: i32): i32 { return kart_speed(i) }
+export function kartLap(i: i32): i32 { return kart_lap(i) }
+/// 1 for the leader. Ties break on distance to the next gate, so the order is stable.
+export function kartRank(i: i32): i32 { return kart_rank(i) }
+export function kartBoost(i: i32): i32 { return kart_boost(i) }
+/// Frames of drift held so far — the mini-turbo meter.
+export function kartCharge(i: i32): i32 { return kart_charge(i) }
+export function kartSurface(i: i32): i32 { return kart_surface(i) }
+export function kartFinished(i: i32): i32 { return kart_finished(i) }
+/// This frame's events for one racer, as an EV_* bitmask.
+export function kartEvents(i: i32): i32 { return kart_events(i) }
+export function kartDrifting(i: i32): i32 { return kart_drifting(i) }
+/// What racer `i` is holding, as an ITEM_* value.
+export function kartItem(i: i32): i32 { return kart_item(i) }
+/// Live shells and bananas on the course.
+export function kartHazards(): i32 { return kart_hazards() }
+/// What the world is made of at a point — for placing items and props on the road rather than in a
+/// hedge.
+export function kartSurfaceAt(x: i32, z: i32): i32 { return kart_surface_at(x, z) }

@@ -1,0 +1,727 @@
+// menu.tish — reusable pause overlay + NES-era file select (packages/ui).
+//
+//     import { pauseMenu, pauseWarmLater, pauseWarmPump, optionsMenu, fileSelectMenu, fileWarm, pauseBlocked } from '../../../packages/menu'
+//
+// Pause is Sprite text (`text_draw`), NOT the UI canvas. agb's DynamicTile16 path (ui_begin /
+// ui_rect / ui_text) allocates VRAM tiles + HashMap entries per cell — rebuilding that on every
+// Start press is hundreds of ms. `text_draw` keeps Object/Sprite VRAM in a slot cache; dismiss
+// only flips `text_visible` so reopen is free after the first raster. Queue that first raster with
+// `pauseWarmLater` after a scene load and drive `pauseWarmPump()` from the game loop, so even the
+// first Start is free without charging the raster to the area's load budget.
+import {
+  uiHideIcons, makeCursor, col2, uiFont, uiPaintBox,
+  uiKeys, uiKeyDown, uiStackClear,
+  BTN_A, BTN_B, BTN_START, BTN_LEFT, BTN_RIGHT
+} from './ui'
+import { ui_hide, text_draw, text_visible, key_live, frame } from 'cargo:tish_agb'
+import { dialogActive } from './dialog'
+import {
+  SAVE_FILE_COUNT, saveHas, savePeek, savePeekEmpty, savePeekLabel, savePeekDetail,
+} from './save'
+
+function pick(v, d) {
+  if (v === null) { return d }
+  if (typeof v === 'undefined') { return d }
+  return v
+}
+
+function present(v) {
+  if (v === null) { return 0 }
+  if (typeof v === 'undefined') { return 0 }
+  return 1
+}
+
+function menuDismiss() {
+  uiStackClear()
+  uiHideIcons()
+  ui_hide()
+}
+
+// Retained pause lines — Sprite VRAM stays allocated across open/close.
+let PAUSE = {
+  warm: 0,
+  base: 24,
+  nStat: 0,
+  nItem: 0,
+  hasHint: 0,
+  x: 72,
+  y0: 36,
+  gap: 12,
+  // Item row currently drawn as selected, so an open/cursor move can repaint just the two
+  // affected rows instead of every item.
+  sel: 0,
+}
+
+function pauseSlotTitle() { return PAUSE.base }
+function pauseSlotStat(i) { return PAUSE.base + 1 + i }
+function pauseSlotItem(i) { return PAUSE.base + 1 + PAUSE.nStat + i }
+function pauseSlotHint() { return PAUSE.base + 1 + PAUSE.nStat + PAUSE.nItem }
+
+function pauseHideAll() {
+  let n = 1 + PAUSE.nStat + PAUSE.nItem + PAUSE.hasHint
+  let i = 0
+  while (i < n) {
+    text_visible(PAUSE.base + i, 0)
+    i = i + 1
+  }
+}
+
+function pauseShowAll() {
+  let n = 1 + PAUSE.nStat + PAUSE.nItem + PAUSE.hasHint
+  let i = 0
+  while (i < n) {
+    text_visible(PAUSE.base + i, 1)
+    i = i + 1
+  }
+}
+
+function rowLabel(items, i, selected) {
+  if (selected > 0) { return "> " + items[i].label }
+  return "  " + items[i].label
+}
+
+function hintFromPrompts(prompts) {
+  if (prompts === null) { return "" }
+  let s = ""
+  let i = 0
+  while (i < prompts.length) {
+    let lab = pick(prompts[i].label, "")
+    if (i === 0) { s = "A " + lab }
+    else { s = s + "  B " + lab }
+    i = i + 1
+  }
+  return s
+}
+
+// Record the layout shape (slots, position, row counts) from `cfg`. Cheap — no rasterizing.
+function pauseShape(cfg) {
+  PAUSE.base = pick(cfg.slot, 24)
+  PAUSE.x = pick(cfg.x, 72)
+  PAUSE.y0 = pick(cfg.y, 36)
+  PAUSE.gap = pick(cfg.gap, 12)
+  let status = pick(cfg.status, null)
+  PAUSE.nStat = 0
+  if (status !== null) { PAUSE.nStat = status.length }
+  PAUSE.nItem = cfg.items.length
+  PAUSE.hasHint = 0
+  if (hintFromPrompts(pick(cfg.prompts, null)) !== "") { PAUSE.hasHint = 1 }
+}
+
+function pauseCount() { return 1 + PAUSE.nStat + PAUSE.nItem + PAUSE.hasHint }
+
+// Line order: title, status rows, item rows, hint. Every line owns a fixed slot + y, which is
+// what lets `text_draw` hit its cache on a redraw.
+function pauseLineY(i) {
+  let nRows = 1 + PAUSE.nStat + PAUSE.nItem
+  if (i < nRows) { return PAUSE.y0 + PAUSE.gap * i }
+  return PAUSE.y0 + PAUSE.gap * nRows + 4
+}
+
+// Rasterize line `i` with the cursor sitting on item `sel`.
+function pauseDrawLine(cfg, i, sel) {
+  let font = uiFont(null)
+  let y = pauseLineY(i)
+  if (i === 0) {
+    text_draw(font, pauseSlotTitle(), PAUSE.x, y, pick(cfg.title, "PAUSE"), col2("accent"))
+    return
+  }
+  let si = i - 1
+  if (si < PAUSE.nStat) {
+    text_draw(font, pauseSlotStat(si), PAUSE.x, y, cfg.status[si], col2("dim"))
+    return
+  }
+  let ii = si - PAUSE.nStat
+  if (ii < PAUSE.nItem) {
+    let on = 0
+    let col = col2("text")
+    if (ii === sel) { on = 1; col = col2("selected") }
+    text_draw(font, pauseSlotItem(ii), PAUSE.x, y, rowLabel(cfg.items, ii, on), col)
+    return
+  }
+  text_draw(font, pauseSlotHint(), PAUSE.x, y, hintFromPrompts(pick(cfg.prompts, null)), col2("dim"))
+}
+
+// Move the cursor between item rows the way the reference SRPG does: recolor only the two rows involved.
+function pauseSelect(cfg, oldi, newi) {
+  if (oldi === newi) { return }
+  let base = 1 + PAUSE.nStat
+  if (oldi >= 0) {
+    if (oldi < PAUSE.nItem) { pauseDrawLine(cfg, base + oldi, newi) }
+  }
+  pauseDrawLine(cfg, base + newi, newi)
+  PAUSE.sel = newi
+}
+
+// Rasterize pause chrome into Sprite VRAM and leave it HIDDEN. Call once after scene load
+// (and again after warp if you wipe HUD text). First Start then only flips visibility.
+// Blocking — prefer `pauseWarmLater` + `pauseWarmPump` when a load is on the clock.
+export function pauseWarm(cfg) {
+  pauseShape(cfg)
+  let n = pauseCount()
+  let i = 0
+  while (i < n) {
+    pauseDrawLine(cfg, i, 0)
+    i = i + 1
+  }
+  pauseHideAll()
+  PAUSE.sel = 0
+  PAUSE.warm = 1
+}
+
+// Deferred warm: one text line per `pauseWarmPump()` call instead of the whole panel at once.
+let WARM = { cfg: null, step: -1 }
+
+// Queue a warm off the load critical path. Rasterizing the panel is tens of ms of glyph work;
+// paying it during a scene load pushes the area past its 1s budget, so hand it to the game loop.
+export function pauseWarmLater(cfg) {
+  pauseShape(cfg)
+  WARM.cfg = cfg
+  WARM.step = 0
+  PAUSE.sel = 0
+  PAUSE.warm = 0
+}
+
+// Call once per frame from the game loop. Rasterizes at most ONE pause line, so the chrome lands
+// in Sprite VRAM over a handful of frames with no visible hitch. No-op once warm.
+export function pauseWarmPump() {
+  if (WARM.step < 0) { return }
+  let cfg = WARM.cfg
+  if (WARM.step >= pauseCount()) {
+    WARM.step = -1
+    WARM.cfg = null
+    PAUSE.warm = 1
+    return
+  }
+  pauseDrawLine(cfg, WARM.step, 0)
+  text_visible(PAUSE.base + WARM.step, 0)
+  WARM.step = WARM.step + 1
+}
+
+// pauseMenu({ title?, items:[{label, onSelect?}], status?, prompts?, slot?, x?, y? })
+// Returns chosen index. B or Start cancels → -1.
+// Instant after pauseWarm / a prior open: Sprite Objects stay in VRAM; only visibility flips.
+export function pauseMenu(cfg) {
+  let items = cfg.items
+  let status = pick(cfg.status, null)
+  let cur = makeCursor(1, items.length)
+  let font = uiFont(null)
+
+  // (Re)warm if layout shape changed or never warmed (e.g. first open without pauseWarm, or a
+  // deferred warm still mid-flight — finish it here rather than showing a half-drawn panel).
+  let needWarm = 0
+  if (PAUSE.warm === 0) { needWarm = 1 }
+  let nStat = 0
+  if (status !== null) { nStat = status.length }
+  if (nStat !== PAUSE.nStat) { needWarm = 1 }
+  if (items.length !== PAUSE.nItem) { needWarm = 1 }
+  let wantHint = 0
+  if (hintFromPrompts(pick(cfg.prompts, null)) !== "") { wantHint = 1 }
+  if (wantHint !== PAUSE.hasHint) { needWarm = 1 }
+  if (needWarm > 0) {
+    WARM.step = -1
+    WARM.cfg = null
+    pauseWarm(cfg)
+  }
+
+  // Warm open = visibility flip + the DIRTY lines only. Title and hint never change, so they are
+  // not redrawn at all; status rows carry live numbers; the cursor moves at most two item rows.
+  let si = 0
+  while (si < PAUSE.nStat) {
+    text_draw(font, pauseSlotStat(si), PAUSE.x, pauseLineY(1 + si), status[si], col2("dim"))
+    si = si + 1
+  }
+  pauseSelect(cfg, PAUSE.sel, cur.index())
+
+  pauseShowAll()
+
+  let startHeld = 1
+  while (true) {
+    let k = uiKeys()
+    let oldIdx = cur.index()
+    if (cur.navBits(k) > 0) { pauseSelect(cfg, oldIdx, cur.index()) }
+
+    if (uiKeyDown(k, BTN_A) > 0) {
+      let idx = cur.index()
+      let item = items[idx]
+      pauseHideAll()
+      let cb = item.onSelect
+      if (cb !== null) { if (typeof cb !== 'undefined') { cb() } }
+      return idx
+    }
+    if (uiKeyDown(k, BTN_B) > 0) { pauseHideAll(); return -1 }
+
+    let startDown = 0
+    if (key_live(BTN_START) > 0) { startDown = 1 }
+    if (startDown > 0) {
+      if (startHeld === 0) { pauseHideAll(); return -1 }
+    }
+    startHeld = startDown
+
+    frame()
+  }
+}
+
+// ── Options sub-screen ────────────────────────────────────────────────────────
+// The screen a pause "Options" row opens: same retained-sprite model as pause, so it is instant after the
+// first open and a value change repaints ONE text slot. Every row owns two slots (label, value) precisely so
+// flipping BGM off doesn't redraw the label beside it.
+//
+// Lives here rather than in a game because the shape is always the same — a column of label/value rows over
+// the frozen game — and because it has to share the sprite-text slot space with pause and file select. Its
+// default base is well clear of both; pass `slot` if a game already parks text there.
+let OPT = { warm: 0, base: 64, n: 0, x: 60, y0: 40, gap: 12, valueX: 150, hasHint: 0, sel: 0 }
+
+function optSlotTitle() { return OPT.base }
+function optSlotLabel(i) { return OPT.base + 1 + i * 2 }
+function optSlotValue(i) { return OPT.base + 2 + i * 2 }
+function optSlotHint() { return OPT.base + 1 + OPT.n * 2 }
+
+function optShape(cfg) {
+  OPT.base = pick(cfg.slot, 64)
+  OPT.x = pick(cfg.x, 60)
+  OPT.y0 = pick(cfg.y, 40)
+  OPT.gap = pick(cfg.gap, 12)
+  OPT.valueX = pick(cfg.valueX, 150)
+  OPT.n = cfg.rows.length
+  OPT.hasHint = 0
+  if (hintFromPrompts(pick(cfg.prompts, null)) !== "") { OPT.hasHint = 1 }
+}
+
+function optHideAll() {
+  text_visible(optSlotTitle(), 0)
+  let i = 0
+  while (i < OPT.n) {
+    text_visible(optSlotLabel(i), 0)
+    text_visible(optSlotValue(i), 0)
+    i = i + 1
+  }
+  if (OPT.hasHint > 0) { text_visible(optSlotHint(), 0) }
+}
+
+function optShowAll() {
+  text_visible(optSlotTitle(), 1)
+  let i = 0
+  while (i < OPT.n) {
+    text_visible(optSlotLabel(i), 1)
+    text_visible(optSlotValue(i), 1)
+    i = i + 1
+  }
+  if (OPT.hasHint > 0) { text_visible(optSlotHint(), 1) }
+}
+
+function optRowY(i) { return OPT.y0 + OPT.gap * i }
+
+// A row is a picker (`choices`), a toggle (`get`/`set`, 0|1), or an action (`onSelect` only).
+function optIsValue(row) {
+  if (present(row.get) === 1) { return 1 }
+  return 0
+}
+
+// What the value column reads. `< >` appear only on the SELECTED row: that is the affordance telling the
+// player Left/Right does something here, and an action row deliberately shows nothing.
+function optValueText(row, on) {
+  if (optIsValue(row) === 0) { return "" }
+  let v = row.get()
+  let s = ""
+  if (present(row.choices) === 1) {
+    s = row.choices[v]
+  } else {
+    if (v > 0) { s = "ON" } else { s = "OFF" }
+  }
+  if (on > 0) { return "< " + s + " >" }
+  return s
+}
+
+function optDrawLabel(cfg, i, sel) {
+  let font = uiFont(null)
+  let on = 0
+  let col = col2("text")
+  if (i === sel) { on = 1; col = col2("selected") }
+  text_draw(font, optSlotLabel(i), OPT.x, optRowY(i), rowLabel(cfg.rows, i, on), col)
+}
+
+function optDrawValue(cfg, i, sel) {
+  let font = uiFont(null)
+  let on = 0
+  let col = col2("dim")
+  if (i === sel) { on = 1; col = col2("selected") }
+  text_draw(font, optSlotValue(i), OPT.valueX, optRowY(i), optValueText(cfg.rows[i], on), col)
+}
+
+// Move the cursor: repaint the two rows involved (label + value, for the `< >`), nothing else.
+function optSelect(cfg, oldi, newi) {
+  if (oldi === newi) { return }
+  if (oldi >= 0) {
+    if (oldi < OPT.n) { optDrawLabel(cfg, oldi, newi); optDrawValue(cfg, oldi, newi) }
+  }
+  optDrawLabel(cfg, newi, newi)
+  optDrawValue(cfg, newi, newi)
+  OPT.sel = newi
+}
+
+// Step row `i` by `d` (+1/-1) and repaint just its value. Choices wrap; a toggle flips.
+function optStep(cfg, i, d) {
+  let row = cfg.rows[i]
+  if (optIsValue(row) === 0) { return 0 }
+  if (present(row.set) === 0) { return 0 }
+  let v = row.get()
+  if (present(row.choices) === 1) {
+    let n = row.choices.length
+    v = (v + d + n) % n
+  } else {
+    if (v > 0) { v = 0 } else { v = 1 }
+  }
+  row.set(v)
+  optDrawValue(cfg, i, OPT.sel)
+  return 1
+}
+
+// Rasterize the options chrome into Sprite VRAM and leave it hidden, so the first open is a visibility flip.
+// Blocking (tens of ms of glyph work) — call it where pause is warmed, not on a load's critical path.
+export function optionsWarm(cfg) {
+  optShape(cfg)
+  let font = uiFont(null)
+  text_draw(font, optSlotTitle(), OPT.x, OPT.y0 - OPT.gap, pick(cfg.title, "OPTIONS"), col2("accent"))
+  let i = 0
+  while (i < OPT.n) {
+    optDrawLabel(cfg, i, 0)
+    optDrawValue(cfg, i, 0)
+    i = i + 1
+  }
+  if (OPT.hasHint > 0) {
+    text_draw(font, optSlotHint(), OPT.x, optRowY(OPT.n) + 4,
+      hintFromPrompts(pick(cfg.prompts, null)), col2("dim"))
+  }
+  optHideAll()
+  OPT.sel = 0
+  OPT.warm = 1
+}
+
+// optionsMenu({ title?, rows, prompts?, slot?, x?, y?, gap?, valueX? })
+//   rows: [{ label,
+//            get?: () => v, set?: (v) => void,   // v is 0|1 → ON/OFF, or an index into `choices`
+//            choices?: [label, …],               // with get/set → a picker instead of a toggle
+//            onSelect?: () => void }]            // alone → an action row (e.g. "Back", "Reset")
+// Up/Down moves, Left/Right (or A) changes a value, A fires an action row, B/Start leaves.
+// Returns the index of the action row chosen with A, else -1.
+//
+// `set` is called on every step, so a game hears the change immediately (mute the BGM as the player flips
+// it, don't wait for them to back out) — that is also why nothing here needs an "apply" row.
+export function optionsMenu(cfg) {
+  let rows = cfg.rows
+  let cur = makeCursor(1, rows.length)
+
+  let needWarm = 0
+  if (OPT.warm === 0) { needWarm = 1 }
+  if (rows.length !== OPT.n) { needWarm = 1 }
+  if (needWarm > 0) { optionsWarm(cfg) }
+
+  // Values are game state and may have moved since the last open; labels/title/hint never do. The cursor
+  // always reopens on row 0, so only the row we left and row 0 need their label repainted.
+  let sel = cur.index()
+  let i = 0
+  while (i < OPT.n) { optDrawValue(cfg, i, sel); i = i + 1 }
+  if (OPT.sel !== sel) { optDrawLabel(cfg, OPT.sel, sel) }
+  optDrawLabel(cfg, sel, sel)
+  OPT.sel = sel
+  optShowAll()
+
+  let startHeld = 1
+  while (true) {
+    // frame() FIRST, unlike pauseMenu. Button edges live on the input state until the next frame() updates
+    // it, so reading them in the same frame the caller did hands us its press again — the A that chose
+    // "Options" would land on row 0 and flip it before the player has seen the screen.
+    frame()
+
+    let k = uiKeys()
+    let oldIdx = cur.index()
+    if (cur.navBits(k) > 0) { optSelect(cfg, oldIdx, cur.index()) }
+    if (uiKeyDown(k, BTN_LEFT) > 0) { optStep(cfg, cur.index(), -1) }
+    if (uiKeyDown(k, BTN_RIGHT) > 0) { optStep(cfg, cur.index(), 1) }
+
+    if (uiKeyDown(k, BTN_A) > 0) {
+      let idx = cur.index()
+      let row = rows[idx]
+      if (optIsValue(row) === 1) {
+        optStep(cfg, idx, 1)   // A on a value row is the same as Right, so the d-pad isn't mandatory
+      } else {
+        optHideAll()
+        let cb = row.onSelect
+        if (cb !== null) { if (typeof cb !== 'undefined') { cb() } }
+        return idx
+      }
+    }
+    if (uiKeyDown(k, BTN_B) > 0) { optHideAll(); return -1 }
+
+    let startDown = 0
+    if (key_live(BTN_START) > 0) { startDown = 1 }
+    if (startDown > 0) {
+      if (startHeld === 0) { optHideAll(); return -1 }
+    }
+    startHeld = startDown
+  }
+}
+
+// ── File select ───────────────────────────────────────────────────────────────
+// Same retained-sprite model as the pause menu: every line owns a fixed `text_draw` slot, so an
+// open is a visibility flip plus a redraw of only the lines whose text actually changed (identical
+// text is a slot-cache hit and costs nothing). Warm it from the title with `fileWarm` — the title
+// screen is not on a load clock, and the picker then appears the frame it is asked for.
+let FILE = {
+  warm: 0,
+  base: 40,
+  x: 56,
+  y0: 40,
+  gap: 13,
+  sel: 0,
+  mode: "",
+  title: "",
+  // Peeked slot text, refreshed on every open (a save written since the warm changes these).
+  labels: [],
+  details: [],
+  empty: [],
+}
+
+function fileSlotTitle() { return FILE.base }
+function fileSlotLabel(i) { return FILE.base + 1 + i * 2 }
+function fileSlotDetail(i) { return FILE.base + 2 + i * 2 }
+function fileSlotHint() { return FILE.base + 1 + SAVE_FILE_COUNT * 2 }
+function fileCount() { return 2 + SAVE_FILE_COUNT * 2 }
+
+function fileLineY(i) {
+  // Each file is a label + an indented detail line; the pairs are spaced wider than the pair itself.
+  if (i === 0) { return FILE.y0 }
+  let li = i - 1
+  if (li < SAVE_FILE_COUNT * 2) {
+    let file = (li - (li % 2)) / 2
+    let sub = li % 2
+    return FILE.y0 + 18 + file * (FILE.gap * 2 + 4) + sub * FILE.gap
+  }
+  return FILE.y0 + 18 + SAVE_FILE_COUNT * (FILE.gap * 2 + 4) + 2
+}
+
+function fileHintText() {
+  if (FILE.mode === "new") { return "A Start   B Back" }
+  return "A Load   B Back"
+}
+
+function fileLabelColor(i, selected) {
+  if (FILE.empty[i] > 0) {
+    if (FILE.mode === "continue") { return "dim" }
+  }
+  if (selected > 0) { return "selected" }
+  return "text"
+}
+
+function fileDetailColor(selected) {
+  if (selected > 0) { return "text" }
+  return "dim"
+}
+
+function fileMark(selected) {
+  if (selected > 0) { return "> " }
+  return "  "
+}
+
+// Read every slot's save header once. Peeking is SRAM work, so it happens on warm/open — never on a
+// cursor move.
+function filePeek(formatDetail) {
+  FILE.labels = []
+  FILE.details = []
+  FILE.empty = []
+  let i = 0
+  while (i < SAVE_FILE_COUNT) {
+    savePeek(i, formatDetail)
+    FILE.empty.push(savePeekEmpty())
+    FILE.labels.push(savePeekLabel())
+    FILE.details.push(savePeekDetail())
+    i = i + 1
+  }
+}
+
+function fileShape(cfg) {
+  FILE.base = pick(cfg.slot, 40)
+  FILE.x = pick(cfg.x, 56)
+  FILE.y0 = pick(cfg.y, 40)
+  FILE.gap = pick(cfg.gap, 13)
+  FILE.mode = pick(cfg.mode, "continue")
+  let title = pick(cfg.title, null)
+  if (title === null) {
+    title = "SELECT FILE"
+    if (FILE.mode === "new") { title = "NEW GAME" }
+  }
+  FILE.title = title
+}
+
+// Rasterize line `i` with the cursor on file `sel`. Every line carries the theme bg as a SHADOW so
+// the picker reads over the title artwork without a canvas panel behind it (a panel would put
+// DynamicTile16 work back on the open).
+function fileDrawLine(i, sel) {
+  let font = uiFont(null)
+  let shadow = col2("bg")
+  let y = fileLineY(i)
+  if (i === 0) {
+    text_draw(font, fileSlotTitle(), FILE.x, y, FILE.title, col2("accent"), shadow)
+    return
+  }
+  let li = i - 1
+  if (li < SAVE_FILE_COUNT * 2) {
+    let file = (li - (li % 2)) / 2
+    let on = 0
+    if (file === sel) { on = 1 }
+    if (li % 2 === 0) {
+      text_draw(font, fileSlotLabel(file), FILE.x, y, fileMark(on) + FILE.labels[file], col2(fileLabelColor(file, on)), shadow)
+    } else {
+      text_draw(font, fileSlotDetail(file), FILE.x + 12, y, FILE.details[file], col2(fileDetailColor(on)), shadow)
+    }
+    return
+  }
+  text_draw(font, fileSlotHint(), FILE.x, y, fileHintText(), col2("dim"), shadow)
+}
+
+function fileHideAll() {
+  let i = 0
+  while (i < fileCount()) { text_visible(FILE.base + i, 0); i = i + 1 }
+}
+
+function fileShowAll() {
+  let i = 0
+  while (i < fileCount()) { text_visible(FILE.base + i, 1); i = i + 1 }
+}
+
+// Drop the picker's Sprite VRAM (empty text frees a slot's Objects). Hiding is the right move
+// between title visits, but once play starts the entities need those tiles back.
+export function fileFree() {
+  let font = uiFont(null)
+  let i = 0
+  while (i < fileCount()) { text_draw(font, FILE.base + i, 0, 0, ""); i = i + 1 }
+  FILE.warm = 0
+}
+
+// Cursor move, SRPG-style: only the four lines involved (old file's label + detail, new file's).
+function fileSelect(oldi, newi) {
+  if (oldi === newi) { return }
+  if (oldi >= 0) {
+    if (oldi < SAVE_FILE_COUNT) {
+      fileDrawLine(1 + oldi * 2, newi)
+      fileDrawLine(2 + oldi * 2, newi)
+    }
+  }
+  fileDrawLine(1 + newi * 2, newi)
+  fileDrawLine(2 + newi * 2, newi)
+  FILE.sel = newi
+}
+
+// fileWarm({ mode, formatDetail?, title?, slot?, x?, y?, gap? }) — rasterize the picker into Sprite
+// VRAM and leave it HIDDEN, so the first `fileSelectMenu` with the same config opens in one frame.
+// Call it from the title screen (where nothing is on a clock), not from a scene load.
+export function fileWarm(cfg) {
+  fileShape(cfg)
+  filePeek(pick(cfg.formatDetail, null))
+  let i = 0
+  while (i < fileCount()) { fileDrawLine(i, 0); i = i + 1 }
+  fileHideAll()
+  FILE.sel = 0
+  FILE.warm = 1
+}
+
+// fileSelectMenu({ mode, formatDetail?, title?, slot?, x?, y?, gap? }) — NES-era file picker.
+// mode "continue" — only occupied slots may be taken; "new" — an empty slot is taken immediately, an
+// occupied one asks to overwrite. Returns the slot index, or -1 if cancelled.
+export function fileSelectMenu(cfg) {
+  let mode = pick(cfg.mode, "continue")
+  let formatDetail = pick(cfg.formatDetail, null)
+  let cur = makeCursor(1, SAVE_FILE_COUNT)
+
+  // Re-shape + re-peek every open: the mode/title differ between New Game and Continue, and a save
+  // written since the warm changes the labels. Lines whose text is unchanged are slot-cache hits.
+  fileShape(cfg)
+  filePeek(formatDetail)
+  let i = 0
+  while (i < fileCount()) { fileDrawLine(i, cur.index()); i = i + 1 }
+  FILE.sel = cur.index()
+  FILE.warm = 1
+  fileShowAll()
+
+  // The picker is entered ON an A press (title "New Game"), and now that the open costs a couple of
+  // frames instead of half a second that press is often still down — latch it so the first A the
+  // player sees us act on is a fresh one.
+  let aHeld = 0
+  if (key_live(BTN_A) > 0) { aHeld = 1 }
+
+  let confirmSlot = -1
+  while (true) {
+    let k = uiKeys()
+
+    if (confirmSlot < 0) {
+      let oldIdx = cur.index()
+      if (cur.navBits(k) > 0) { fileSelect(oldIdx, cur.index()) }
+    }
+
+    let aDown = 0
+    if (key_live(BTN_A) > 0) { aDown = 1 }
+    let aEdge = 0
+    if (aDown > 0) { if (aHeld === 0) { aEdge = 1 } }
+    aHeld = aDown
+
+    if (uiKeyDown(k, BTN_B) > 0) {
+      if (confirmSlot >= 0) {
+        // Leaving the overwrite prompt: drop its canvas box and bring the list back.
+        confirmSlot = -1
+        ui_hide()
+        uiHideIcons()
+        fileShowAll()
+      } else {
+        fileHideAll()
+        menuDismiss()
+        return -1
+      }
+    }
+
+    if (aEdge > 0) {
+      if (confirmSlot >= 0) {
+        let slot = confirmSlot
+        fileFree()
+        menuDismiss()
+        return slot
+      }
+      let slot = cur.index()
+      if (mode === "continue") {
+        if (saveHas(slot) > 0) {
+          fileFree()
+          menuDismiss()
+          return slot
+        }
+      } else {
+        if (saveHas(slot) === 0) {
+          fileFree()
+          menuDismiss()
+          return slot
+        }
+        // Overwrite prompt is a canvas box, and HUD sprites draw in FRONT of it — hide the list
+        // while it is up rather than letting the file lines show through.
+        confirmSlot = slot
+        fileHideAll()
+        uiPaintBox({
+          dir: "col", pad: 8, gap: 4, fill: "panel", border: "border",
+          children: [
+            { text: "Overwrite?", color: "accent" },
+            { text: FILE.labels[slot], color: "text" },
+            { text: FILE.details[slot], color: "dim" },
+            { text: "A Yes  B No", color: "dim" },
+          ],
+        })
+      }
+    }
+
+    frame()
+  }
+}
+
+// True (1) when the game loop should ignore Start (dialogue owns the screen).
+// Pass a custom `isBlocked` () → 1/0 if you don't use packages/dialog.
+export function pauseBlocked(isBlocked) {
+  if (present(isBlocked) === 1) { return isBlocked() }
+  if (dialogActive() > 0) { return 1 }
+  return 0
+}
