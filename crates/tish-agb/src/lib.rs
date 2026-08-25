@@ -6173,6 +6173,12 @@ pub fn terrain_clear_typed() {
             t.dirty.clear();
         }
     });
+    // Dropping the dynamic tiles only QUEUES their VRAM for release; agb frees it in `gc()` at the
+    // next frame commit. A caller that clears and REBUILDS terrain within one frame (an arena
+    // reseed) otherwise peaks at both arenas' tiles at once — measured as "Ran out of video RAM
+    // for tiles" on a linked warheads match whose two boards were ~266 and ~518 tiles. Same rule
+    // bg_clear already follows.
+    agb::display::tiled::VRAM_MANAGER.gc();
 }
 
 /// Re-point the screenblock entries of every cell whose pixels changed, then show the layer.

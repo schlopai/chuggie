@@ -40,5 +40,19 @@ if [ ! -x "$link" ] || [ "$here/tools/gba-link.c" -nt "$link" ]; then
     -I"$mgba_prefix/include" -L"$mgba_prefix/lib" -lmgba
 fi
 
+# ⚠️ WATCHDOG. A lockstep pair can deadlock: one console panics mid-transfer and the other waits
+# on SIO forever while its sibling's frame counter runs away — gba-link's frame cap never trips
+# because the stalled console never reaches it. Measured once at 650,000 frames on a 5,000-frame
+# run before anyone looked. LINK_TIMEOUT seconds (default 1800) is well past any honest run
+# (a loaded machine measured ~15 min for 2,500 heavy frames).
 GBA_LINK_LOG=1 "$link" "$rom0" "$rom1" /tmp/gba-link-0.ppm /tmp/gba-link-1.ppm \
-  "$frames" "$keys0" "$keys1"
+  "$frames" "$keys0" "$keys1" &
+link_pid=$!
+( sleep "${LINK_TIMEOUT:-1800}"; kill "$link_pid" 2>/dev/null ) &
+watchdog=$!
+wait "$link_pid"; rc=$?
+kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null
+if [ "$rc" -ge 128 ]; then
+  echo "gba-link: killed by the ${LINK_TIMEOUT:-1800}s watchdog — the pair deadlocked" >&2
+fi
+exit "$rc"

@@ -108,8 +108,11 @@ jobs:
           repository: spacedevin/agb
           ref: chuggie
           path: chuggie/agb
-      - uses: dtolnay/rust-toolchain@nightly
+      # The SAME pinned nightly rust-toolchain.toml names — a floating nightly changes ROM
+      # codegen and shifts frame-exact verifier timings against local builds.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-07-22
           components: rust-src
       - uses: Swatinem/rust-cache@v2
         with:
@@ -188,8 +191,11 @@ jobs:
             -DUSE_FFMPEG=OFF -DUSE_SQLITE3=OFF -DUSE_DISCORD_RPC=OFF -DUSE_EDITLINE=OFF \
             -DUSE_ELF=OFF -DUSE_EPOXY=OFF -DBUILD_GL=OFF -DBUILD_GLES2=OFF
           make -C /tmp/mgba-build -j"$(nproc)" install
-      - uses: dtolnay/rust-toolchain@nightly
+      # The SAME pinned nightly rust-toolchain.toml names — a floating nightly changes ROM
+      # codegen and shifts frame-exact verifier timings against local builds.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-07-22
           components: rust-src
       - uses: Swatinem/rust-cache@v2
         with:

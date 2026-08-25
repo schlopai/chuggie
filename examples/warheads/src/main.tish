@@ -49,7 +49,7 @@ import {
   frame, log, backdrop, ticks, heap_free, hud_text, key_held,
   camera_set, bg_new, bg_parallax, ui_begin, ui_text, ui_clear_rect, ui_rect, fx_flash,
   terrain_new, terrain_palette, terrain_pal_bank, terrain_disc, terrain_planet, terrain_carve, terrain_solid, terrain_clear,
-  terrain_mass,
+  terrain_mass, bg_tile_map_reserve,
   sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_visible, sprite_set_hud, sprite_clear
 } from 'cargo:tish_agb'
 import { rngSeed, rngBelow } from '../../../packages/rng'
@@ -249,9 +249,13 @@ let PC_RAMP: i32[] = [
 // of draws, so the RNG stream advances by the same amount whatever it deals.
 let PC_BAG: i32[] = [0, 1, 2, 3, 4, 5, 0, 0]
 // ⚠️ THE TERRAIN'S TILE BUDGET, AS A SUM OF SQUARED RADII. A planet claims ~r^2/20 of the GBA's
-// 1024 background tiles, so 13,000 caps terrain at ~640 and leaves ~380 for the HUD canvas and the
-// starfield. A hardware ceiling, not a tuning knob.
-let R2_BUDGET: i32 = 13000
+// 1024 background tiles. 13,000 (~640 terrain tiles) assumed ~380 left for everything else, and
+// that was measured wrong: the worlds generate UNDER the hull-select roster (deliberately — see
+// the band-per-tick comment), and roster canvas + HUD + starfield peak well past 380. A linked
+// deal of est=624 died in agb's tile allocator at PICK, and so did a retry capped at est=518;
+// est=266 survives. 7,600 caps terrain at ~380, the measured-safe side. A hardware ceiling, not
+// a tuning knob.
+let R2_BUDGET: i32 = 7600
 // ⚠️ GRAVITY FOLLOWS THE REMAINING MASS, NOT THE ORIGINAL CENTRE.
 //
 // A planet used to pull as a point mass fixed at its centre. Blow the middle out and that point
@@ -615,6 +619,11 @@ uiInit({ font: small, lineH: 9, tileReserve: 0, theme: {
   p1: 0xE05858, p2: 0x58C0B0, spent: 0x505460
 } })
 ui_begin()
+// ⚠️ BOOT-TIME, EMPTY-HEAP, ONCE. This game's live-tile peak (terrain worlds + the full-screen
+// hull-select canvas) crosses agb's 512-node tile-map threshold, and without the pre-size the
+// 512 -> 1024 rehash is a 20KB contiguous allocation issued mid-game on a fragmented heap —
+// measured here as "memory allocation of 480 bytes failed" one frame after the second PICK.
+bg_tile_map_reserve(600)
 terrain_new(ARENA_W, ARENA_H)
 // Slots 1..12 are rewritten per match, one triple per planet, from PC_COL. Only the two shared
 // tones are fixed: a near-black limb that separates a world from the starfield, and a specular the
