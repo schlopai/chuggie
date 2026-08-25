@@ -72,26 +72,31 @@ fi
 # fully-visible board to about 5.4KB, so a real half-closed wipe lands between the two. Crude, and
 # exactly strong enough — it is the one property every effect shares and no failure mode fakes.
 shot_partial() {
-  local frame=$1 name=$2 png sz
+  local frame=$1 name=$2 png cov
   png=$(mktemp -u).png
   $ROOT/scripts/screenshot.sh $rom "$png" "$frame" >/dev/null 2>&1 || true
   if [ ! -f "$png" ]; then echo "  FAIL $name: no screenshot at frame $frame"; fail=1; return; fi
-  sz=$(stat -f%z "$png" 2>/dev/null || stat -c%s "$png")
+  # Measured in PIXELS, not PNG bytes: byte size depends on the PNG encoder (ImageMagick 6 on CI
+  # compresses a half-closed iris to ~400 bytes, squarely in the old "fully hidden" band). The
+  # covering colour is whatever the majority colour is; partial means 5%..95% of the screen is it.
+  cov=$(python3 -c "
+from PIL import Image
+from collections import Counter
+d=list(Image.open('$png').convert('RGB').getdata())
+print(Counter(d).most_common(1)[0][1]*100//len(d))")
   rm -f "$png"
-  # ⚠️ The floor is 1200, not 1500. A nearly-closed box wipe compresses to about 1.4KB — genuinely
-  # partial, and it fails a tighter bound. Fully hidden is under 1000 on every effect here, so 1200
-  # separates the two without calling a real frame a failure.
-  if [ "$sz" -gt 1200 ] && [ "$sz" -lt 5200 ]; then
-    echo "  ok   $name is partially covered at frame $frame ($sz b)"
+  # 3..96: a nearly-closed wipe is genuinely partial and sits around 95-96%.
+  if [ "$cov" -ge 3 ] && [ "$cov" -le 96 ]; then
+    echo "  ok   $name is partially covered at frame $frame (majority colour ${cov}%)"
   else
-    echo "  FAIL $name at frame $frame is fully hidden or fully visible ($sz b)"; fail=1
+    echo "  FAIL $name at frame $frame is fully hidden or fully visible (majority colour ${cov}%)"; fail=1
   fi
 }
 # Anchors are DERIVED from each effect's logged entry frame plus a mid-close offset, because the
 # absolute cadence shifts between builds (a fresh ROM enters its cycle a few frames off a stale
 # one, and a hardcoded frame lands fully-hidden instead of mid-close).
 fx_start() { grep "TRANSITIONS effect .* $1" "$log" | head -1 | grep -oE "frame [0-9]+" | grep -oE "[0-9]+"; }
-shot_partial "$(( $(fx_start iris)    + 62 ))" "iris"
+shot_partial "$(( $(fx_start iris)    + 50 ))" "iris"
 shot_partial "$(( $(fx_start box)     + 74 ))" "box"
 shot_partial "$(( $(fx_start wipe)    + 74 ))" "wipe"
 shot_partial "$(( $(fx_start curtain) + 74 ))" "curtain"
