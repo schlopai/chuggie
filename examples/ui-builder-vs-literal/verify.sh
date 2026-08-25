@@ -10,8 +10,8 @@ fail=0
 chk() { if [ "$2" = "$3" ]; then echo "  ok   $1 = $3"; else echo "  FAIL $1: got '$2', expected '$3'"; fail=1; fi }
 
 ROM=ui-builder-vs-literal.gba
-[ -f "$ROM" ] || "${TISH:-tish}" build src/main.tish --target gba -o "$ROM" >/dev/null 2>&1
-[ -f "$ROM" ] || { echo "  FAIL $ROM missing — run npm run build"; exit 1; }
+[ -f "$ROM" ] || npm run build >/tmp/ubvl-vbuild.log 2>&1 || true
+[ -f "$ROM" ] || { echo "  FAIL $ROM missing:"; tail -20 /tmp/ubvl-vbuild.log; exit 1; }
 
 # Frame 100 is after the literal path has rendered; 320 is after the builder path has repainted.
 "$ROOT/tools/gba-shot" "$ROM" /tmp/uibl-lit.ppm 100 >/dev/null 2>&1

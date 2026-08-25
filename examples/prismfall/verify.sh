@@ -6,7 +6,8 @@ cd "$(dirname "$0")"
 ROM=prismfall.gba; SHOT=../../scripts/screenshot.sh; fails=0
 check() { if [ "$2" = "$3" ]; then printf '  ok   %-40s %s\n' "$1" "$3"
   else printf '  FAIL %-40s expected %s, got %s\n' "$1" "$2" "$3"; fails=$((fails+1)); fi; }
-[ -f "$ROM" ] || { echo "no $ROM — run npm run build"; exit 1; }
+[ -f "$ROM" ] || npm run build >/tmp/prismfall-vbuild.log 2>&1 || true
+[ -f "$ROM" ] || { echo "no $ROM — build failed:"; tail -20 /tmp/prismfall-vbuild.log; exit 1; }
 echo "prismfall verify"
 
 # 1. The facility loads with the expected geometry.

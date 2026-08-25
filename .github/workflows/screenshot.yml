@@ -37,8 +37,23 @@ jobs:
           ref: chuggie
           path: chuggie/agb
 
-      - name: Install libmgba (headless renderer) + a PNG converter
-        run: sudo apt-get update && sudo apt-get install -y libmgba-dev imagemagick python3-pil libfreetype6-dev pkg-config
+      - name: Install tooling
+        run: sudo apt-get update && sudo apt-get install -y imagemagick python3-pil libfreetype6-dev pkg-config cmake libpng-dev zlib1g-dev
+      - name: Cache libmgba
+        id: mgba-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/mgba-prefix
+          key: mgba-0.10.5-${{ runner.os }}
+      - name: Build libmgba 0.10.5
+        if: steps.mgba-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch 0.10.5 https://github.com/mgba-emu/mgba /tmp/mgba-src
+          cmake -S /tmp/mgba-src -B /tmp/mgba-build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$HOME/mgba-prefix" -DBUILD_QT=OFF -DBUILD_SDL=OFF \
+            -DUSE_FFMPEG=OFF -DUSE_SQLITE3=OFF -DUSE_DISCORD_RPC=OFF -DUSE_EDITLINE=OFF \
+            -DUSE_ELF=OFF -DUSE_EPOXY=OFF -DBUILD_GL=OFF -DBUILD_GLES2=OFF
+          make -C /tmp/mgba-build -j"$(nproc)" install
 
       - name: Rust nightly + rust-src (GBA build-std target)
         uses: dtolnay/rust-toolchain@nightly
@@ -59,6 +74,7 @@ jobs:
         working-directory: chuggie/chuggie-engine
         env:
           TISH: ${{ github.workspace }}/tish/tish/target/release/tish
+          MGBA_PREFIX: /home/runner/mgba-prefix
         run: ./scripts/screenshot.sh examples/overworld-demo/src/main.tish screenshot.png 200
 
       - name: Upload screenshot

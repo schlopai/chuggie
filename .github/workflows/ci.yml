@@ -184,8 +184,9 @@ jobs:
       - name: Build the gba-shot/gba-link helper tools
         working-directory: chuggie/chuggie-engine
         run: |
-          cc tools/gba-shot.c -o tools/gba-shot -lmgba -lm
-          cc tools/gba-link.c -o tools/gba-link -lmgba -lm
+          P="$HOME/mgba-prefix"
+          cc tools/gba-shot.c -o tools/gba-shot -I"$P/include" -L"$P/lib" -lmgba -lm -Wl,-rpath,"$P/lib"
+          cc tools/gba-link.c -o tools/gba-link -I"$P/include" -L"$P/lib" -lmgba -lm -Wl,-rpath,"$P/lib"
       - name: Build the tish compiler
         working-directory: tish/tish
         run: cargo build --release -p tishlang
@@ -193,6 +194,7 @@ jobs:
         working-directory: chuggie/chuggie-engine/examples/${{ matrix.example }}
         env:
           TISH: ${{ github.workspace }}/tish/tish/target/release/tish
+          MGBA_PREFIX: /home/runner/mgba-prefix
         run: |
           # Some verifiers build through `npm run build`, which invokes a bare `tish`.
           export PATH="$(dirname "$TISH"):$PATH"

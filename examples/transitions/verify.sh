@@ -18,8 +18,8 @@ rom=transitions.gba
 assert_agb_fork || fail=1
 assert_typed_scalars $src || fail=1
 
-[ -f $rom ] || "${TISH:-tish}" build src/main.tish --target gba -o "$rom" >/dev/null 2>&1
-[ -f $rom ] || { echo "  FAIL $rom not built — run npm run build"; exit 1; }
+[ -f $rom ] || npm run build >/tmp/transitions-vbuild.log 2>&1 || true
+[ -f $rom ] || { echo "  FAIL $rom not built:"; tail -20 /tmp/transitions-vbuild.log; exit 1; }
 
 # ── Source-level rules ───────────────────────────────────────────────────────────────────────────
 grep -q "sceneStart(" $src && grep -q "sceneStep()" $src \
