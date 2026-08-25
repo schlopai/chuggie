@@ -13,10 +13,16 @@ echo "prismfall verify"
 n=$(GBA_SHOT_LOG=1 $SHOT $ROM /tmp/pf_v1.png 90 2>&1 | head -c 200000 | grep -ac 'facility 112x40')
 check "facility loads" 1 "$n"
 
-# 2. The gate holds: with only DAWN owned, L/R must NOT change the lens, so the lens HUD never draws.
-#    (It is drawn only on the frames a switch actually happens.)
-h=$(GBA_SHOT_LOG=1 $SHOT $ROM /tmp/pf_v2.png 200 "60:r,72:,100:l,112:,140:0x300,160:" 2>&1 \
-    | head -c 300000 | grep -ac 'hud_text enter')
+# 2. The gate holds: with only DAWN owned, L/R must NOT change the lens. Asserted from the SCREEN:
+#    the frame after the presses must match a no-press control at the same frame (a real switch
+#    recolors the facility by >1000 px; idle noise is ~50).
+$SHOT $ROM /tmp/pf_v2_a.png 200 >/dev/null 2>&1
+$SHOT $ROM /tmp/pf_v2_b.png 200 "60:r,72:,100:l,112:,140:0x300,160:" >/dev/null 2>&1
+h=$(python3 -c "
+from PIL import Image, ImageChops
+a=Image.open('/tmp/pf_v2_a.png').convert('RGB'); b=Image.open('/tmp/pf_v2_b.png').convert('RGB')
+d=ImageChops.difference(a,b).convert('L')
+print(0 if sum(1 for p in d.getdata() if p>16) < 400 else 1)")
 check "locked lens: no switch without a lens" 0 "$h"
 
 # 3. The player actually moves, asserted from the SCREEN rather than from a log line. Walking right

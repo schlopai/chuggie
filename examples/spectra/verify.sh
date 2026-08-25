@@ -35,9 +35,16 @@ print(','.join(p))")
 rooms=$(GBA_SHOT_LOG=1 $SHOT $ROM /tmp/spectra_v_rooms.png 600 "$SCHED" 2>&1 | head -c 400000 | grep -ac '^\[frame.*\] room ')
 check "all 12 rooms load" 12 "$rooms"
 
-# 2. The lens turns. R once from DAWN must reach DUSK; the label is the readout.
-lens=$(GBA_SHOT_LOG=1 $SHOT $ROM /tmp/spectra_v_lens.png 90 "60:r,72:" 2>&1 | head -c 200000 | grep -ac 'hud_text enter')
-[ "$lens" -ge 2 ] && lens=2
+# 2. The lens turns, asserted from the SCREEN: a switch recolors the room's band cells, so the
+# post-R frame must differ from a no-press control at the same frame by far more than animation
+# noise (measured: ~1300 px on a switch vs ~50 px of idle noise).
+$SHOT $ROM /tmp/spectra_v_lens_a.png 89 >/dev/null 2>&1
+$SHOT $ROM /tmp/spectra_v_lens_b.png 89 "60:r,72:" >/dev/null 2>&1
+lens=$(python3 -c "
+from PIL import Image, ImageChops
+a=Image.open('/tmp/spectra_v_lens_a.png').convert('RGB'); b=Image.open('/tmp/spectra_v_lens_b.png').convert('RGB')
+d=ImageChops.difference(a,b).convert('L')
+print(2 if sum(1 for p in d.getdata() if p>16) > 400 else 0)")
 check "lens redraws on a switch" 2 "$lens"
 
 # 3. The crush rule refuses an illegal switch. In THE CRUSH the roof is band C, so pressing L under
