@@ -5,7 +5,7 @@
 // from how the array was WRITTEN. A literal is promoted to a Rust `static` (right: it lives in ROM,
 // not RAM) whose index path was BOXED: build a `Value::Number(i as f64)`, match it back to a usize,
 // read as f64, convert to i32, per element. That finding is the whole reason
-// `drop-gba/packages/drop_tables.tish` carries a warmed two-slot cache, and it lands on this repo
+// A warmed two-slot table cache is the pattern in question, and the decision lands on this repo
 // hard, because the topdown RPG port's generated dungeon-room table is 76 KB of exactly that shape.
 //
 // But bench-access measured the MICRO case: 64 entries, a masked index, inside a function that
@@ -42,18 +42,10 @@
 // fiction. bench-access learned that the expensive way — a call measured at 0.026 ticks and an array
 // parameter came out NEGATIVE, and the plausible half of that run was believed for weeks.
 
-import { timer_read, frame, log, backdrop, hud_text } from 'cargo:tish_agb'
-import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { timer_read, frame, log, backdrop } from 'cargo:tish_agb'
 import { PUSH, LIT, WARM, litAt, pushAt, warmFill, warmFillConst, warmFillPush, warmFillMask,
          tablesChecksum, setLevel } from './tables'
 
-
-// --- screen readout (scripts/add_screen_readout.py) ---
-// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
-backdrop(0x101018)
-hud_text(0, 8, 8, "bench-tables")
-hud_text(1, 8, 24, "running - numbers go to the log")
-frame()
 // A sink every bench writes to. Two jobs: nothing measured can be discarded as dead, and every
 // bench function touches a module array, so all of them are boxed `value_call`s and the loop-only
 // control at the same N subtracts that call rather than leaving it in one arm only.
@@ -229,5 +221,4 @@ if (worst >= 4389) { ok = 0 }
 log("BENCH-TABLES SANE " + ok + " worstSpan=" + worst + " (must be 1, and worstSpan < 4389)")
 log("BENCH-TABLES DONE")
 
-hud_text(1, 8, 24, "done - numbers are in the log")
 while (true) { frame() }

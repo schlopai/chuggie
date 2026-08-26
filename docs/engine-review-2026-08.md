@@ -28,7 +28,7 @@ agb 0.25                     hardware, VRAM, mixer, fixnum, input
 ④b tish-gba-game-engine      7,870 lines in one lib.rs. SoA ECS + fixed per-frame pipeline +
   │                          genre modules (grid/platformer/topdown/shmup) + the isob_* board.
   ▼
-④c packages/*.tish           43 top-level + clan/ (5) + the SRPG rules modules (15, since moved to the chuggie-tactics repo) = 63 tish modules.
+④c packages/*.tish           43 top-level + clan/ (5) + the SRPG rules modules (15) = 63 tish modules.
   ▼
 ④d examples/*                137 directories.
 ```
@@ -100,7 +100,7 @@ speed that `Health`+`tag` already model, use an immediate death model where the 
 `onDeath`, have no SoA/mask/generational-ids, pack fields as `u8`/`i16` where the World is `i32`
 everywhere, are not driven by `world_step`, and are entirely boxed with zero typed twins.
 
-It works, and the isoboard SRPG example (now in the chuggie-tactics repo) proves it. But it should be either blessed in `ARCHITECTURE.md` as a
+It works, and the isoboard examples prove it. But it should be either blessed in `ARCHITECTURE.md` as a
 deliberate standalone "logical board" subsystem or folded onto the World. Today it is silent
 divergence, and §6 shows the cost: an RTS wants grid pathing, and the only grid pathing we have is
 inside a subsystem shaped entirely around turn-based play.
@@ -115,7 +115,7 @@ inside a subsystem shaped entirely around turn-based play.
 | isometric | ✅ `packages/iso.tish` + `iso_actors.tish` — projection, depth bias, riser redraw, camera clamp. Extracted after the two verbatim copies had already drifted (`UNIT_LIFT` was 12 in one and 20 in the other). |
 | top-down | ✅ `packages/topdown.tish` — two movers, facing/tile/room arithmetic that had **seven** copies in one topdown RPG port, the warp latch both games hand-rolled, `tdContextAction`, soft targeting, and the L/R chord skill wheel. Room streaming deliberately still per-game; see [`topdown-genre.md`](topdown-genre.md). |
 | puzzle/grid | `packages/grid.tish` exists (90 KB, packed one-i32-per-cell board) but `packages/grid` as a *genre kit* is still on the backlog. |
-| SRPG | ⚠️ The SRPG presentation package is presentation only. The isoboard SRPG example still hand-rolls ~763 lines of battle controller (both since moved to the chuggie-tactics repo). |
+| SRPG | ⚠️ The SRPG presentation package is presentation only. The isoboard SRPG example still hand-rolls ~763 lines of battle controller. |
 | **RTS** | **Does not exist.** §6. |
 
 Two modules dominate by size and both are load-bearing: `ui.tish` (159 KB — a runtime flexbox-lite
@@ -166,12 +166,12 @@ time at least once.
 - **Builds are nondeterministic.** The same source emits Rust in a different *order* every build
   (a `HashMap` in codegen). Diffing two builds of unchanged source is not a signal.
 - **`tish build` caches packages.** Editing `packages/*.tish` may not recompile. When a package
-  change appears not to take: `rm -rf .tish`, then grep the generated Rust to confirm.
+  change appears not to take: `rm -rf.tish`, then grep the generated Rust to confirm.
 - **⚠️ `TISH_FAST_NATIVE_BUILD` hides errors.** It exits 0 on a failed GBA compile and leaves the
   *previous* `.gba` in place, so you debug a stale ROM. Do not use it while iterating.
 - **A missing name builds.** tish does not check that an imported function exists; a typo compiles
   and then throws at runtime — a black screen, not a compile error and not a hang.
-- Any interrupted or corrupted build: `rm -rf .tish` and rebuild. There is no cheaper recovery.
+- Any interrupted or corrupted build: `rm -rf.tish` and rebuild. There is no cheaper recovery.
 
 ### The stack
 
@@ -194,7 +194,7 @@ shape from the first commit rather than discovering the ceiling at 600 closures.
 
 | Category | Count | Purpose |
 |---|---|---|
-| the SRPG example family (now in the chuggie-tactics repo) | 31 | One SRPG subsystem each, plus the full template (3,162 LOC) and the isoboard example (2,960). |
+| the SRPG example family | 31 | One SRPG subsystem each, plus the full template (3,162 LOC) and the isoboard example (2,960). |
 | `iso-*` | 12 | Isometric subsystem slices, same skeleton, not yet renamed to match. |
 | Full games | ~20 | the two topdown RPG ports (8,304 and 6,130 LOC, since moved to their own repo), `warheads`, `versus`, `beatemup`, `kart-circuit`, `akari`, `blockfall`, `solitaire`, `creature-rpg`, … |
 | Feature demos | ~40 | One API each, small and teaching. |

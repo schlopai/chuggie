@@ -71,7 +71,7 @@ regenerate with `npm run gen:music` after editing `scripts/gen_music.py`.
 
 ## Cue map (iso baselines)
 
-Neither iso-town nor the isoboard SRPG example (now in the chuggie-tactics repo) ships audio today. Wire like this:
+Neither iso-town nor iso-tactics ships audio today. Wire like this:
 
 | iso-town mode | Call |
 |---------------|------|

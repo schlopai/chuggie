@@ -145,7 +145,7 @@ fn fit_4bpp_tiles(img: &mut RgbaImage, cap: usize) {
 //
 // A `.tmj` that carries a `banks` map property does not get composited at all. Instead the
 // background is the 64x64 tilemap the real game built in VRAM, dumped by
-// the board-banks packer script (now in the chuggie-tactics repo): its tiles, its 16 palette banks, and its 4096 screen entries,
+// the board-banks packer script: its tiles, its 16 palette banks, and its 4096 screen entries,
 // uploaded byte for byte.
 //
 // **Why, in one measurement.** Compositing tile art at an imported board's 2px elevation lands blocks off the 8px
@@ -176,7 +176,7 @@ struct Banks {
     rows: usize,
     cols: usize,
     /// Where cell (0,0) sits in this map, measured against THIS dump. See `place()` in
-    /// the board-banks packer script (now in the chuggie-tactics repo) — the composite path's `board_layout` describes a canvas the
+    /// the board-banks packer script — the composite path's `board_layout` describes a canvas the
     /// real game never used, so it cannot supply this.
     ox: i64,
     oy: i64,
@@ -190,7 +190,7 @@ const BANK_HDR: usize = 16; // "FBN2" + u16 tile_count + i16 ox + i16 oy + u16 s
 const BANK_PAL: usize = 16 * 16 * 2;
 
 impl Banks {
-    /// Parse a `.banks` blob written by the board-banks packer script's `pack` (now in the chuggie-tactics repo).
+    /// Parse a `.banks` blob written by the board-banks packer script's `pack`.
     fn parse(raw: &[u8]) -> Result<Banks, String> {
         // ⚠️ `FBN2`, and a stale `FBNK` must be rejected rather than adapted. The old format's 4096
         // entries were ONE 64x64 map with the foreground folded into its bottom half — accepting it

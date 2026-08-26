@@ -164,7 +164,7 @@ export function demoBackPressed() {
 
 // ── widget: a list with a cursor ─────────────────────────────────────────────────────────────────
 // Two demos in and both had hand-rolled the same thing: a header, N rows of "label ....... value",
-// a `>` on the selected one, and up/down that wraps. `iso-shop` and two SRPG demos (since moved to the chuggie-tactics repo)
+// a `>` on the selected one, and up/down that wraps. Several iso demos
 // all want it too, so it lives here rather than being written six more times.
 //
 // The caller owns the slot range — `slot` through `slot + 2*rows`. That is deliberate: a demo that
@@ -211,7 +211,7 @@ export function demoListDraw(items, sel, header) {
 // expensive repaint in it.
 //
 // ⚠️ This is not an optimisation, it is an INPUT FIX, and it was rediscovered five separate times
-// before landing here (iso-story-branch, several SRPG demos since moved to the chuggie-tactics repo, and the flag
+// before landing here (iso-story-branch, several iso demos, and the flag
 // panel). Rebuilding a row array and its concatenated strings every frame costs enough that the main
 // loop stops completing once per vblank — and `key_pressed` is then polled less than once a frame,
 // so SHORT KEY TAPS ARE SILENTLY DROPPED. The symptom is always the same and always misleading: a

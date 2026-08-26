@@ -2,7 +2,7 @@
 """Factory-wrap a tish module: move its module-level bindings into a factory function.
 
 Every module-level binding is a permanent slot in the generated run() stack frame
-(see the gba-run-frame notes and the large SRPG example's game.tish, now in the chuggie-tactics repo). On GBA that frame comes out of a
+(see the gba-run-frame notes). On GBA that frame comes out of a
 ~29.7 KB IWRAM stack, and tish #655's stack guard trips when the resting SP sinks
 into its 2 KB margin — so module growth eventually wedges the ROM at boot with an
 "expected number" panic (the guard's parked RangeError eaten by a typed call site).

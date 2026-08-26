@@ -2,12 +2,11 @@
 
 > *What a generated table costs to read, and whether caching one is worth anything.*
 
-<img src="preview.png" alt="preview" width="480">
 
 This ROM was built to answer one question before any code was written against it:
 
 > The topdown RPG port ships 76 KB of `export let X: i32[] = [...]`, and its sibling port and the large SRPG example ship more.
-> Should this repo generalise [drop-gba]'s warmed two-slot table cache into its table generator?
+> Should this repo generalise a warmed two-slot table cache into its table generator?
 
 The answer is **no**, and the reason is not the one the question assumed.
 
@@ -94,5 +93,4 @@ The fill is measured at **two widths** for the same reason. One width cannot sep
 per-element slope from the one-off boxed call, and the first draft of this bench reported ~28 ticks
 an element for a copy whose parts cost ~2 — inventing a problem for a cache to solve.
 
-[drop-gba]: https://github.com/schlopai/drop-gba
 [perf-rules §1]: ../../docs/perf-rules.md

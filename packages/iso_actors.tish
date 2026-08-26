@@ -4,7 +4,7 @@
 // this file is the LAYOUT of one particular sheet format. A game that draws its own actors wants
 // the first without the second.
 //
-// These indices MUST match the isoboard SRPG example's pack_actors.py (now in the chuggie-tactics repo), which packs each character
+// These indices MUST match the actor packer that packs each character
 // sheet as two facing blocks (SE then NE) — the game h-flips them for the SW / NW diagonals — with
 // this per-block layout:
 //
@@ -13,7 +13,7 @@
 // SE block starts at frame 0, NE block at DIR_STRIDE (17). Weapon sheets hold the 4-frame swing for
 // both facings: SE 0..3, NE 4..7.
 //
-// This was a byte-identical copy in the isoboard SRPG example's anim.tish (now in the chuggie-tactics repo) and
+// This was a byte-identical copy in an isoboard example's anim.tish and
 // examples/iso-town/src/anim.tish. Two files that must stay in step is the same failure that let
 // the projection drift; one file cannot.
 

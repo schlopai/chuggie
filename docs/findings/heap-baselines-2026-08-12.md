@@ -23,7 +23,7 @@ high-water-mark, so the first rooms that fire bullets settle the heap once and i
 
 ## Not yet taken
 
-the two large SRPG examples (since moved to the chuggie-tactics repo) and the topdown RPG port (also moved out). Each is a long build and none of them is touched by WS2A; take
+the two large SRPG examples and the topdown RPG port. Each is a long build and none of them is touched by WS2A; take
 their baselines at the top of WS1 (auto-battle) and WS2C respectively, by the same method. The large SRPG example
 already ships `heapProbe: 1`, so its breakdown comes for free.
 

@@ -36,4 +36,4 @@ npm start          # build + open in mGBA
 ```
 
 For a fuller isometric build (an SRPG prototype with a build-time-baked iso board), see
-the isoboard SRPG example in the chuggie-tactics repo.
+`examples/iso-tactics`.

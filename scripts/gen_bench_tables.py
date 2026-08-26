@@ -73,7 +73,7 @@ export function pushAt(k: i32): i32 {{ return PUSH[idx(k)] }}
 
 // ── The warmed slice ──────────────────────────────────────────────────────────────────────────
 //
-// `drop-gba/packages/drop_tables.tish:91-160` copies the slice an attacker actually needs out of a
+// The pattern copies the slice an attacker actually needs out of a
 // promoted static into a pushed array once, then reads that. This is the same move, at the same
 // width, so the bench can price both the warmed READ and the FILL that pays for it.
 

@@ -5,7 +5,7 @@
 
 > game builds.*
 
-The large SRPG example (since moved to the chuggie-tactics repo) reaches its tutorial battle with ~21.5 KB free and dies partway through the first
+A large SRPG example reaches its tutorial battle with ~21.5 KB free and dies partway through the first
 turn on a 96-byte allocation. Three plausible culprits were proposed and all three were wrong. This
 example reproduces just the opening's UI calls and prints the heap after each step.
 

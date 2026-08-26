@@ -90,7 +90,7 @@ deliberately reverted as belonging in chuggie-engine rather than core. #631 is t
 
 **A `declare fn` with a trailing `//` comment is silently skipped.** The name then never resolves and
 the ROM jumps through null at boot with no diagnostic. Cost a debugging cycle here; guarded now by
-the repro-tables example (since moved to the chuggie-tactics repo), which calls every accessor. Same family as #655 — a failure with no
+a repro-tables example, which calls every accessor. Same family as #655 — a failure with no
 message. Not filed.
 
 **A failed allocation during module init silently halts the ROM.** No panic, no fault, nothing
