@@ -20,11 +20,11 @@ jobs:
     timeout-minutes: 40
     steps:
       # Lay the repos out to mirror the local checkout layout (see ci.yml's header note):
-      #   $GITHUB_WORKSPACE/chuggie/chuggie-engine + $GITHUB_WORKSPACE/chuggie/agb + $GITHUB_WORKSPACE/tish/tish
-      - name: Checkout chuggie-engine
+      #   $GITHUB_WORKSPACE/chuggie/chuggie + $GITHUB_WORKSPACE/chuggie/agb + $GITHUB_WORKSPACE/tish/tish
+      - name: Checkout chuggie
         uses: actions/checkout@v7
         with:
-          path: chuggie/chuggie-engine
+          path: chuggie/chuggie
       - name: Checkout tish compiler
         uses: actions/checkout@v7
         with:
@@ -72,7 +72,7 @@ jobs:
         run: cargo build --release -p tishlang
 
       - name: Build the overworld-demo ROM and capture a headless screenshot
-        working-directory: chuggie/chuggie-engine
+        working-directory: chuggie/chuggie
         env:
           TISH: ${{ github.workspace }}/tish/tish/target/release/tish
           MGBA_PREFIX: /home/runner/mgba-prefix
@@ -82,5 +82,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: overworld-demo-screenshot
-          path: chuggie/chuggie-engine/screenshot.png
+          path: chuggie/chuggie/screenshot.png
           if-no-files-found: error

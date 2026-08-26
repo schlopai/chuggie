@@ -10,7 +10,7 @@
 # Layout note: the crates carry `../../../../tish/tish/crates/...` path deps on the compiler repo
 # and .cargo/config.toml patches agb to `../agb/agb`, mirroring the local checkout layout. Every
 # job therefore reproduces that tree inside the workspace:
-#   $GITHUB_WORKSPACE/chuggie/chuggie-engine + $GITHUB_WORKSPACE/chuggie/agb
+#   $GITHUB_WORKSPACE/chuggie/chuggie + $GITHUB_WORKSPACE/chuggie/agb
 #   $GITHUB_WORKSPACE/tish/tish
 # (screenshot.yml does the same — keep the two in step.)
 
@@ -35,11 +35,11 @@ jobs:
       # Reproduce the local sibling layout exactly: the crates carry
       # `../../../../tish/tish/crates/...` path deps and .cargo/config.toml patches agb to
       # `../agb/agb`, so the tree must look like
-      #   $GITHUB_WORKSPACE/chuggie/chuggie-engine + $GITHUB_WORKSPACE/chuggie/agb
+      #   $GITHUB_WORKSPACE/chuggie/chuggie + $GITHUB_WORKSPACE/chuggie/agb
       #   $GITHUB_WORKSPACE/tish/tish
       - uses: actions/checkout@v7
         with:
-          path: chuggie/chuggie-engine
+          path: chuggie/chuggie
       - uses: actions/checkout@v7
         with:
           repository: spacedevin/agb
@@ -54,7 +54,7 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: chuggie/chuggie-engine/crates/tish-gba-scenepack
+          workspaces: chuggie/chuggie/crates/tish-gba-scenepack
       # freetype-sys in scenepack's host dependency tree links the system freetype.
       - name: Install freetype
         run: sudo apt-get update && sudo apt-get install -y libfreetype6-dev pkg-config
@@ -64,22 +64,22 @@ jobs:
       # gba_profile_is_honest prove this bake still agrees with @spacedevin/deck and that the `gba`
       # profile's reject list is honest rather than aspirational.
       - name: Test tish_gba_scenepack
-        working-directory: chuggie/chuggie-engine/crates/tish-gba-scenepack
+        working-directory: chuggie/chuggie/crates/tish-gba-scenepack
         run: cargo test --locked
 
       - name: rustfmt (all crates)
-        working-directory: chuggie/chuggie-engine
+        working-directory: chuggie/chuggie
         run: |
           for c in tish-agb tish-agb-sio tish-gba-game-engine tish-gba-scenepack; do
             (cd "crates/$c" && cargo fmt --check) || { echo "::error::cargo fmt --check failed for $c"; exit 1; }
           done
 
       - name: clippy tish_gba_scenepack (host)
-        working-directory: chuggie/chuggie-engine/crates/tish-gba-scenepack
+        working-directory: chuggie/chuggie/crates/tish-gba-scenepack
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Check and clippy the other crates (thumbv4t, no link)
-        working-directory: chuggie/chuggie-engine
+        working-directory: chuggie/chuggie
         run: |
           # rust-toolchain.toml pins the nightly (never float it — a fresh nightly means fresh
           # lints and a red CI that local checkouts cannot reproduce); this installs that pin.
@@ -101,7 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          path: chuggie/chuggie-engine
+          path: chuggie/chuggie
       - uses: actions/checkout@v7
         with:
           repository: tishlang/tish
@@ -130,7 +130,7 @@ jobs:
         working-directory: tish/tish
         run: cargo build --release -p tishlang
       - name: Build grid-demo
-        working-directory: chuggie/chuggie-engine/examples/grid-demo
+        working-directory: chuggie/chuggie/examples/grid-demo
         env:
           TISH: ${{ github.workspace }}/tish/tish/target/release/tish
         run: |
@@ -139,7 +139,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: grid-demo-rom
-          path: chuggie/chuggie-engine/examples/grid-demo/grid-demo.gba
+          path: chuggie/chuggie/examples/grid-demo/grid-demo.gba
           if-no-files-found: error
 
   # ── The example verifiers: build a ROM, emulate it, and assert on what came out. ──────────────
@@ -163,7 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          path: chuggie/chuggie-engine
+          path: chuggie/chuggie
       - uses: actions/checkout@v7
         with:
           repository: tishlang/tish
@@ -208,7 +208,7 @@ jobs:
       # Several verifiers call tools/gba-shot (and gba-link) directly; the binaries are
       # gitignored, so build them from source here (same flags scripts/screenshot.sh uses).
       - name: Build the gba-shot/gba-link helper tools
-        working-directory: chuggie/chuggie-engine
+        working-directory: chuggie/chuggie
         run: |
           P="$HOME/mgba-prefix"
           cc tools/gba-shot.c -o tools/gba-shot -I"$P/include" -L"$P/lib" -lmgba -lm -Wl,-rpath,"$P/lib"
@@ -217,7 +217,7 @@ jobs:
         working-directory: tish/tish
         run: cargo build --release -p tishlang
       - name: Run the verifier
-        working-directory: chuggie/chuggie-engine/examples/${{ matrix.example }}
+        working-directory: chuggie/chuggie/examples/${{ matrix.example }}
         env:
           TISH: ${{ github.workspace }}/tish/tish/target/release/tish
           MGBA_PREFIX: /home/runner/mgba-prefix
@@ -297,7 +297,7 @@ jobs:
     permissions:
       contents: write
       # @sem/github opens a failure issue when a release throws. Without this it cannot, and the
-      # 403 from the issues API is what surfaces instead of the real error.
+      # real error is buried under a 403 from the issues API.
       issues: write
     steps:
       - uses: actions/checkout@v7
@@ -305,13 +305,10 @@ jobs:
       - uses: actions/setup-node@v7
         with: { node-version: "24" }
 
-      # WHY THIS REPO HAS NO RELEASES. sem computes the version correctly every time — the last main
-      # run logged "Forced version: 0.1.0 / Next tag: v0.1.0" — and then died on the next line:
-      #
-      #   Failed to create tag v0.1.0: Committer identity unknown
-      #
-      # A tag is a commit-shaped object and actions/checkout does not configure an author, so every
-      # prerelease since the sem migration has failed at exactly that point.
+      # WHY THIS REPO HAD NO RELEASES. sem computed v0.1.0 correctly every time and then died on
+      # `Failed to create tag v0.1.0: Committer identity unknown` — a tag is a commit-shaped object
+      # and actions/checkout does not configure one. Every prerelease since the sem migration failed
+      # here, which is why the repo has zero releases and zero tags despite months of feat: commits.
       - name: Configure git identity for the release tag
         run: |
           git config user.name "github-actions[bot]"
@@ -366,7 +363,7 @@ jobs:
             fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
           ' "$V"
           (cd packages && npm pack)
-          mv packages/chuggie-engine-*.tgz tish-gba-npm-package.tgz
+          mv packages/schlopai-chuggie-*.tgz tish-gba-npm-package.tgz
           ls -l tish-gba-npm-package.tgz
 
       - name: Create the prerelease via @sem/github

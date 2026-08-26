@@ -1,6 +1,6 @@
 # PINNED, deliberately. Do not change this to a bare `channel = "nightly"`.
 #
-# A floating `nightly` means the compiler can move under all three repos (tish, agb, chuggie-engine)
+# A floating `nightly` means the compiler can move under all three repos (tish, agb, chuggie)
 # without a single line of source changing — building an unrelated project, or any `rustup update`,
 # silently swaps it. That produces "the code is identical but the ROM broke", which is unfalsifiable
 # and costs days. On 2026-08-14 the channel drifted from 2026-07-22 to 2026-08-14 mid-session.

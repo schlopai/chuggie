@@ -7,7 +7,7 @@
 // with `sprite_set_pos`, exactly like the three card RPGs in `card-gba`.
 //
 // Until `packages/cutscene-core.tish` existed, such a game could not stage anything
-// (schlopai/chuggie-engine#63, #66). `packages/cutscene.tish` documented three hooks so that "a game that
+// (schlopai/chuggie#63, #66). `packages/cutscene.tish` documented three hooks so that "a game that
 // draws with raw sprites and presents its own frames can use every verb here" — and then imported
 // five game-engine natives at module top for the defaults behind those hooks. tish's native merge
 // links whole modules, so the escape hatch never reached: supplying all three hooks still linked the

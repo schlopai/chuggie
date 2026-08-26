@@ -1,4 +1,4 @@
-// ui.tish — a small RUNTIME UI LAYOUT ENGINE for chuggie-engine menus (flexbox-lite).
+// ui.tish — a small RUNTIME UI LAYOUT ENGINE for chuggie menus (flexbox-lite).
 //
 // The engine had drawing primitives (text, sprites, bars) but no LAYOUT: every menu hard-coded pixel
 // x/y for every element. This composes them into a declarative, CSS-flexbox-like tree so you describe

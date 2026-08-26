@@ -173,7 +173,7 @@ compiler-generated Value glue (`generated_native.rs`) → `tish_agb::fn(&[Value]
   1. `cargo:` path deps arrive via `extra_dependencies_toml` (`tish.rustDependencies`) —
      thread it into the generated `[dependencies]`, not just `native_modules`.
   2. Generated crate needs an empty `[workspace]` so a parent Cargo workspace
-     (the chuggie-engine repo, when the build dir lives under it) doesn't absorb it.
+     (the chuggie repo, when the build dir lives under it) doesn't absorb it.
   3. **cargo joins `rustflags` arrays across nested `.cargo/config.toml` files** —
      a build dir inside a project that already has `-Tgba.ld` in its config got it
      twice ("region 'ewram' already defined"). Fixed by passing the GBA rustflags

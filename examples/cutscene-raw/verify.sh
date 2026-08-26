@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cutscene-raw verify — schlopai/chuggie-engine#63 and #66.
+# cutscene-raw verify — schlopai/chuggie#63 and #66.
 #
 # The claim: a game that CANNOT link the game-engine crate can stage a scene. Not "can show a
 # dialogue box" — can move an actor on its own, pan a camera, and branch. #66 is explicit that a core

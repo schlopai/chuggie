@@ -1,4 +1,4 @@
-// save.tish — shared cartridge-SRAM helpers for chuggie-engine games.
+// save.tish — shared cartridge-SRAM helpers for chuggie games.
 //
 // The engine (`cargo:tish_agb`) stores a fixed adventure blob per slot (scene, HP, score, flags,
 // tile position). This package wraps those natives and adds NES-style file-select peek helpers.

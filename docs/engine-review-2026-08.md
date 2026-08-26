@@ -1,6 +1,6 @@
 # Engine review — August 2026
 
-A whole-stack read of chuggie-engine: the Rust crates, the tish language as it actually compiles, the
+A whole-stack read of chuggie: the Rust crates, the tish language as it actually compiles, the
 `packages/` authoring layer, and the 137 examples. Written to answer one question at the end —
 **what would it take to build a real-time strategy game here** — but the first five sections stand
 on their own as a current-state account.

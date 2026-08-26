@@ -60,7 +60,7 @@ run() frame **27,140 → 23,412 B**. The four changes that did it are all on mai
 
 ⚠️ NOT closed: the specific complaint "touching module state" still holds. A fn reading a mutable
 module-scope binding is still boxed — that needs struct globals in a `Cell` static, which was
-deliberately reverted as belonging in chuggie-engine rather than core. #631 is the same root cause.
+deliberately reverted as belonging in chuggie rather than core. #631 is the same root cause.
 
 ## C. Open, unaddressed, no fix has ever existed
 

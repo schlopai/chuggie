@@ -112,7 +112,7 @@ function descend(s: i32) {
 backdrop(0)
 
 dungeonInit(DW, DH)
-// packages/dungeon no longer imports the engine crate (schlopai/chuggie-engine#68), so the game supplies
+// packages/dungeon no longer imports the engine crate (schlopai/chuggie#68), so the game supplies
 // the collision sink. A raw-sprite game would pass its own, or none.
 dungeonSetCollider(grid_from_gids)
 

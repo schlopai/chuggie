@@ -17,7 +17,7 @@ do not.
     python3 scripts/frame_stability.py                       # every example in THIS repo
     python3 scripts/frame_stability.py examples/feel-demo    # just one
     python3 scripts/frame_stability.py --find examples/feel-demo
-    python3 .../chuggie-engine/scripts/frame_stability.py ../game/*/  # a game repo's own ROM dirs
+    python3 .../chuggie/scripts/frame_stability.py ../game/*/  # a game repo's own ROM dirs
 
 An argument is a ROM directory (or its verify.sh, or a bare example name in this repo), so a game
 repo that consumes this engine can point it at its own cartridges. With no arguments it sweeps this

@@ -44,7 +44,7 @@
 // tile-of, room-of, room indexing, warp arming, the context-action probe — and they are the fiddly
 // parts worth sharing. Three natives, used by the two `*Drive` functions alone, made all twelve
 // unusable to a `tish_agb`-only ROM, which is why `card-gba` hand-rolled fourteen functions
-// re-implementing this file's job (schlopai/chuggie-engine#68).
+// re-implementing this file's job (schlopai/chuggie#68).
 //
 // Same remedy as `packages/cutscene-core.tish`: the actor's position is read and written through a
 // hook. A game with entities passes the engine natives; a `scene:` game passes `sprite_set_pos` and

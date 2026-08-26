@@ -3,7 +3,7 @@
 > *Puzzle game demo (Akari / Light Up).*
 
 A **top-down action-RPG** for the Game Boy Advance, written entirely in [tish](https://github.com/tishlang/tish)
-components on the chuggie-engine engine, using the CC0 **Ninja Adventure** art pack.
+components on the chuggie engine, using the CC0 **Ninja Adventure** art pack.
 
 > elder hands you a training blade and sends you to cleanse it.*
 

@@ -1,5 +1,6 @@
 {
   "name": "warheads",
+  "version": "0.0.0",
   "private": true,
   "scripts": {
     "assets": "python3 ../../scripts/gen_warheads_tables.py && python3 ../../scripts/gen_warheads.py",

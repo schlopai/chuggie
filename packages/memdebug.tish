@@ -26,7 +26,7 @@ import { heap_free, ui_mem_report, log } from 'cargo:tish_agb'
 // ⚠️ NO CRATE IMPORT. A memory debugger that only `tish_gba_game_engine` games can link is one the
 // ROMs most likely to be fighting for heap cannot use — they are the ones on the tight budget, and
 // they bisected `heap_free()` by hand against a hardcoded ladder of probe sizes instead
-// (schlopai/chuggie-engine#68). One native was the whole reason.
+// (schlopai/chuggie#68). One native was the whole reason.
 //
 // Entity count is now supplied, and reads 0 when it is not. A game with no entities HAS no entities;
 // reporting 0 is the honest answer, not a degraded one.

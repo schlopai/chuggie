@@ -1,6 +1,6 @@
 // feel.tish — a game-feel library for tiled GBA screens.
 //
-// Lives in chuggie-engine, not in a game: nothing here knows what a card is. It imports four natives
+// Lives in chuggie, not in a game: nothing here knows what a card is. It imports four natives
 // (ui_rect, the fx shake, and the PSG) and takes screen coordinates. It was written inside card-gba and
 // moved out once three games and an example were all consuming it — a shared thing living in one
 // consumer's tree is a shared thing only until the second consumer disagrees with the first.
@@ -55,7 +55,7 @@
 // pair. Adding a kind should have to justify itself.
 
 import { ui_rect, text_draw, text_visible, fx_bump, fx_shake_stop } from "cargo:tish_agb"
-// The tunings are chuggie-engine's chipsfx, but INLINED rather than imported, and the reason is measured:
+// The tunings are chuggie's chipsfx, but INLINED rather than imported, and the reason is measured:
 // importing that module cost Queen's Blood 10,496 bytes of heap and took heap_free(40960) from one
 // full block to ZERO. A Tish function costs ~151 bytes whether it is called or not, and the import
 // brings thirteen of them plus their module state; QB wanted eight and would have paid for thirteen.
@@ -388,7 +388,7 @@ export function feelPlay(preset: i32, x: i32, y: i32, mag: i32): i32 {
   // spring was chosen to avoid: FEEL's argument for springs is that you can "spam them without risk
   // of them conflicting", and a gate in front of them throws that away.
   //
-  // Found by examples/feel-demo, the first thing in chuggie-engine ever to call this file — its B button
+  // Found by examples/feel-demo, the first thing in chuggie ever to call this file — its B button
   // plays a preset four times in one frame and logged one play and three refusals.
   //
   // Muted, a play still bumps, still freezes and still sounds; it does not spawn a call-out, a burst

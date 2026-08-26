@@ -1,4 +1,4 @@
-// shmup.tish — a reusable SHOOT-'EM-UP toolkit for the chuggie-engine engine.
+// shmup.tish — a reusable SHOOT-'EM-UP toolkit for the chuggie engine.
 //
 // The genre kit for a top-down (or side) scrolling shooter: a player ship with weapon levels, bullets
 // and bullet-hell patterns, enemy movement AIs, a scripted level director, power-ups, and a

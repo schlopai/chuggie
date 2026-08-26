@@ -1,4 +1,4 @@
-// title.tish — a reusable RPG TITLE SCREEN for the chuggie-engine engine.
+// title.tish — a reusable RPG TITLE SCREEN for the chuggie engine.
 //
 // The classic layout every RPG opens with: a full-screen BACKGROUND, a big TITLE in a fancy font, a
 // MENU in the middle (New Game / Continue / …) with a moving cursor, and a COPYRIGHT line at the

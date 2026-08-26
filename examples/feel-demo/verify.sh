@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify feel-demo — and, through it, packages/feel.tish.
 #
-# THE POINT OF THIS FILE. Until feel-demo existed, nothing in chuggie-engine compiled `packages/feel.tish`
+# THE POINT OF THIS FILE. Until feel-demo existed, nothing in chuggie compiled `packages/feel.tish`
 # at all: its only consumers were in the sibling card-gba tree, reaching across the repo boundary.
 # So this repo shipped 670 lines it could not build, let alone test, and the original showcase
 # (card-gba/examples/fx-demo, now removed) had no verify.sh either. Every assertion below was

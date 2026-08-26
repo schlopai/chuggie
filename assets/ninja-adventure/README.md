@@ -6,7 +6,7 @@ can be built without the external download. **License: CC0** (public domain — 
 including commercial; attribution appreciated). See [LICENSE.txt](LICENSE.txt).
 
 This is the complete pack (1,916 PNGs), **not** the small subset the Godot demo bundles. It is
-the canonical asset source for every chuggie-engine example.
+the canonical asset source for every chuggie example.
 
 ## Layout
 

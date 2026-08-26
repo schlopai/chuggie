@@ -56,7 +56,7 @@ ui_mem_report()                    // UI internals: tiles, peak, solid, cap, cel
 imported `entity_count` from `cargo:tish_gba_game_engine` at module top, so no `tish_agb`-only ROM
 could link it, which was 104 of the 122 examples: exactly the ROMs on the tightest budgets.
 `01039065` freed it (along with `topdown` and `dungeon`); the entity count is now injected via
-`memSetEntityCount(fn)` and reads 0 when unset. [#68](https://github.com/schlopai/chuggie-engine/issues/68)
+`memSetEntityCount(fn)` and reads 0 when unset. [#68](https://github.com/schlopai/chuggie/issues/68)
 is still OPEN despite the work looking done — the commit referenced it rather than closing it, and
 nobody has verified that a `tish_agb`-only ROM actually links `memdebug` end to end.
 
@@ -230,7 +230,7 @@ in another. Measure in the target, and measure the change in isolation — the `
 of a +24,512 total, which is how we know the 18 dead functions removed alongside it were the
 rounding error rather than the win.
 
-Filed as [#67](https://github.com/schlopai/chuggie-engine/issues/67): a function that is only ever
+Filed as [#67](https://github.com/schlopai/chuggie/issues/67): a function that is only ever
 *called* can be emitted as a static `fn` and stripped by the linker. Seven already are. That single
 change would retire most of this section.
 

@@ -1,15 +1,15 @@
-# chuggie-engine
+# chuggie
 
 Game engine packages for writing Game Boy Advance games in [tish][tish], on [agb][agb].
 
 ```bash
-npm install chuggie-engine
+npm install @schlopai/chuggie
 ```
 
 ```tish
-import { mount, spawn, set_transform } from 'chuggie-engine'
-import { sceneGoto, sceneRegister } from 'chuggie-engine/scene'
-import { menuOpen } from 'chuggie-engine/menu'
+import { mount, spawn, set_transform } from '@schlopai/chuggie'
+import { sceneGoto, sceneRegister } from '@schlopai/chuggie/scene'
+import { menuOpen } from '@schlopai/chuggie/menu'
 ```
 
 Every module is tish source, compiled into your ROM by `tish build --target gba`. Nothing here is
@@ -28,7 +28,7 @@ compiler inlines what you actually import.
 | Game data | `clan/*` · `clansave` · `isodemo` |
 | Debug | `memdebug` |
 
-`import { … } from 'chuggie-engine'` is the engine entry (`engine.tish`); everything else is a subpath.
+`import { … } from '@schlopai/chuggie'` is the engine entry (`engine.tish`); everything else is a subpath.
 
 ## The Rust half
 
@@ -57,7 +57,7 @@ installs all three.
 ## License
 
 See the repository. Don't send patches here — the source of truth is
-[schlopai/chuggie-engine](https://github.com/schlopai/chuggie-engine).
+[schlopai/chuggie](https://github.com/schlopai/chuggie).
 
 [tish]: https://github.com/tishlang/tish
 [agb]: https://github.com/agbrs/agb

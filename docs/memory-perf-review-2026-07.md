@@ -1,6 +1,6 @@
-# Memory & performance review — chuggie-engine + the GBA tish compiler
+# Memory & performance review — chuggie + the GBA tish compiler
 
-**Date:** 2026-07-30 · **Scope:** `/Users/a_/Projects/chuggie-engine` (runtime crates, `packages/*.tish`, examples) and
+**Date:** 2026-07-30 · **Scope:** `/Users/a_/Projects/chuggie` (runtime crates, `packages/*.tish`, examples) and
 `/Users/a_/Projects/tish/tish` (portable/no_std core, GBA facade, boxing boundary, GBA codegen regions).
 **Method:** 12 parallel static review dimensions with adversarial cross-verification, plus headless
 libmgba soaks of 13 shipped ROMs. ~31k lines of in-repo review surface.

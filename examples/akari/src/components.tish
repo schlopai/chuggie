@@ -24,7 +24,7 @@ import {
 import { starSheet } from 'sheet:../assets/shuriken.png'
 import { gameState } from './state'
 
-// packages/topdown no longer imports the engine crate (schlopai/chuggie-engine#68); the game supplies how
+// packages/topdown no longer imports the engine crate (schlopai/chuggie#68); the game supplies how
 // an actor's position is read and written. Installed once, at module init, before any drive runs.
 topdownSetActor(entity_x, entity_y, set_transform)
 import { sfxSlash, sfxThrow, sfxWhoosh, sfxCoin } from './audio'

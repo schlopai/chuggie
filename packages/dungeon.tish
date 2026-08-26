@@ -29,7 +29,7 @@
 import { rngSeed, rngBelow } from './rng'
 import { tilemap_stream } from 'cargo:tish_agb'
 // ⚠️ NO CRATE IMPORT. Collision marking is the only thing here that needed the game engine, and it
-// is one call — so it is supplied instead (schlopai/chuggie-engine#68). A game with the engine passes
+// is one call — so it is supplied instead (schlopai/chuggie#68). A game with the engine passes
 // `grid_from_gids`; a `scene:` or raw-sprite game passes its own collision sink, or none at all and
 // reads walkability with `dungeonAt`.
 let SINK = { collide: null }
