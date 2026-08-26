@@ -8,15 +8,21 @@
 #
 #   1. builds the tish CLI (`target/release/tish`) if it isn't built,
 #   2. materializes it as the npm package's platform binary (what `npm install` runs), and
-#   3. self-contains the package the way `npm publish` does — the GBA build needs the tish source
-#      workspace (the runtime/facade crates), which the published tarball bundles and we symlink.
+#   3. links the tish source workspace into it, because a GBA build needs the runtime/facade crates.
 #
 # After this: `cd examples/<name> && npm install && npm start` (or `npm run build` / `npm run shot`).
-# Idempotent — safe to re-run after pulling tish (re-materializes the binary). Leaves the tish repo's
-# tracked files untouched (materialized paths go in its local .git/info/exclude).
+# Idempotent — safe to re-run after pulling tish (re-materializes the binary).
+#
+# ⚠️ THIS IS A LOCAL CONVENIENCE, NOT HOW THE PACKAGE IS BUILT. An earlier version of this script
+# also appended those symlinks to the tish repo's .git/info/exclude — a local, per-clone file that
+# no .gitignore and no review shows. The paths were therefore untracked AND invisible, so a tarball
+# packed in CI shipped none of them while a tarball packed on a machine that had run this script
+# shipped all 33 crates. Nobody could see the difference. tish's own prepack now copies the payload
+# from its repo root, so nothing here is load-bearing for a release; this script no longer writes to
+# another repository's git configuration.
 set -euo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"                    # chuggie-engine repo root
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"                    # chuggie repo root
 tish_repo="${TISH_REPO:-$(cd "$here/../tish/tish" 2>/dev/null && pwd || true)}"
 if [ -z "$tish_repo" ] || [ ! -d "$tish_repo/crates/tish_runtime" ]; then
   echo "error: tish checkout not found." >&2
@@ -38,16 +44,26 @@ mkdir -p "$pkg/platform/$platform"
 cp "$bin" "$pkg/platform/$platform/tish"
 cp "$bin" "$pkg/bin/tish"
 
-# 3) self-contain the package (published pack copies these; locally we symlink to the real workspace)
-ln -sfn ../../crates    "$pkg/crates"
-ln -sfn ../../Cargo.toml "$pkg/Cargo.toml"
-ln -sfn ../../justfile   "$pkg/justfile" 2>/dev/null || true
+# 3) link the tish source workspace in, so a local GBA build can path-depend on the runtime crates.
+#    No `2>/dev/null || true` here: if a link cannot be made, the next `npm run build` fails with a
+#    confusing cargo error instead, so say it now.
+for link in crates Cargo.toml justfile; do
+  if [ ! -e "$tish_repo/$link" ]; then
+    echo "error: $tish_repo/$link does not exist — is TISH_REPO pointing at a tish checkout?" >&2
+    exit 1
+  fi
+  ln -sfn "../../$link" "$pkg/$link"
+done
 
-# 4) keep the tish repo clean — exclude the materialized paths locally (not a tracked .gitignore edit)
-excl="$tish_repo/.git/info/exclude"
-if [ -f "$excl" ] && ! grep -q "npm/tish/crates" "$excl"; then
-  printf '\n# chuggie-engine local dev: @tishlang/tish package materialized for file: linking\nnpm/tish/crates\nnpm/tish/Cargo.toml\nnpm/tish/justfile\n' >> "$excl"
-fi
+# These links are untracked in the tish repo. Say so, rather than hiding them in that repo's
+# .git/info/exclude the way this script used to — `git status` showing them is the point.
+cat <<NOTE
+note: linked crates/, Cargo.toml and justfile into $pkg.
+      They are untracked there, so \`git status\` in the tish repo will list them. That is
+      deliberate: they are local-dev scaffolding, and hiding them is what let a broken npm
+      payload ship unnoticed. Remove them with:
+        rm -f $pkg/crates $pkg/Cargo.toml $pkg/justfile
+NOTE
 
 echo "✓ local @tishlang/tish ready (from $tish_repo)"
 echo "  next:  cd examples/<name> && npm install && npm start"

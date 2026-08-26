@@ -1,4 +1,4 @@
-# Publish the chuggie-engine crates to crates.io when a GitHub release is promoted from prerelease to
+# Publish the chuggie crates to crates.io when a GitHub release is promoted from prerelease to
 # full release. Runs in parallel with the NPM release workflow.
 #
 # Mirrors tishlang/tish's crates-release.yml: version stamped from the tag, a hand-ordered
@@ -66,6 +66,29 @@ jobs:
           find crates -name "Cargo.toml" -exec sed -i.bak "s/^version = .*/version = \"$VERSION\"/" {} \;
           find crates -name "Cargo.toml.bak" -delete
 
+      # `.cargo/config.toml` patches crates.io's `agb` to a sibling checkout of our fork, so every
+      # example ROM builds against it. That patch must NEVER be in scope for a publish:
+      #
+      #   * this job checks out only this repo, so `../agb/agb` does not exist and cargo aborts —
+      #     "failed to read /home/runner/work/chuggie/agb/agb/Cargo.toml" — before it publishes
+      #     anything, including tish_gba_scenepack, which does not even use agb;
+      #   * and a published crate must resolve `agb` from crates.io like its consumers will, not
+      #     from a fork that only exists on our machines.
+      #
+      # Stripped explicitly and reported, rather than left to fail as an unrelated-looking file-not-
+      # found halfway through a release.
+      - name: Remove the local agb fork patch before publishing
+        run: |
+          if grep -q '^\[patch\.crates-io\]' .cargo/config.toml; then
+            echo "::notice::stripping [patch.crates-io] (local agb fork) — a publish must resolve agb from crates.io"
+            sed -i.bak '/^\[patch\.crates-io\]/,$d' .cargo/config.toml
+            rm -f .cargo/config.toml.bak
+          else
+            echo "::warning::no [patch.crates-io] found in .cargo/config.toml — has the fork patch moved? Check that a publish still resolves agb from crates.io."
+          fi
+          cargo metadata --no-deps --format-version 1 >/dev/null \
+            || { echo "::error::cargo still cannot read this workspace after stripping the patch"; exit 1; }
+
       - name: Publish crates (dependency order)
         run: |
           TAG="${{ github.event.release.tag_name || inputs.tag }}"
@@ -93,13 +116,28 @@ jobs:
           done
           [ "$missing" -eq 0 ] || { echo "Add the crate(s) above to CRATES in dependency order, then re-run."; exit 1; }
 
+          # EVERY crate here is in the workspace `exclude` list (they build for thumbv4t; a host
+          # `cargo build` must not try to cross-compile them), so `cargo publish -p <name>` from the
+          # root fails with "package ID specification `<name>` did not match any packages" — the
+          # workspace genuinely does not contain them. Publish from inside each crate instead.
+          crate_dir() {
+            local want="$1" dir name
+            for dir in crates/*/; do
+              [ -f "$dir/Cargo.toml" ] || continue
+              name=$(grep -m1 '^name = ' "$dir/Cargo.toml" | cut -d'"' -f2)
+              if [ "$name" = "$want" ]; then printf '%s' "${dir%/}"; return 0; fi
+            done
+            echo "::error::no directory under crates/ defines package '$want'" >&2
+            return 1
+          }
+
           # Publish one crate, retrying ONLY on a crates.io rate limit. Honours the server's
           # "try again after" when present, else 60s, capped at 180s. Any other failure fails fast.
           publish_with_retry() {
             local crate="$1" max="${PUBLISH_MAX_ATTEMPTS:-6}" attempt log after tgt now wait
             log=$(mktemp)
             for attempt in $(seq 1 "$max"); do
-              if cargo publish -p "$crate" --token "$CARGO_REGISTRY_TOKEN" --no-verify --allow-dirty >"$log" 2>&1; then
+              if (cd "$(crate_dir "$crate")" && cargo publish --token "$CARGO_REGISTRY_TOKEN" --no-verify --allow-dirty) >"$log" 2>&1; then
                 cat "$log"; rm -f "$log"; return 0
               fi
               cat "$log"
@@ -132,7 +170,7 @@ jobs:
               echo "::warning::Skipping $crate — blocked on tishlang_runtime_gba reaching crates.io. See the header of this workflow."
               continue
             fi
-            if curl -sSf -o /dev/null -A "tish-gba-release/1.0 (https://github.com/schlopai/chuggie-engine)" \
+            if curl -sSf -o /dev/null -A "tish-gba-release/1.0 (https://github.com/schlopai/chuggie)" \
                  "https://crates.io/api/v1/crates/${crate}/${VERSION}"; then
               echo "Skipping $crate v${VERSION} (already published)"
             else
