@@ -86,8 +86,18 @@ jobs:
           else
             echo "::warning::no [patch.crates-io] found in .cargo/config.toml — has the fork patch moved? Check that a publish still resolves agb from crates.io."
           fi
-          cargo metadata --no-deps --format-version 1 >/dev/null \
-            || { echo "::error::cargo still cannot read this workspace after stripping the patch"; exit 1; }
+          # Verify the CRATES WE PUBLISH, one at a time — not the workspace root.
+          #
+          # The root cannot be read here and does not need to be: its only member is
+          # examples/p0-spike, which path-depends on the agb fork directly (not via the patch), and
+          # every crate under crates/ is in the workspace `exclude` list. Running `cargo metadata`
+          # at the root just reports p0-spike's missing fork and says nothing about whether a
+          # publish will work.
+          for dir in crates/*/; do
+            [ -f "$dir/Cargo.toml" ] || continue
+            (cd "$dir" && cargo metadata --no-deps --format-version 1 >/dev/null) \
+              || { echo "::error::cargo cannot read $dir after stripping the patch — a publish from it would fail"; exit 1; }
+          done
 
       - name: Publish crates (dependency order)
         run: |
