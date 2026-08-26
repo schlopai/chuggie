@@ -7,6 +7,10 @@ description = "Serial IO (link cable) for agb, exposed to tish via cargo:tish_ag
 repository = "https://github.com/schlopai/chuggie"
 
 [dependencies]
-agb = { path = "../../../agb/agb" }
+# The path is the local fork (see .cargo/config.toml); the version is what a
+# CONSUMER resolves from crates.io. Without it `cargo publish` refuses the crate:
+#   "all dependencies must have a version requirement specified when publishing.
+#    dependency `agb` does not specify a version"
+agb = { path = "../../../agb/agb", version = "0.25.0" }
 critical-section = "1.1.2"
 tishlang_runtime_gba = { path = "../../../../tish/tish/crates/tish_runtime_gba", version = ">=0.1" }
