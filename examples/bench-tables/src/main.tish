@@ -5,7 +5,7 @@
 // from how the array was WRITTEN. A literal is promoted to a Rust `static` (right: it lives in ROM,
 // not RAM) whose index path was BOXED: build a `Value::Number(i as f64)`, match it back to a usize,
 // read as f64, convert to i32, per element. That finding is the whole reason
-// `drop-gba/packages/drop_tables.tish` carries a warmed two-slot cache, and it lands on this repo
+// A warmed two-slot table cache is the pattern in question, and the decision lands on this repo
 // hard, because the topdown RPG port's generated dungeon-room table is 76 KB of exactly that shape.
 //
 // But bench-access measured the MICRO case: 64 entries, a masked index, inside a function that

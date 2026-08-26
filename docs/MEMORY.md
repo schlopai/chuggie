@@ -22,7 +22,7 @@ a statement that we are spending something the cartridge did not.
 | palettes | 512 B | **16 BG banks + 16 OBJ banks**, hard ceiling |
 | ROM | 32 MB | free real estate — put everything here |
 
-Measured on the large SRPG example (since moved to the chuggie-tactics repo): static data ~16 KB, leaving **~237 KB of heap**.
+Measured on a large SRPG example: static data ~16 KB, leaving **~237 KB of heap**.
 
 **The cartridge spends ~0 bytes of heap on data.** Tiles, glyphs, maps and tables are ROM, DMA'd to
 VRAM. Every kilobyte of ours is a decoded copy of something that did not need decoding.

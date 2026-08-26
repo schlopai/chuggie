@@ -176,7 +176,7 @@ export function dungeonGen(seed: i32, depth: i32) {
   // ⚠️ HOIST THE BOUND. `while (i < W * H)` re-reads two module scalars and multiplies them on
   // EVERY iteration — the loop condition is the hot path, not the body. Left in place this loop and
   // its siblings cost ~13.8 ticks a cell against the ~1.35 a module array write should be, and one
-  // generation overran the 16-bit timer. Same finding drop-gba's optimisation ladder opens with.
+  // generation overran the 16-bit timer. The usual first finding of an optimisation pass.
   let cells: i32 = W * H
   let wallT: i32 = WALL
   let i: i32 = 0

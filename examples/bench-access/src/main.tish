@@ -65,7 +65,7 @@ while (bmi < 2048) { BIGMOD.push(bmi & 63); bmi = bmi + 1 }
 // converts to i32. Per element. Hoisting the index into an `i32` local does NOT help — the boxing is
 // in the promoted-array read, not in the index expression.
 //
-// Every generated table in drop-gba is a literal, which is why its attack builder measured ~20x what
+// Every generated table there is a literal, which is why its attack builder measured ~20x what
 // this bench predicted.
 let LITERAL: i32[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
                       16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
@@ -105,7 +105,7 @@ function benchBigModule(n: i32): i32 {
   return acc
 }
 
-// Reads are measured above; a WRITE is a different operation and had never been priced. drop-gba's
+// Reads are measured above; a WRITE is a different operation and had never been priced. That
 // atkBuild does one module-array write per cell and its inner loop costs ~20x what the read number
 // predicts, so this is the remaining candidate.
 function benchModuleWrite(n: i32): i32 {

@@ -1,0 +1,42 @@
+// Unit classes as COMPONENTS — the same behaviour-component pattern the ninja demos use
+// (`update({ this })`), adapted to a turn-based game. Each class bundles its stats, sprite sheet,
+// and a per-turn AI behaviour `onTurn(ctx)`; the battle controller (main.tish) registers a unit from
+// a class's stats and, on that unit's turn, calls its `onTurn` to decide a move. Keeping the policy
+// here (data-driven, per class) mirrors the engine split: engine owns the rules, the component owns
+// the decisions — so a new class is just a new object, no controller changes.
+import { fighter } from 'sheet32:../assets/fighter.png'
+import { mage } from 'sheet32:../assets/mage.png'
+
+// Shared AI behaviour: advance to the reachable tile closest to the nearest enemy. `ctx` is the turn
+// context the controller passes in — the unit's own tile, its move range, an enemy-distance query,
+// and `moveTo` to commit a destination.
+function advanceToEnemy(ctx) {
+  let bestCol = ctx.selfCol
+  let bestRow = ctx.selfRow
+  let bestDist = ctx.enemyDist(bestCol, bestRow)
+  let i = 0
+  while (i < ctx.reachable) {
+    let col = ctx.rangeCol(i)
+    let row = ctx.rangeRow(i)
+    let dist = ctx.enemyDist(col, row)
+    if (dist < bestDist) { bestDist = dist; bestCol = col; bestRow = row }
+    i = i + 1
+  }
+  ctx.moveTo(bestCol, bestRow)
+}
+
+// hp is in whole hearts × 4 (the HUD heart sheet has 5 frames = 4 hp/heart), so 20 = 5 hearts.
+export const Fighter = {
+  name: 'Fighter', sheet: fighter,
+  speed: 50, move: 4, jump: 1, hp: 20, power: 6,
+  onTurn: (ctx) => { advanceToEnemy(ctx) }
+}
+
+export const Mage = {
+  name: 'Mage', sheet: mage,
+  speed: 45, move: 3, jump: 1, hp: 12, power: 5,
+  onTurn: (ctx) => { advanceToEnemy(ctx) }   // later: hang back + cast at range
+}
+
+// Indexed by the Tiled map's unit `cls` field: 0 = Fighter, 1 = Mage.
+export const CLASSES = [Fighter, Mage]

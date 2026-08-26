@@ -1,0 +1,44 @@
+// NPC definitions keyed by Tiled spawn `cls`. cls 0 is the player (not in this table).
+
+export let CLS_PLAYER = 0
+export let CLS_ELDER = 1
+export let CLS_VILLAGER = 2
+export let CLS_GUARD = 3
+export let CLS_MERCHANT = 4
+
+export let LINES_ELDER = [
+  "Welcome to the plaza, traveler.",
+  "The merchant by the towers keeps fine wares.",
+  "Mind the pond — the stones are slippery."
+]
+
+export let LINES_VILLAGER = [
+  "Beautiful day for a stroll!",
+  "I heard the merchant has potions today."
+]
+
+export let LINES_GUARD = [
+  "Keep the peace, citizen.",
+  "Nothing to report on this watch."
+]
+
+// Merchant opens the shop UI; these lines are unused (shop greets itself).
+export let LINES_MERCHANT = [
+  "Looking to buy or sell?"
+]
+
+export function npcDef(cls) {
+  if (cls === CLS_ELDER) {
+    return { name: "Elder", lines: LINES_ELDER, merchant: 0, portrait: -1 }
+  }
+  if (cls === CLS_VILLAGER) {
+    return { name: "Villager", lines: LINES_VILLAGER, merchant: 0, portrait: -1 }
+  }
+  if (cls === CLS_GUARD) {
+    return { name: "Guard", lines: LINES_GUARD, merchant: 0, portrait: -1 }
+  }
+  if (cls === CLS_MERCHANT) {
+    return { name: "Merchant", lines: LINES_MERCHANT, merchant: 1, portrait: 8 }
+  }
+  return { name: "Someone", lines: ["..."], merchant: 0, portrait: -1 }
+}

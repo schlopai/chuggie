@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Verify grid-demo — and through it packages/grid.tish, the generic cell-grid kit.
 #
-# WHY THE DEMO IS A FLOOR-STACKED MATCH-3 AND NOT A MAGICAL DROP. grid.tish was extracted from the
-# Magical Drop rules, so a Magical Drop demo would pass whether the kit were generic or merely the
+# WHY THE DEMO IS A FLOOR-STACKED MATCH-3 AND NOT A CEILING-FED ONE. grid.tish was extracted from
+# ceiling-fed rules, so a ceiling-fed demo would pass whether the kit were generic or merely the
 # old code renamed. This is the opposite board — gravity toward the floor, gems dropped in from the
 # top — and `anchor: 1` is the only line that differs.
 #
@@ -131,7 +131,7 @@ check $? "a column filled to the last row is playable; one pushed PAST it is a t
 
 # A fed row arrives at the ANCHOR, which on this floor-stacked board is the floor — so garbage pushes
 # the stack toward the ceiling rather than landing on top of it. `gridPush` would do the opposite, and
-# that exact mix-up inverted the descent in the Magical Drop port.
+# that exact mix-up inverted the descent in the original port.
 grep -q 'FEED 1 level' /tmp/grid-demo.log
 check $? "the rising floor feeds garbage rows from the anchor end"
 feeds=$(grep -c '^\[frame [0-9]*\] FEED ' /tmp/grid-demo.log || true)

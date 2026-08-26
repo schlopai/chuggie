@@ -1,6 +1,6 @@
 // iso.tish — the isometric projection, shared by every game built on the `isobattle:` bake.
 //
-// This existed as a verbatim copy in BOTH the isoboard SRPG example (now in the chuggie-tactics repo) and examples/iso-town, and the
+// This existed as a verbatim copy in BOTH isoboard examples, and the
 // copies had already drifted apart in two ways that each produced a visible bug:
 //
 //   * `UNIT_LIFT` was 12 in one and 20 in the other. 20 is correct and 12 puts every character

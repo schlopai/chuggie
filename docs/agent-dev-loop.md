@@ -1,7 +1,7 @@
 # Building, testing and self-playing a GBA example
 
 Written for an agent working in this repo. It describes the loop actually used to build the
-isoboard SRPG example (since moved to the chuggie-tactics repo) — the commands, and more importantly the
+isoboard examples — the commands, and more importantly the
 traps that cost real time. The commands below use `<example>` for whichever example you are building.
 
 The shape of the loop is: **change → build → drive the ROM headlessly → read the result → strip your
@@ -187,7 +187,7 @@ mirror, for two mGBA windows (**File → New multiplayer window**) or two cartri
 
 ## 4. Self-play — the regression harness
 
-The isoboard SRPG example (now in the chuggie-tactics repo) has a `SELF_PLAY` flag near the top of `src/main.tish`;
+An isoboard example can carry a `SELF_PLAY` flag near the top of `src/main.tish`;
 the same pattern applies to any battle example:
 
 ```tish

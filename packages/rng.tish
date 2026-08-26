@@ -22,9 +22,9 @@
 // ── WHY THESE CONSTANTS ────────────────────────────────────────────────────────────────────────
 //
 // `rngNext` is bit-for-bit Numerical Recipes' LCG, the same stream the retired match-3 rules
-// core used (`archive/crates/tish-gba-drop/src/rng.rs:24` in schlop/drop-gba).
+// core used.
 //
-// ⚠️ THAT IS A CROSS-REPO CONTRACT, not an implementation note. drop-gba's conformance corpus —
+// ⚠️ THAT IS A COMPATIBILITY CONTRACT, not an implementation note. The conformance corpus —
 // sixteen scenarios at two board widths, plus 400 fuzz seeds per width — is checked against goldens
 // that Rust core authored, and a shared field generator is the only reason a 10,000-step trace can
 // be compared at all. Change these numbers and every one of those goldens is silently invalidated,
@@ -45,7 +45,7 @@ let STREAMS: i32 = 8
 let RS = [1, 1, 1, 1, 1, 1, 1, 1]
 
 /// Seed a stream. Zero is remapped, because an LCG seeded at 0 is legal but starts with a long,
-/// visibly non-random climb — `schlop/drop-gba/archive/crates/tish-gba-drop/src/rng.rs:16-18` guards the same way.
+/// visibly non-random climb, so the same guard applies here.
 export function rngSeed(s: i32, seed: i32) {
   if (s < 0 || s >= STREAMS) { return }
   let v = seed
@@ -75,7 +75,7 @@ export function rngNext(s: i32) {
 ///
 /// `next % n` off the low bits is the classic way to get a badly non-uniform stream out of an LCG —
 /// the low bits of an LCG have short periods (bit 0 alternates). Same reasoning and the same shift
-/// as `schlop/drop-gba/archive/crates/tish-gba-drop/src/rng.rs:33-38`.
+/// as the reference implementation.
 export function rngBelow(s: i32, n: i32): i32 {
   // `n == 0` returns without drawing, matching `rng.rs:30-33`. `n == 1` DOES draw — trivially
   // returning 0 early would be correct arithmetically and wrong for the stream, and the whole point
@@ -105,7 +105,7 @@ export function rngChance(s: i32, pct: i32): i32 {
 }
 
 /// A cheap 16-bit stream, for anything drawn per frame where a full 32-bit step is not worth a
-/// soft-float multiply. Lifted from the SRPG rules module (now in the chuggie-tactics repo), which chose it for exactly this
+/// soft-float multiply. Lifted from an SRPG rules module, which chose it for exactly this
 /// reason. Period 65536, so do not deal a field from it.
 export function rngNext16(s: i32): i32 {
   if (s < 0 || s >= STREAMS) { return 0 }

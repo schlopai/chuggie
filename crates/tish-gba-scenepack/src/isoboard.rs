@@ -16,7 +16,7 @@ use image::{imageops, Rgba, RgbaImage};
 use serde::Deserialize;
 use std::path::Path;
 
-// iso projection — MUST match the isoboard SRPG examples (now in the chuggie-tactics repo)
+// iso projection — MUST match the isoboard examples
 const TILE: u32 = 32;
 const ORIGIN_X: i64 = 96;
 const ORIGIN_Y: i64 = 24;
