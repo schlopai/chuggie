@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit a key schedule that plays a Magical Drop board, for `scripts/screenshot.sh`.
+"""Emit a key schedule that plays a match-3 board, for `scripts/screenshot.sh`.
 
 WHY THIS EXISTS. Every example ships in attract mode: the native CPU plays until somebody touches
 the pad. That makes the demo deterministic, and it also means the code a *player* runs — the pad

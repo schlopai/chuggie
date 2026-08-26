@@ -138,16 +138,41 @@ def collect():
     return rows, missing_readme
 
 
+def display_title(name, title, tagline):
+    """`beatemup — a Final Fight-shaped brawler`: what the example is, in one line.
+
+    Titles that SHOUT get lowercased — 88 of the 123 READMEs head with an all-caps slug, and a wall
+    of them reads as an error log, not an index. A title that already carries its own `— …` keeps
+    it; otherwise the FIRST clause of the tagline supplies one, which is where the good short
+    descriptions already live ("A Final Fight-shaped brawler: four actors on a road with real
+    depth, …" gives up exactly the phrase you want). The rest of the tagline stays where it
+    belongs, on the example's own page.
+    """
+    if title.upper() == title and any(c.isalpha() for c in title):
+        title = title.lower()
+    if "—" in title:
+        return title
+    short = re.split(r"[:—]|\. ", tagline or "", 1)[0].strip().rstrip(".")
+    if not short:
+        return title
+    # "A Final Fight-shaped brawler" -> "a Final Fight-shaped brawler": it is a clause now, not a
+    # sentence. Only the first letter, so "A Star Wars-ish…" keeps its capitals further in.
+    short = short[0].lower() + short[1:]
+    if short.lower() == title.lower():
+        return title            # "asteroids — asteroids" helps nobody
+    return f"{title} — {short}"
+
+
 def table(rows):
-    out = ["| | example | what it is |", "|---|---|---|"]
+    out = ["| | example |", "|---|---|"]
     for name, title, tagline, shot in rows:
         # The previews are committed at native 240x160 — one GBA pixel per pixel, the smallest the
         # files can be. How big they APPEAR is set here, in the markup, at the same PREVIEW_WIDTH
         # the example READMEs use, so the display size is one decision in one place instead of
-        # something baked into 57 committed binaries.
+        # something baked into 80-odd committed binaries.
         img = f'<img src="{name}/{shot}" width="{PREVIEW_WIDTH}">' if shot else "—"
-        desc = tagline or f"*({title})*"
-        out.append(f"| {img} | **[{title}]({name}/README.md)**<br>`{name}` | {desc} |")
+        out.append(f"| {img} | **[{display_title(name, title, tagline)}]({name}/README.md)**"
+                   f"<br>`{name}` |")
     return "\n".join(out)
 
 

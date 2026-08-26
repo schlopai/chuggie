@@ -6,7 +6,7 @@
 // does, so pressing DOWN cleared all 240x160 and re-shaped every string — more work than fits
 // before the next vblank, so the whole menu visibly blinked out for a frame.
 //
-// I fixed that by hand, row by row. But dirty-region repainting is not a Magical Drop problem, and
+// I fixed that by hand, row by row. But dirty-region repainting is not a match-3 problem, and
 // `packages/ui.tish` already solves it: `makeButtonGroup(...).nav()` repaints exactly the two
 // buttons whose selection changed, and `uiBake` / `uiReplay` solve a screen's layout once and
 // replay it with no layout at all.
@@ -18,7 +18,7 @@
 //                  node count and per-phase ticks, so "did that press cost a full layout" is a
 //                  number rather than an impression.
 //
-// The comparison it is against is schlop/drop-gba's `magical-drop`, whose front end does the same job with
+// The comparison it is against is the retired match-3 port, whose front end did the same job with
 // hand-rolled row invalidation.
 //
 // CONTROLS  Up/Down move · A/Start select · Select forces a FULL re-render, for the contrast.
@@ -56,7 +56,7 @@ function paintAll() {
   uiRender({
     dir: "col", pad: 6, gap: 4, align: "center",
     children: [
-      { text: "MAGICAL DROP", font: titleFont, color: "title" },
+      { text: "UI SHELL", font: titleFont, color: "title" },
       { text: "ui.tish front end", color: "dim" },
       menu.view(null),
       { text: "UP/DOWN move - SELECT forces a full re-render", color: "dim" },

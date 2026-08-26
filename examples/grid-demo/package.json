@@ -23,5 +23,5 @@
       }
     }
   },
-  "description": "A floor-stacked match-3 on packages/grid.tish — the generic cell-grid kit, proven on the opposite gravity anchor from Magical Drop."
+  "description": "A floor-stacked match-3 on packages/grid.tish — the generic cell-grid kit, proven on the opposite gravity anchor from the match-3 it came from."
 }

@@ -37,7 +37,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 SHOT = ROOT / "scripts" / "screenshot.sh"
 # Follow what the golden check actually READS, then find the capture that writes it. Matching on a
-# filename convention instead ("*-screen.png") silently skipped two examples — magical-drop compares
+# filename convention instead ("*-screen.png") silently skipped two examples — the match-3 port compares
 # the long run's own frame and pocket-modes uses "-vs.png". A checker that quietly covers less than
 # it claims is the thing this whole file exists to stop.
 SCREEN_CHECK = re.compile(r"screen_check\.py\s+(\S+)\s+reference\.png")

@@ -1,7 +1,7 @@
 // grid-demo — a floor-stacked match-3 on packages/grid.tish.
 //
-// WHY IT IS THIS GAME AND NOT MAGICAL DROP. `packages/grid.tish` was extracted from the Magical
-// Drop rules, so a Magical Drop demo would prove nothing: it would pass whether the kit were
+// WHY IT IS THIS GAME AND NOT THE MATCH-3 IT CAME FROM. `packages/grid.tish` was extracted from
+// the retired match-3 rules, so a match-3 demo would prove nothing: it would pass whether the kit were
 // generic or merely the old code with a new name. So this is the OPPOSITE board — gravity toward
 // the floor instead of the ceiling, gems dropped in from the top instead of pulled from the bottom,
 // runs cleared where they land. The same `gridCollapse`, `gridSeedRuns`, `gridSpread` and
@@ -143,7 +143,7 @@ gridPaintTarget(BOARD, BG, gems, 8, OX, OY)
 // ── dealing ─────────────────────────────────────────────────────────────────────────────────────
 // Authored with `gridSet`, which is INERT — it writes no seeds. That is why a freshly dealt board
 // does not immediately detonate itself even when it happens to contain a run of three, and it is
-// the same distinction the Magical Drop core draws between an authored board and a thrown balloon.
+// the same distinction the match-3 core draws between an authored board and a thrown balloon.
 function deal() {
   gridClear(BOARD)
   let cc: i32 = 0

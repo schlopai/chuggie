@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Assert a captured GBA run actually made sound.
 
-The Magical Drop examples synthesise every effect on the PSG channels — no ROM, no mixer voice,
+The match-3 examples synthesise every effect on the PSG channels — no ROM, no mixer voice,
 no per-frame work. That is cheap, and it is also easy to break silently: a wrong channel borrow,
 a zero-length envelope or a missing `chip_borrow` just goes quiet, and nothing else in the test
 suite notices. A screenshot certainly does not.

@@ -38,6 +38,18 @@ const AUTOPLAY_FRAMES = 720;    // long enough to get through a title/intro and 
 // rather than the file being deleted afterwards, so a re-run cannot quietly put it back.
 const NO_PREVIEW = new Set(['bench-behav', 'bench-boot']);
 
+// Per-example capture-window overrides, for the few where the generic window produces something
+// actively bad rather than merely dull.
+//
+// sunnyside-day's clock runs ~96s per in-game day, so its light should change slowly. It came out
+// strobing — luminance sweeping 124 -> 8 -> 153 twice in three seconds — because AUTOPLAY was
+// mashing START into it and skipping the clock forward. It needs no input at all: it animates on
+// its own. `drive: false` opts an example out of autoplay, which is the fix whenever driving it
+// does something worse than leaving it alone.
+const WINDOW = {
+  'sunnyside-day': { drive: false, every: 8 },
+};
+
 const root = path.resolve(__dirname, '..');
 const dir = path.join(root, 'examples');
 
@@ -153,12 +165,13 @@ for (const name of examples) {
     continue;
   }
 
+  const over = WINDOW[name] || {};
   const tunedFrames = Number((m && m[2]) || DEFAULT_FRAMES);
   const tunedKeys = ((m && m[3]) || '').trim().replace(/^"|"$/g, '');
   let frames = tunedFrames;
   let keys = tunedKeys;
   // An authored schedule always wins — it knows the example's controls and this does not.
-  const driving = !keys;
+  const driving = !keys && over.drive !== false;
   if (driving) {
     frames = Math.max(frames, AUTOPLAY_FRAMES);
     keys = autoplay(frames);
@@ -172,8 +185,10 @@ for (const name of examples) {
   // frame 120 or 180 would otherwise have its whole window start at power-on. When that floor
   // leaves too little room, run PAST the tuned frame instead of shortening the clip — a short
   // capture is what made an earlier pass emit one-frame previews.
-  const span = Number(PREVIEW_FRAMES) * Number(PREVIEW_EVERY);
-  const from = Math.max(MIN_FROM, frames - span);
+  const every = String(over.every || PREVIEW_EVERY);
+  if (over.frames) frames = over.frames;
+  const span = Number(PREVIEW_FRAMES) * Number(every);
+  const from = over.from !== undefined ? over.from : Math.max(MIN_FROM, frames - span);
   const run = Math.max(frames, from + span);
 
   // Capture to a scratch path and promote only on success. Several of these previews are original
@@ -187,7 +202,7 @@ for (const name of examples) {
       ...process.env,
       GIF_SCALE: PREVIEW_SCALE,
       GIF_MAX_FRAMES: PREVIEW_FRAMES,
-      GIF_EVERY: PREVIEW_EVERY,
+      GIF_EVERY: every,
       GIF_FROM: String(from),
     },
     stdio: ['ignore', 'ignore', 'pipe'],
