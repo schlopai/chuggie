@@ -1,6 +1,8 @@
 # REPRO INTRO HEAP
 
 > *Where the large SRPG example's memory actually goes — measured in 30 seconds instead of guessed at over five-minute
+<img src="preview.png" alt="preview" width="480">
+
 > game builds.*
 
 The large SRPG example (since moved to the chuggie-tactics repo) reaches its tutorial battle with ~21.5 KB free and dies partway through the first

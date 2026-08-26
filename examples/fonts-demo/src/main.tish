@@ -1,4 +1,5 @@
 // fonts-demo — paginated specimens (sprite VRAM is finite; one page at a time).
+// Pages advance by themselves every AUTO_ADVANCE frames; < > steps them by hand.
 // Every face is baked at its native pixel size.
 // Pages: faces → tiny pixel → Kenney → display → agb layout effects.
 import { monogram } from "font:../../../assets/fonts/monogram.ttf@16"
@@ -37,7 +38,12 @@ let BTN_LEFT: i32 = 8
 let BTN_RIGHT: i32 = 9
 let PAGES: i32 = 5
 let FOOTER: i32 = 9
-let S = { page: 0 }
+let S = { page: 0, idle: 0 }
+
+// Pages advance on their own after AUTO_ADVANCE frames without a press, so the demo shows all five
+// specimens to someone who never touches the pad — a still or a clip of page 1 says nothing about
+// the other four. Any press resets the timer, so browsing by hand is never fought by the timer.
+let AUTO_ADVANCE: i32 = 45
 
 backdrop(0x0E1420)
 
@@ -122,8 +128,20 @@ paint()
 
 while (true) {
   let next = S.page
-  if (key_pressed(BTN_LEFT) > 0) { next = (S.page + PAGES - 1) % PAGES }
-  if (key_pressed(BTN_RIGHT) > 0) { next = (S.page + 1) % PAGES }
+  let touched = false
+  if (key_pressed(BTN_LEFT) > 0) { next = (S.page + PAGES - 1) % PAGES; touched = true }
+  if (key_pressed(BTN_RIGHT) > 0) { next = (S.page + 1) % PAGES; touched = true }
+
+  if (touched) {
+    S.idle = 0
+  } else {
+    S.idle = S.idle + 1
+    if (S.idle >= AUTO_ADVANCE) {
+      S.idle = 0
+      next = (S.page + 1) % PAGES
+    }
+  }
+
   if (next !== S.page) {
     S.page = next
     paint()

@@ -106,38 +106,38 @@ Not things to play — these measure something or reproduce a specific bug.
 
 | | example |
 |---|---|
-| — | **[bench access — what a data access and a function call actually cost on GBA](bench-access/README.md)**<br>`bench-access` |
+| <img src="bench-access/preview.png" width="480"> | **[bench access — what a data access and a function call actually cost on GBA](bench-access/README.md)**<br>`bench-access` |
 | <img src="bench-ai/preview.png" width="480"> | **[bench ai — a benchmark testing the performance of the ai subsystem](bench-ai/README.md)**<br>`bench-ai` |
 | — | **[bench behav — a benchmark testing the performance of the behav subsystem](bench-behav/README.md)**<br>`bench-behav` |
 | — | **[bench boot — a benchmark testing the performance of the boot subsystem](bench-boot/README.md)**<br>`bench-boot` |
 | — | **[bench build — a benchmark testing the performance of the build subsystem](bench-build/README.md)**<br>`bench-build` |
-| — | **[bench entities — a benchmark testing the performance of the entities subsystem](bench-entities/README.md)**<br>`bench-entities` |
+| <img src="bench-entities/preview.png" width="480"> | **[bench entities — a benchmark testing the performance of the entities subsystem](bench-entities/README.md)**<br>`bench-entities` |
 | <img src="bench-memory/preview.gif" width="480"> | **[bench memory — a benchmark testing the performance of the memory subsystem](bench-memory/README.md)**<br>`bench-memory` |
 | <img src="bench-room/preview.gif" width="480"> | **[bench room — a benchmark testing the performance of the room subsystem](bench-room/README.md)**<br>`bench-room` |
-| — | **[bench systems — where the native pass goes, system by system](bench-systems/README.md)**<br>`bench-systems` |
-| — | **[bench tables — what a generated table costs to read, and whether caching one is worth anything](bench-tables/README.md)**<br>`bench-tables` |
+| <img src="bench-systems/preview.png" width="480"> | **[bench systems — where the native pass goes, system by system](bench-systems/README.md)**<br>`bench-systems` |
+| <img src="bench-tables/preview.png" width="480"> | **[bench tables — what a generated table costs to read, and whether caching one is worth anything](bench-tables/README.md)**<br>`bench-tables` |
 | — | **[p0 spike — a prototype or technical spike for engine core mechanics](p0-spike/README.md)**<br>`p0-spike` |
-| — | **[probe arrayarg — does passing a typed module array to a native de-optimise every OTHER read of it? Yes](probe-arrayarg/README.md)**<br>`probe-arrayarg` |
+| <img src="probe-arrayarg/preview.png" width="480"> | **[probe arrayarg — does passing a typed module array to a native de-optimise every OTHER read of it? Yes](probe-arrayarg/README.md)**<br>`probe-arrayarg` |
 | <img src="probe-arrayret/preview.png" width="480"> | **[probe arrayret — a technical test for array returns over FFI or WASM](probe-arrayret/README.md)**<br>`probe-arrayret` |
-| — | **[probe module let — does a bare module-level `let` read back correctly after reassignment on the GBA target?](probe-module-let/README.md)**<br>`probe-module-let` |
-| — | **[repro 654 agg push — aggregate repro for #654](repro-654-agg-push/README.md)**<br>`repro-654-agg-push` |
-| — | **[repro 654 capt shadow — a body-local must shadow its never-assigned `_capt` alias](repro-654-capt-shadow/README.md)**<br>`repro-654-capt-shadow` |
-| — | **[repro 654 capt stack — ~40 never-assigned Value captures + a nested arrow should not clone at entry](repro-654-capt-stack/README.md)**<br>`repro-654-capt-stack` |
-| — | **[repro 654 heap natives — many FunDecls naming `log` must not multiply VmRef allocations](repro-654-heap-natives/README.md)**<br>`repro-654-heap-natives` |
-| — | **[repro 654 sibling stack — one hot FunDecl naming ~40 sibling fns keeps VmRefs, not Value extracts](repro-654-sibling-stack/README.md)**<br>`repro-654-sibling-stack` |
-| — | **[repro 654 vec cell arrow — a nested arrow over a cell-captured native array must not double-wrap the VmRef](repro-654-vec-cell-arrow/README.md)**<br>`repro-654-vec-cell-arrow` |
-| — | **[repro eco natives — proof ROM for the ecosystem/platformer engine natives](repro-eco-natives/README.md)**<br>`repro-eco-natives` |
-| — | **[REPRO: struct-global store shadows a user variable — `G.cur = BASE + c` did not compile, because the emitted `with(|c| …)` closure shadowed the author's own `c`](repro-globalset-shadow/README.md)**<br>`repro-globalset-shadow` |
+| <img src="probe-module-let/preview.png" width="480"> | **[probe module let — does a bare module-level `let` read back correctly after reassignment on the GBA target?](probe-module-let/README.md)**<br>`probe-module-let` |
+| <img src="repro-654-agg-push/preview.png" width="480"> | **[repro 654 agg push — aggregate repro for #654](repro-654-agg-push/README.md)**<br>`repro-654-agg-push` |
+| <img src="repro-654-capt-shadow/preview.png" width="480"> | **[repro 654 capt shadow — a body-local must shadow its never-assigned `_capt` alias](repro-654-capt-shadow/README.md)**<br>`repro-654-capt-shadow` |
+| <img src="repro-654-capt-stack/preview.png" width="480"> | **[repro 654 capt stack — ~40 never-assigned Value captures + a nested arrow should not clone at entry](repro-654-capt-stack/README.md)**<br>`repro-654-capt-stack` |
+| <img src="repro-654-heap-natives/preview.png" width="480"> | **[repro 654 heap natives — many FunDecls naming `log` must not multiply VmRef allocations](repro-654-heap-natives/README.md)**<br>`repro-654-heap-natives` |
+| <img src="repro-654-sibling-stack/preview.png" width="480"> | **[repro 654 sibling stack — one hot FunDecl naming ~40 sibling fns keeps VmRefs, not Value extracts](repro-654-sibling-stack/README.md)**<br>`repro-654-sibling-stack` |
+| <img src="repro-654-vec-cell-arrow/preview.png" width="480"> | **[repro 654 vec cell arrow — a nested arrow over a cell-captured native array must not double-wrap the VmRef](repro-654-vec-cell-arrow/README.md)**<br>`repro-654-vec-cell-arrow` |
+| <img src="repro-eco-natives/preview.gif" width="480"> | **[repro eco natives — proof ROM for the ecosystem/platformer engine natives](repro-eco-natives/README.md)**<br>`repro-eco-natives` |
+| <img src="repro-globalset-shadow/preview.png" width="480"> | **[REPRO: struct-global store shadows a user variable — `G.cur = BASE + c` did not compile, because the emitted `with(|c| …)` closure shadowed the author's own `c`](repro-globalset-shadow/README.md)**<br>`repro-globalset-shadow` |
 | <img src="repro-hub-cave-heap/preview.png" width="480"> | **[repro hub cave heap — a bug reproduction or regression test case](repro-hub-cave-heap/README.md)**<br>`repro-hub-cave-heap` |
-| — | **[repro intro heap — *Where the large SRPG example's memory actually goes](repro-intro-heap/README.md)**<br>`repro-intro-heap` |
-| — | **[repro mixed struct — a struct param qualifies on ONE numeric field, not all of them](repro-mixed-struct/README.md)**<br>`repro-mixed-struct` |
-| — | **[repro platformer cost — where does packages/platformer.tish spend its ticks?](repro-platformer-cost/README.md)**<br>`repro-platformer-cost` |
-| — | **[REPRO: PSG SFX vs MUSIC — does firing a PSG sound effect on a channel the music is using damage the music?](repro-psg-sfx/README.md)**<br>`repro-psg-sfx` |
+| <img src="repro-intro-heap/preview.png" width="480"> | **[repro intro heap — *Where the large SRPG example's memory actually goes](repro-intro-heap/README.md)**<br>`repro-intro-heap` |
+| <img src="repro-mixed-struct/preview.png" width="480"> | **[repro mixed struct — a struct param qualifies on ONE numeric field, not all of them](repro-mixed-struct/README.md)**<br>`repro-mixed-struct` |
+| <img src="repro-platformer-cost/preview.png" width="480"> | **[repro platformer cost — where does packages/platformer.tish spend its ticks?](repro-platformer-cost/README.md)**<br>`repro-platformer-cost` |
+| <img src="repro-psg-sfx/preview.png" width="480"> | **[REPRO: PSG SFX vs MUSIC — does firing a PSG sound effect on a channel the music is using damage the music?](repro-psg-sfx/README.md)**<br>`repro-psg-sfx` |
 | <img src="repro-sprite-y/preview.png" width="480"> | **[repro sprite y — a bug reproduction or regression test case for sprite Y coordinates](repro-sprite-y/README.md)**<br>`repro-sprite-y` |
-| — | **[repro stackframe — struct params and locals across calls read back correctly](repro-stackframe/README.md)**<br>`repro-stackframe` |
+| <img src="repro-stackframe/preview.png" width="480"> | **[repro stackframe — struct params and locals across calls read back correctly](repro-stackframe/README.md)**<br>`repro-stackframe` |
 | <img src="repro-structwrite/preview.png" width="480"> | **[repro structwrite — a bug reproduction or regression test case for struct writes](repro-structwrite/README.md)**<br>`repro-structwrite` |
-| — | **[repro ui layout — native flex solver vs the boxed arithmetic it replaces](repro-ui-layout/README.md)**<br>`repro-ui-layout` |
-| — | **[repro ui paint — native paint vs the boxed paint it replaces, on the same screen](repro-ui-paint/README.md)**<br>`repro-ui-paint` |
-| — | **[repro-uibar](repro-uibar/README.md)**<br>`repro-uibar` |
-| — | **[repro validate 653 — cross-module const/identifier validation must accept this program](repro-validate-653/README.md)**<br>`repro-validate-653` |
-| — | **[repro validate 655 — simple recursion must validate and run](repro-validate-655/README.md)**<br>`repro-validate-655` |
+| <img src="repro-ui-layout/preview.png" width="480"> | **[repro ui layout — native flex solver vs the boxed arithmetic it replaces](repro-ui-layout/README.md)**<br>`repro-ui-layout` |
+| <img src="repro-ui-paint/preview.png" width="480"> | **[repro ui paint — native paint vs the boxed paint it replaces, on the same screen](repro-ui-paint/README.md)**<br>`repro-ui-paint` |
+| <img src="repro-uibar/preview.png" width="480"> | **[repro-uibar](repro-uibar/README.md)**<br>`repro-uibar` |
+| <img src="repro-validate-653/preview.png" width="480"> | **[repro validate 653 — cross-module const/identifier validation must accept this program](repro-validate-653/README.md)**<br>`repro-validate-653` |
+| <img src="repro-validate-655/preview.png" width="480"> | **[repro validate 655 — simple recursion must validate and run](repro-validate-655/README.md)**<br>`repro-validate-655` |

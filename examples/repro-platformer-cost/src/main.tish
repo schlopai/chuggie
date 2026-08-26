@@ -11,7 +11,8 @@
 //
 // Each phase runs 64 frames and logs the MEAN ticks per call. Logging happens BETWEEN phases,
 // so the measured frames carry no string-concat perturbation (docs/perf-rules.md).
-import { log, ticks } from 'cargo:tish_agb'
+import { log, ticks, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 import {
   spawn, set_transform, set_collider, set_platformer, world_step, step_ticks
 } from 'cargo:tish_gba_game_engine'
@@ -21,6 +22,13 @@ import {
   platformerInit, platformerDrive, platformerDriveRaw, platformerAnimate
 } from '../../../packages/platformer'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "repro-platformer-cost")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 grid_setup(15, 10)
 let c: i32 = 0
 while (c < 15) { grid_set_solid(c, 8, 1) c = c + 1 }
@@ -82,3 +90,5 @@ while (f < 360) {
   f = f + 1
 }
 log("repro-platformer-cost done")
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }

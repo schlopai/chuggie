@@ -1,7 +1,15 @@
 // Isolate akari E0599: native i32[] cell-captured by FunDecl, then nested arrow indexes it.
 // Bug: arrow did VmRef::new on an already-VmRef local → VmRef<VmRef<Vec>> and .get fails.
-import { log, vblank } from 'cargo:tish_agb'
+import { log, vblank, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "repro-654-vec-cell-arrow")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 let TEXT_CPS: i32[] = [1, 2, 4]
 
 function textSpeedIndex() {
@@ -32,3 +40,5 @@ while (f < 130) {
   f = f + 1
 }
 log("repro-654-vec-cell-arrow done")
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }

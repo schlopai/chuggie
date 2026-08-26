@@ -2,6 +2,8 @@
 
 > *Does firing a PSG sound effect on a channel the music is using damage the music?*
 
+<img src="preview.png" alt="preview" width="480">
+
 `rap-dojo` plays a short note on a correct answer via `chip_borrow` + `psg_square`. Whichever
 channel it borrows, the music is already using that channel for something, and the reported symptom
 was *"it plays another song over the song, so I can't hear it"*.

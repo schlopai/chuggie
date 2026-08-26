@@ -11,5 +11,12 @@
   },
   "devDependencies": {
     "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+  },
+  "tish": {
+    "rustDependencies": {
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
+    }
   }
 }

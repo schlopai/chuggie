@@ -8,8 +8,8 @@ closest cheap proxy there is for "the frame with the most on it".
 
 Uses tools/gba-shot's sequence mode (GBA_SHOT_SEQ), so it is one emulator boot, not one per frame.
 
-Exits 2 when the best frame found is still a dead screen — at most MIN_COLOURS distinct colours,
-the same bar scripts/shot_check.py uses to call a frame a crash page rather than a picture.
+Exits 2 when the best frame found has no picture on it at all — a flat screen, or a bare
+two-colour fill.
 
 Usage: python3 scripts/best_still.py <rom.gba> <out.png> [frames] [keys]
 """
@@ -21,7 +21,14 @@ from glob import glob
 
 from PIL import Image
 
-MIN_COLOURS = 4          # matches assert_live() in scripts/shot_check.py
+# What counts as "no picture on it". Deliberately NOT a colour count: white text on a solid backdrop
+# is exactly two colours and is a perfectly good preview (repro-654-agg-push draws its name and
+# result that way), while bench-access's best frame is ALSO two colours and is nothing — a
+# half-white/half-black wipe. The difference is not how many colours but how they are distributed:
+# a drawing puts a small amount of ink on a background; a blank or a wipe is a big flat fill.
+FLAT_SHARE = 0.999      # one colour covering this much of the screen is a blank
+INK_MAX_SHARE = 0.20    # in a two-colour frame, a "minority" bigger than this is a fill, not ink
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -51,19 +58,32 @@ def main():
             sys.stderr.write(r.stderr)
             return 1
 
+        def is_drawing(im):
+            """Something was drawn here, as opposed to the screen being blank or filled."""
+            counts = sorted((n for n, _ in im.getcolors(1 << 16)), reverse=True)
+            total = im.width * im.height
+            if len(counts) < 2 or counts[0] / total >= FLAT_SHARE:
+                return False                      # one flat colour: a blank
+            if len(counts) == 2 and counts[1] / total > INK_MAX_SHARE:
+                return False                      # a big two-colour fill: a wipe, not a picture
+            return True
+
+        # Test every frame as it is scanned, rather than picking the most colourful frame and
+        # testing that one at the end. Those are different answers when frames tie on colour count:
+        # repro-654-agg-push's wipe and its final readout are both two colours, and taking the first
+        # threw away the readout. Ties now go to the LATER frame — the settled screen.
         best, best_n = None, -1
         for f in sorted(glob(os.path.join(tmp, "f*.ppm"))):
             im = Image.open(f).convert("RGB")
+            if not is_drawing(im):
+                continue
             n = len(im.getcolors(1 << 16) or [])
-            if n > best_n:
+            if n >= best_n:
                 best_n, best = n, im.copy()
 
         if best is None:
-            print("best_still: no frames captured", file=sys.stderr)
-            return 1
-        if best_n <= MIN_COLOURS:
-            print(f"best_still: dead screen — the best frame in {frames} has only {best_n} "
-                  f"distinct colour(s); this ROM never draws anything.", file=sys.stderr)
+            print(f"best_still: no picture — nothing in {frames} frames is more than a flat "
+                  f"screen or a two-colour fill; this ROM never draws anything.", file=sys.stderr)
             return 2
         best.save(out)
         print(f"best_still: {best_n} colours -> {out}", file=sys.stderr)

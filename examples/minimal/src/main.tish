@@ -1,6 +1,14 @@
 // Minimal pure-tish-agb game: proves the `cargo:tish_agb` binding on GBA.
-import { log, vblank } from 'cargo:tish_agb'
+import { log, vblank, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "minimal")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 let count: i32 = 0
 while (count < 3) {
   log("tish-agb frame " + count)
@@ -8,3 +16,5 @@ while (count < 3) {
   count = count + 1
 }
 log("done")
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }

@@ -1,8 +1,16 @@
 // Isolate a large SRPG example's pattern: one hot FunDecl names ~40 sibling fns.
 // Assert: entry keeps VmRef (`let f = f_ref.clone()`), not Value extract;
 // mGBA survives ≥120 frames without stack-overflow panic.
-import { log, vblank } from 'cargo:tish_agb'
+import { log, vblank, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "repro-654-sibling-stack")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 function f0() { return 0 }
 function f1() { return 1 }
 function f2() { return 2 }
@@ -96,3 +104,5 @@ while (frame < 130) {
   frame = frame + 1
 }
 log("repro-654-sibling-stack done")
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }
