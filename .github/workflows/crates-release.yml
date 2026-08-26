@@ -5,13 +5,11 @@
 # dependency list with a drift guard, rate-limit-aware retry, and skip-if-already-published so a
 # re-dispatch resumes a throttled run instead of restarting it.
 #
-# ── BLOCKED, READ THIS BEFORE ENABLING ────────────────────────────────────────────────────────
-# Only tish_gba_scenepack can publish today. The other four depend on `tishlang_runtime_gba`, which
-# is NOT on crates.io — it lives in the sibling tishlang/tish repo and is consumed here by a
-# `../../../tish/tish/crates/...` path. cargo refuses to publish a crate with a path-only dep, so
-# those four fail until tishlang/tish publishes it. Their manifests already carry
-# `version = ">=0.1"` alongside the path, so they become publishable the moment it lands, with no
-# further edits here. `PUBLISH_BLOCKED_ON_RUNTIME_GBA` below is the switch.
+# All four crates publish, in dependency order. tish_agb_sio, tish_agb and tish_gba_game_engine
+# depend on `tishlang_runtime_gba`; their manifests carry `version = ">=0.1"` alongside the path, so
+# they resolve it from crates.io once tishlang/tish publishes it (tishlang/tish#690 added it to that
+# release's crate list). If it is not there yet, the publish fails on the crate that needs it and
+# names it — a re-dispatch resumes, because already-published crates are skipped.
 
 name: Crates.io release
 
@@ -36,8 +34,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      # Set to "false" once tishlang_runtime_gba is on crates.io — see the header note.
-      PUBLISH_BLOCKED_ON_RUNTIME_GBA: "true"
     steps:
       # FIRST, before anything costly. crates.io only reports a missing token at UPLOAD — "please
       # provide a non-empty token" — which is the very last thing the job does, so a repo without the
@@ -127,7 +123,6 @@ jobs:
             tish_agb                # tishlang_runtime_gba
             tish_gba_game_engine    # tish_agb
           )
-          BLOCKED=(tish_agb_sio tish_agb tish_gba_game_engine)
 
           # Drift guard: a crate added under crates/ but forgotten here would otherwise surface only
           # as a mid-publish "no matching package named" failure on a dependent. Fail early instead.
@@ -167,7 +162,7 @@ jobs:
               fi
               cat "$log"
               if grep -qiE 'no matching package named .tishlang_runtime_gba|failed to select a version for .tishlang_runtime_gba' "$log"; then
-                echo "::error::$crate needs tishlang_runtime_gba on crates.io. Publish it from tishlang/tish first, then set PUBLISH_BLOCKED_ON_RUNTIME_GBA=false here and re-dispatch with tag=${TAG}."
+                echo "::error::$crate needs tishlang_runtime_gba on crates.io. Publish it from tishlang/tish (it is in that repo's crate list), then re-dispatch this workflow with tag=${TAG} — already-published crates are skipped, so it resumes here."
                 rm -f "$log"; return 1
               fi
               if ! grep -qiE '429|too many|rate.?limit|try again (later|after)' "$log"; then
@@ -190,11 +185,6 @@ jobs:
           }
 
           for crate in "${CRATES[@]}"; do
-            if [ "$PUBLISH_BLOCKED_ON_RUNTIME_GBA" = "true" ] \
-               && printf '%s\n' "${BLOCKED[@]}" | grep -qx "$crate"; then
-              echo "::warning::Skipping $crate — blocked on tishlang_runtime_gba reaching crates.io. See the header of this workflow."
-              continue
-            fi
             if curl -sSf -o /dev/null -A "tish-gba-release/1.0 (https://github.com/schlopai/chuggie)" \
                  "https://crates.io/api/v1/crates/${crate}/${VERSION}"; then
               echo "Skipping $crate v${VERSION} (already published)"
