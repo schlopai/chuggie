@@ -2,7 +2,7 @@
 
 > *Six players and a ball — the acceptance test for disc-vs-disc contact.*
 
-<img src="preview.png" width="240">
+<img src="preview.png">
 
 [`golf`](../golf/README.md) proves one disc integrates, bounces off tiles and comes to rest. That
 says nothing about what happens when discs meet **each other**, which is the half of a physics
