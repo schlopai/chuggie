@@ -1,6 +1,6 @@
 # RTS FLOW
 
-<img src="preview.png" alt="preview" width="480">
+<img src="preview.gif" alt="preview" width="480">
 
 RTS de-risk A1: 24 units following one shared flow field through a three-barrier course, measured
 against the 60fps frame budget.

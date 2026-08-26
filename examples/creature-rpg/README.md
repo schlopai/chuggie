@@ -7,7 +7,7 @@ A grid-RPG-style world built on `packages/engine.tish`'s grid movement, with Pix
 joined by a gap in a treeline — plus two house interiors you walk into through their doors. Step
 into the tall grass and one of six wild creatures finds you.
 
-<img src="preview.png" alt="preview" width="480">
+<img src="preview.gif" alt="preview" width="480">
 
 | | |
 |---|---|
