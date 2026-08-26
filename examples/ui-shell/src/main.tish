@@ -18,7 +18,7 @@
 //                  node count and per-phase ticks, so "did that press cost a full layout" is a
 //                  number rather than an impression.
 //
-// The comparison it is against is the retired match-3 port, whose front end did the same job with
+// The comparison it is against is a hand-rolled front end doing the same job with
 // hand-rolled row invalidation.
 //
 // CONTROLS  Up/Down move · A/Start select · Select forces a FULL re-render, for the contrast.

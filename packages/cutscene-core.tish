@@ -100,7 +100,7 @@ function stepAnim(e, face, moving) {
 // ── who an "actor" is ─────────────────────────────────────────────────────────────────────────
 // ⚠️ This package used to REQUIRE engine entities: `cutWalk` positioned actors with
 // `set_transform(e, …)` and read their start with `entity_x/entity_y`. That quietly excluded both
-// isometric examples — `iso-town` and the isoboard SRPG example (now in the chuggie-tactics repo) draw everything with **raw sprites** and create
+// isometric examples — `iso-town` and `iso-tactics` draw everything with **raw sprites** and create
 // no entities at all, so not one cutscene verb could move an actor in the game this narrative layer
 // is being built for. `akari`, the only consumer, happens to use entities, which is why it never
 // showed up.

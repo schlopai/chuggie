@@ -30,7 +30,7 @@ order and checksumming.
 
 It does not fail at runtime; it fails to **build**, so including it would take the other three cases
 down with it and the ROM would report nothing. It was found while wiring the clan bridge into
-the isoboard SRPG example (now in the chuggie-tactics repo):
+an isoboard example:
 
 ```
 error[E0425]: cannot find value `deployList__m18` in this scope

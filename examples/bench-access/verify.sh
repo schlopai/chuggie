@@ -80,14 +80,14 @@ check $? "a ZERO-argument call lowers natively, like a 4-argument one (c0=$C0 vs
 # 4. Passing an `i32[]` across a module boundary is the most expensive thing here: ~222 ticks, some
 #    170x a scalar call. Batching work through an array parameter to avoid N scalar calls is
 #    therefore a PESSIMISATION unless N is large — which is the opposite of the intuition, and the
-#    reason drop-gba's atkBuild rewrite recovered only a third of what it looked like it should.
+#    reason an attack-table rewrite recovered only a third of what it looked like it should.
 [ "$C4ARR" -gt $(( C4 * 20 )) ]
 check $? "an i32[] parameter costs far more than the scalar call it rides on ($C4ARR vs $C4)"
 
 # 5. A REALISTIC accessor — a branch on a module flag plus a computed index into a large module
 #    array, i.e. exactly `rColourPattern` — costs ~193 ticks and does NOT inline. This is the
 #    number the engine's hot loops actually pay, and the one that reconciles the model with the
-#    field: drop-gba measured 2,340 ticks to build one attack line out of 14 such calls.
+#    field: 2,340 ticks measured to build one attack line out of 14 such calls.
 [ "$BIG" -gt $(( C4 * 20 )) ]
 check $? "a realistic accessor does NOT inline away like the trivial ones (big=$BIG vs c4=$C4)"
 
@@ -95,7 +95,7 @@ check $? "a realistic accessor does NOT inline away like the trivial ones (big=$
 #    every element written through it, against ~1.35 for the same write to a module array in the
 #    callee's own file. Forty times. This is what makes "batch it through an out-parameter" the
 #    wrong instinct on this target: the batching helper should own its buffer and expose a reader,
-#    not accept one. drop-gba's atkBuild was 1,469 ticks per call for seven such writes.
+#    not accept one. That atkBuild was 1,469 ticks per call for seven such writes.
 #
 #    c4arr7 runs at WN=5 and c4arr at CN=10, so compare PER OP: (c4arr7/5) > (c4arr/10).
 [ $(( C4ARR7 / 5 )) -gt $(( C4ARR / 10 )) ]
@@ -103,7 +103,7 @@ check $? "an array parameter costs per WRITE, not per call ($(( C4ARR7 / 5 )) fo
 
 echo "== two things that are NOT the problem =="
 # Negative results, asserted so nobody spends an afternoon rediscovering them. Both were live
-# hypotheses for why drop-gba's atkBuild inner loop costs ~20x what the read number predicts.
+# hypotheses for why that atkBuild inner loop costs ~20x what the read number predicts.
 
 # A. Array SIZE does not affect access cost. 2,048 entries reads identically to 64 — the two
 #    measurements are the same number, not merely close.
@@ -122,7 +122,7 @@ echo "== the one that mattered, and no longer does =="
 # identical indices, because a promoted static's index path built a `Value::Number(i as f64)`,
 # matched it back to a usize, read the array as f64 and converted to i32, per element.
 #
-# That finding is why `drop-gba/packages/drop_tables.tish` carries a warmed two-slot cache, and it
+# That finding is why a warmed two-slot table cache is worth considering, and it
 # was the reason to expect one here too. tishlang/tish#645 fixed it. A promoted literal now reads
 # ~0.67 ticks against a pushed array's ~1.69 — the gap did not close, it INVERTED, because a static
 # is a ROM load while a `VmRef<Vec<i32>>` costs a borrow and a bounds check.
@@ -147,7 +147,7 @@ echo "== the mechanism behind all of it =="
 # the callee. That is the ~190 ticks `bigRead` costs and `call4` does not.
 #
 # This is what the numbers above are all made of, and it is checkable directly in the generated
-# Rust rather than inferred from a stopwatch. In drop-gba's whole ROM, ONE function out of hundreds
+# Rust rather than inferred from a stopwatch. In that whole ROM, ONE function out of hundreds
 # got a typed twin: `cpuMaxCandidates(cols: i32): i32 { return cols + 2 * (cols - 1) }`. Every rules
 # function touches state, so every rules call is boxed.
 #

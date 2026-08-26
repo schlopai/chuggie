@@ -10,7 +10,7 @@ screen. A wrong sprite is a wrong tile index here; wrong movement is a wrong X/Y
 Game code cannot forge it, because game code is not what writes this file — the emulator is.
 
 Produce the dumps with an mgba-based memory probe (the `gba-probe` tool, which now lives in the
-chuggie-tactics repo) writing `<prefix>-f<frame>-OAM.bin`, 1024 bytes = 128 entries x 8 bytes.
+writing `<prefix>-f<frame>-OAM.bin`, 1024 bytes = 128 entries x 8 bytes.
 
 ⚠️ COORDINATES ARE NOT SCREEN COORDINATES UNTIL YOU SIGN THEM. Y is 8 bits and X is 9 bits, both
 stored unsigned and both wrapping. An object one pixel off the top of the screen stores Y=255, not

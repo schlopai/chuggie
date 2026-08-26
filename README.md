@@ -40,8 +40,7 @@ frame in tish, measured. `scripts/const_to_let.py` applies the biggest one in bu
 
 - 120+ examples, 50+ authoring packages, headless mGBA verify in CI
 - SoA ECS (`tish-gba-game-engine`) + low-level `tish-agb` bindings on agb 0.25
-- Genre kits (shmup, platformer, top-down, iso, fighter, UI, deck, …); some full
-  games live in sibling repos (drop, tactics, …)
+- Genre kits (shmup, platformer, top-down, iso, fighter, UI, deck, …)
 - npm / crates.io publish still gated (see release workflows); versions are `0.x`
 
 Early P0 spikes (hand-written ROM, hecs rejected for atomics → custom SoA) are

@@ -3,7 +3,7 @@
 #
 #     is a warmed copy of a generated table worth building?
 #
-# The answer decides whether `drop-gba/packages/drop_tables.tish`'s two-slot cache gets generalised
+# The answer decides whether a warmed two-slot table cache gets generalised
 # into this repo's table generator, or whether that whole design is dead code here.
 #
 # ── GATES vs VERDICTS ─────────────────────────────────────────────────────────────────────────
@@ -195,7 +195,7 @@ fi
 
 # 5. What the cache would have COST, either way — kept because it is the number behind the rule
 #    "warm off the hot frame", and a rule with a measurement attached survives a refactor.
-#    drop-gba filled its cache lazily once: the fill landed on the frame that needed the data and
+#    One approach fills the cache lazily: the fill lands on the frame that needs the data and
 #    took the peak from 6,614 to 12,877 ticks, worse than having no cache at all.
 if [ "$FILL128" -gt 4389 ]; then
   verdict "one 128-element fill is ~$FILL128 ticks — MORE than a frame. A lazy fill is a dropped frame."

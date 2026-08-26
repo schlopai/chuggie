@@ -140,8 +140,8 @@ typed externs; the perf-critical setters/getters/emitters are typed, the config/
 | **Top-down (action-RPG)** | `TopDown` + `topdown_system` (8-dir + collision + knockback) + `Chase` native seek AI + `swing` melee + grid interact. `topdown_snap` profiles: **0** free 8-way · **2** tile stepping (a direction commits a full 16px cell) | ❌ **none** (uses engine.tish `makeEntity` methods) | `akari` (flagship: title+cutscene+scenes+combat); the topdown RPG port (own grid-step controller; moved to its own repo); ninja-village, ninja-adventure |
 | **Grid/RPG (tile-locked)** | `GridPos` + `grid_system` (tile-locked 4-dir + occupancy) + `Walk`/`walk_system` + `grid_interact` | ❌ **none** (engine.tish `loadMap` inline arrays) | `overworld-demo` (sole) |
 | **Puzzle (cell grid)** | `tilemap_set` (16px cells) and `tilemap_set8` (one 8x8 tile — added for `blockfall`, because a 10x20 well does not exist at 16px), plus `sheet8:` 8px sprites for a piece that moves every frame | ✅ **packages/grid.tish** — the packed cell word, runs, flood fill, gravity collapse, the causality plane and the tile painter, for anything whose board is columns of PACKED cells | `grid-demo` (floor-stacked match-3 on the kit, with a rising floor); `blockfall` (falling-block, guideline ruleset — deliberately **not** on the kit: packed columns cannot model an overhang, and the hole under one is the whole game) |
-| **Isoboard (SRPG)** | ⚠️ a **separate** board subsystem (`IsoBoardGrid`/`IsoBoardUnit`/`IsoBoard`): BFS move-range, pathfinding, speed-CT turn order, unit HP — *not* the SoA World, *not* in `world_step`, all boxed `isob_*` | ⚠️ **partial** — `packages/iso` (projection/depth/risers/camera); the phase machine, AI and turn flow live in the SRPG examples (now in the chuggie-tactics repo) **by choice** | chuggie-tactics repo |
-| **Isometric render** | `sprite_set_depth` + depth-sort in `frame()` | ✅ **packages/iso.tish** (+ `iso_actors.tish` for the 32px sheet frame contract) | `iso-sprite` (tech demo, pre-package); SRPG examples now in chuggie-tactics |
+| **Isoboard (SRPG)** | ⚠️ a **separate** board subsystem (`IsoBoardGrid`/`IsoBoardUnit`/`IsoBoard`): BFS move-range, pathfinding, speed-CT turn order, unit HP — *not* the SoA World, *not* in `world_step`, all boxed `isob_*` | ⚠️ **partial** — `packages/iso` (projection/depth/risers/camera); the phase machine, AI and turn flow live in the SRPG examples **by choice** | a downstream project repo |
+| **Isometric render** | `sprite_set_depth` + depth-sort in `frame()` | ✅ **packages/iso.tish** (+ `iso_actors.tish` for the 32px sheet frame contract) | `iso-sprite` (tech demo, pre-package); SRPG examples now in a downstream project |
 | **Rhythm (call-and-response)** | `deck_frame()` — the deck sequencer's playhead, exposed so a chart and its song share ONE clock. Added for this genre: the sequencer advances per **elapsed display frame** (`music_catchup`), so a tish-side frame counter falls behind the music on every frame the game misses, and the chart slides off a frame at a time | ✅ **packages/rhythm.tish** — beat clock, hit windows, misses, stray-press-vs-freestyle, combo/score/meter, and the scrolling prompt lane | `rap-dojo` (sole; Parappa-style, fake 3D from `bg_bands`) |
 | **Kart racing (Mode 7)** | `kart_*` in `crates/tish-agb/src/kart.rs` — the whole simulation behind ONE `kart_step()` per frame: fixed-point handling (speed along the heading + slide across it, no `sqrt`), per-surface top speed and drag, drift with a mini-turbo charge, boost, ordered-gate lap validation, standings, and waypoint-following opponents with a rubber band that scales TOP SPEED (as a per-frame subtraction it could exceed acceleration and stop a leading AI dead). Plus `kart_draw()`: billboard placement, the heading frame, and the near/far sheet swap the GBA needs because it cannot scale a sprite | ✅ **packages/kart.tish** — the genre kit over those natives; nothing per-kart on the frame path | `kart-circuit` (sole; drift+boost, off-road, 3 rubber-banded AI, attract-mode demo) |
 | **Card / cold screen** | none — and none needed. Cards are `ui_rect` + `ui_text` on the UI text canvas: no OAM, no sprite VRAM, no palette banks, no art files. The constraints that matter are the canvas ones: ONE 15-entry UI palette, `ui_begin` once per frame, and `ui_clear_rect` snapping OUT to whole 8x8 tiles | ❌ **none** (deliberate — nothing here generalises past "a pile of cards"; the reusable half already exists as card-gba's `card-ui.tish`) | `solitaire` (Klondike: deal, run moves, undo, auto-finish, attract player). ⚠️ a whole-table repaint is ~20 FRAMES — gate per PILE. ⚠️ NEVER clear-then-draw: the beam crosses the cleared region before the redraw lands, which the player sees as FLICKER on every selection; overdraw opaquely and erase only the tail a shrunken pile leaves. ⚠️ a screenshot taken during a multi-frame repaint shows a HALF-DRAWN canvas, which looks exactly like a draw call that failed |
@@ -208,7 +208,7 @@ Grouped by genre / layer (see the examples pass for the full per-example table):
 - **probes**: probe-arrayret — settles whether a tish fn can return an array on device (it can).
 - **SRPG family** — the isoboard SRPG game and its ~44 subsystem examples (town, battle, UI,
   progression, persistence, audio, campaign integration) were extracted to the sibling
-  **chuggie-tactics** repo, which builds against this engine's crates (`isob_*` natives,
+  downstream project, which builds against this engine's crates (`isob_*` natives,
   `packages/iso`, the `isoboard:` scheme). See that repo's INVENTORY.md for the family map and its
   verify.sh discipline.
 - **tech/demo**: iso-sprite, engine-demo, collect-demo, mono-demo, anim-demo, bg-demo, input-demo, asset-sprite, dpad-sprite, minimal, title-demo, fonts-demo, bench-ai, bench-entities, repro-structwrite, p0-spike.
@@ -233,7 +233,7 @@ Ranked by architectural impact. These are the drifts from "one consistent archit
 2. **Genre packages: platformer DONE, isometric DONE, top-down partial, grid and isoboard-battle outstanding.**
    ✅ `packages/iso.tish` now owns the isometric projection, depth biases, raised-block redraw and
    camera clamp, and `packages/iso_actors.tish` the 32px sheet frame contract. Both were verbatim
-   copies in the SRPG examples (now in chuggie-tactics) that had **already drifted**: `UNIT_LIFT` was 12 in one and
+   copies in the SRPG examples that had **already drifted**: `UNIT_LIFT` was 12 in one and
    20 in the other (20 is correct — the art is byte-identical and its feet sit 8px below where 12
    puts them), and one demo hardcoded the bake origin, pinning it to boards of about 8×8. The
    remaining isoboard work is the battle controller itself.
@@ -249,7 +249,7 @@ Ranked by architectural impact. These are the drifts from "one consistent archit
    was discarding, so pressing A beside an NPC talked to them *and* swung a sword through them on the
    same frame. Room streaming is deliberately still per-game; see
    [`docs/topdown-genre.md`](docs/topdown-genre.md) for what is owned, what is not, and why.
-   ⚠️ the SRPG integration example (chuggie-tactics repo) still hand-rolls 763 lines. Still to
+   ⚠️ the SRPG integration example still hand-rolls 763 lines. Still to
    extract: **`packages/grid`** and a battle-controller package. `packages/drop` now covers
    the puzzle genre, and `tilemap_set` (added for it) is the per-cell background write any future
    `packages/grid` will want — a sprite per cell is not viable, see the measurements in

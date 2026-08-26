@@ -18,13 +18,13 @@
 // WHY LOCKSTEP AND NOT STATE SYNC. A 16-bit word per frame is what the cable comfortably carries;
 // a board is 63 cells plus chain state plus a queue, and sending that at 60Hz is not close to
 // possible. Sending only the inputs works exactly as long as both machines agree on everything
-// else — which is why `schlop/drop-gba/archive/crates/tish-gba-drop` has a seeded LCG rather than a clock-seeded one, and
+// else — which is why a lockstep game wants a seeded LCG rather than a clock-seeded one, and
 // why nothing in the rules reads the frame counter. That property was built in from the start and
 // is the reason this is a transport rather than a rewrite.
 //
 // HOW THIS IS TESTED. `tools/gba-link` runs two cores in one process with their serial ports
 // wired together through mGBA's own SIO lockstep, so the two-console case is exercised for real:
-// both units enumerate, agree a seed and exchange words. drop-gba's `examples/drop-link` covers the other
+// both units enumerate, agree a seed and exchange words. `examples/pong-link` covers the other
 // half — a side driven by a word from outside — without needing a peer at all.
 //
 // Three bugs came out of actually running it, and none would have been visible from reading:

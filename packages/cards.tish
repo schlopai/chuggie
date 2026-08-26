@@ -1,6 +1,6 @@
 // cards.tish — piles of cards: the model under patience, deckbuilders and trick-takers.
 //
-// `examples/solitaire` and a card-battle example (since moved to the chuggie-tactics repo) each wrote their own pile array, their own
+// `examples/solitaire` and a card-battle example each wrote their own pile array, their own
 // shuffle and their own "move the top N cards" loop. This is that model extracted once. It owns
 // NOTHING about rendering, input or rules — a pile here is an ordered stack of card ids with a
 // face-up bit each, and every game's legality check stays in the game.

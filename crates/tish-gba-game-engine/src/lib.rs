@@ -10083,7 +10083,7 @@ pub fn world_step(_args: &[Value]) -> Value {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Iso grid — a reusable isometric, height-mapped board with SRPG-style movement.
 // Standalone global state (independent of the SoA `World`): a game renders however it likes and uses
-// these for the logical grid, move-range flood fill, and pathfinding. See the SRPG plan doc in the chuggie-tactics repo.
+// these for the logical grid, move-range flood fill, and pathfinding. See the SRPG plan doc outside this repo.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[derive(Clone, Copy)]
@@ -10461,10 +10461,11 @@ impl IsoBoardGrid {
     }
 }
 
-static TAC: SingleCore<RefCell<IsoBoardGrid>> = SingleCore::new(RefCell::new(IsoBoardGrid::new()));
+static ISO_GRID: SingleCore<RefCell<IsoBoardGrid>> =
+    SingleCore::new(RefCell::new(IsoBoardGrid::new()));
 
-fn with_tac<R>(f: impl FnOnce(&mut IsoBoardGrid) -> R) -> R {
-    TAC.with(|c| f(&mut c.borrow_mut()))
+fn with_iso_grid<R>(f: impl FnOnce(&mut IsoBoardGrid) -> R) -> R {
+    ISO_GRID.with(|c| f(&mut c.borrow_mut()))
 }
 
 // ── Baked iso boards (the `isoboard:` import scheme) ───────────────────────
@@ -10633,14 +10634,14 @@ fn with_board<R>(handle: i32, f: impl FnOnce(&IsoBoard) -> R) -> Option<R> {
 pub fn isob_load(args: &[Value]) -> Value {
     let handle = n(args, 0) as i32;
     // The board's fields are all Copy (ints + `'static` slices), so copy them out and drop the
-    // registry borrow before touching TAC — no nested `SingleCore` borrows.
+    // registry borrow before touching ISO_GRID — no nested `SingleCore` borrows.
     if let Some((w, h, frames, heights, walk, sky)) =
         with_board(handle, |b| (b.w, b.h, b.frames, b.heights, b.walk, b.sky))
     {
         // The board's own sky, or a disarm. Done here rather than left to the game so that loading a
         // board never leaves the PREVIOUS board's gradient running behind it.
         tish_agb::native_sky_set(sky);
-        with_tac(|t| {
+        with_iso_grid(|t| {
             t.init(w, h);
             for i in 0..(w * h) as usize {
                 if let Some(ci) = t.idx(i as i32 % w, i as i32 / w) {
@@ -10712,10 +10713,10 @@ pub fn isob_board_lift(args: &[Value]) -> Value {
 
 /// `isob_w()` / `isob_h()` — the loaded grid's dimensions (valid after `isob_load` / `isob_init`).
 pub fn isob_w(_args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.w) as f64)
+    Value::Number(with_iso_grid(|t| t.w) as f64)
 }
 pub fn isob_h(_args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.h) as f64)
+    Value::Number(with_iso_grid(|t| t.h) as f64)
 }
 
 /// `isob_spawn_count(board)` — how many unit spawns the map defines.
@@ -10742,14 +10743,14 @@ pub fn isob_spawn_team(args: &[Value]) -> Value {
 
 /// `isob_init(w, h)` — (re)create a `w×h` iso board (all cells walkable, height 0, unoccupied).
 pub fn isob_init(args: &[Value]) -> Value {
-    with_tac(|t| t.init(n(args, 0) as i32, n(args, 1) as i32));
+    with_iso_grid(|t| t.init(n(args, 0) as i32, n(args, 1) as i32));
     Value::Null
 }
 
 /// `isob_set_cell(col, row, height, tile, walkable)` — set a cell's elevation, terrain id, and
 /// whether a unit may stand on it. Occupancy is separate (`isob_set_occupant`).
 pub fn isob_set_cell(args: &[Value]) -> Value {
-    with_tac(|t| {
+    with_iso_grid(|t| {
         if let Some(i) = t.idx(n(args, 0) as i32, n(args, 1) as i32) {
             t.cells[i].height = n(args, 2) as u8;
             t.cells[i].tile = n(args, 3) as u8;
@@ -10761,7 +10762,7 @@ pub fn isob_set_cell(args: &[Value]) -> Value {
 
 /// `isob_height(col, row)` — a cell's elevation (0 off-board).
 pub fn isob_height(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| {
+    Value::Number(with_iso_grid(|t| {
         t.idx(n(args, 0) as i32, n(args, 1) as i32)
             .map_or(0, |i| t.cells[i].height as i32)
     }) as f64)
@@ -10769,7 +10770,7 @@ pub fn isob_height(args: &[Value]) -> Value {
 
 /// `isob_tile(col, row)` — a cell's terrain/type id.
 pub fn isob_tile(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| {
+    Value::Number(with_iso_grid(|t| {
         t.idx(n(args, 0) as i32, n(args, 1) as i32)
             .map_or(0, |i| t.cells[i].tile as i32)
     }) as f64)
@@ -10777,7 +10778,7 @@ pub fn isob_tile(args: &[Value]) -> Value {
 
 /// `isob_walkable(col, row)` — 1 if a unit may stand on the cell, else 0.
 pub fn isob_walkable(args: &[Value]) -> Value {
-    Value::Bool(with_tac(|t| {
+    Value::Bool(with_iso_grid(|t| {
         t.idx(n(args, 0) as i32, n(args, 1) as i32)
             .is_some_and(|i| t.cells[i].walkable)
     }))
@@ -10786,7 +10787,7 @@ pub fn isob_walkable(args: &[Value]) -> Value {
 /// `isob_set_occupant(col, row, entity)` — mark which unit stands on a cell (-1 = empty). Occupied
 /// cells block other units' movement.
 pub fn isob_set_occupant(args: &[Value]) -> Value {
-    with_tac(|t| {
+    with_iso_grid(|t| {
         if let Some(i) = t.idx(n(args, 0) as i32, n(args, 1) as i32) {
             t.cells[i].occupant = n(args, 2) as i32;
         }
@@ -10796,7 +10797,7 @@ pub fn isob_set_occupant(args: &[Value]) -> Value {
 
 /// `isob_occupant(col, row)` — entity id standing on the cell, or -1.
 pub fn isob_occupant(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| {
+    Value::Number(with_iso_grid(|t| {
         t.idx(n(args, 0) as i32, n(args, 1) as i32)
             .map_or(-1, |i| t.cells[i].occupant)
     }) as f64)
@@ -10817,7 +10818,7 @@ pub fn isob_move_range(args: &[Value]) -> Value {
     } else {
         -1
     };
-    with_tac(|t| {
+    with_iso_grid(|t| {
         t.move_range(
             n(args, 0) as i32,
             n(args, 1) as i32,
@@ -10827,7 +10828,7 @@ pub fn isob_move_range(args: &[Value]) -> Value {
             team,
         )
     });
-    Value::Number(with_tac(|t| t.reach.len()) as f64)
+    Value::Number(with_iso_grid(|t| t.reach.len()) as f64)
 }
 
 /// `isob_move_cost(col, row)` — what the last computed move-range spent to REACH that cell, or -1 if
@@ -10840,7 +10841,7 @@ pub fn isob_move_range(args: &[Value]) -> Value {
 /// a test that wants to prove a rule fired.
 pub fn isob_move_cost(args: &[Value]) -> Value {
     let (c, r) = (n(args, 0) as i32, n(args, 1) as i32);
-    Value::Number(with_tac(|t| match t.idx(c, r) {
+    Value::Number(with_iso_grid(|t| match t.idx(c, r) {
         Some(i) if t.in_move[i] => t.dist[i],
         _ => -1,
     }) as f64)
@@ -10849,7 +10850,7 @@ pub fn isob_move_cost(args: &[Value]) -> Value {
 /// `isob_in_range(col, row)` — 1 if the cell is in the last computed move-range, else 0 (Number so
 /// tish `isob_in_range(...) > 0` works).
 pub fn isob_in_range(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| {
+    Value::Number(with_iso_grid(|t| {
         t.idx(n(args, 0) as i32, n(args, 1) as i32)
             .map_or(0, |i| t.in_move[i] as i32)
     }) as f64)
@@ -10857,18 +10858,18 @@ pub fn isob_in_range(args: &[Value]) -> Value {
 
 /// `isob_range_count()` — number of reachable cells from the last `isob_move_range`.
 pub fn isob_range_count(_args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.reach.len()) as f64)
+    Value::Number(with_iso_grid(|t| t.reach.len()) as f64)
 }
 /// `isob_range_col(i)` / `isob_range_row(i)` — the i-th reachable cell.
 pub fn isob_range_col(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| {
+    Value::Number(with_iso_grid(|t| {
         t.reach
             .get(n(args, 0) as usize)
             .map_or(-1, |&(c, _)| c as i32)
     }) as f64)
 }
 pub fn isob_range_row(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| {
+    Value::Number(with_iso_grid(|t| {
         t.reach
             .get(n(args, 0) as usize)
             .map_or(-1, |&(_, r)| r as i32)
@@ -10878,21 +10879,21 @@ pub fn isob_range_row(args: &[Value]) -> Value {
 /// `isob_path(col, row)` — reconstruct the route from the last move-range's origin to (col,row);
 /// returns its length (0 if unreachable). Read with `isob_path_len` / `isob_path_col` / `isob_path_row`.
 pub fn isob_path(args: &[Value]) -> Value {
-    with_tac(|t| t.path_to(n(args, 0) as i32, n(args, 1) as i32));
-    Value::Number(with_tac(|t| t.path.len()) as f64)
+    with_iso_grid(|t| t.path_to(n(args, 0) as i32, n(args, 1) as i32));
+    Value::Number(with_iso_grid(|t| t.path.len()) as f64)
 }
 pub fn isob_path_len(_args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.path.len()) as f64)
+    Value::Number(with_iso_grid(|t| t.path.len()) as f64)
 }
 pub fn isob_path_col(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| {
+    Value::Number(with_iso_grid(|t| {
         t.path
             .get(n(args, 0) as usize)
             .map_or(-1, |&(c, _)| c as i32)
     }) as f64)
 }
 pub fn isob_path_row(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| {
+    Value::Number(with_iso_grid(|t| {
         t.path
             .get(n(args, 0) as usize)
             .map_or(-1, |&(_, r)| r as i32)
@@ -10904,7 +10905,7 @@ pub fn isob_path_row(args: &[Value]) -> Value {
 /// `isob_add_unit(col, row, team, speed, move, jump, hp)` — register a unit on the board (claiming the
 /// cell) and return its id. Ids count up from 0 in registration order.
 pub fn isob_add_unit(args: &[Value]) -> Value {
-    let id = with_tac(|t| {
+    let id = with_iso_grid(|t| {
         t.add_unit(
             n(args, 0) as i32,
             n(args, 1) as i32,
@@ -10927,7 +10928,7 @@ pub fn isob_add_unit(args: &[Value]) -> Value {
 /// obviously a leak — the turn queue offers turns to units from a fight that ended, and the tish
 /// side's own count disagrees with the engine's.
 pub fn isob_clear_units(_args: &[Value]) -> Value {
-    with_tac(|t| {
+    with_iso_grid(|t| {
         t.units.clear();
         for c in t.cells.iter_mut() {
             c.occupant = -1;
@@ -10938,11 +10939,11 @@ pub fn isob_clear_units(_args: &[Value]) -> Value {
 
 /// `isob_unit_count()` — number of registered units.
 pub fn isob_unit_count(_args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.units.len()) as f64)
+    Value::Number(with_iso_grid(|t| t.units.len()) as f64)
 }
 
 fn unit_field(args: &[Value], f: impl Fn(&IsoBoardUnit) -> i32) -> Value {
-    Value::Number(with_tac(|t| t.units.get(n(args, 0) as usize).map_or(-1, f)) as f64)
+    Value::Number(with_iso_grid(|t| t.units.get(n(args, 0) as usize).map_or(-1, f)) as f64)
 }
 
 /// Per-unit getters: `isob_unit_col/row/team/hp/maxhp/move/jump/speed(id)`, `isob_unit_alive(id)`.
@@ -10972,7 +10973,7 @@ pub fn isob_unit_speed(args: &[Value]) -> Value {
 }
 pub fn isob_unit_alive(args: &[Value]) -> Value {
     // Number (1/0), not Bool, so tish `isob_unit_alive(id) > 0` comparisons work on GBA.
-    Value::Number(with_tac(|t| {
+    Value::Number(with_iso_grid(|t| {
         t.units
             .get(n(args, 0) as usize)
             .map_or(0, |u| u.alive as i32)
@@ -10982,7 +10983,7 @@ pub fn isob_unit_alive(args: &[Value]) -> Value {
 /// `isob_unit_move_range(id)` — flood-fill the reachable tiles for a unit using its own Move/Jump and
 /// movement type (from its current cell). Then query with `isob_in_range` / `isob_range_*` / `isob_path`.
 pub fn isob_unit_move_range(args: &[Value]) -> Value {
-    with_tac(|t| {
+    with_iso_grid(|t| {
         if let Some(u) = t.units.get(n(args, 0) as usize).copied() {
             t.move_range(
                 u.col,
@@ -10994,7 +10995,7 @@ pub fn isob_unit_move_range(args: &[Value]) -> Value {
             );
         }
     });
-    Value::Number(with_tac(|t| t.reach.len()) as f64)
+    Value::Number(with_iso_grid(|t| t.reach.len()) as f64)
 }
 
 /// `isob_set_terrain_cost(tile, cost)` — move points needed to ENTER a cell of terrain id `tile`.
@@ -11008,7 +11009,7 @@ pub fn isob_unit_move_range(args: &[Value]) -> Value {
 pub fn isob_set_terrain_cost(args: &[Value]) -> Value {
     let tile = n(args, 0) as usize;
     let cost = (n(args, 1) as i32).clamp(1, 255) as u8;
-    with_tac(|t| {
+    with_iso_grid(|t| {
         if tile < t.cost.len() {
             t.cost[tile] = cost;
         }
@@ -11030,7 +11031,7 @@ pub fn isob_set_terrain_cost(args: &[Value]) -> Value {
 pub fn isob_knockback(args: &[Value]) -> Value {
     let id = n(args, 0) as i32;
     let (sc, sr) = (n(args, 1) as i32, n(args, 2) as i32);
-    let moved = with_tac(|t| match t.knock_dest(id, sc, sr) {
+    let moved = with_iso_grid(|t| match t.knock_dest(id, sc, sr) {
         Some((nc, nr, _)) => {
             t.unit_set_pos(id, nc, nr);
             true
@@ -11051,7 +11052,9 @@ pub fn isob_knockback(args: &[Value]) -> Value {
 pub fn isob_knock_drop(args: &[Value]) -> Value {
     let id = n(args, 0) as i32;
     let (sc, sr) = (n(args, 1) as i32, n(args, 2) as i32);
-    Value::Number(with_tac(|t| t.knock_dest(id, sc, sr).map_or(0, |(_, _, d)| d.max(0))) as f64)
+    Value::Number(
+        with_iso_grid(|t| t.knock_dest(id, sc, sr).map_or(0, |(_, _, d)| d.max(0))) as f64,
+    )
 }
 
 /// `isob_set_zoc(on)` — turn zone of control on or off for every subsequent move-range query.
@@ -11062,7 +11065,7 @@ pub fn isob_knock_drop(args: &[Value]) -> Value {
 /// for a game that does not ask for it.
 pub fn isob_set_zoc(args: &[Value]) -> Value {
     let on = n(args, 0) != 0.0;
-    with_tac(|t| t.zoc_on = on);
+    with_iso_grid(|t| t.zoc_on = on);
     Value::Null
 }
 
@@ -11078,7 +11081,7 @@ pub fn isob_set_zoc(args: &[Value]) -> Value {
 pub fn isob_revive(args: &[Value]) -> Value {
     let id = n(args, 0) as i32;
     let hp = n(args, 1) as i16;
-    Value::Number(with_tac(|t| {
+    Value::Number(with_iso_grid(|t| {
         let (col, row, max_hp) = match t.units.get(id as usize) {
             Some(u) if !u.alive => (u.col, u.row, u.max_hp),
             _ => return 0,
@@ -11106,7 +11109,7 @@ pub fn isob_turn_end(args: &[Value]) -> Value {
     let id = n(args, 0) as usize;
     let moved = n(args, 1) != 0.0;
     let acted = n(args, 2) != 0.0;
-    with_tac(|t| {
+    with_iso_grid(|t| {
         if let Some(u) = t.units.get_mut(id) {
             let mut cost = 0;
             if moved {
@@ -11124,7 +11127,7 @@ pub fn isob_turn_end(args: &[Value]) -> Value {
 /// `isob_unit_ct(id)` — the unit's current turn counter, for a UI that wants to show who is next.
 pub fn isob_unit_ct(args: &[Value]) -> Value {
     let id = n(args, 0) as usize;
-    Value::Number(with_tac(|t| t.units.get(id).map_or(0, |u| u.ct)) as f64)
+    Value::Number(with_iso_grid(|t| t.units.get(id).map_or(0, |u| u.ct)) as f64)
 }
 
 /// `isob_unit_set_speed_scale(id, percent)` — scale how fast a unit's turn counter fills. 100 is
@@ -11140,7 +11143,7 @@ pub fn isob_unit_ct(args: &[Value]) -> Value {
 pub fn isob_unit_set_speed_scale(args: &[Value]) -> Value {
     let id = n(args, 0) as usize;
     let pct = (n(args, 1) as i32).clamp(1, 1000) as u16;
-    with_tac(|t| {
+    with_iso_grid(|t| {
         if let Some(u) = t.units.get_mut(id) {
             u.speed_scale = pct;
         }
@@ -11156,7 +11159,7 @@ pub fn isob_unit_set_speed_scale(args: &[Value]) -> Value {
 pub fn isob_unit_set_flying(args: &[Value]) -> Value {
     let id = n(args, 0) as usize;
     let f = n(args, 1) != 0.0;
-    with_tac(|t| {
+    with_iso_grid(|t| {
         if let Some(u) = t.units.get_mut(id) {
             u.flying = f;
         }
@@ -11166,7 +11169,7 @@ pub fn isob_unit_set_flying(args: &[Value]) -> Value {
 
 /// `isob_unit_set_pos(id, col, row)` — move a unit (updates board occupancy).
 pub fn isob_unit_set_pos(args: &[Value]) -> Value {
-    with_tac(|t| t.unit_set_pos(n(args, 0) as i32, n(args, 1) as i32, n(args, 2) as i32));
+    with_iso_grid(|t| t.unit_set_pos(n(args, 0) as i32, n(args, 1) as i32, n(args, 2) as i32));
     Value::Null
 }
 
@@ -11175,7 +11178,7 @@ pub fn isob_unit_set_pos(args: &[Value]) -> Value {
 pub fn isob_damage(args: &[Value]) -> Value {
     let id = n(args, 0) as i32;
     let amt = n(args, 1) as i16;
-    with_tac(|t| {
+    with_iso_grid(|t| {
         let (dead, c, r) = match t.units.get_mut(id as usize) {
             Some(u) if u.alive => {
                 u.hp -= amt;
@@ -11203,7 +11206,7 @@ pub fn isob_damage(args: &[Value]) -> Value {
 pub fn isob_heal(args: &[Value]) -> Value {
     let id = n(args, 0) as i32;
     let amt = n(args, 1) as i16;
-    with_tac(|t| {
+    with_iso_grid(|t| {
         if let Some(u) = t.units.get_mut(id as usize) {
             if u.alive {
                 u.hp = (u.hp + amt).min(u.max_hp);
@@ -11216,7 +11219,7 @@ pub fn isob_heal(args: &[Value]) -> Value {
 /// `isob_unit_set_maxhp(id, v)` — set a unit's HP ceiling, keeping current HP in range. Returns the
 /// new maximum (0 for an unknown unit).
 ///
-/// ⚠️ This exists because the SRPG growth rules (now in the chuggie-tactics repo) documented a rule they could not implement: "what
+/// ⚠️ This exists because the SRPG growth rules (no longer in this repo) documented a rule they could not implement: "what
 /// a level does NOT raise is HP … there is no setter for the maximum, so growing it would mean a
 /// Rust change." Real SRPG levels raise HP, so the engine was quietly deciding a game-design
 /// question. A missing setter is not a neutral omission — it becomes a rule.
@@ -11227,7 +11230,7 @@ pub fn isob_heal(args: &[Value]) -> Value {
 pub fn isob_unit_set_maxhp(args: &[Value]) -> Value {
     let id = n(args, 0) as i32;
     let v = (n(args, 1) as i16).max(1);
-    with_tac(|t| {
+    with_iso_grid(|t| {
         if let Some(u) = t.units.get_mut(id as usize) {
             let delta = v - u.max_hp;
             u.max_hp = v;
@@ -11245,7 +11248,7 @@ pub fn isob_unit_set_maxhp(args: &[Value]) -> Value {
 /// `isob_turn_next()` — advance the speed-based turn queue and return the id of the unit whose turn it
 /// is (or -1 if none are alive).
 pub fn isob_turn_next(_args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.turn_next()) as f64)
+    Value::Number(with_iso_grid(|t| t.turn_next()) as f64)
 }
 
 // ── Attack targeting ────────────────────────────────────────────────────────────
@@ -11277,7 +11280,7 @@ impl IsoBoardGrid {
 /// `isob_adjacent_enemy(unitId)` — a living enemy on one of the unit's 4 neighbouring tiles (in
 /// range of a melee attack), or -1 if none. Used for attack targeting and AI.
 pub fn isob_adjacent_enemy(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.adjacent_enemy(n(args, 0) as i32)) as f64)
+    Value::Number(with_iso_grid(|t| t.adjacent_enemy(n(args, 0) as i32)) as f64)
 }
 
 // ── isob_* typed siblings ────────────────────────────────────────────────────────
@@ -11992,6 +11995,1144 @@ pub fn swing_typed(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32) -> i32 
 pub fn world_step_typed() -> i32 {
     match world_step(&[]) {
         Value::Bool(b) => b as i32,
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+/// `iso_stack_count(board, col, row)` — how many RAISED blocks are stacked on a cell (0 for flat).
+pub fn iso_stack_count(args: &[Value]) -> Value {
+    let (h, c, r) = (n(args, 0) as i32, n(args, 1) as i32, n(args, 2) as i32);
+    Value::Number(
+        with_board(h, |b| {
+            board_stack_span(b, c, r).map_or(0, |(_, len)| len as i32)
+        })
+        .unwrap_or(0) as f64,
+    )
+}
+
+/// `iso_stack_elev(board, col, row, i)` — the i-th stacked block's TOP elevation (8px units).
+pub fn iso_stack_elev(args: &[Value]) -> Value {
+    stack_field(args, |b, j| b.stack_elev[j] as i32)
+}
+
+/// `iso_stack_tile(board, col, row, i)` — the i-th stacked block's own tile frame.
+pub fn iso_stack_tile(args: &[Value]) -> Value {
+    stack_field(args, |b, j| b.stack_tile[j] as i32)
+}
+
+/// `iso_load(board)` — build the grid from a `tactics:` board: size it, then fill every cell's
+/// elevation / terrain id / walkability from the baked map. Replaces `iso_init` + a per-cell
+/// `iso_set_cell` loop. Unit spawns are read separately (`iso_spawn_*`) so the game maps each to its
+/// class stats before `iso_add_unit`.
+pub fn iso_load(args: &[Value]) -> Value {
+    let handle = n(args, 0) as i32;
+    // The board's fields are all Copy (ints + `'static` slices), so copy them out and drop the
+    // registry borrow before touching ISO_GRID — no nested `SingleCore` borrows.
+    if let Some((w, h, frames, heights, walk, sky)) =
+        with_board(handle, |b| (b.w, b.h, b.frames, b.heights, b.walk, b.sky))
+    {
+        // The board's own sky, or a disarm. Done here rather than left to the game so that loading a
+        // board never leaves the PREVIOUS board's gradient running behind it.
+        tish_agb::native_sky_set(sky);
+        with_iso_grid(|t| {
+            t.init(w, h);
+            for i in 0..(w * h) as usize {
+                if let Some(ci) = t.idx(i as i32 % w, i as i32 / w) {
+                    t.cells[ci].height = *heights.get(i).unwrap_or(&0);
+                    t.cells[ci].tile = *frames.get(i).unwrap_or(&0);
+                    t.cells[ci].walkable = *walk.get(i).unwrap_or(&1) != 0;
+                }
+            }
+        });
+    }
+    Value::Null
+}
+
+/// `iso_board_bg(board)` — the floor background handle to hand to `bg_new`. `-1` if unknown.
+pub fn iso_board_bg(args: &[Value]) -> Value {
+    // ⚠️ From the SIDE TABLE, not the board. The board is a `static` baked at compile time and the
+    // background handle is only assigned at registration, so `IsoBoard::bg` is always 0.
+    let h = n(args, 0) as i32;
+    if h < 0 || h as usize >= MAX_BOARDS {
+        return Value::Number(-1.0);
+    }
+    Value::Number(ISO_BOARD_BG.with(|c| c.borrow()[h as usize]) as f64)
+}
+
+/// `iso_board_mapw(board)` / `iso_board_maph(board)` — the layer size in pixels, for camera clamps.
+pub fn iso_board_mapw(args: &[Value]) -> Value {
+    Value::Number(with_board(n(args, 0) as i32, |b| b.mapw).unwrap_or(512) as f64)
+}
+
+pub fn iso_board_maph(args: &[Value]) -> Value {
+    Value::Number(with_board(n(args, 0) as i32, |b| b.maph).unwrap_or(512) as f64)
+}
+
+/// `iso_board_cw(board)` / `iso_board_ch(board)` — the painted content's right/bottom edge in px.
+pub fn iso_board_cw(args: &[Value]) -> Value {
+    Value::Number(with_board(n(args, 0) as i32, |b| b.cw).unwrap_or(512) as f64)
+}
+
+pub fn iso_board_ch(args: &[Value]) -> Value {
+    Value::Number(with_board(n(args, 0) as i32, |b| b.ch).unwrap_or(512) as f64)
+}
+
+/// `iso_board_fg(board)` — the FOREGROUND background handle, or `-1` if the board has none.
+///
+/// Hand it to `bg_new` at a priority ABOVE the unit sprites (a lower number; sprites sit at 2) so
+/// that scenery in it — mounds, trees, chimneys — occludes the units standing behind it, which is
+/// the whole reason the foreground is a layer of its own.
+pub fn iso_board_fg(args: &[Value]) -> Value {
+    let h = n(args, 0) as i32;
+    if h < 0 || h as usize >= MAX_BOARDS {
+        return Value::Number(-1.0);
+    }
+    Value::Number(ISO_BOARD_FG.with(|c| c.borrow()[h as usize]) as f64)
+}
+
+/// `iso_board_ox(board)` / `iso_board_oy(board)` — iso projection origin used when the floor was baked.
+pub fn iso_board_ox(args: &[Value]) -> Value {
+    Value::Number(with_board(n(args, 0) as i32, |b| b.ox).unwrap_or(96) as f64)
+}
+
+pub fn iso_board_oy(args: &[Value]) -> Value {
+    Value::Number(with_board(n(args, 0) as i32, |b| b.oy).unwrap_or(24) as f64)
+}
+
+/// `iso_board_lift(board)` — pixels the floor art rises per elevation unit, as baked. See
+/// `IsoBoard::lift`; defaults to the classic 8 for boards that predate the field.
+pub fn iso_board_lift(args: &[Value]) -> Value {
+    Value::Number(with_board(n(args, 0) as i32, |b| b.lift).unwrap_or(8) as f64)
+}
+
+/// `iso_w()` / `iso_h()` — the loaded grid's dimensions (valid after `iso_load` / `iso_init`).
+pub fn iso_w(_args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| t.w) as f64)
+}
+
+pub fn iso_h(_args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| t.h) as f64)
+}
+
+/// `iso_spawn_count(board)` — how many unit spawns the map defines.
+pub fn iso_spawn_count(args: &[Value]) -> Value {
+    Value::Number(with_board(n(args, 0) as i32, |b| b.spawns.len() as i32).unwrap_or(0) as f64)
+}
+
+/// `iso_spawn_col/row/cls/team(board, i)` — the i-th spawn's grid column / row / class index / team.
+pub fn iso_spawn_col(args: &[Value]) -> Value {
+    spawn_field(args, |s| s.0 as i32)
+}
+
+pub fn iso_spawn_row(args: &[Value]) -> Value {
+    spawn_field(args, |s| s.1 as i32)
+}
+
+pub fn iso_spawn_cls(args: &[Value]) -> Value {
+    spawn_field(args, |s| s.2 as i32)
+}
+
+pub fn iso_spawn_team(args: &[Value]) -> Value {
+    spawn_field(args, |s| s.3 as i32)
+}
+
+/// `iso_init(w, h)` — (re)create a `w×h` tactics board (all cells walkable, height 0, unoccupied).
+pub fn iso_init(args: &[Value]) -> Value {
+    with_iso_grid(|t| t.init(n(args, 0) as i32, n(args, 1) as i32));
+    Value::Null
+}
+
+/// `iso_set_cell(col, row, height, tile, walkable)` — set a cell's elevation, terrain id, and
+/// whether a unit may stand on it. Occupancy is separate (`iso_set_occupant`).
+pub fn iso_set_cell(args: &[Value]) -> Value {
+    with_iso_grid(|t| {
+        if let Some(i) = t.idx(n(args, 0) as i32, n(args, 1) as i32) {
+            t.cells[i].height = n(args, 2) as u8;
+            t.cells[i].tile = n(args, 3) as u8;
+            t.cells[i].walkable = n(args, 4) != 0.0;
+        }
+    });
+    Value::Null
+}
+
+/// `iso_height(col, row)` — a cell's elevation (0 off-board).
+pub fn iso_height(args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| {
+        t.idx(n(args, 0) as i32, n(args, 1) as i32)
+            .map_or(0, |i| t.cells[i].height as i32)
+    }) as f64)
+}
+
+/// `iso_tile(col, row)` — a cell's terrain/type id.
+pub fn iso_tile(args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| {
+        t.idx(n(args, 0) as i32, n(args, 1) as i32)
+            .map_or(0, |i| t.cells[i].tile as i32)
+    }) as f64)
+}
+
+/// `iso_walkable(col, row)` — 1 if a unit may stand on the cell, else 0.
+pub fn iso_walkable(args: &[Value]) -> Value {
+    Value::Bool(with_iso_grid(|t| {
+        t.idx(n(args, 0) as i32, n(args, 1) as i32)
+            .is_some_and(|i| t.cells[i].walkable)
+    }))
+}
+
+/// `iso_set_occupant(col, row, entity)` — mark which unit stands on a cell (-1 = empty). Occupied
+/// cells block other units' movement.
+pub fn iso_set_occupant(args: &[Value]) -> Value {
+    with_iso_grid(|t| {
+        if let Some(i) = t.idx(n(args, 0) as i32, n(args, 1) as i32) {
+            t.cells[i].occupant = n(args, 2) as i32;
+        }
+    });
+    Value::Null
+}
+
+/// `iso_occupant(col, row)` — entity id standing on the cell, or -1.
+pub fn iso_occupant(args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| {
+        t.idx(n(args, 0) as i32, n(args, 1) as i32)
+            .map_or(-1, |i| t.cells[i].occupant)
+    }) as f64)
+}
+
+/// `iso_move_range(col, row, move, jump)` — flood-fill the tiles reachable from (col,row) for `move`
+/// move points and `jump` max height delta; returns the count. Query with `iso_in_range` /
+/// `iso_range_*`, and `iso_path` for a route into it.
+///
+/// The unit-less form takes the movement type as an optional 5th argument (`iso_move_range(c, r,
+/// move, jump, flying)`), defaulting to walking when it is omitted. That is what lets a caller ask
+/// the hypothetical — "where could a flier get to from here?" — without a unit to ask it about.
+pub fn iso_move_range(args: &[Value]) -> Value {
+    let flying = n(args, 4) != 0.0;
+    // 6th arg is the mover's team for zone-of-control; absent (or -1) means path with no ZoC.
+    let team = if args.len() > 5 {
+        n(args, 5) as i32
+    } else {
+        -1
+    };
+    with_iso_grid(|t| {
+        t.move_range(
+            n(args, 0) as i32,
+            n(args, 1) as i32,
+            n(args, 2) as i32,
+            n(args, 3) as i32,
+            flying,
+            team,
+        )
+    });
+    Value::Number(with_iso_grid(|t| t.reach.len()) as f64)
+}
+
+/// `iso_move_cost(col, row)` — what the last computed move-range spent to REACH that cell, or -1 if
+/// it never did.
+///
+/// The cell list alone can't tell you what the search decided. On an open 4-connected board almost
+/// everything stays reachable whatever the rules say — terrain costs and zone of control change how
+/// DEARLY, and detour into the price rather than out of the set. This is the number that moves, so
+/// it's the one worth asking for, both for a UI that wants to show what a destination costs and for
+/// a test that wants to prove a rule fired.
+pub fn iso_move_cost(args: &[Value]) -> Value {
+    let (c, r) = (n(args, 0) as i32, n(args, 1) as i32);
+    Value::Number(with_iso_grid(|t| match t.idx(c, r) {
+        Some(i) if t.in_move[i] => t.dist[i],
+        _ => -1,
+    }) as f64)
+}
+
+/// `iso_in_range(col, row)` — 1 if the cell is in the last computed move-range, else 0 (Number so
+/// tish `iso_in_range(...) > 0` works).
+pub fn iso_in_range(args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| {
+        t.idx(n(args, 0) as i32, n(args, 1) as i32)
+            .map_or(0, |i| t.in_move[i] as i32)
+    }) as f64)
+}
+
+/// `iso_range_count()` — number of reachable cells from the last `iso_move_range`.
+pub fn iso_range_count(_args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| t.reach.len()) as f64)
+}
+
+/// `iso_range_col(i)` / `iso_range_row(i)` — the i-th reachable cell.
+pub fn iso_range_col(args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| {
+        t.reach
+            .get(n(args, 0) as usize)
+            .map_or(-1, |&(c, _)| c as i32)
+    }) as f64)
+}
+
+pub fn iso_range_row(args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| {
+        t.reach
+            .get(n(args, 0) as usize)
+            .map_or(-1, |&(_, r)| r as i32)
+    }) as f64)
+}
+
+/// `iso_path(col, row)` — reconstruct the route from the last move-range's origin to (col,row);
+/// returns its length (0 if unreachable). Read with `iso_path_len` / `iso_path_col` / `iso_path_row`.
+pub fn iso_path(args: &[Value]) -> Value {
+    with_iso_grid(|t| t.path_to(n(args, 0) as i32, n(args, 1) as i32));
+    Value::Number(with_iso_grid(|t| t.path.len()) as f64)
+}
+
+pub fn iso_path_len(_args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| t.path.len()) as f64)
+}
+
+pub fn iso_path_col(args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| {
+        t.path
+            .get(n(args, 0) as usize)
+            .map_or(-1, |&(c, _)| c as i32)
+    }) as f64)
+}
+
+pub fn iso_path_row(args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| {
+        t.path
+            .get(n(args, 0) as usize)
+            .map_or(-1, |&(_, r)| r as i32)
+    }) as f64)
+}
+
+/// `iso_add_unit(col, row, team, speed, move, jump, hp)` — register a unit on the board (claiming the
+/// cell) and return its id. Ids count up from 0 in registration order.
+pub fn iso_add_unit(args: &[Value]) -> Value {
+    let id = with_iso_grid(|t| {
+        t.add_unit(
+            n(args, 0) as i32,
+            n(args, 1) as i32,
+            n(args, 2) as u8,
+            n(args, 3) as u16,
+            n(args, 4) as u8,
+            n(args, 5) as u8,
+            n(args, 6) as i16,
+        )
+    });
+    Value::Number(id as f64)
+}
+
+/// `iso_clear_units()` — drop every unit, keeping the board.
+///
+/// ⚠️ Before this existed the ONLY way to empty the unit table was `iso_load`, which reloads the
+/// whole board. A game that fights two battles on the SAME board therefore could not clear it:
+/// `isoUseBoard` returns early when the board is already current, so `iso_load` never runs, the old
+/// units stay registered, and the new battle's ids are appended after them. The symptoms are not
+/// obviously a leak — the turn queue offers turns to units from a fight that ended, and the tish
+/// side's own count disagrees with the engine's.
+pub fn iso_clear_units(_args: &[Value]) -> Value {
+    with_iso_grid(|t| {
+        t.units.clear();
+        for c in t.cells.iter_mut() {
+            c.occupant = -1;
+        }
+    });
+    Value::Null
+}
+
+/// `iso_unit_count()` — number of registered units.
+pub fn iso_unit_count(_args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| t.units.len()) as f64)
+}
+
+/// Per-unit getters: `iso_unit_col/row/team/hp/maxhp/move/jump/speed(id)`, `iso_unit_alive(id)`.
+pub fn iso_unit_col(args: &[Value]) -> Value {
+    unit_field(args, |u| u.col)
+}
+
+pub fn iso_unit_row(args: &[Value]) -> Value {
+    unit_field(args, |u| u.row)
+}
+
+pub fn iso_unit_team(args: &[Value]) -> Value {
+    unit_field(args, |u| u.team as i32)
+}
+
+pub fn iso_unit_hp(args: &[Value]) -> Value {
+    unit_field(args, |u| u.hp as i32)
+}
+
+pub fn iso_unit_maxhp(args: &[Value]) -> Value {
+    unit_field(args, |u| u.max_hp as i32)
+}
+
+pub fn iso_unit_move(args: &[Value]) -> Value {
+    unit_field(args, |u| u.mov as i32)
+}
+
+pub fn iso_unit_jump(args: &[Value]) -> Value {
+    unit_field(args, |u| u.jump as i32)
+}
+
+pub fn iso_unit_speed(args: &[Value]) -> Value {
+    unit_field(args, |u| u.speed as i32)
+}
+
+pub fn iso_unit_alive(args: &[Value]) -> Value {
+    // Number (1/0), not Bool, so tish `iso_unit_alive(id) > 0` comparisons work on GBA.
+    Value::Number(with_iso_grid(|t| {
+        t.units
+            .get(n(args, 0) as usize)
+            .map_or(0, |u| u.alive as i32)
+    }) as f64)
+}
+
+/// `iso_unit_move_range(id)` — flood-fill the reachable tiles for a unit using its own Move/Jump and
+/// movement type (from its current cell). Then query with `iso_in_range` / `iso_range_*` / `iso_path`.
+pub fn iso_unit_move_range(args: &[Value]) -> Value {
+    with_iso_grid(|t| {
+        if let Some(u) = t.units.get(n(args, 0) as usize).copied() {
+            t.move_range(
+                u.col,
+                u.row,
+                u.mov as i32,
+                u.jump as i32,
+                u.flying,
+                u.team as i32,
+            );
+        }
+    });
+    Value::Number(with_iso_grid(|t| t.reach.len()) as f64)
+}
+
+/// `iso_set_terrain_cost(tile, cost)` — move points needed to ENTER a cell of terrain id `tile`.
+///
+/// The engine deliberately does not know that id 33 is water. It owns the search; the game owns what
+/// its tiles mean, so cost is pushed in from the example's terrain table. Defaults to 1 everywhere,
+/// so a game that never calls this behaves exactly as it did before costs existed.
+///
+/// Clamped to ≥ 1: a free tile would break the search's assumption that distance only ever increases
+/// as it sweeps outward, and the cheapest way to say "this tile is free to cross" is a flier.
+pub fn iso_set_terrain_cost(args: &[Value]) -> Value {
+    let tile = n(args, 0) as usize;
+    let cost = (n(args, 1) as i32).clamp(1, 255) as u8;
+    with_iso_grid(|t| {
+        if tile < t.cost.len() {
+            t.cost[tile] = cost;
+        }
+    });
+    Value::Null
+}
+
+/// `iso_knockback(id, from_col, from_row)` — shove a unit one tile directly away from (from_col,
+/// from_row). Returns 1 if it moved, 0 if something stopped it.
+///
+/// Height is deliberately NOT a reason to refuse: being shoved off a ledge is the interesting case,
+/// and a `jump` check here would quietly make knockback do nothing near exactly the terrain that
+/// makes it worth having. The board edge, a solid cell and another unit all still stop it — a unit
+/// backed against any of those takes the hit where it stands.
+///
+/// The engine moves the body and reports that it did. What a fall COSTS is the game's to decide, so
+/// the caller compares the heights either side and applies its own damage; the same split as the
+/// damage formula.
+pub fn iso_knockback(args: &[Value]) -> Value {
+    let id = n(args, 0) as i32;
+    let (sc, sr) = (n(args, 1) as i32, n(args, 2) as i32);
+    let moved = with_iso_grid(|t| match t.knock_dest(id, sc, sr) {
+        Some((nc, nr, _)) => {
+            t.unit_set_pos(id, nc, nr);
+            true
+        }
+        None => false,
+    });
+    Value::Number(moved as i32 as f64)
+}
+
+/// `iso_knock_drop(id, from_col, from_row)` — how far the unit WOULD fall if shoved from there, or 0
+/// if the shove is blocked or lands level or uphill.
+///
+/// This exists so an AI can price a shove before committing to one. It deliberately answers with the
+/// drop rather than with the destination: the destination would make the caller re-derive the rule
+/// for which direction a shove goes and what stops it, and the moment two copies of that rule exist
+/// they start to disagree. Blocked and level both answer 0 because they are worth the same to anyone
+/// asking — no fall, no damage.
+pub fn iso_knock_drop(args: &[Value]) -> Value {
+    let id = n(args, 0) as i32;
+    let (sc, sr) = (n(args, 1) as i32, n(args, 2) as i32);
+    Value::Number(
+        with_iso_grid(|t| t.knock_dest(id, sc, sr).map_or(0, |(_, _, d)| d.max(0))) as f64,
+    )
+}
+
+/// `iso_set_zoc(on)` — turn zone of control on or off for every subsequent move-range query.
+///
+/// With it on, stepping into a tile adjacent to a living enemy ends the move — the tile is reachable,
+/// nothing through it is. That turns a defender from an obstacle you route around into one you have
+/// to deal with, which is the entire point of a front line. Off by default so this changes nothing
+/// for a game that does not ask for it.
+pub fn iso_set_zoc(args: &[Value]) -> Value {
+    let on = n(args, 0) != 0.0;
+    with_iso_grid(|t| t.zoc_on = on);
+    Value::Null
+}
+
+/// `iso_revive(id, hp)` — bring a KO'd unit back on the cell it fell on, at `hp` (clamped to its
+/// maximum, and to at least 1). Returns 1 if it stood up, 0 if it was already alive or something has
+/// since walked onto its cell.
+///
+/// The occupancy check is the whole reason this cannot live in the example: death RELEASES the cell,
+/// so a body is not a wall, and by the time anyone reaches it with a Phoenix Down somebody may be
+/// standing there. The engine owns that map, so it is the only place that can answer honestly —
+/// and returning 0 rather than reviving onto an occupied cell means the caller can decline to spend
+/// the item instead of quietly creating two units on one tile.
+pub fn iso_revive(args: &[Value]) -> Value {
+    let id = n(args, 0) as i32;
+    let hp = n(args, 1) as i16;
+    Value::Number(with_iso_grid(|t| {
+        let (col, row, max_hp) = match t.units.get(id as usize) {
+            Some(u) if !u.alive => (u.col, u.row, u.max_hp),
+            _ => return 0,
+        };
+        match t.idx(col, row) {
+            Some(i) if t.cells[i].occupant < 0 => t.cells[i].occupant = id,
+            _ => return 0,
+        }
+        if let Some(u) = t.units.get_mut(id as usize) {
+            u.alive = true;
+            u.hp = hp.clamp(1, max_hp);
+        }
+        1
+    }) as f64)
+}
+
+/// `iso_turn_end(id, moved, acted)` — charge the rest of the turn's counter cost, once the game knows
+/// what the unit actually did with it. The base cost was taken when the turn was handed out.
+///
+/// The split exists so that forgetting to call this cannot wedge the queue: a game that never calls
+/// it still has every unit paying 500 a turn and the order still advances, it just loses the tempo
+/// rule. Making `turn_next` charge nothing and rely on this would mean one missed call returns the
+/// same unit forever.
+pub fn iso_turn_end(args: &[Value]) -> Value {
+    let id = n(args, 0) as usize;
+    let moved = n(args, 1) != 0.0;
+    let acted = n(args, 2) != 0.0;
+    with_iso_grid(|t| {
+        if let Some(u) = t.units.get_mut(id) {
+            let mut cost = 0;
+            if moved {
+                cost += COST_MOVE;
+            }
+            if acted {
+                cost += COST_ACTION;
+            }
+            u.ct = (u.ct - cost).max(0);
+        }
+    });
+    Value::Null
+}
+
+/// `iso_unit_ct(id)` — the unit's current turn counter, for a UI that wants to show who is next.
+pub fn iso_unit_ct(args: &[Value]) -> Value {
+    let id = n(args, 0) as usize;
+    Value::Number(with_iso_grid(|t| t.units.get(id).map_or(0, |u| u.ct)) as f64)
+}
+
+/// `iso_unit_set_speed_scale(id, percent)` — scale how fast a unit's turn counter fills. 100 is
+/// normal; a haste/slow pair would typically be 200 and 50.
+///
+/// The engine owns the turn queue and therefore owns this; which status sets it, for how long, and
+/// what the numbers are stay the game's. It scales ACCRUAL and not the Speed stat, so the AI's threat
+/// tables and the Status screen go on reading an unmodified stat block, and clearing the status is
+/// just setting it back to 100 — there is no original value to remember and no way to double-apply.
+///
+/// Clamped to 1..=1000: a scale of 0 would stop the unit accruing at all, which is not a slow but a
+/// removal, and would leave `turn_next` hunting for a tick count that never arrives.
+pub fn iso_unit_set_speed_scale(args: &[Value]) -> Value {
+    let id = n(args, 0) as usize;
+    let pct = (n(args, 1) as i32).clamp(1, 1000) as u16;
+    with_iso_grid(|t| {
+        if let Some(u) = t.units.get_mut(id) {
+            u.speed_scale = pct;
+        }
+    });
+    Value::Null
+}
+
+/// `iso_unit_set_flying(id, flying)` — a flier pays 1 move point per tile and ignores height deltas.
+///
+/// It is NOT a bigger move budget: it changes which tiles the budget can be spent on, so a flier
+/// crosses a ford or a cliff that would cost a walker two points or stop it outright, and is no
+/// faster than anyone else over open ground. Solid cells and occupied cells still block it.
+pub fn iso_unit_set_flying(args: &[Value]) -> Value {
+    let id = n(args, 0) as usize;
+    let f = n(args, 1) != 0.0;
+    with_iso_grid(|t| {
+        if let Some(u) = t.units.get_mut(id) {
+            u.flying = f;
+        }
+    });
+    Value::Null
+}
+
+/// `iso_unit_set_pos(id, col, row)` — move a unit (updates board occupancy).
+pub fn iso_unit_set_pos(args: &[Value]) -> Value {
+    with_iso_grid(|t| t.unit_set_pos(n(args, 0) as i32, n(args, 1) as i32, n(args, 2) as i32));
+    Value::Null
+}
+
+/// `iso_damage(id, amount)` — subtract HP; a unit at ≤0 HP dies (alive=false, cell freed). Returns
+/// remaining HP.
+pub fn iso_damage(args: &[Value]) -> Value {
+    let id = n(args, 0) as i32;
+    let amt = n(args, 1) as i16;
+    with_iso_grid(|t| {
+        let (dead, c, r) = match t.units.get_mut(id as usize) {
+            Some(u) if u.alive => {
+                u.hp -= amt;
+                if u.hp <= 0 {
+                    u.hp = 0;
+                    u.alive = false;
+                }
+                (!u.alive, u.col, u.row)
+            }
+            _ => (false, 0, 0),
+        };
+        if dead {
+            if let Some(i) = t.idx(c, r) {
+                if t.cells[i].occupant == id {
+                    t.cells[i].occupant = -1;
+                }
+            }
+        }
+    });
+    unit_field(args, |u| u.hp as i32)
+}
+
+/// `iso_heal(id, amount)` — restore HP to a living unit, capped at its `max_hp`. Returns the unit's
+/// new HP (0 if the unit is dead/unknown — dead units cannot be healed here). For support classes.
+pub fn iso_heal(args: &[Value]) -> Value {
+    let id = n(args, 0) as i32;
+    let amt = n(args, 1) as i16;
+    with_iso_grid(|t| {
+        if let Some(u) = t.units.get_mut(id as usize) {
+            if u.alive {
+                u.hp = (u.hp + amt).min(u.max_hp);
+            }
+        }
+    });
+    unit_field(args, |u| if u.alive { u.hp as i32 } else { 0 })
+}
+
+/// `iso_unit_set_maxhp(id, v)` — set a unit's HP ceiling, keeping current HP in range. Returns the
+/// new maximum (0 for an unknown unit).
+///
+/// ⚠️ This exists because a level-growth package documented a rule it could not implement: "what
+/// a level does NOT raise is HP … there is no setter for the maximum, so growing it would mean a
+/// Rust change." Levelling normally raises HP, so the engine was quietly deciding a game-design
+/// question. A missing setter is not a neutral omission — it becomes a rule.
+///
+/// Raising the ceiling raises current HP by the same amount rather than leaving the unit wounded: a
+/// level-up mid-battle that hands you a bigger empty bar reads as a penalty. Lowering it (a curse, a
+/// job change) clamps current HP down instead.
+pub fn iso_unit_set_maxhp(args: &[Value]) -> Value {
+    let id = n(args, 0) as i32;
+    let v = (n(args, 1) as i16).max(1);
+    with_iso_grid(|t| {
+        if let Some(u) = t.units.get_mut(id as usize) {
+            let delta = v - u.max_hp;
+            u.max_hp = v;
+            if delta > 0 {
+                u.hp += delta;
+            }
+            if u.hp > u.max_hp {
+                u.hp = u.max_hp;
+            }
+        }
+    });
+    unit_field(args, |u| u.max_hp as i32)
+}
+
+/// `iso_turn_next()` — advance the speed-based turn queue and return the id of the unit whose turn it
+/// is (or -1 if none are alive).
+pub fn iso_turn_next(_args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| t.turn_next()) as f64)
+}
+
+/// `iso_adjacent_enemy(unitId)` — a living enemy on one of the unit's 4 neighbouring tiles (in
+/// range of a melee attack), or -1 if none. Used for attack targeting and AI.
+pub fn iso_adjacent_enemy(args: &[Value]) -> Value {
+    Value::Number(with_iso_grid(|t| t.adjacent_enemy(n(args, 0) as i32)) as f64)
+}
+
+pub fn iso_stack_count_typed(p0: i32, p1: i32, p2: i32) -> i32 {
+    match iso_stack_count(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_stack_elev_typed(p0: i32, p1: i32, p2: i32, p3: i32) -> i32 {
+    match iso_stack_elev(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+        Value::Number(p3 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_stack_tile_typed(p0: i32, p1: i32, p2: i32, p3: i32) -> i32 {
+    match iso_stack_tile(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+        Value::Number(p3 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_load_typed(p0: i32) {
+    iso_load(&[Value::Number(p0 as f64)]);
+}
+
+pub fn iso_board_bg_typed(p0: i32) -> i32 {
+    match iso_board_bg(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_board_cw_typed(p0: i32) -> i32 {
+    match iso_board_cw(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 512,
+    }
+}
+
+pub fn iso_board_ch_typed(p0: i32) -> i32 {
+    match iso_board_ch(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 512,
+    }
+}
+
+pub fn iso_board_mapw_typed(p0: i32) -> i32 {
+    match iso_board_mapw(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 512,
+    }
+}
+
+pub fn iso_board_maph_typed(p0: i32) -> i32 {
+    match iso_board_maph(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 512,
+    }
+}
+
+pub fn iso_board_fg_typed(p0: i32) -> i32 {
+    match iso_board_fg(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => -1,
+    }
+}
+
+pub fn iso_board_ox_typed(p0: i32) -> i32 {
+    match iso_board_ox(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_board_oy_typed(p0: i32) -> i32 {
+    match iso_board_oy(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_board_lift_typed(p0: i32) -> i32 {
+    match iso_board_lift(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_w_typed() -> i32 {
+    match iso_w(&[]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_h_typed() -> i32 {
+    match iso_h(&[]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_spawn_count_typed(p0: i32) -> i32 {
+    match iso_spawn_count(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_spawn_col_typed(p0: i32, p1: i32) -> i32 {
+    match iso_spawn_col(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_spawn_row_typed(p0: i32, p1: i32) -> i32 {
+    match iso_spawn_row(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_spawn_cls_typed(p0: i32, p1: i32) -> i32 {
+    match iso_spawn_cls(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_spawn_team_typed(p0: i32, p1: i32) -> i32 {
+    match iso_spawn_team(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_init_typed(p0: i32, p1: i32) {
+    iso_init(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]);
+}
+
+pub fn iso_set_cell_typed(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32) {
+    iso_set_cell(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+        Value::Number(p3 as f64),
+        Value::Number(p4 as f64),
+    ]);
+}
+
+pub fn iso_height_typed(p0: i32, p1: i32) -> i32 {
+    match iso_height(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_tile_typed(p0: i32, p1: i32) -> i32 {
+    match iso_tile(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_walkable_typed(p0: i32, p1: i32) -> i32 {
+    match iso_walkable(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Bool(b) => b as i32,
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_set_occupant_typed(p0: i32, p1: i32, p2: i32) {
+    iso_set_occupant(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+    ]);
+}
+
+pub fn iso_occupant_typed(p0: i32, p1: i32) -> i32 {
+    match iso_occupant(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_move_range_typed(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32) -> i32 {
+    match iso_move_range(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+        Value::Number(p3 as f64),
+        Value::Number(p4 as f64),
+        Value::Number(p5 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_move_cost_typed(p0: i32, p1: i32) -> i32 {
+    match iso_move_cost(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_in_range_typed(p0: i32, p1: i32) -> i32 {
+    match iso_in_range(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_range_count_typed() -> i32 {
+    match iso_range_count(&[]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_range_col_typed(p0: i32) -> i32 {
+    match iso_range_col(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_range_row_typed(p0: i32) -> i32 {
+    match iso_range_row(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_path_typed(p0: i32, p1: i32) -> i32 {
+    match iso_path(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_path_len_typed() -> i32 {
+    match iso_path_len(&[]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_path_col_typed(p0: i32) -> i32 {
+    match iso_path_col(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_path_row_typed(p0: i32) -> i32 {
+    match iso_path_row(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_add_unit_typed(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32) -> i32 {
+    match iso_add_unit(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+        Value::Number(p3 as f64),
+        Value::Number(p4 as f64),
+        Value::Number(p5 as f64),
+        Value::Number(p6 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_clear_units_typed() {
+    iso_clear_units(&[]);
+}
+
+pub fn iso_unit_count_typed() -> i32 {
+    match iso_unit_count(&[]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_unit_col_typed(p0: i32) -> i32 {
+    match iso_unit_col(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_unit_row_typed(p0: i32) -> i32 {
+    match iso_unit_row(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_unit_team_typed(p0: i32) -> i32 {
+    match iso_unit_team(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_unit_hp_typed(p0: i32) -> i32 {
+    match iso_unit_hp(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_unit_maxhp_typed(p0: i32) -> i32 {
+    match iso_unit_maxhp(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_unit_move_typed(p0: i32) -> i32 {
+    match iso_unit_move(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_unit_jump_typed(p0: i32) -> i32 {
+    match iso_unit_jump(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_unit_speed_typed(p0: i32) -> i32 {
+    match iso_unit_speed(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_unit_alive_typed(p0: i32) -> i32 {
+    match iso_unit_alive(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_unit_move_range_typed(p0: i32) -> i32 {
+    match iso_unit_move_range(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_set_terrain_cost_typed(p0: i32, p1: i32) {
+    iso_set_terrain_cost(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]);
+}
+
+pub fn iso_knockback_typed(p0: i32, p1: i32, p2: i32) -> i32 {
+    match iso_knockback(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_knock_drop_typed(p0: i32, p1: i32, p2: i32) -> i32 {
+    match iso_knock_drop(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_set_zoc_typed(p0: i32) {
+    iso_set_zoc(&[Value::Number(p0 as f64)]);
+}
+
+pub fn iso_revive_typed(p0: i32, p1: i32) -> i32 {
+    match iso_revive(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_turn_end_typed(p0: i32, p1: i32, p2: i32) {
+    iso_turn_end(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+    ]);
+}
+
+pub fn iso_unit_ct_typed(p0: i32) -> i32 {
+    match iso_unit_ct(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_unit_set_speed_scale_typed(p0: i32, p1: i32) {
+    iso_unit_set_speed_scale(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]);
+}
+
+pub fn iso_unit_set_flying_typed(p0: i32, p1: i32) {
+    iso_unit_set_flying(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]);
+}
+
+pub fn iso_unit_set_pos_typed(p0: i32, p1: i32, p2: i32) {
+    iso_unit_set_pos(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+    ]);
+}
+
+pub fn iso_damage_typed(p0: i32, p1: i32) -> i32 {
+    match iso_damage(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_heal_typed(p0: i32, p1: i32) -> i32 {
+    match iso_heal(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_unit_set_maxhp_typed(p0: i32, p1: i32) -> i32 {
+    match iso_unit_set_maxhp(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_turn_next_typed() -> i32 {
+    match iso_turn_next(&[]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn iso_adjacent_enemy_typed(p0: i32) -> i32 {
+    match iso_adjacent_enemy(&[Value::Number(p0 as f64)]) {
         Value::Number(v) => v as i32,
         _ => 0,
     }

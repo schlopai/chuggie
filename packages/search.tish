@@ -1,7 +1,7 @@
 // search.tish — a frame-budgeted incremental best-move search.
 //
 // The generic shape behind any tile-game AI: enumerate candidate moves, score each, keep the best,
-// and spread the work across frames so a decision never blows a frame budget. The retired match-3 port's CPU is
+// and spread the work across frames so a decision never blows a frame budget. A match-3 CPU is
 // one instance (24 pickup orders x 7 target columns, ~130 simulated moves per decision); a match-3
 // dropper is another; an SRPG unit picking a tile is a third.
 //
@@ -29,7 +29,7 @@
 // ── BUDGET IS TICKS, NOT A COUNT ───────────────────────────────────────────────────────────────
 //
 // The Rust this generalises spends a fixed number of candidate pairs per frame
-// (`schlop/drop-gba/archive/crates/tish-gba-drop/src/game.rs:663-687`). That is the wrong knob: pairs are not equal cost —
+// by capping the number of pairs considered. That is the wrong knob: pairs are not equal cost —
 // one that reaches a clear runs a whole cascade, most do not — so a fixed count overruns exactly
 // when the position is interesting. A tick budget cannot overrun. `searchStep` reads `timer_read()`
 // (~7 ticks) and returns -1 the moment the budget is spent, so the caller's loop simply ends and

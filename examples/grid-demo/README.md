@@ -18,7 +18,7 @@ npm run verify
 
 ## Why this game and not the match-3 it came from
 
-`packages/grid.tish` was extracted from the retired match-3 port's rules, so a match-3 demo would prove
+`packages/grid.tish` was extracted from a match-3's rules, so a match-3 demo would prove
 nothing — it would pass whether the kit were genuinely generic or merely the old code under a new
 name. This is the **opposite board**: gravity toward the floor instead of the ceiling, gems dropped in
 from the top instead of pulled from the bottom, runs cleared where they land. The same

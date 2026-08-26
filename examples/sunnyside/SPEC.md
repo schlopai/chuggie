@@ -66,6 +66,6 @@ reachable for later examples.
   by the baker; UI/emotes share; hard ceiling 16 banks
 - hud_text strings: clock, gold, stamina, tool name only (budget ~19)
 - run() stack: scene split (title / world / interior / shop) with shell
-  factories from day one — the 29KB lesson (the scene-split doc, now in the chuggie-tactics repo)
+  factories from day one — the 29KB scene-split lesson
 - Heap: the three worldgen planes cost ~36KB; one fill loop per array (see
   worldgen.tish header); keep ~60KB free after boot
