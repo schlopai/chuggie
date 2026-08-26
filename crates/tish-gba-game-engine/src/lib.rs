@@ -12004,21 +12004,32 @@ pub fn world_step_typed() -> i32 {
 // the callable surface went. This is the GENERIC isometric board — a grid with heights, pathing,
 // ranges and units. Nothing game-specific: no clans, no laws, no judges, no jobs.
 
-static TACTICS_BG: SingleCore<RefCell<[i32; MAX_BOARDS]>> = SingleCore::new(RefCell::new([0; MAX_BOARDS]));
+static TACTICS_BG: SingleCore<RefCell<[i32; MAX_BOARDS]>> =
+    SingleCore::new(RefCell::new([0; MAX_BOARDS]));
 
-static TACTICS_FG: SingleCore<RefCell<[i32; MAX_BOARDS]>> = SingleCore::new(RefCell::new([-1; MAX_BOARDS]));
+static TACTICS_FG: SingleCore<RefCell<[i32; MAX_BOARDS]>> =
+    SingleCore::new(RefCell::new([-1; MAX_BOARDS]));
 
 /// `tac_stack_count(board, col, row)` — how many RAISED blocks are stacked on a cell (0 for flat).
 pub fn tac_stack_count(args: &[Value]) -> Value {
     let (h, c, r) = (n(args, 0) as i32, n(args, 1) as i32, n(args, 2) as i32);
-    Value::Number(with_board(h, |b| board_stack_span(b, c, r).map_or(0, |(_, len)| len as i32)).unwrap_or(0) as f64)
+    Value::Number(
+        with_board(h, |b| {
+            board_stack_span(b, c, r).map_or(0, |(_, len)| len as i32)
+        })
+        .unwrap_or(0) as f64,
+    )
 }
 
 /// `tac_stack_elev(board, col, row, i)` — the i-th stacked block's TOP elevation (8px units).
-pub fn tac_stack_elev(args: &[Value]) -> Value { stack_field(args, |b, j| b.stack_elev[j] as i32) }
+pub fn tac_stack_elev(args: &[Value]) -> Value {
+    stack_field(args, |b, j| b.stack_elev[j] as i32)
+}
 
 /// `tac_stack_tile(board, col, row, i)` — the i-th stacked block's own tile frame.
-pub fn tac_stack_tile(args: &[Value]) -> Value { stack_field(args, |b, j| b.stack_tile[j] as i32) }
+pub fn tac_stack_tile(args: &[Value]) -> Value {
+    stack_field(args, |b, j| b.stack_tile[j] as i32)
+}
 
 /// `tac_load(board)` — build the grid from a `tactics:` board: size it, then fill every cell's
 /// elevation / terrain id / walkability from the baked map. Replaces `tac_init` + a per-cell
@@ -12120,13 +12131,21 @@ pub fn tac_spawn_count(args: &[Value]) -> Value {
 }
 
 /// `tac_spawn_col/row/cls/team(board, i)` — the i-th spawn's grid column / row / class index / team.
-pub fn tac_spawn_col(args: &[Value]) -> Value { spawn_field(args, |s| s.0 as i32) }
+pub fn tac_spawn_col(args: &[Value]) -> Value {
+    spawn_field(args, |s| s.0 as i32)
+}
 
-pub fn tac_spawn_row(args: &[Value]) -> Value { spawn_field(args, |s| s.1 as i32) }
+pub fn tac_spawn_row(args: &[Value]) -> Value {
+    spawn_field(args, |s| s.1 as i32)
+}
 
-pub fn tac_spawn_cls(args: &[Value]) -> Value { spawn_field(args, |s| s.2 as i32) }
+pub fn tac_spawn_cls(args: &[Value]) -> Value {
+    spawn_field(args, |s| s.2 as i32)
+}
 
-pub fn tac_spawn_team(args: &[Value]) -> Value { spawn_field(args, |s| s.3 as i32) }
+pub fn tac_spawn_team(args: &[Value]) -> Value {
+    spawn_field(args, |s| s.3 as i32)
+}
 
 /// `tac_init(w, h)` — (re)create a `w×h` tactics board (all cells walkable, height 0, unoccupied).
 pub fn tac_init(args: &[Value]) -> Value {
@@ -12149,17 +12168,26 @@ pub fn tac_set_cell(args: &[Value]) -> Value {
 
 /// `tac_height(col, row)` — a cell's elevation (0 off-board).
 pub fn tac_height(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.idx(n(args, 0) as i32, n(args, 1) as i32).map_or(0, |i| t.cells[i].height as i32)) as f64)
+    Value::Number(with_tac(|t| {
+        t.idx(n(args, 0) as i32, n(args, 1) as i32)
+            .map_or(0, |i| t.cells[i].height as i32)
+    }) as f64)
 }
 
 /// `tac_tile(col, row)` — a cell's terrain/type id.
 pub fn tac_tile(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.idx(n(args, 0) as i32, n(args, 1) as i32).map_or(0, |i| t.cells[i].tile as i32)) as f64)
+    Value::Number(with_tac(|t| {
+        t.idx(n(args, 0) as i32, n(args, 1) as i32)
+            .map_or(0, |i| t.cells[i].tile as i32)
+    }) as f64)
 }
 
 /// `tac_walkable(col, row)` — 1 if a unit may stand on the cell, else 0.
 pub fn tac_walkable(args: &[Value]) -> Value {
-    Value::Bool(with_tac(|t| t.idx(n(args, 0) as i32, n(args, 1) as i32).map_or(false, |i| t.cells[i].walkable)))
+    Value::Bool(with_tac(|t| {
+        t.idx(n(args, 0) as i32, n(args, 1) as i32)
+            .map_or(false, |i| t.cells[i].walkable)
+    }))
 }
 
 /// `tac_set_occupant(col, row, entity)` — mark which unit stands on a cell (-1 = empty). Occupied
@@ -12175,7 +12203,10 @@ pub fn tac_set_occupant(args: &[Value]) -> Value {
 
 /// `tac_occupant(col, row)` — entity id standing on the cell, or -1.
 pub fn tac_occupant(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.idx(n(args, 0) as i32, n(args, 1) as i32).map_or(-1, |i| t.cells[i].occupant)) as f64)
+    Value::Number(with_tac(|t| {
+        t.idx(n(args, 0) as i32, n(args, 1) as i32)
+            .map_or(-1, |i| t.cells[i].occupant)
+    }) as f64)
 }
 
 /// `tac_move_range(col, row, move, jump)` — flood-fill the tiles reachable from (col,row) for `move`
@@ -12188,8 +12219,21 @@ pub fn tac_occupant(args: &[Value]) -> Value {
 pub fn tac_move_range(args: &[Value]) -> Value {
     let flying = n(args, 4) != 0.0;
     // 6th arg is the mover's team for zone-of-control; absent (or -1) means path with no ZoC.
-    let team = if args.len() > 5 { n(args, 5) as i32 } else { -1 };
-    with_tac(|t| t.move_range(n(args, 0) as i32, n(args, 1) as i32, n(args, 2) as i32, n(args, 3) as i32, flying, team));
+    let team = if args.len() > 5 {
+        n(args, 5) as i32
+    } else {
+        -1
+    };
+    with_tac(|t| {
+        t.move_range(
+            n(args, 0) as i32,
+            n(args, 1) as i32,
+            n(args, 2) as i32,
+            n(args, 3) as i32,
+            flying,
+            team,
+        )
+    });
     Value::Number(with_tac(|t| t.reach.len()) as f64)
 }
 
@@ -12212,7 +12256,10 @@ pub fn tac_move_cost(args: &[Value]) -> Value {
 /// `tac_in_range(col, row)` — 1 if the cell is in the last computed move-range, else 0 (Number so
 /// tish `tac_in_range(...) > 0` works).
 pub fn tac_in_range(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.idx(n(args, 0) as i32, n(args, 1) as i32).map_or(0, |i| t.in_move[i] as i32)) as f64)
+    Value::Number(with_tac(|t| {
+        t.idx(n(args, 0) as i32, n(args, 1) as i32)
+            .map_or(0, |i| t.in_move[i] as i32)
+    }) as f64)
 }
 
 /// `tac_range_count()` — number of reachable cells from the last `tac_move_range`.
@@ -12222,11 +12269,19 @@ pub fn tac_range_count(_args: &[Value]) -> Value {
 
 /// `tac_range_col(i)` / `tac_range_row(i)` — the i-th reachable cell.
 pub fn tac_range_col(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.reach.get(n(args, 0) as usize).map_or(-1, |&(c, _)| c as i32)) as f64)
+    Value::Number(with_tac(|t| {
+        t.reach
+            .get(n(args, 0) as usize)
+            .map_or(-1, |&(c, _)| c as i32)
+    }) as f64)
 }
 
 pub fn tac_range_row(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.reach.get(n(args, 0) as usize).map_or(-1, |&(_, r)| r as i32)) as f64)
+    Value::Number(with_tac(|t| {
+        t.reach
+            .get(n(args, 0) as usize)
+            .map_or(-1, |&(_, r)| r as i32)
+    }) as f64)
 }
 
 /// `tac_path(col, row)` — reconstruct the route from the last move-range's origin to (col,row);
@@ -12241,11 +12296,19 @@ pub fn tac_path_len(_args: &[Value]) -> Value {
 }
 
 pub fn tac_path_col(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.path.get(n(args, 0) as usize).map_or(-1, |&(c, _)| c as i32)) as f64)
+    Value::Number(with_tac(|t| {
+        t.path
+            .get(n(args, 0) as usize)
+            .map_or(-1, |&(c, _)| c as i32)
+    }) as f64)
 }
 
 pub fn tac_path_row(args: &[Value]) -> Value {
-    Value::Number(with_tac(|t| t.path.get(n(args, 0) as usize).map_or(-1, |&(_, r)| r as i32)) as f64)
+    Value::Number(with_tac(|t| {
+        t.path
+            .get(n(args, 0) as usize)
+            .map_or(-1, |&(_, r)| r as i32)
+    }) as f64)
 }
 
 /// `tac_add_unit(col, row, team, speed, move, jump, hp)` — register a unit on the board (claiming the
@@ -12253,8 +12316,13 @@ pub fn tac_path_row(args: &[Value]) -> Value {
 pub fn tac_add_unit(args: &[Value]) -> Value {
     let id = with_tac(|t| {
         t.add_unit(
-            n(args, 0) as i32, n(args, 1) as i32, n(args, 2) as u8,
-            n(args, 3) as u16, n(args, 4) as u8, n(args, 5) as u8, n(args, 6) as i16,
+            n(args, 0) as i32,
+            n(args, 1) as i32,
+            n(args, 2) as u8,
+            n(args, 3) as u16,
+            n(args, 4) as u8,
+            n(args, 5) as u8,
+            n(args, 6) as i16,
         )
     });
     Value::Number(id as f64)
@@ -12284,25 +12352,45 @@ pub fn tac_unit_count(_args: &[Value]) -> Value {
 }
 
 /// Per-unit getters: `tac_unit_col/row/team/hp/maxhp/move/jump/speed(id)`, `tac_unit_alive(id)`.
-pub fn tac_unit_col(args: &[Value]) -> Value { unit_field(args, |u| u.col) }
+pub fn tac_unit_col(args: &[Value]) -> Value {
+    unit_field(args, |u| u.col)
+}
 
-pub fn tac_unit_row(args: &[Value]) -> Value { unit_field(args, |u| u.row) }
+pub fn tac_unit_row(args: &[Value]) -> Value {
+    unit_field(args, |u| u.row)
+}
 
-pub fn tac_unit_team(args: &[Value]) -> Value { unit_field(args, |u| u.team as i32) }
+pub fn tac_unit_team(args: &[Value]) -> Value {
+    unit_field(args, |u| u.team as i32)
+}
 
-pub fn tac_unit_hp(args: &[Value]) -> Value { unit_field(args, |u| u.hp as i32) }
+pub fn tac_unit_hp(args: &[Value]) -> Value {
+    unit_field(args, |u| u.hp as i32)
+}
 
-pub fn tac_unit_maxhp(args: &[Value]) -> Value { unit_field(args, |u| u.max_hp as i32) }
+pub fn tac_unit_maxhp(args: &[Value]) -> Value {
+    unit_field(args, |u| u.max_hp as i32)
+}
 
-pub fn tac_unit_move(args: &[Value]) -> Value { unit_field(args, |u| u.mov as i32) }
+pub fn tac_unit_move(args: &[Value]) -> Value {
+    unit_field(args, |u| u.mov as i32)
+}
 
-pub fn tac_unit_jump(args: &[Value]) -> Value { unit_field(args, |u| u.jump as i32) }
+pub fn tac_unit_jump(args: &[Value]) -> Value {
+    unit_field(args, |u| u.jump as i32)
+}
 
-pub fn tac_unit_speed(args: &[Value]) -> Value { unit_field(args, |u| u.speed as i32) }
+pub fn tac_unit_speed(args: &[Value]) -> Value {
+    unit_field(args, |u| u.speed as i32)
+}
 
 pub fn tac_unit_alive(args: &[Value]) -> Value {
     // Number (1/0), not Bool, so tish `tac_unit_alive(id) > 0` comparisons work on GBA.
-    Value::Number(with_tac(|t| t.units.get(n(args, 0) as usize).map_or(0, |u| u.alive as i32)) as f64)
+    Value::Number(with_tac(|t| {
+        t.units
+            .get(n(args, 0) as usize)
+            .map_or(0, |u| u.alive as i32)
+    }) as f64)
 }
 
 /// `tac_unit_move_range(id)` — flood-fill the reachable tiles for a unit using its own Move/Jump and
@@ -12310,7 +12398,14 @@ pub fn tac_unit_alive(args: &[Value]) -> Value {
 pub fn tac_unit_move_range(args: &[Value]) -> Value {
     with_tac(|t| {
         if let Some(u) = t.units.get(n(args, 0) as usize).copied() {
-            t.move_range(u.col, u.row, u.mov as i32, u.jump as i32, u.flying, u.team as i32);
+            t.move_range(
+                u.col,
+                u.row,
+                u.mov as i32,
+                u.jump as i32,
+                u.flying,
+                u.team as i32,
+            );
         }
     });
     Value::Number(with_tac(|t| t.reach.len()) as f64)
@@ -12573,132 +12668,480 @@ pub fn tac_adjacent_enemy(args: &[Value]) -> Value {
     Value::Number(with_tac(|t| t.adjacent_enemy(n(args, 0) as i32)) as f64)
 }
 
-pub fn tac_stack_count_typed(p0: i32, p1: i32, p2: i32) -> i32 { match tac_stack_count(&[Value::Number(p0 as f64), Value::Number(p1 as f64), Value::Number(p2 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_stack_elev_typed(p0: i32, p1: i32, p2: i32, p3: i32) -> i32 { match tac_stack_elev(&[Value::Number(p0 as f64), Value::Number(p1 as f64), Value::Number(p2 as f64), Value::Number(p3 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_stack_tile_typed(p0: i32, p1: i32, p2: i32, p3: i32) -> i32 { match tac_stack_tile(&[Value::Number(p0 as f64), Value::Number(p1 as f64), Value::Number(p2 as f64), Value::Number(p3 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_load_typed(p0: i32) { tac_load(&[Value::Number(p0 as f64)]); }
-
-pub fn tac_board_bg_typed(p0: i32) -> i32 { match tac_board_bg(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_board_cw_typed(p0: i32) -> i32 { match tac_board_cw(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 512 } }
-
-pub fn tac_board_ch_typed(p0: i32) -> i32 { match tac_board_ch(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 512 } }
-
-pub fn tac_board_mapw_typed(p0: i32) -> i32 { match tac_board_mapw(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 512 } }
-
-pub fn tac_board_maph_typed(p0: i32) -> i32 { match tac_board_maph(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 512 } }
-
-pub fn tac_board_fg_typed(p0: i32) -> i32 { match tac_board_fg(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => -1 } }
-
-pub fn tac_board_ox_typed(p0: i32) -> i32 { match tac_board_ox(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_board_oy_typed(p0: i32) -> i32 { match tac_board_oy(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_board_lift_typed(p0: i32) -> i32 { match tac_board_lift(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_w_typed() -> i32 { match tac_w(&[]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_h_typed() -> i32 { match tac_h(&[]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_spawn_count_typed(p0: i32) -> i32 { match tac_spawn_count(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_spawn_col_typed(p0: i32, p1: i32) -> i32 { match tac_spawn_col(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_spawn_row_typed(p0: i32, p1: i32) -> i32 { match tac_spawn_row(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_spawn_cls_typed(p0: i32, p1: i32) -> i32 { match tac_spawn_cls(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_spawn_team_typed(p0: i32, p1: i32) -> i32 { match tac_spawn_team(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_init_typed(p0: i32, p1: i32) { tac_init(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]); }
-
-pub fn tac_set_cell_typed(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32) { tac_set_cell(&[Value::Number(p0 as f64), Value::Number(p1 as f64), Value::Number(p2 as f64), Value::Number(p3 as f64), Value::Number(p4 as f64)]); }
-
-pub fn tac_height_typed(p0: i32, p1: i32) -> i32 { match tac_height(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_tile_typed(p0: i32, p1: i32) -> i32 { match tac_tile(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_walkable_typed(p0: i32, p1: i32) -> i32 { match tac_walkable(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Bool(b) => b as i32, Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_set_occupant_typed(p0: i32, p1: i32, p2: i32) { tac_set_occupant(&[Value::Number(p0 as f64), Value::Number(p1 as f64), Value::Number(p2 as f64)]); }
-
-pub fn tac_occupant_typed(p0: i32, p1: i32) -> i32 { match tac_occupant(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_move_range_typed(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32) -> i32 { match tac_move_range(&[Value::Number(p0 as f64), Value::Number(p1 as f64), Value::Number(p2 as f64), Value::Number(p3 as f64), Value::Number(p4 as f64), Value::Number(p5 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_move_cost_typed(p0: i32, p1: i32) -> i32 { match tac_move_cost(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_in_range_typed(p0: i32, p1: i32) -> i32 { match tac_in_range(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_range_count_typed() -> i32 { match tac_range_count(&[]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_range_col_typed(p0: i32) -> i32 { match tac_range_col(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_range_row_typed(p0: i32) -> i32 { match tac_range_row(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_path_typed(p0: i32, p1: i32) -> i32 { match tac_path(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_path_len_typed() -> i32 { match tac_path_len(&[]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_path_col_typed(p0: i32) -> i32 { match tac_path_col(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_path_row_typed(p0: i32) -> i32 { match tac_path_row(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_add_unit_typed(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32) -> i32 { match tac_add_unit(&[Value::Number(p0 as f64), Value::Number(p1 as f64), Value::Number(p2 as f64), Value::Number(p3 as f64), Value::Number(p4 as f64), Value::Number(p5 as f64), Value::Number(p6 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_clear_units_typed() { tac_clear_units(&[]); }
-
-pub fn tac_unit_count_typed() -> i32 { match tac_unit_count(&[]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_unit_col_typed(p0: i32) -> i32 { match tac_unit_col(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_unit_row_typed(p0: i32) -> i32 { match tac_unit_row(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_unit_team_typed(p0: i32) -> i32 { match tac_unit_team(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_unit_hp_typed(p0: i32) -> i32 { match tac_unit_hp(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_unit_maxhp_typed(p0: i32) -> i32 { match tac_unit_maxhp(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_unit_move_typed(p0: i32) -> i32 { match tac_unit_move(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_unit_jump_typed(p0: i32) -> i32 { match tac_unit_jump(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_unit_speed_typed(p0: i32) -> i32 { match tac_unit_speed(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_unit_alive_typed(p0: i32) -> i32 { match tac_unit_alive(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_unit_move_range_typed(p0: i32) -> i32 { match tac_unit_move_range(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_set_terrain_cost_typed(p0: i32, p1: i32) { tac_set_terrain_cost(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]); }
-
-pub fn tac_knockback_typed(p0: i32, p1: i32, p2: i32) -> i32 { match tac_knockback(&[Value::Number(p0 as f64), Value::Number(p1 as f64), Value::Number(p2 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_knock_drop_typed(p0: i32, p1: i32, p2: i32) -> i32 { match tac_knock_drop(&[Value::Number(p0 as f64), Value::Number(p1 as f64), Value::Number(p2 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_set_zoc_typed(p0: i32) { tac_set_zoc(&[Value::Number(p0 as f64)]); }
-
-pub fn tac_revive_typed(p0: i32, p1: i32) -> i32 { match tac_revive(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_turn_end_typed(p0: i32, p1: i32, p2: i32) { tac_turn_end(&[Value::Number(p0 as f64), Value::Number(p1 as f64), Value::Number(p2 as f64)]); }
-
-pub fn tac_unit_ct_typed(p0: i32) -> i32 { match tac_unit_ct(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_unit_set_speed_scale_typed(p0: i32, p1: i32) { tac_unit_set_speed_scale(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]); }
-
-pub fn tac_unit_set_flying_typed(p0: i32, p1: i32) { tac_unit_set_flying(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]); }
-
-pub fn tac_unit_set_pos_typed(p0: i32, p1: i32, p2: i32) { tac_unit_set_pos(&[Value::Number(p0 as f64), Value::Number(p1 as f64), Value::Number(p2 as f64)]); }
-
-pub fn tac_damage_typed(p0: i32, p1: i32) -> i32 { match tac_damage(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_heal_typed(p0: i32, p1: i32) -> i32 { match tac_heal(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_unit_set_maxhp_typed(p0: i32, p1: i32) -> i32 { match tac_unit_set_maxhp(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_turn_next_typed() -> i32 { match tac_turn_next(&[]) { Value::Number(v) => v as i32, _ => 0 } }
-
-pub fn tac_adjacent_enemy_typed(p0: i32) -> i32 { match tac_adjacent_enemy(&[Value::Number(p0 as f64)]) { Value::Number(v) => v as i32, _ => 0 } }
+pub fn tac_stack_count_typed(p0: i32, p1: i32, p2: i32) -> i32 {
+    match tac_stack_count(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_stack_elev_typed(p0: i32, p1: i32, p2: i32, p3: i32) -> i32 {
+    match tac_stack_elev(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+        Value::Number(p3 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_stack_tile_typed(p0: i32, p1: i32, p2: i32, p3: i32) -> i32 {
+    match tac_stack_tile(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+        Value::Number(p3 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_load_typed(p0: i32) {
+    tac_load(&[Value::Number(p0 as f64)]);
+}
+
+pub fn tac_board_bg_typed(p0: i32) -> i32 {
+    match tac_board_bg(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_board_cw_typed(p0: i32) -> i32 {
+    match tac_board_cw(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 512,
+    }
+}
+
+pub fn tac_board_ch_typed(p0: i32) -> i32 {
+    match tac_board_ch(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 512,
+    }
+}
+
+pub fn tac_board_mapw_typed(p0: i32) -> i32 {
+    match tac_board_mapw(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 512,
+    }
+}
+
+pub fn tac_board_maph_typed(p0: i32) -> i32 {
+    match tac_board_maph(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 512,
+    }
+}
+
+pub fn tac_board_fg_typed(p0: i32) -> i32 {
+    match tac_board_fg(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => -1,
+    }
+}
+
+pub fn tac_board_ox_typed(p0: i32) -> i32 {
+    match tac_board_ox(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_board_oy_typed(p0: i32) -> i32 {
+    match tac_board_oy(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_board_lift_typed(p0: i32) -> i32 {
+    match tac_board_lift(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_w_typed() -> i32 {
+    match tac_w(&[]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_h_typed() -> i32 {
+    match tac_h(&[]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_spawn_count_typed(p0: i32) -> i32 {
+    match tac_spawn_count(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_spawn_col_typed(p0: i32, p1: i32) -> i32 {
+    match tac_spawn_col(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_spawn_row_typed(p0: i32, p1: i32) -> i32 {
+    match tac_spawn_row(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_spawn_cls_typed(p0: i32, p1: i32) -> i32 {
+    match tac_spawn_cls(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_spawn_team_typed(p0: i32, p1: i32) -> i32 {
+    match tac_spawn_team(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_init_typed(p0: i32, p1: i32) {
+    tac_init(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]);
+}
+
+pub fn tac_set_cell_typed(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32) {
+    tac_set_cell(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+        Value::Number(p3 as f64),
+        Value::Number(p4 as f64),
+    ]);
+}
+
+pub fn tac_height_typed(p0: i32, p1: i32) -> i32 {
+    match tac_height(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_tile_typed(p0: i32, p1: i32) -> i32 {
+    match tac_tile(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_walkable_typed(p0: i32, p1: i32) -> i32 {
+    match tac_walkable(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Bool(b) => b as i32,
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_set_occupant_typed(p0: i32, p1: i32, p2: i32) {
+    tac_set_occupant(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+    ]);
+}
+
+pub fn tac_occupant_typed(p0: i32, p1: i32) -> i32 {
+    match tac_occupant(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_move_range_typed(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32) -> i32 {
+    match tac_move_range(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+        Value::Number(p3 as f64),
+        Value::Number(p4 as f64),
+        Value::Number(p5 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_move_cost_typed(p0: i32, p1: i32) -> i32 {
+    match tac_move_cost(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_in_range_typed(p0: i32, p1: i32) -> i32 {
+    match tac_in_range(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_range_count_typed() -> i32 {
+    match tac_range_count(&[]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_range_col_typed(p0: i32) -> i32 {
+    match tac_range_col(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_range_row_typed(p0: i32) -> i32 {
+    match tac_range_row(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_path_typed(p0: i32, p1: i32) -> i32 {
+    match tac_path(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_path_len_typed() -> i32 {
+    match tac_path_len(&[]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_path_col_typed(p0: i32) -> i32 {
+    match tac_path_col(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_path_row_typed(p0: i32) -> i32 {
+    match tac_path_row(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_add_unit_typed(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32) -> i32 {
+    match tac_add_unit(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+        Value::Number(p3 as f64),
+        Value::Number(p4 as f64),
+        Value::Number(p5 as f64),
+        Value::Number(p6 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_clear_units_typed() {
+    tac_clear_units(&[]);
+}
+
+pub fn tac_unit_count_typed() -> i32 {
+    match tac_unit_count(&[]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_unit_col_typed(p0: i32) -> i32 {
+    match tac_unit_col(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_unit_row_typed(p0: i32) -> i32 {
+    match tac_unit_row(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_unit_team_typed(p0: i32) -> i32 {
+    match tac_unit_team(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_unit_hp_typed(p0: i32) -> i32 {
+    match tac_unit_hp(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_unit_maxhp_typed(p0: i32) -> i32 {
+    match tac_unit_maxhp(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_unit_move_typed(p0: i32) -> i32 {
+    match tac_unit_move(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_unit_jump_typed(p0: i32) -> i32 {
+    match tac_unit_jump(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_unit_speed_typed(p0: i32) -> i32 {
+    match tac_unit_speed(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_unit_alive_typed(p0: i32) -> i32 {
+    match tac_unit_alive(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_unit_move_range_typed(p0: i32) -> i32 {
+    match tac_unit_move_range(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_set_terrain_cost_typed(p0: i32, p1: i32) {
+    tac_set_terrain_cost(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]);
+}
+
+pub fn tac_knockback_typed(p0: i32, p1: i32, p2: i32) -> i32 {
+    match tac_knockback(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_knock_drop_typed(p0: i32, p1: i32, p2: i32) -> i32 {
+    match tac_knock_drop(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+    ]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_set_zoc_typed(p0: i32) {
+    tac_set_zoc(&[Value::Number(p0 as f64)]);
+}
+
+pub fn tac_revive_typed(p0: i32, p1: i32) -> i32 {
+    match tac_revive(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_turn_end_typed(p0: i32, p1: i32, p2: i32) {
+    tac_turn_end(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+    ]);
+}
+
+pub fn tac_unit_ct_typed(p0: i32) -> i32 {
+    match tac_unit_ct(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_unit_set_speed_scale_typed(p0: i32, p1: i32) {
+    tac_unit_set_speed_scale(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]);
+}
+
+pub fn tac_unit_set_flying_typed(p0: i32, p1: i32) {
+    tac_unit_set_flying(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]);
+}
+
+pub fn tac_unit_set_pos_typed(p0: i32, p1: i32, p2: i32) {
+    tac_unit_set_pos(&[
+        Value::Number(p0 as f64),
+        Value::Number(p1 as f64),
+        Value::Number(p2 as f64),
+    ]);
+}
+
+pub fn tac_damage_typed(p0: i32, p1: i32) -> i32 {
+    match tac_damage(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_heal_typed(p0: i32, p1: i32) -> i32 {
+    match tac_heal(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_unit_set_maxhp_typed(p0: i32, p1: i32) -> i32 {
+    match tac_unit_set_maxhp(&[Value::Number(p0 as f64), Value::Number(p1 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_turn_next_typed() -> i32 {
+    match tac_turn_next(&[]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
+
+pub fn tac_adjacent_enemy_typed(p0: i32) -> i32 {
+    match tac_adjacent_enemy(&[Value::Number(p0 as f64)]) {
+        Value::Number(v) => v as i32,
+        _ => 0,
+    }
+}
