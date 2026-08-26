@@ -19,6 +19,8 @@ pinned in [`CONTRACT.md`](./CONTRACT.md); spike results in
 **Screenshots (headless):** `scripts/screenshot.sh <rom.gba | src/main.tish> [out.png] [frames]`
 renders a ROM in libmgba with no window (no display / screen-recording permission), so it works
 locally and in CI — see [`.github/workflows/screenshot.yml`](./.github/workflows/screenshot.yml).
+`scripts/gif.sh` takes the same arguments and records the run as a looping animated GIF instead,
+for everything a still cannot show — movement, animation, transitions, particles.
 
 **Working on an example:** the whole build → drive-headlessly → self-play → strip-probes loop, with
 the traps that cost the most time, is written up in
@@ -68,6 +70,7 @@ cd examples/fonts-demo
 npm run build                  # → fonts-demo.gba
 npm start                      # build + open in mGBA
 npm run shot                   # build + headless screenshot.png (no window; for CI / quick checks)
+npm run gif                    # build + headless screenshot.gif — an animated clip of the same run
 npm run clean                  # remove build artifacts
 ```
 

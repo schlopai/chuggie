@@ -6,6 +6,7 @@
     "build": "cargo build --release && agb-gbafix ../../target/thumbv4t-none-eabi/release/p0-spike -o p0-spike.gba",
     "start": "npm run build && (mgba-qt p0-spike.gba || mgba p0-spike.gba)",
     "shot": "npm run build && ../../scripts/screenshot.sh p0-spike.gba screenshot.png",
+    "gif": "npm run build && ../../scripts/gif.sh p0-spike.gba screenshot.gif",
     "clean": "cargo clean; rm -f p0-spike.gba p0-spike.sav"
   },
   "devDependencies": {

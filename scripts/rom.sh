@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Build, play or screenshot one example's ROM. Backs the editor actions in .vscode/ (regenerate those
+# Build, play, screenshot or record one example's ROM. Backs the editor actions in .vscode/ (regenerate those
 # with `npm run vscode` after adding an example) and is fine to call by hand.
 #
-# Usage:  scripts/rom.sh play|build|shot|rom [example]
+# Usage:  scripts/rom.sh play|build|shot|gif|rom [example]
 #   play   : run the ROM that is ON DISK in mGBA. Does NOT build — so it starts instantly, and says
 #            what to run if the ROM is missing or older than its sources.
 #   build  : `npm run build` in the example.
 #   shot   : headless screenshot -> examples/<name>/screenshot.png (see scripts/screenshot.sh).
+#   gif    : headless animated clip -> examples/<name>/screenshot.gif (see scripts/gif.sh).
 #   rom    : print the ROM path and exit (for scripting).
 #
 #   [example] may be a name (akari), a directory (examples/akari) or ANY path inside one
@@ -18,7 +19,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"          # repo root
-action="${1:?usage: rom.sh play|build|shot|rom [example]}"
+action="${1:?usage: rom.sh play|build|shot|gif|rom [example]}"
 arg="${2:-}"
 memo="$here/target/.last-example"
 
@@ -67,6 +68,10 @@ case "$action" in
 
   shot)
     cd "$dir" && exec npm run shot
+    ;;
+
+  gif)
+    cd "$dir" && exec npm run gif
     ;;
 
   play)

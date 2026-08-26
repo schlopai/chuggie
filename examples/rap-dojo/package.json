@@ -7,6 +7,7 @@
     "verify": "./verify.sh",
     "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
     "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png 240",
+    "gif": "npm run build && ../../scripts/gif.sh \"$npm_package_name.gba\" screenshot.gif 240",
     "assets": "python3 ../../scripts/gen_rap_dojo.py && python3 ../../scripts/gen_rap_dojo_music.py",
     "clean": "rm -rf .tish .buildno src/buildid.tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
   },

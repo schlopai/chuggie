@@ -6,6 +6,7 @@
     "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
     "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
     "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png 200",
+    "gif": "npm run build && ../../scripts/gif.sh \"$npm_package_name.gba\" screenshot.gif 200",
     "verify": "./verify.sh",
     "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
   },
