@@ -10083,7 +10083,7 @@ pub fn world_step(_args: &[Value]) -> Value {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Iso grid — a reusable isometric, height-mapped board with SRPG-style movement.
 // Standalone global state (independent of the SoA `World`): a game renders however it likes and uses
-// these for the logical grid, move-range flood fill, and pathfinding. See the SRPG plan doc in the chuggie-tactics repo.
+// these for the logical grid, move-range flood fill, and pathfinding. See the SRPG plan doc outside this repo.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[derive(Clone, Copy)]
@@ -11219,7 +11219,7 @@ pub fn isob_heal(args: &[Value]) -> Value {
 /// `isob_unit_set_maxhp(id, v)` — set a unit's HP ceiling, keeping current HP in range. Returns the
 /// new maximum (0 for an unknown unit).
 ///
-/// ⚠️ This exists because the SRPG growth rules (now in the chuggie-tactics repo) documented a rule they could not implement: "what
+/// ⚠️ This exists because the SRPG growth rules (no longer in this repo) documented a rule they could not implement: "what
 /// a level does NOT raise is HP … there is no setter for the maximum, so growing it would mean a
 /// Rust change." Real SRPG levels raise HP, so the engine was quietly deciding a game-design
 /// question. A missing setter is not a neutral omission — it becomes a rule.
