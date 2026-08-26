@@ -1,0 +1,86 @@
+// The clan's stock, and what each item in it does.
+//
+// FFTA's Item command is not learned and is not a job skill: every unit can use it, and what it uses
+// comes out of ONE inventory shared by the whole clan. That sharing is the entire tactical content of
+// the system — there are three Potions in this battle, not three Potions each, so spending one is a
+// decision about the squad rather than about the unit holding it.
+//
+// Items are ability records rather than a type of their own. Everything downstream — the target
+// picker, the range check, the AI's search, the Judge's legality test, the resolution — already takes
+// an ability, so an item that is one gets all of that for free and needs no branch except where the
+// effect actually lands. The fields they do not use (power, element, aoe) are the ones a weapon needs
+// and an item does not, and they sit at their neutral values.
+import { KIND_ITEM } from '../../../packages/ffta/kinds'
+import { USE_ATK, EL_NONE } from '../../../packages/ffta/elements'
+import { SHAPE_BURST } from '../../../packages/tactics'
+import { ST_NONE } from '../../../packages/ffta/status'
+
+// Every item is range 1 — the ROM's own ability table gives Potion, Hi-Potion and X-Potion a range of
+// 1 with a vertical tolerance of 1. Reaching a hurt ally is a move you have to spend the turn on, and
+// that is what stops a stock of potions from being a healer that costs nothing and cannot be
+// interrupted. (FFT's Chemist throws items four tiles; FFTA has no such job.)
+let ITEM_RANGE: i32 = 1
+
+// What an item does, split by effect rather than by name so the resolution reads the fields instead
+// of testing which item it is holding. An item may do more than one of these — FFTA's Elixir restores
+// both pools, and Cureall is a cure that heals nothing.
+//   heal    HP restored
+//   restore MP restored
+//   cure    clears an affliction
+//   revive  works on a KO'd ally, and ONLY on one
+function item(name, heal, restore, cure, revive) {
+  // Vertical 2 to match the reach of a hand: the ROM gives Potions a vertical tolerance of 1 in its
+  // own units, and one visible tier is two steps in ours.
+  return { name: name, kind: KIND_ITEM, heal: heal, restore: restore, cure: cure, revive: revive,
+           power: 0, stat: USE_ATK, vert: 2, range: ITEM_RANGE, minRange: 0, mp: 0, element: EL_NONE,
+           status: ST_NONE, statusTurns: 0, aoe: 0, shape: SHAPE_BURST, knock: 0, ap: 0 }
+}
+
+// FFTA's numbers are a Potion for 25 HP and an Ether for 80 MP against units with hundreds of each.
+// These are the same items against OUR scale, where a Fighter has 26 HP and a Mage 20 MP: a Potion
+// worth 25 here would top up anything from a sliver, and an Ether worth 80 would make MP costs
+// meaningless. What is preserved is the shape — a Potion is most of a small unit's health, an Ether
+// is most of a caster's pool, and both are worth a whole turn.
+export const Potion      = item('Potion', 12, 0, 0, 0)
+export const Ether       = item('Ether', 0, 8, 0, 0)
+export const Antidote    = item('Antidote', 0, 0, 1, 0)
+export const PhoenixDown = item('Phoenix Down', 0, 0, 0, 1)
+
+// The stock the battle starts with, in the order the menu lists them. Small on purpose: an item is
+// only a decision while there are fewer of them than there are turns you would like to use one on.
+export const STOCK = [
+  { item: Potion, count: 3 },
+  { item: Ether, count: 1 },
+  { item: Antidote, count: 1 },
+  { item: PhoenixDown, count: 1 }
+]
+
+// What a won battle pays the clan. In FFTA the reward is the mission's, and the Judge's answer to a
+// carded clan is the penalty named **Volunteer — forfeit of reward**: you fought it for free. Paying
+// in ITEMS rather than gil is what makes that bite here, because the stock is the one resource this
+// battle actually shares, and losing the Phoenix Down you were owed is a thing you can point at.
+//
+// Weighted by putting the common thing in more than once, which beats a table of probabilities for a
+// list this short and cannot drift out of sync with itself the way parallel weight arrays do.
+export const LOOT = [Potion, Potion, Potion, Antidote, Ether, PhoenixDown]
+
+// Add one to the stock. An item not already stocked cannot be won — the menu shows the stock as a
+// fixed list of rows, so a prize with nowhere to sit would be paid into nothing.
+export function stockAdd(it) {
+  let i = 0
+  while (i < STOCK.length) {
+    if (STOCK[i].item.name === it.name) { STOCK[i].count = STOCK[i].count + 1; return 1 }
+    i = i + 1
+  }
+  return 0
+}
+
+export function stockTotal() {
+  let n = 0
+  let i = 0
+  while (i < STOCK.length) {
+    n = n + STOCK[i].count
+    i = i + 1
+  }
+  return n
+}

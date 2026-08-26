@@ -1,0 +1,44 @@
+// NPC definitions keyed by Tiled spawn `cls`. cls 0 is the player (not in this table).
+
+export let CLS_PLAYER: i32 = 0
+export let CLS_ELDER: i32 = 1
+export let CLS_CLINIC: i32 = 2
+export let CLS_GUARD: i32 = 3
+export let CLS_MERCHANT: i32 = 4
+
+export let LINES_ELDER = [
+  "Welcome to the plaza, traveler.",
+  "The merchant by the towers keeps fine wares.",
+  "The healer near the path can mend your clan for Gil."
+]
+
+export let LINES_CLINIC = [
+  "Welcome to the clinic.",
+  "I can restore your whole clan for 100 Gil."
+]
+
+export let LINES_GUARD = [
+  "Keep the peace, citizen.",
+  "Nothing to report on this watch."
+]
+
+// Merchant opens the shop UI; these lines are unused (shop greets itself).
+export let LINES_MERCHANT = [
+  "Looking to buy or sell?"
+]
+
+export function npcDef(cls) {
+  if (cls === CLS_ELDER) {
+    return { name: "Elder", lines: LINES_ELDER, merchant: 0, clinic: 0, portrait: -1 }
+  }
+  if (cls === CLS_CLINIC) {
+    return { name: "Healer", lines: LINES_CLINIC, merchant: 0, clinic: 1, portrait: -1 }
+  }
+  if (cls === CLS_GUARD) {
+    return { name: "Guard", lines: LINES_GUARD, merchant: 0, clinic: 0, portrait: -1 }
+  }
+  if (cls === CLS_MERCHANT) {
+    return { name: "Merchant", lines: LINES_MERCHANT, merchant: 1, clinic: 0, portrait: 8 }
+  }
+  return { name: "Someone", lines: ["..."], merchant: 0, clinic: 0, portrait: -1 }
+}

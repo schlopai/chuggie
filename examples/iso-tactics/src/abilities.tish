@@ -1,0 +1,123 @@
+// Ability tables — the GAME's data, not the engine's rules.
+//
+// A unit's turn offers one action from its ACTION LIST: slot 0 is always the plain weapon attack
+// (built from `weapons.tish` by `weaponAction`), and the rest are the class's abilities. Everything
+// that decides what an action does lives in one of these records, so a new spell is a new entry here
+// and nothing else — the controller reads `kind` to pick the animation, `range`/`minRange` to collect
+// targets, `mp` to gate it, and the damage formula (`formula.tish`) reads `power`/`stat`/`element`.
+//
+// `kind` is reused from weapons.tish on purpose: it already drives the on-screen performance (melee
+// lunge, caster charge→release, heal cast), so an ability inherits an animation by declaring its kind.
+//
+// A note on cost, because this is a GBA: every key of every one of these objects is ~90 bytes of heap
+// (hash bucket + the key string), so an 8-key ability record is ~720 B. That is why the table below is
+// a handful of hand-picked abilities rather than a generated matrix of fifty — a full FFTA job wheel
+// wants a packed array format, not one object per row.
+// ⚠️ THE NAMES ARE THE ROM'S; THE NUMBERS ARE NOT. Five names here were invented — Power Strike,
+// Crush, Sweep, Bolt and Smite — and are now Beatdown, Air Render, Wild Swing, Thunder and Holy,
+// each a real FFTA ability of the same broad role. (FFTA calls the lightning spell Thunder, not
+// Bolt.) `scripts/ffta_validate.py::check_example_names` fails the build if any name here stops
+// resolving against `data/ffta/tables/abilities.csv`.
+//
+// Everything numeric below — power, MP, range, AoE shape, the status riders and the AP prices — is
+// this demo's own tuning, in its own small scale. The ROM's figures for the same abilities are in
+// `abilities.csv` and are an order of magnitude larger (Fire is power 30 there, 3 here).
+
+import { KIND_MELEE, KIND_MAGIC, KIND_HEAL, KIND_BUFF, KIND_COMBO } from '../../../packages/ffta/kinds'
+import { ST_NONE, ST_POISON, ST_SLOW, ST_HASTE } from '../../../packages/ffta/status'
+
+// The element and scaling-stat enums moved to packages/ffta/elements.tish — the damage formula
+// and the law checker read them, so they are rules, not this example's data. Re-exported here so
+// an ability table still reads as one file.
+import { USE_ATK, USE_MAG, EL_NONE, EL_FIRE, EL_ICE, EL_BOLT, EL_HOLY, ELEMENT_NAMES } from '../../../packages/ffta/elements'
+export { USE_ATK, USE_MAG, EL_NONE, EL_FIRE, EL_ICE, EL_BOLT, EL_HOLY, ELEMENT_NAMES }
+
+// How an ability's area is shaped around what it is aimed at (main.tish `buildFootprint` reads this).
+//   BURST — the target's tile plus everything within `aoe` of it. `aoe: 0` is a single target.
+//   LINE  — a pierce: every tile between the caster and the target, target included. `aoe` is unused,
+//           because the shape is decided by where the two of them stand, which is the point of it.
+//   CONE  — a widening wedge anchored on the CASTER, `aoe` steps deep, fanning toward the target. The
+//           target only picks the direction, so a cone is aimed rather than placed.
+// The shapes themselves live in packages/tactics, next to the footprint builder that gives them
+// meaning — re-exported here so an ability table reads as one file.
+export { SHAPE_BURST, SHAPE_LINE, SHAPE_CONE } from '../../../packages/tactics'
+
+// power  — added to the scaling stat before defense (see formula.tish)
+// stat   — USE_ATK (physical, adds weapon power, reduced by DEF) or USE_MAG (reduced by RES)
+// range  — max Manhattan distance to a target; minRange excludes tiles closer than that
+// vert   — VERTICAL range: how many elevation steps up or down this may be aimed. This is the only
+//          thing height does in FFTA and now the only thing it does here — the damage formula does
+//          not know what a cliff is, but a sword cannot be swung at somebody standing on top of one.
+//          `0` means "ignore height entirely", which is the ROM's own convention for the field.
+//          Steps, not tiers: the map stacks two steps per visible tier, and a class's `jump` is 2, so
+//          a melee `vert` of 2 reaches exactly as high as its owner can climb
+// mp     — spent on use; a unit that cannot pay does not see the ability offered
+// status/statusTurns — a condition inflicted on a hit (status.tish); ST_NONE for most
+// aoe    — blast radius in tiles around the target (Manhattan); 0 is a single target. An area hit
+//          catches ALLIES too, which is the whole cost of casting one
+// knock  — 1 if a hit shoves the target one tile straight back. A shove is worth more than the
+//          damage attached to it: it can put a unit in the pond, off a ledge, or simply out of the
+//          reach it spent its own turn buying
+// ap     — AP a wielder must earn before this unlocks. `0` means it is known the moment the weapon is
+//          equipped; anything higher is learned mid-battle from fighting. Which weapon teaches what,
+//          and in what order, is in weapons.tish — the ability only names its price
+//
+// The status and aoe keys cost every record ~270 B of heap whether it uses them or not (see the note
+// above) — worth it here because the alternative, a parallel table keyed by ability, is the kind of
+// split data that goes stale the first time someone adds a spell.
+export const PowerStrike = { name: 'Beatdown', kind: KIND_MELEE, power: 3, stat: USE_ATK, vert: 2, range: 1, minRange: 0, mp: 4, element: EL_NONE, status: ST_NONE, statusTurns: 0, aoe: 0, shape: SHAPE_BURST, knock: 0, ap: 0 }
+// Crush poisons: the Brute's one answer to a target it cannot finish this turn.
+export const Crush       = { name: 'Air Render',        kind: KIND_MELEE, power: 4, stat: USE_ATK, vert: 2, range: 1, minRange: 0, mp: 6, element: EL_NONE, status: ST_POISON, statusTurns: 3, aoe: 0, shape: SHAPE_BURST, knock: 1, ap: 0 }
+// Fire is the blast: radius 1 (the target's tile and its four neighbours). It is the Mage's answer
+// to a clump — and the reason a Mage has to think about where its own line stands, because the
+// flames do not check tabards.
+export const Fire        = { name: 'Fire',         kind: KIND_MAGIC, power: 3, stat: USE_MAG, vert: 4, range: 3, minRange: 0, mp: 6, element: EL_FIRE, status: ST_NONE, statusTurns: 0, aoe: 1, shape: SHAPE_BURST, knock: 0, ap: 0 }
+// Minimum range 2: a lightning bolt cannot be called down on the tile you are standing next to. It is
+// here to prove minRange works — it also gives the mage a reason to keep its distance. The numbing
+// shock slows: the Mage's way of buying itself another turn of distance.
+//
+// It is also a LINE, and that is what makes it the interesting spell rather than a bigger Fire: the
+// bolt skewers everything between the Mage and its mark, so its value depends entirely on where the
+// Mage is standing. Lining three units up is a play; walking into the shot is a mistake.
+export const Bolt        = { name: 'Thunder',         kind: KIND_MAGIC, power: 5, stat: USE_MAG, vert: 6, range: 4, minRange: 2, mp: 8, element: EL_BOLT, status: ST_SLOW, statusTurns: 3, aoe: 0, shape: SHAPE_LINE, knock: 0, ap: 25 }
+export const Smite       = { name: 'Holy',        kind: KIND_MAGIC, power: 3, stat: USE_MAG, vert: 4, range: 2, minRange: 0, mp: 5, element: EL_HOLY, status: ST_NONE, statusTurns: 0, aoe: 0, shape: SHAPE_BURST, knock: 0, ap: 20 }
+// The one cone: a two-step wedge swept from the Fighter through whatever it is standing next to. It
+// is aimed at an adjacent unit (range 1) but reaches PAST it, so the value of a Sweep is decided by
+// what is behind the thing you are hitting.
+export const Sweep       = { name: 'Wild Swing',        kind: KIND_MELEE, power: 2, stat: USE_ATK, vert: 2, range: 1, minRange: 0, mp: 6, element: EL_NONE, status: ST_NONE, statusTurns: 0, aoe: 2, shape: SHAPE_CONE, knock: 0, ap: 25 }
+// Cure also clears an affliction — that behaviour is keyed off `kind`, not off these fields, so any
+// healing ability is a cleanse.
+// Haste — FFTA's Time Magic, riding the Cleric's scepter for want of a Time Mage. It is the only
+// ability that targets a HEALTHY ally, and the only one whose entire effect is a change to the turn
+// order rather than to a number printed on a unit.
+export const Haste       = { name: 'Haste',        kind: KIND_BUFF,  power: 0, stat: USE_MAG, vert: 4, range: 3, minRange: 0, mp: 8, element: EL_NONE, status: ST_HASTE, statusTurns: 4, aoe: 0, shape: SHAPE_BURST, knock: 0, ap: 6 }
+export const Cure        = { name: 'Cure',         kind: KIND_HEAL,  power: 4, stat: USE_MAG, vert: 4, range: 3, minRange: 0, mp: 5, element: EL_NONE, status: ST_NONE, statusTurns: 0, aoe: 0, shape: SHAPE_BURST, knock: 0, ap: 0 }
+
+// The plain attack, as an ability record, so the controller has ONE shape to handle. Built once per
+// class at boot (not per turn) — a record allocated every time the menu opened would be pure churn.
+// A unit's Combo, built per CLASS alongside its plain attack for the same reason: the record never
+// changes, only whether the unit can afford it. It borrows the weapon's own reach, because a Combo in
+// FFTA is the unit's ordinary swing with everybody else piling on — not a new weapon.
+// A weapon's own vertical reach, which both of the generated actions below borrow: an arm's length
+// up a slope for something swung, two tiers for something cast. Derived from the weapon rather than
+// stated on it so that re-arming a class moves its vertical reach with everything else.
+function weaponVert(w) {
+  if (w.kind === KIND_MELEE) { return 2 }
+  return 4
+}
+
+export function comboAction(w) {
+  let stat = USE_ATK
+  if (w.kind !== KIND_MELEE) { stat = USE_MAG }
+  return { name: 'Red Combo', kind: KIND_COMBO, power: 0, stat: stat, vert: weaponVert(w), range: w.range, minRange: 0, mp: 0,
+           element: EL_NONE, status: ST_NONE, statusTurns: 0, aoe: 0, shape: SHAPE_BURST, knock: 0, ap: 0 }
+}
+
+export function weaponAction(w) {
+  let stat = USE_ATK
+  if (w.kind !== KIND_MELEE) { stat = USE_MAG }
+  // The row that names it in the Action list, so a healer's basic action does not read "Attack".
+  let nm = 'Attack'
+  if (w.kind === KIND_HEAL) { nm = 'Heal' }
+  return { name: nm, kind: w.kind, power: 0, stat: stat, vert: weaponVert(w), range: w.range, minRange: 0, mp: 0, element: EL_NONE, status: ST_NONE, statusTurns: 0, aoe: 0, shape: SHAPE_BURST, knock: 0, ap: 0 }
+}

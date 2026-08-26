@@ -1,0 +1,48 @@
+// Equippable weapons — the "weapon equip" component. A class equips one weapon; it decides how that
+// unit acts on its turn (the controller reads `kind`/`power`/`range`) and which swing overlay plays
+// over the attack animation (`sheet`, a 64x64 8-frame swing: SE 0..3, NE 4..7, built by
+// tools/pack_actors.py from the Tiny Tactics weapon art). Swapping a class's `weapon` changes both
+// its combat numbers and its on-screen swing — no controller edits.
+import { woodenSword } from 'sheet64:../assets/weapons/WoodenSword.png'
+import { ironSword } from 'sheet64:../assets/weapons/IronSword.png'
+import { hatchet } from 'sheet64:../assets/weapons/Hatchet.png'
+import { ironAxe } from 'sheet64:../assets/weapons/IronAxe.png'
+import { woodenStaff } from 'sheet64:../assets/weapons/WoodenStaff.png'
+import { scepter } from 'sheet64:../assets/weapons/Scepter.png'
+import { KIND_MELEE, KIND_MAGIC, KIND_HEAL } from '../../../packages/ffta/kinds'
+import { PowerStrike, Crush, Sweep, Fire, Bolt, Smite, Cure, Haste } from './abilities'
+
+// HEALING IS AN ABILITY, NOT A WEAPON, and it costs MP — see `Cure` in abilities.tish. A weapon's
+// action is free and unlimited, so a healing WEAPON is a free unlimited heal: two clerics so equipped
+// simply out-heal every attack in the game, and the sample battle ran for four minutes without a
+// death until this was moved. KIND_HEAL is kept because it is still the right archetype for a relic
+// that only mends, but nothing below equips one.
+// THE WEAPON IS WHERE ABILITIES COME FROM (the FFTA rule). `teaches` is the ordered list a wielder
+// learns by earning **AP** with it: the first entry costs nothing and is known on the spot, the rest
+// unlock during the battle as the unit fights. That ordering is the whole design — a class's opening
+// move is decided by its equipment, and re-arming it changes not just its damage but what it can
+// eventually *do*. See `ap` on each ability in abilities.tish for the price.
+//
+// `power` = HP damage (or heal), `range` = max Manhattan distance to a target (1 = adjacent).
+// ⚠️ THE NAMES ARE THE ROM'S; THE NUMBERS ARE NOT. Every name in this file resolves against
+// `data/ffta/tables/` and `scripts/ffta_validate.py::check_example_names` fails the build if one
+// stops doing so.
+//
+// This file used to name six weapons that DO NOT EXIST IN FFTA — Wood Sword, Iron Sword, Hatchet,
+// Iron Axe, Staff, Scepter — in the repo's own FFTA showcase, sitting indistinguishable from the
+// archive beside them. `OVERVIEW.md` already documents that exact contamination happening once
+// before (seven invented item names shipped in the demo shop), which is why the check now exists
+// rather than the habit being trusted.
+//
+// What is still authored: `power`, `range` and the `teaches` PAIRING. The demo's combat is tuned in
+// a small 4-9 power scale; the ROM's `atk` for these items runs 15-33 and feeding it straight into
+// this formula would one-shot everything. And `teaches` is the demo's pairing — the ROM's real
+// gear->ability data is in `ability_gear.csv` (Rod really does teach Fire/Thunder/Blizzard), but it
+// pairs weapons with abilities whose ROLES this demo's classes do not have.
+
+export const WoodenSword = { name: 'Shortsword', sheet: woodenSword, kind: KIND_MELEE, power: 4, range: 1, teaches: [PowerStrike] }
+export const IronSword   = { name: 'Silver Sword', sheet: ironSword,   kind: KIND_MELEE, power: 7, range: 1, teaches: [PowerStrike, Sweep] }
+export const Hatchet     = { name: 'Zeus Mace',    sheet: hatchet,     kind: KIND_MELEE, power: 6, range: 1, teaches: [Crush] }
+export const IronAxe     = { name: 'Battle Mace',   sheet: ironAxe,     kind: KIND_MELEE, power: 9, range: 1, teaches: [Crush, Sweep] }
+export const WoodenStaff = { name: 'Rod',      sheet: woodenStaff, kind: KIND_MAGIC, power: 5, range: 2, teaches: [Fire, Bolt] }
+export const Scepter     = { name: 'White Staff',    sheet: scepter,     kind: KIND_MAGIC, power: 5, range: 2, teaches: [Cure, Haste, Smite] }

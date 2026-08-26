@@ -1,0 +1,2432 @@
+// iso-tactics — FFTA-style isometric tactics prototype.
+//
+// The battlefield IS the Tiled map: `tactics:../tiled/battle.tmj` bakes the isometric floor, the
+// per-cell terrain/elevation/walkability, and the unit spawns straight into the ROM at build time —
+// no import script, no generated data module. The reusable tactics core — height grid, unit registry,
+// speed-based turn queue, move-range flood fill, pathfinding, targeting, damage/heal — lives in the
+// ENGINE (`tac_*`, see docs/ffta-tactics-plan.md); `tac_load(board)` builds the grid from the baked
+// map and `tac_spawn_*` reads its unit list. Unit classes are COMPONENTS (components.tish); each equips
+// a WEAPON (weapons.tish) that decides its attack style + on-screen swing. The character sprite sheets
+// carry a full animation set (walk / attack / charge / release / damage / weak / dead) laid out by
+// src/anim.tish + tools/pack_actors.py. This file is the controller: iso rendering, the turn flow,
+// the animation state machine, the weapon overlay, and the HUD.
+import { board } from 'tactics:../tiled/battle.tmj'
+import { tiles } from 'sheet32:../assets/tiles.png'
+import { cursor } from 'sheet32:../assets/cursor.png'
+import { highlight } from 'sheet32:../assets/highlight.png'
+import { hpbar } from 'sheet32:../assets/hpbar.png'
+import { pointer } from 'sheet:../assets/pointer.png'
+import { facingdot } from 'sheet:../assets/facing.png'
+import { sprite_new, sprite_set_frame, sprite_set_sheet, sprite_set_pos, sprite_set_depth, sprite_set_visible, sprite_set_flip, sprite_set_hud, key_pressed, hud_text, frame } from 'cargo:tish_agb'
+import { tac_spawn_count, tac_spawn_col, tac_spawn_row, tac_spawn_cls, tac_spawn_team, tac_add_unit, tac_unit_count, tac_unit_col, tac_unit_row, tac_unit_team, tac_unit_alive, tac_unit_hp, tac_unit_maxhp, tac_unit_move_range, tac_unit_set_pos, tac_turn_next, tac_range_count, tac_range_col, tac_range_row, tac_in_range, tac_path, tac_path_len, tac_path_col, tac_path_row, tac_occupant, tac_damage, tac_heal, tac_tile, tac_set_terrain_cost, tac_unit_set_flying, tac_set_zoc, tac_knockback, tac_knock_drop, tac_move_cost, tac_unit_set_speed_scale, tac_turn_end, tac_move_range, tac_revive } from 'cargo:tish_gba_game_engine'
+import {
+  isoInit, isoW, isoH, isoX, isoY, isoCellHeight, isoTileTopY, isoUnitTopY,
+  isoDepthAt, isoUnitDepth, isoDrawRisers,
+  ISO_TILE_HALF_W, ISO_TILE_HALF_H, ISO_LIFT_PER_STEP, ISO_DEPTH_PER_TILE,
+  ISO_BIAS_DECAL, ISO_BIAS_CORPSE, ISO_BIAS_UNIT, ISO_BIAS_CURSOR
+} from '../../../packages/iso'
+import {
+  tacticsInit, tacShowMoveRange, tacHideMoveRange, tacShowCursor, tacHideCursor,
+  tacPlaceHighlight, tacHideHighlightsFrom, tacShowFootprint, tacHighlightCap,
+  fpBuild, fpCovers, fpIsArea, SHAPE_BURST, SHAPE_LINE, SHAPE_CONE
+} from '../../../packages/tactics'
+import { CLASSES } from './components'
+import { archetypeForJob, statsForClanUnit } from './clanbridge'
+import { clanSeedDemo, clanRoster, clanFormation } from '../../../packages/clan/state'
+import { Human, Bangaa, NuMou, Viera, Moogle, raceAllows } from './races'
+import { TERRAIN_COSTS, terrainName, terrainCost } from '../../../packages/ffta/terrain'
+import { KIND_MELEE, KIND_MAGIC, KIND_HEAL, KIND_BUFF, KIND_ITEM, KIND_COMBO } from '../../../packages/ffta/kinds'
+import { STOCK, LOOT, stockAdd, stockTotal } from './items'
+import { comboAction, weaponAction } from './abilities'
+import { RES, REL_BACK, REL_SIDE, rollAction, expectedDamage, hitChance, relativeFacing, rngSeed, rnd } from '../../../packages/ffta/rules'
+import { LAWS, CARD_NONE, CARD_YELLOW, CARD_RED, CARD_EXP_PENALTY, JP_MAX, lawBreaks, lawRecommends } from '../../../packages/ffta/laws'
+import { ST_NONE, ST_SLEEP, ST_SLOW, ST_HASTE, STATUS_NAMES, SPEED_SCALE, POISON_DMG, REGEN_HEAL, ST_POISON, ST_REGEN, isAffliction, skipsTurn } from '../../../packages/ffta/status'
+import { EXP_PER_LEVEL, EXP_PER_DAMAGE, EXP_PER_HEAL, EXP_KILL, apFor, cloneStats, applyLevel } from '../../../packages/ffta/growth'
+import { DIR_STRIDE, ANIM_WALK, ANIM_ATTACK, ANIM_CHARGE, ANIM_RELEASE, ANIM_DAMAGE, ANIM_WEAK, ANIM_DEAD, facing, weaponBase } from '../../../packages/iso_actors'
+
+// ═══ Config ══════════════════════════════════════════════════════════════════════
+// SELF_PLAY = 0 → team 0 is you (d-pad + A/B), team 1 is AI. Flip to 1 for "attract mode": BOTH
+// teams play themselves — handy for watching every animation (attacks, casts, heals, deaths) run.
+let SELF_PLAY: i32 = 0
+let WEAK_PCT: i32 = 35  // at/below this % of max HP a unit idles in its "weak" stagger pose
+
+// ═══ Isometric projection + board ════════════════════════════════════════════════
+// Projection, depth biases and the raised-block redraw all live in packages/iso now — this file
+// and examples/iso-town used to carry byte-identical copies that had already drifted apart.
+//
+// Two behaviour changes come with the move, both fixes:
+//   * the origin is read from the BAKE instead of being hardcoded to (96, 24), so a board larger
+//     than ~8x8 (which bakes onto the 512px atlas at a different origin) now renders correctly;
+//   * UNIT_LIFT was 12 here and 20 in iso-town. 20 is right — the actor art is byte-identical
+//     between the two examples, its feet sit at cell_y+28, and the tile diamond's centre is
+//     tileTopY+8, so 28-8 = 20. At 12 every unit stood at the diamond's front corner.
+isoInit({ board: board, tiles: tiles })
+let MAPW = isoW()
+let MAPH = isoH()
+isoDrawRisers(board)
+// Highlight pool, board cursor and footprint buffer. Sized here rather than inside the package
+// so a bigger board can pay for a bigger pool deliberately — both are hard ceilings that
+// silently truncate, not hints.
+tacticsInit({ highlight: highlight, cursor: cursor, w: isoW(), h: isoH(), poolSize: 40, fpMax: 16 })
+
+
+// ═══ Register units from their class components ══════════════════════════════════
+// Per-unit render state lives in these parallel arrays, indexed by engine unit id.
+let unitSprites = []
+let unitClass = []
+let unitFaceBase = []   // persisted facing block: 0 = SE art, DIR_STRIDE = NE art
+let unitFaceFlip = []   // persisted facing h-flip
+let unitFaceDir = []    // the same facing as a direction 0..3 — what a back-attack test needs
+let unitMp = []         // MP is the EXAMPLE's stat: the engine's unit registry knows only HP
+let unitDead = []       // 1 once defeated → drawn as a corpse
+let unitStats = []      // per-unit stat block (growth.tish) — a CLONE, so a level buys one unit a point
+let unitStatus = []     // active condition (status.tish), ST_NONE for none
+let unitStTurns = []    // turns of it left, ticked at the start of the unit's own turn
+let unitExp = []        // EXP earned this battle, toward the next level
+// Judge Points — the law's reward, and the currency a Combo spends. Per unit, capped at JP_MAX, and
+// at most one earned per turn: `jpTurn` remembers whether this unit has already been paid this turn.
+let unitJp = []
+let jpTurn = []
+let unitLevel = []      // levels gained this battle (all units start at 0)
+let unitCard = []       // the Judge's record: CARD_NONE / YELLOW / RED
+let unitAp = []         // AP earned toward the next thing its weapon teaches
+let unitKnown = []      // how many of `weapon.teaches` it has learned (a prefix of that list)
+// The clan roster unit this battle unit came FROM, or null for a map-spawned enemy. This is the
+// write-back path: EXP, AP and levels earned here are pushed onto the town's roster when the
+// battle ends, which is what makes progress persist across town → battle → town.
+let clanSlotOf = []
+// Zone of control: stepping next to a living enemy ends the move. On an 8x8 board with Move 3-4 this
+// is what stops a Mage strolling through the enemy line to reach the back rank — a defender becomes
+// something you have to deal with rather than route around. Off in the engine by default; the game
+// opts in.
+tac_set_zoc(1)
+
+// The engine's move-range search reads a cost per cell but has no idea what the map's tiles are.
+// Hand it the example's table once, here, before the first range is ever asked for.
+let costI: i32 = 0
+while (costI < TERRAIN_COSTS.length) {
+  tac_set_terrain_cost(TERRAIN_COSTS[costI].tile, TERRAIN_COSTS[costI].cost)
+  costI = costI + 1
+}
+
+// The ROSTER: which race stands in each of the map's spawn slots. The Tiled map says what JOB is in
+// a slot (its `cls` field) and nothing about race, so the pairing lives here rather than in the map —
+// no engine change, and the half of "race × job" the map does not know about stays example-owned.
+//
+// One of each race, and the Human first so there is a baseline Fighter on screen to read the others
+// against. Slots the table does not cover fall back to Human, which is the identity race: a map with
+// more spawns than this list still runs, it just runs unraced.
+let ROSTER = [Human, NuMou, Viera, Bangaa, Viera, Moogle]
+
+// An illegal pairing is a mistake in the table above, not something to silently apply — a Bangaa
+// Mage would otherwise spawn with the Bangaa's −2 MAG and read as a badly tuned Mage rather than as
+// a rule being broken. Falling back to the identity race makes it show up as "this unit has no
+// racial at all", which is visible on the Status screen the moment you look.
+function raceFor(clsId, slot) {
+  if (slot >= ROSTER.length) { return Human }
+  let r = ROSTER[slot]
+  if (raceAllows(r, clsId) === 0) { return Human }
+  return r
+}
+
+// ═══ The player squad comes from the CLAN ════════════════════════════════════════
+// The Tiled map still decides where everybody stands and who the enemy is; what changes is where
+// TEAM 0 comes from. Its units are the clan's formation — the same roster the town's Party menu
+// equips, re-jobs and levels — zipped onto the map's team-0 spawn points in slot order.
+//
+// `clanSeedDemo()` is the standalone case: run on its own, this example has no town to inherit a
+// clan from, so it seeds the same demo roster iso-town does. A game that enters battle FROM the
+// town simply has the state already and the seed is a no-op.
+//
+// Fallbacks are deliberate rather than defensive. More team-0 spawns than deployed units → the
+// extras spawn from the map's own `cls`, so a map is always fully populated and playable. More
+// deployed units than spawn points → the tail simply does not deploy, which is what a battle with
+// limited slots means in FFTA anyway.
+clanSeedDemo()
+// Flatten the formation to the units it deploys, in slot order, skipping empty (-1) slots. Built
+// inline rather than by a helper because a tish function that CONSTRUCTS and returns an array does
+// not survive GBA codegen — see the note in clanbridge.tish.
+let CLAN_UNITS = clanRoster()
+let FORMATION = clanFormation()
+let SQUAD = []
+let formI: i32 = 0
+while (formI < FORMATION.length) {
+  let ri = FORMATION[formI]
+  if (ri >= 0) {
+    if (ri < CLAN_UNITS.length) { SQUAD.push(CLAN_UNITS[ri]) }
+  }
+  formI = formI + 1
+}
+let squadNext: i32 = 0
+
+let SPAWN_COUNT = tac_spawn_count(board)
+let placeI: i32 = 0
+while (placeI < SPAWN_COUNT) {
+  let clsId = tac_spawn_cls(board, placeI)
+  let team = tac_spawn_team(board, placeI)
+  // The raced block is built BEFORE the unit is registered: speed, move, jump and max HP are the
+  // engine's copy (they drive the turn queue and the move-range fill) and it has no setters for
+  // them, so a racial that arrived afterwards would apply to the formula and not to the board.
+  let st = cloneStats(CLASSES[clsId], raceFor(clsId, placeI))
+  let fromClan = 0
+  if (team === 0) {
+    if (squadNext < SQUAD.length) { fromClan = 1 }
+  }
+  if (fromClan === 1) {
+    let cu = SQUAD[squadNext]
+    squadNext = squadNext + 1
+    clsId = archetypeForJob(cu.job)
+    st = statsForClanUnit(cu)
+    clanSlotOf.push(cu)
+  } else {
+    clanSlotOf.push(null)
+  }
+  let cls = CLASSES[clsId]
+  tac_add_unit(tac_spawn_col(board, placeI), tac_spawn_row(board, placeI), team, st.speed, st.move, st.jump, st.hp)
+  tac_unit_set_flying(placeI, st.race.fly)
+  unitSprites.push(sprite_new(cls.sheet))
+  unitClass.push(clsId)
+  unitFaceBase.push(0)
+  unitFaceFlip.push(0)
+  unitFaceDir.push(0)
+  unitMp.push(st.mp)
+  unitDead.push(0)
+  unitStats.push(st)
+  unitStatus.push(ST_NONE)
+  unitStTurns.push(0)
+  unitExp.push(0)
+  unitJp.push(0)
+  jpTurn.push(0)
+  unitLevel.push(0)
+  unitCard.push(CARD_NONE)
+  unitAp.push(0)
+  unitKnown.push(0)
+  placeI = placeI + 1
+}
+let UNIT_COUNT = tac_unit_count()
+
+// The unit's OWN stats, which is what the formula and the AI must read — never `CLASSES[...]`, or a
+// levelled unit would fight with its class's starting numbers (and its twin on the other team would
+// share the buff).
+function statsOf(id) { return unitStats[id] }
+
+// ═══ Action lists ════════════════════════════════════════════════════════════════
+// Every action a unit can take is one ability record: slot 0 is the plain weapon attack, the rest are
+// the abilities it has LEARNED from its weapon (weapons.tish `teaches`, in order, paid for in AP).
+//
+// The plain attack is built once per CLASS — a weapon's swing never changes, and allocating that
+// record per turn would be pure heap churn in a list the menu and the AI walk constantly. The learned
+// part is per UNIT, because it grows mid-battle: `unitActions[id]` is an array of references to the
+// shared ability records, rebuilt only on the rare frame something is actually learned.
+let ATTACKS = []
+let COMBOS = []
+let actListI: i32 = 0
+while (actListI < CLASSES.length) {
+  ATTACKS.push(weaponAction(CLASSES[actListI].weapon))
+  COMBOS.push(comboAction(CLASSES[actListI].weapon))
+  actListI = actListI + 1
+}
+let unitActions = []
+
+// WHERE a unit's learnable abilities come from, in one place. Both the rebuild and the learn check
+// ask this rather than reaching into the weapon themselves, so "abilities are taught by what you are
+// holding" is a single claim instead of two copies that can disagree. Armour or an accessory that
+// also taught would be concatenated here and nothing downstream would change.
+function teachesFor(id) { return statsOf(id).weapon.teaches }
+
+function rebuildActions(id) {
+  let list = [ATTACKS[unitClass[id]]]
+  let taught = teachesFor(id)
+  let tI = 0
+  while (tI < unitKnown[id]) { list.push(taught[tI]); tI = tI + 1 }
+  unitActions[id] = list
+}
+
+// Cash in whatever AP the unit has against its weapon's list, IN ORDER, and rebuild its menu if that
+// bought anything. Returns the name of the last thing learned (or "") so the caller can pop it up.
+//
+// Learning strictly in order is what lets the weapon decide a class's arc rather than just its stats:
+// a Fighter's Iron Sword opens with Power Strike and pays out Sweep later, so the shape of its turn
+// changes partway through a battle without a single line of controller code knowing which ability
+// that is.
+function learnCheck(id) {
+  let taught = teachesFor(id)
+  let got = ""
+  while (unitKnown[id] < taught.length && unitAp[id] >= taught[unitKnown[id]].ap) {
+    got = taught[unitKnown[id]].name
+    unitKnown[id] = unitKnown[id] + 1
+  }
+  if (got !== "") { rebuildActions(id) }
+  return got
+}
+
+let seedI: i32 = 0
+while (seedI < UNIT_COUNT) {
+  unitActions.push(0)
+  rebuildActions(seedI)   // the weapon attack, which nobody has to earn
+  learnCheck(seedI)       // plus whatever the weapon gives away at ap: 0
+  seedI = seedI + 1
+}
+function actionsOf(id) { return unitActions[id] }
+
+// The rows a unit can actually choose from: its actions, plus **Combo** when it has a Judge Point to
+// spend. Combo is a row rather than a sixth menu entry because it is one of the unit's commands, not
+// a category beside them — and because a 240px menu row is full. It appears and disappears with the
+// currency, which is the clearest statement the UI can make about what JP is for.
+// Can this unit take part in a Combo at all — lead one or be pulled into one? The move is "everybody
+// hits this at once", so the answer is whether its ORDINARY action hurts. One predicate for both ends
+// on purpose: a unit that may lead a Combo but not join one, or the reverse, is a rule that reads as
+// a bug from whichever side you meet it.
+//
+// No shipped weapon is KIND_HEAL — the Cleric's scepter is magic and Cure is a separate ability, so
+// this excludes nobody today. It is here because the weapon table can express a healing weapon, and
+// the failure if one is ever added is silent and absurd: an ally joins the Combo by healing the
+// target.
+function comboJoins(id) {
+  if (ATTACKS[unitClass[id]].kind === KIND_HEAL) { return 0 }
+  return 1
+}
+function comboReady(id) {
+  if (unitJp[id] === 0) { return 0 }
+  return comboJoins(id)
+}
+function actionRowCount(id) {
+  let n = actionsOf(id).length
+  if (comboReady(id) > 0) { n = n + 1 }
+  return n
+}
+function actionRowAt(id, i) {
+  let list = actionsOf(id)
+  if (i < list.length) { return list[i] }
+  return COMBOS[unitClass[id]]
+}
+
+// The AI searches ONE list of everything a unit could do, which is its own actions followed by the
+// squad's stock. Indexing past the end of the actions means "an item", which keeps the search, the
+// plan it stores and the re-check at resolution all speaking in plain integers.
+//
+// It spans the WHOLE stock rather than only what is left, so an index means the same thing before and
+// after something is spent — a plan made this turn is resolved a few frames later, and a list that
+// resized underneath it would silently point at a different item. Emptiness is a usability question,
+// answered by `aiCanUse`.
+function actionSpan(id) {
+  let n = actionRowCount(id)
+  if (ownsStock(id) > 0) { n = n + STOCK.length }
+  return n
+}
+function actionAt(id, a) {
+  let n = actionRowCount(id)
+  if (a < n) { return actionRowAt(id, a) }
+  return STOCK[a - n].item
+}
+function canPay(id, ability) { return unitMp[id] >= ability.mp }
+
+// ═══ The squad's stock ═══════════════════════════════════════════════════════════
+// One inventory for the whole team, not one per unit — that sharing is the tactical content of FFTA's
+// item system. There are three Potions in this battle, not three each, so spending one is a decision
+// about the squad.
+//
+// Looked up by NAME rather than by holding on to the record, because the same item record is shared
+// by every entry that refers to it and comparing identity across a language boundary is not something
+// worth relying on for a four-element scan.
+function stockIndexOf(ability) {
+  let i = 0
+  while (i < STOCK.length) {
+    if (STOCK[i].item.name === ability.name) { return i }
+    i = i + 1
+  }
+  return -1
+}
+function stockHas(ability) {
+  let i = stockIndexOf(ability)
+  if (i < 0) { return 0 }
+  if (STOCK[i].count > 0) { return 1 }
+  return 0
+}
+function stockUse(ability) {
+  let i = stockIndexOf(ability)
+  if (i >= 0 && STOCK[i].count > 0) { STOCK[i].count = STOCK[i].count - 1 }
+}
+// The stock belongs to team 0. Enemies having their own is FFTA-true and would want a second
+// inventory; giving them THIS one would let them drink the potions you bought.
+function ownsStock(id) {
+  if (tac_unit_team(id) === 0) { return 1 }
+  return 0
+}
+
+// ═══ The Judge ═══════════════════════════════════════════════════════════════════
+// A fixed seed, so a battle replays identically: the headless harness has to be able to take the
+// same screenshot twice, and "the AI did something different this run" is not a debugging story
+// anybody wants. Seed from a real clock when you want a fight to surprise you.
+//
+// It is seeded HERE, above the first draw, rather than beside the main loop: the law is drawn from
+// this generator, so seeding after it would leave the one decision that reshapes the whole battle
+// stuck on the LCG's default state — the same law every run, no matter the seed.
+rngSeed(20260729)
+
+// One law for the battle, drawn from the same LCG the combat dice use, so a replay of the fight
+// draws the same law. `battleLaw` is read through `lawOk` by everything that offers an action.
+let battleLaw = LAWS[rnd(LAWS.length)]
+
+// Legal under the battle's law? The AI treats this as a hard filter; the player's menu only MARKS
+// an illegal ability, because being able to break a law — and choosing not to — is the whole point
+// of having a Judge instead of a disabled button.
+function lawOk(ability) { return lawBreaks(battleLaw, ability) === 0 }
+
+// What the AI may consider: affordable AND legal. Enemies obey the law without exception, so the
+// player never loses to a unit that cheated the rule they are bound by.
+function aiCanUse(id, ability) {
+  if (ability.kind === KIND_COMBO && comboReady(id) === 0) { return 0 }
+  if (ability.kind === KIND_ITEM) {
+    if (ownsStock(id) === 0) { return 0 }
+    if (stockHas(ability) === 0) { return 0 }
+  }
+  if (!canPay(id, ability)) { return 0 }
+  return lawOk(ability)
+}
+
+// The first team-0 unit — used as the HUD fallback before the first turn.
+let PLAYER_ID: i32 = 0
+let findP: i32 = 0
+while (findP < UNIT_COUNT) {
+  if (tac_unit_team(findP) === 0) { PLAYER_ID = findP }
+  findP = findP + 1
+}
+
+// ═══ Weapon-swing overlay ════════════════════════════════════════════════════════
+// One shared 64×64 sprite re-pointed (sprite_set_sheet) at whichever attacker's weapon is swinging,
+// centred on the wielder's body. Hidden except during an attack/cast.
+let weaponOverlay = sprite_new(CLASSES[0].weapon.sheet)
+sprite_set_visible(weaponOverlay, 0)
+
+// ═══ HP HUD — a fill bar + "name cur/max" for the unit whose turn it is ═══════════
+let HP_BAR_FRAMES: i32 = 16
+let hpBar = sprite_new(hpbar)
+sprite_set_hud(hpBar, 1)
+sprite_set_pos(hpBar, 6, 5)
+
+
+// ═══ Cursor ══════════════════════════════════════════════════════════════════════
+// FFTA's facing widget: one marker on each of the four edges of the unit's tile, the chosen edge lit
+// and the other three dim. Four sprites held for the life of the program rather than made and freed
+// around each choice — they are needed on most turns, and four is cheaper to keep than to churn.
+let faceDots = []
+let faceDotI: i32 = 0
+while (faceDotI < 4) {
+  let d = sprite_new(facingdot)
+  sprite_set_visible(d, 0)
+  faceDots.push(d)
+  faceDotI = faceDotI + 1
+}
+
+// ═══ Menu pointer ════════════════════════════════════════════════════════════════
+// The action menu is three FIXED-position labels; this HUD sprite is the only thing that moves to
+// show the selection, so the (non-monospace) text never reflows.
+let menuPointer = sprite_new(pointer)
+sprite_set_hud(menuPointer, 1)
+sprite_set_visible(menuPointer, 0)
+let MENU_Y: i32 = 140
+// Five labels across 240px, each needing 13px of clearance for the pointer sprite that sits to its
+// left. The gaps are as even as the (proportional) font allows: nudging one label moves the pointer
+// with it, so a column that looks fine on its own can still land the NEXT pointer on top of the
+// previous word.
+let MENU_X_MOVE: i32 = 18
+let MENU_X_ACT: i32 = 56
+let MENU_X_ITEM: i32 = 116
+let MENU_X_STATUS: i32 = 154
+let MENU_X_WAIT: i32 = 210
+let SKILL_X: i32 = 24  // the submenu pointer column (labels sit 12px right of it)
+
+// hud_text slots — each an independent, fixed-position line of front text (no reflow).
+let SLOT_HP: i32 = 0  // active unit's name + HP + MP (top-left)
+let SLOT_MOVE: i32 = 1  // menu item: Move
+let SLOT_ACT: i32 = 2  // menu item: Attack / Heal
+let SLOT_WAIT: i32 = 3  // menu item: Wait
+let SLOT_INFO: i32 = 4  // target readout during TARGET, or a "No target" note
+let SLOT_POPUP: i32 = 5  // ±N floating over a target
+let SLOT_RESULT: i32 = 6  // Victory! / Defeat
+let SLOT_SKILL: i32 = 7  // menu item: Item
+let SLOT_SKILL0: i32 = 8  // first row of the Action or Item list (one slot per row; never both at once)
+let SKILL_SLOTS: i32 = 4  // how many rows either list can show. The Action list is the weapon action
+                       // plus what the weapon teaches, and no weapon teaches more than three; the
+                       // item list is the whole stock. Both are at the ceiling, so a fourth taught
+                       // ability or a fifth item needs slots before it needs anything else.
+let SLOT_LAW: i32 = 12  // the Judge's standing law — painted once, never cleared
+let SLOT_STATUS: i32 = 13  // menu item: Status
+let SLOT_INSPECT: i32 = 14  // second line of the inspect readout (the stat block)
+let SLOT_SPLASH0: i32 = 15  // popups for the extra victims of a blast (the primary uses SLOT_POPUP)
+let SPLASH_SLOTS: i32 = 3  // a radius-1 blast on this board never catches more; extras are simply unshown
+let SLOT_BANNER: i32 = 18  // "whose turn" banner, shown briefly at the top of each turn
+let SLOT_INSPECT2: i32 = 19  // third line of the inspect readout — the numbers that decide the turn ORDER
+let SLOT_SPOILS: i32 = 20  // the Judge's verdict under the result: what the clan won, or that it did not
+                       // and the reach, which the ATK/DEF line has no room for and which matter just
+                       // as much once Haste, terrain cost and facing are all in play
+
+// The banner is a beat, not a permanent readout: long enough to catch whose turn it is, gone before
+// it can sit over the board while you are trying to read the board.
+let BANNER_FRAMES: i32 = 40
+let bannerTimer: i32 = 0
+
+// The law never changes mid-battle, so this slot is written once and never repainted. It is on
+// screen at all times rather than behind a menu: a rule you can be punished for has to be visible
+// at the moment you choose the action, not one button-press away.
+//
+// It sits on the BOTTOM row, not beside the HP readout: that line grows at run time (a level and a
+// status name get appended to it), and at full width it reaches x≈162 — straight through anything
+// parked at the top right. The bottom row is the only strip nothing else grows into.
+// Both halves, because a law you can only break is one the player reads once and then ignores. The
+// recommendation is the half that changes what you reach for, so it belongs next to the prohibition
+// rather than a menu away.
+hud_text(SLOT_LAW, 6, 150, "LAW: " + battleLaw.name + "   REC: " + battleLaw.rec)
+
+// ═══ Turn / animation state ══════════════════════════════════════════════════════
+let PHASE_BEGIN: i32 = 0
+let PHASE_MENU: i32 = 1  // player: choose an action (Move / Attack|Heal / Wait)
+let PHASE_PICK: i32 = 2  // player: choose a move tile
+let PHASE_TARGET: i32 = 3  // player: choose which target
+let PHASE_THINK: i32 = 4  // AI: brief beat, then decide
+let PHASE_WALK: i32 = 5  // path-walk to the chosen tile
+let PHASE_ACT: i32 = 6  // AI: find a target in range
+let PHASE_WINDUP: i32 = 7  // caster holds the CHARGE pose
+let PHASE_SWING: i32 = 8  // melee swing / spell release (+ weapon overlay), effect lands here
+let PHASE_PAUSE: i32 = 9
+let PHASE_DONE: i32 = 10  // battle over — show the result
+let PHASE_SKILL: i32 = 11  // player: choose an ability from the class's list
+let PHASE_INSPECT: i32 = 12  // player: free cursor, reading any unit's stat block
+let PHASE_FACE: i32 = 13  // player: which way to stand at the end of the turn
+let PHASE_TITLE: i32 = 14  // the front menu: deploy the squad yourself, or take the map's placement
+let PHASE_DEPLOY: i32 = 15  // player: place one unit inside the deploy zone
+let PHASE_DEPLOY_NEXT: i32 = 16  // one unit placed and faced — on to the next, or into the battle
+let PHASE_ITEM: i32 = 17  // player: choose from the squad's stock
+let resultText = ""
+let spoilsText = ""   // the Judge's line under it: what the clan won, or why it did not
+
+let MENU_MOVE: i32 = 0
+let MENU_ACT: i32 = 1
+let MENU_ITEM: i32 = 2
+let MENU_STATUS: i32 = 3
+let MENU_WAIT: i32 = 4
+let menuSel: i32 = 0
+let skillSel: i32 = 0  // index into the action list (0 is the unit's plain weapon action)
+let itemSel: i32 = 0  // index into STOCK
+let pickedAbility = null      // what the target picker is currently aiming
+let hasMoved: i32 = 0  // a player unit may Move once per turn; after that Move is spent
+
+// timings (frames)
+let AI_THINK_FRAMES: i32 = 18
+let FRAMES_PER_TILE: i32 = 8
+let WALK_CYCLE: i32 = 8
+let WINDUP_FRAMES: i32 = 20
+let SWING_FRAMES: i32 = 24
+let HIT_SUB: i32 = 2  // damage/heal lands when the swing reaches sub-frame 2
+let RECOIL_FRAMES: i32 = 16
+let PAUSE_FRAMES: i32 = 16
+
+// target picker (rebuilt when an attack/heal is chosen)
+let targetIds = []
+let targetCols = []
+let targetRows = []
+let targetCount: i32 = 0
+let targetIdx: i32 = 0
+
+// active action
+let attackTarget = -1
+let actKind: i32 = 0
+let actAbility = null   // the ability record being performed (decides animation, math, MP)
+let actBase: i32 = 0
+let actFlip: i32 = 0
+let actHit: i32 = 0  // 1 once this swing's effect has been applied
+let recoilId = -1       // unit currently flinching (DAMAGE pose)
+let recoilTimer: i32 = 0
+
+// AI destination + walk cursor
+let aiDestCol: i32 = 0
+let aiDestRow: i32 = 0
+// Attract mode has nobody to answer the front menu, and the headless harness drives it by frame
+// number, so a menu that waited for A would stall every self-play run. It goes straight to the
+// battle on the map's own placement — which is exactly what Auto Deploy does.
+let phase = PHASE_TITLE
+if (SELF_PLAY > 0) { phase = PHASE_BEGIN }
+// True from boot until the first turn begins. The front menu and the deployment step both want the
+// top row for their own headline, and an HP bar for a unit whose battle has not started is measuring
+// nothing. Attract mode never passes through either, so it starts already out of setup.
+let inSetup: i32 = 1
+if (SELF_PLAY > 0) { inSetup = 0 }
+// Set when a turn starts for real, cleared once the facing has been chosen. A turn lost to Sleep, or
+// one whose owner died partway through it, never reaches the facing step.
+let facePending: i32 = 0
+// What the current unit has spent its turn on. FFTA charges the turn counter separately for moving
+// and for acting, so the queue needs to know which of the two happened — a unit that only moved is
+// owed its next turn sooner than one that moved and swung.
+let didMove: i32 = 0
+let didAct: i32 = 0
+// The four isometric facings, indexed the way `dirOf` returns them. Named for where they point ON
+// SCREEN rather than on the grid: the board is drawn isometric, so the grid's +col reads as
+// down-right, and telling a player "east" while the sprite turns south-east helps nobody.
+let FACE_NAMES = ["SE", "SW", "NE", "NW"]
+// Who is being turned, and where to go once they are. The chooser is shared by the two places a
+// facing is decided — the end of a turn and the deployment of a squad — because it is the same
+// decision with the same controls, and the only thing that differs is what happens next.
+let faceWho: i32 = 0
+let faceReturn = PHASE_BEGIN
+let phaseTimer: i32 = 0
+let turnUnit = -1
+let curCol: i32 = 0
+let curRow: i32 = 0
+let walkSeg: i32 = 0
+let walkFrame: i32 = 0
+let walkSegments: i32 = 0
+let walkDestCol: i32 = 0
+let walkDestRow: i32 = 0
+
+// ═══ Small helpers ═══════════════════════════════════════════════════════════════
+function iabs(x) { if (x < 0) { return 0 - x } return x }
+function ifloor(x) { let f = x % 1; return x - f }   // positive values only — EXP awards
+function manhattan(c1, r1, c2, r2) { return iabs(c1 - c2) + iabs(r1 - r2) }
+function lerp(a, b, framesIn, total) { return a + (b - a) * framesIn / total }
+function walkFrameNow() { return (walkSeg * 4 + walkFrame / 2) % WALK_CYCLE }
+function timerElapsed(limit) {
+  phaseTimer = phaseTimer + 1
+  if (phaseTimer > limit) { phaseTimer = 0; return 1 }
+  return 0
+}
+function isHumanTurn() {
+  if (SELF_PLAY === 0 && tac_unit_team(turnUnit) === 0) { return 1 }
+  return 0
+}
+function isWeak(id) {
+  if (tac_unit_hp(id) * 100 <= tac_unit_maxhp(id) * WEAK_PCT) { return 1 }
+  return 0
+}
+function countLiving(team) {
+  let n = 0
+  let id = 0
+  while (id < UNIT_COUNT) {
+    if (tac_unit_alive(id) > 0 && tac_unit_team(id) === team) { n = n + 1 }
+    id = id + 1
+  }
+  return n
+}
+
+
+// ═══ Ability footprints ══════════════════════════════════════════════════════════
+// WHICH TILES AN ABILITY COVERS, IN ONE PLACE. Four things need this answer — the preview highlight,
+// the ally warning, the AI's scoring, and the resolution that actually deals the damage — and when
+// each worked it out for itself with its own `manhattan(...) <= aoe`, adding a second shape would
+// have meant getting the same new rule right four times. They now all read this buffer, so a shape
+// is defined once and the preview cannot disagree with the damage.
+//
+// The buffer is filled in place and never reallocated: the AI asks for a footprint a few hundred
+// times a turn while scoring, and a fresh array per call is exactly the churn this game cannot pay.
+
+
+// How many of the caster's OWN side are standing in the current footprint.
+function alliesInFootprint() {
+  let myTeam = tac_unit_team(turnUnit)
+  let n = 0
+  let id = 0
+  while (id < UNIT_COUNT) {
+    if (tac_unit_alive(id) > 0 && tac_unit_team(id) === myTeam) {
+      if (fpCovers(tac_unit_col(id), tac_unit_row(id)) > 0) { n = n + 1 }
+    }
+    id = id + 1
+  }
+  return n
+}
+
+// ═══ Drawing units ═══════════════════════════════════════════════════════════════
+// Which frame a resting unit shows: corpse / flinch / low-HP stagger / idle (walk sub 0).
+function restFrameOf(id) {
+  let base = unitFaceBase[id]
+  if (unitDead[id] > 0) { return base + ANIM_DEAD }
+  if (recoilId === id && recoilTimer > 0) { return base + ANIM_DAMAGE }
+  if (isWeak(id) > 0) { return base + ANIM_WEAK }
+  return base + ANIM_WALK
+}
+// Draws the whole cast: `activeId` (if >= 0) at the given pose, every other unit at rest, corpses on
+// the ground. Called by the phases that animate the active unit (walk / target / windup / swing) so
+// those don't need a separate at-rest pass.
+function drawUnits(activeId, ax, ay, adepth, aframe, aflip) {
+  let id = 0
+  while (id < UNIT_COUNT) {
+    let sprite = unitSprites[id]
+    if (id === activeId) {
+      sprite_set_pos(sprite, ax, ay)
+      sprite_set_depth(sprite, adepth)
+      sprite_set_frame(sprite, aframe)
+      sprite_set_flip(sprite, aflip)
+      sprite_set_visible(sprite, 1)
+    } else if (tac_unit_alive(id) > 0) {
+      let col = tac_unit_col(id)
+      let row = tac_unit_row(id)
+      sprite_set_pos(sprite, isoX(col, row), isoUnitTopY(col, row))
+      sprite_set_depth(sprite, isoUnitDepth(col, row))
+      sprite_set_frame(sprite, restFrameOf(id))
+      sprite_set_flip(sprite, unitFaceFlip[id])
+      sprite_set_visible(sprite, 1)
+    } else if (unitDead[id] > 0) {
+      let col = tac_unit_col(id)
+      let row = tac_unit_row(id)
+      sprite_set_pos(sprite, isoX(col, row), isoTileTopY(col, row))   // corpse lies on the tile
+      sprite_set_depth(sprite, isoDepthAt(col, row, isoCellHeight(col, row) + ISO_BIAS_CORPSE))
+      sprite_set_frame(sprite, unitFaceBase[id] + ANIM_DEAD)
+      sprite_set_flip(sprite, unitFaceFlip[id])
+      sprite_set_visible(sprite, 1)
+    } else {
+      sprite_set_visible(sprite, 0)
+    }
+    id = id + 1
+  }
+}
+function drawUnitsAtRest() { drawUnits(-1, 0, 0, 0, 0, 0) }
+
+// ═══ Weapon overlay ══════════════════════════════════════════════════════════════
+function showWeapon(id, bx, by, base, sub, flip, depth) {
+  let w = statsOf(id).weapon
+  sprite_set_sheet(weaponOverlay, w.sheet, weaponBase(base) + sub)   // SE 0..3 / NE 4..7
+  sprite_set_pos(weaponOverlay, bx - 16, by - 16)   // 64×64 centred on the 32×32 body
+  sprite_set_depth(weaponOverlay, depth + 1)
+  sprite_set_flip(weaponOverlay, flip)
+  sprite_set_visible(weaponOverlay, 1)
+}
+function hideWeapon() { sprite_set_visible(weaponOverlay, 0) }
+
+// ═══ Targeting ═══════════════════════════════════════════════════════════════════
+// ═══ Combat geometry ═════════════════════════════════════════════════════════════
+// The two things the damage formula wants to know about WHERE a blow comes from. Height delta is
+// positive when striking downhill; `relTo` answers front / side / back against the target's facing.
+function relTo(defId, ac, ar) {
+  return relativeFacing(unitFaceDir[defId], ac - tac_unit_col(defId), ar - tac_unit_row(defId))
+}
+// The four isometric facings as a direction index (see anim.tish for the base/flip encoding).
+function dirOf(base, flip) {
+  if (base === 0) {
+    if (flip === 0) { return 0 }
+    return 1
+  }
+  if (flip === 0) { return 2 }
+  return 3
+}
+function faceToward(id, ac, ar, tc, tr) {
+  let f = facing(ac, ar, tc, tr)
+  unitFaceBase[id] = f.base
+  unitFaceFlip[id] = f.flip
+  unitFaceDir[id] = dirOf(f.base, f.flip)
+  return f
+}
+// Can `ability` be aimed from (ac, ar) at (tc, tr) at all? Horizontal reach and VERTICAL reach, in
+// one predicate, because every place that asks needs to ask both and they must never disagree: the
+// player's target picker, the AI's search and the re-check after walking all call through here, and
+// an AI that could reach up a cliff the menu refuses would simply be cheating.
+//
+// Vertical range is the whole of what height does now (see the note at the top of formula.tish). It
+// is symmetric — you can no more stab down a six-step drop than up it — which is what makes standing
+// on the plateau a real position rather than a damage bonus: melee cannot answer you, and the things
+// that can are the ones that gave up a weapon to do it.
+function inReach(ability, ac, ar, tc, tr) {
+  let d = manhattan(ac, ar, tc, tr)
+  if (d > ability.range || d < ability.minRange) { return 0 }
+  // 0 is the ROM's own "ignore height" value for the field, kept so an ability can opt out.
+  if (ability.vert > 0 && iabs(isoCellHeight(ac, ar) - isoCellHeight(tc, tr)) > ability.vert) { return 0 }
+  return 1
+}
+
+// Is `victim` a legal target of `ability` used by `userId`? (enemies for damage, hurt allies for heal)
+function isTargetOf(userId, ability, victim) {
+  let sameTeam = tac_unit_team(victim) === tac_unit_team(userId)
+  // Checked before the living test, because a Phoenix Down is the one action in the game whose only
+  // legal target is a body — and the cell has to still be free, since death releases it and somebody
+  // may since have walked over the corpse. Asking the engine now means the item is never offered for
+  // a revival that would be refused when it landed.
+  if (ability.kind === KIND_ITEM && ability.revive > 0) {
+    if (!sameTeam) { return 0 }
+    if (tac_unit_alive(victim) > 0) { return 0 }
+    if (tac_occupant(tac_unit_col(victim), tac_unit_row(victim)) >= 0) { return 0 }
+    return 1
+  }
+  if (tac_unit_alive(victim) === 0) { return 0 }
+  // Every other item goes on a living ally that has something to gain from it. Offering a Potion to
+  // somebody at full health, or an Antidote to somebody with nothing to cure, would let a player
+  // spend a limited stock on nothing.
+  if (ability.kind === KIND_ITEM) {
+    if (!sameTeam) { return 0 }
+    if (ability.heal > 0 && tac_unit_hp(victim) < tac_unit_maxhp(victim)) { return 1 }
+    if (ability.restore > 0 && unitMp[victim] < statsOf(victim).mp) { return 1 }
+    if (ability.cure > 0 && isAffliction(unitStatus[victim]) > 0) { return 1 }
+    return 0
+  }
+  if (ability.kind === KIND_HEAL) {
+    if (!sameTeam) { return 0 }
+    if (tac_unit_hp(victim) >= tac_unit_maxhp(victim)) { return 0 }
+    return 1
+  }
+  // A buff goes on any living ally INCLUDING the caster, but not on one already carrying a
+  // condition: re-Hasting refreshes a timer for 8 MP, and overwriting somebody's Regen with it is
+  // worse than doing nothing. Excluding them here means they never appear in the picker, so the rule
+  // is visible as an absence rather than as a refusal after you have chosen.
+  if (ability.kind === KIND_BUFF) {
+    if (!sameTeam) { return 0 }
+    if (unitStatus[victim] !== ST_NONE) { return 0 }
+    return 1
+  }
+  if (sameTeam) { return 0 }
+  return 1
+}
+
+// Fill targetIds/Cols/Rows with everything `ability` may be used on from (ac, ar): enemies
+// (melee/magic) or wounded allies (heal) at a Manhattan distance within [minRange, range].
+function collectTargetsFrom(ability, ac, ar) {
+  targetIds = []
+  targetCols = []
+  targetRows = []
+  let id = 0
+  while (id < UNIT_COUNT) {
+    if (isTargetOf(turnUnit, ability, id) > 0) {
+      let c = tac_unit_col(id)
+      let r = tac_unit_row(id)
+      if (inReach(ability, ac, ar, c, r) > 0) {
+        targetIds.push(id); targetCols.push(c); targetRows.push(r)
+      }
+    }
+    id = id + 1
+  }
+  targetCount = targetIds.length
+  targetIdx = 0
+}
+function collectTargets(ability) {
+  collectTargetsFrom(ability, tac_unit_col(turnUnit), tac_unit_row(turnUnit))
+}
+// The AI's per-turn snapshot of the board, declared up here because the scoring below reads it and
+// tish resolves names in source order. What fills them, and why the snapshot exists at all, is with
+// `buildPlanTables` further down.
+let sCol = []
+let sRow = []
+let sHp = []
+let foeIds = []     // legal damage targets for the thinking unit (living enemies)
+let allyIds = []    // legal heal targets (living, wounded, same team — including itself)
+let buffIds = []    // legal buff targets: living, same team, carrying nothing yet (including itself)
+// Item pools. `allyIds` cannot serve: it holds only WOUNDED allies, which is right for a Potion and
+// wrong for an Ether or an Antidote — a caster can be out of MP at full health, and so can a poisoned
+// unit. `fallenIds` is the one pool of the dead, because a revival is the only action in the game
+// aimed at a body.
+let itemIds = []
+let fallenIds = []
+
+// ═══ Scoring: what one (attacker-tile, ability, target) is worth ═════════════════
+// The single number the AI maximises, and the only place the class's personality weights are read.
+// Damage is counted as EXPECTED damage (discounted by hit chance) and capped at the target's
+// remaining HP, so overkill is not rewarded; finishing a unit is worth a flat `kill` bonus on top,
+// because removing an actor from the turn queue is worth far more than the HP it had left. Healing
+// counts only what is actually restored, so a Cure is never wasted on a scratch.
+function actionValue(userId, ability, victim, fromCol, fromRow) {
+  let w = statsOf(userId).ai
+  let atkCls = statsOf(userId)
+  let defCls = statsOf(victim)
+  if (ability.kind === KIND_HEAL) {
+    let missing = tac_unit_maxhp(victim) - tac_unit_hp(victim)
+    let healed = expectedDamage(atkCls, atkCls.weapon.power, defCls, ability, 0)
+    if (healed > missing) { healed = missing }
+    return healed * w.support
+  }
+  // A buff is worth what the TARGET does with the turns it buys, which is why Haste on a Fighter and
+  // Haste on a Cleric are not the same move. Doubling accrual roughly doubles how often the unit
+  // comes round, and the counter runs down on its own (now faster) turns, so it buys on the order of
+  // half its duration in extra turns — priced at that ally's ordinary swing against a real enemy,
+  // which puts it in the same units as every other score here rather than on a scale of its own.
+  //
+  // No foes left means no turns worth having, and it also means `foeIds[0]` would not exist.
+  if (ability.kind === KIND_BUFF) {
+    if (foeIds.length === 0) { return 0 }
+    let perTurn = expectedDamage(defCls, defCls.weapon.power, statsOf(foeIds[0]), ATTACKS[unitClass[victim]], 0)
+    return ifloor(ability.statusTurns / 2) * perTurn * w.support
+  }
+  // An item is worth what it actually restores — capped at the gap it is filling, the same way a heal
+  // is, so the AI never burns the last Potion to top somebody up by two. A revival is priced as the
+  // health it brings back plus a kill's worth of value, because undoing a death is worth at least
+  // what causing one was.
+  // Reviving is by definition somebody else's, and it is the one item priced above what it restores:
+  // putting an actor back in the turn queue is worth what taking one out was, so the base is `kill`
+  // itself — NOT `kill * support`, which is the same trap self-use fell into. Only the Cleric has a
+  // support weight above zero, so scaling by it meant a Phoenix Down in a Fighter's hands was worth
+  // nothing and the squad's one revival went unused while its owner watched an ally lie there. Every
+  // class undoes a death. The health it comes back with is the part that is genuinely support, and a
+  // supportive class prices that on top.
+  if (ability.kind === KIND_ITEM && ability.revive > 0) {
+    return w.kill + ifloor(tac_unit_maxhp(victim) / 2) * w.support
+  }
+  if (ability.kind === KIND_ITEM) {
+    let gotHp = 0
+    if (ability.heal > 0) {
+      gotHp = tac_unit_maxhp(victim) - tac_unit_hp(victim)
+      if (gotHp > ability.heal) { gotHp = ability.heal }
+    }
+    let got = gotHp
+    if (ability.restore > 0) {
+      let gap = statsOf(victim).mp - unitMp[victim]
+      if (gap > ability.restore) { gap = ability.restore }
+      got = got + gap
+    }
+    // A cure has no number of its own, so it is priced as what the affliction would have cost over
+    // the turns it had left — the same currency as everything else here.
+    if (ability.cure > 0 && isAffliction(unitStatus[victim]) > 0) { got = got + unitStTurns[victim] * 2 }
+    // Worth the bottle? The stock is shared and finite, so an AI that tops somebody up by two points
+    // has thrown a Potion away — the scoring above caps `got` at the gap, which correctly says a
+    // near-full unit gains little, but "little" still beats standing there. Half the bottle is the
+    // floor. (The player is NOT held to this: spending your own stock badly is your business.)
+    if (got * 2 < ability.heal + ability.restore) { return 0 }
+    // On somebody else this is a support action and priced as one. On YOURSELF it is not support at
+    // all — it is self-preservation, and every class does it. Weighting it by `support` is what kept
+    // a wounded Fighter from ever drinking its own Potion: only the Cleric has a support weight above
+    // zero, because support was written to mean "patching up other people".
+    if (victim !== userId) { return got * w.support }
+    let v = got * w.caution
+    // And the case that actually matters: a drink that takes you out of one-shot range is worth what
+    // denying the enemy a kill is worth, which is the same flat figure scoring one is.
+    let hp = tac_unit_hp(userId)
+    let incoming = threatAt(fromCol, fromRow)
+    if (gotHp > 0 && hp <= incoming && hp + gotHp > incoming) { v = v + w.kill }
+    return v
+  }
+  let vc = tac_unit_col(victim)
+  let vr = tac_unit_row(victim)
+  let rel = relativeFacing(unitFaceDir[victim], fromCol - vc, fromRow - vr)
+  // A Combo is priced as what it would actually land: the initiator's swing multiplied by the points
+  // it is about to spend, plus every ally already standing in reach. Counting the allies is what
+  // stops the AI cashing its points the moment it has one — a Combo nobody can join is a slightly
+  // better attack, and the scoring says so rather than the AI being told to wait.
+  if (ability.kind === KIND_COMBO) {
+    let own = expectedDamage(atkCls, atkCls.weapon.power, defCls, ATTACKS[unitClass[userId]], rel)
+    let ex = ifloor(own * (4 + unitJp[userId]) / 4)
+    let jId = 0
+    while (jId < UNIT_COUNT) {
+      let ja = ATTACKS[unitClass[jId]]
+      if (jId !== userId && tac_unit_alive(jId) > 0 && tac_unit_team(jId) === tac_unit_team(userId) && comboJoins(jId) > 0) {
+        if (inReach(ja, sCol[jId], sRow[jId], vc, vr) > 0) {
+          ex = ex + expectedDamage(statsOf(jId), statsOf(jId).weapon.power, defCls, ja,
+                                   relativeFacing(unitFaceDir[victim], sCol[jId] - vc, sRow[jId] - vr))
+        }
+      }
+      jId = jId + 1
+    }
+    let hp = tac_unit_hp(victim)
+    let counted = ex
+    if (counted > hp) { counted = hp }
+    let v = counted * w.aggro
+    if (ex >= hp) { v = v + w.kill }
+    return v
+  }
+  let ex = expectedDamage(atkCls, atkCls.weapon.power, defCls, ability, rel)
+  let hp = tac_unit_hp(victim)
+  let counted = ex
+  if (counted > hp) { counted = hp }
+  let v = counted * w.aggro
+  if (ex >= hp) { v = v + w.kill }
+  // A shove is worth exactly the fall it causes, priced as the damage it is. That keeps Crush a
+  // situational move rather than a strictly better attack: on flat ground the two tie and the AI
+  // keeps the free one, and next to a terrace the fall breaks the tie. Valuing the DISPLACEMENT
+  // itself would need a guess at what the target meant to do next, which this AI cannot know.
+  if (ability.knock > 0) { v = v + tac_knock_drop(victim, fromCol, fromRow) * w.aggro }
+  return v
+}
+
+// What an ability aimed at `victim` is worth counting EVERYONE it would catch. A single-target
+// ability is just `actionValue`; a blast sums the value over every unit inside the radius and
+// SUBTRACTS its own side, which is what stops a Mage dropping Fire on a scrum that happens to
+// include its own Fighter. Gated on `aoe > 0` so the ordinary abilities keep the cheap path — the
+// AI calls this a few hundred times a turn, and the splash loop walks every unit on the board.
+function splashValue(userId, ability, victim, fromCol, fromRow) {
+  if (fpIsArea(ability) === 0) { return actionValue(userId, ability, victim, fromCol, fromRow) }
+  fpBuild(ability, fromCol, fromRow, tac_unit_col(victim), tac_unit_row(victim))
+  let myTeam = tac_unit_team(userId)
+  let total = 0
+  let id = 0
+  while (id < UNIT_COUNT) {
+    if (tac_unit_alive(id) > 0) {
+      if (fpCovers(tac_unit_col(id), tac_unit_row(id)) > 0) {
+        let v = actionValue(userId, ability, id, fromCol, fromRow)
+        if (tac_unit_team(id) === myTeam) { total = total - v } else { total = total + v }
+      }
+    }
+    id = id + 1
+  }
+  return total
+}
+
+// The AI's pick from the already-collected target list: whichever is worth most from where it stands.
+function bestTarget(ability) {
+  if (targetCount === 0) { return -1 }
+  let ac = tac_unit_col(turnUnit)
+  let ar = tac_unit_row(turnUnit)
+  let best = targetIds[0]
+  let bestV = splashValue(turnUnit, ability, best, ac, ar)
+  let i = 1
+  while (i < targetCount) {
+    let v = splashValue(turnUnit, ability, targetIds[i], ac, ar)
+    if (v > bestV) { bestV = v; best = targetIds[i] }
+    i = i + 1
+  }
+  return best
+}
+
+// ═══ AI: threat-scored search over (move tile × ability × target) ════════════════
+// The old AI walked at the nearest enemy and hit whatever it bumped into. This one asks the question
+// a tactics player asks — "of every tile I can reach, and every ability I can pay for, which single
+// combination is worth the most, and what will it cost me to stand there?" — which is what makes
+// height, flanking, range and MP mean anything.
+//
+// The search is O(tiles × abilities × units): ~25 reachable tiles × ≤3 abilities × 6 units is a few
+// hundred evaluations, far too much for one frame of an interpreted language. So it is AMORTIZED:
+// `aiPlanStep` chews through a few tiles per frame while the "thinking" beat plays, and the turn
+// commits when the search finishes. The frame budget never sees a spike.
+//
+// THREAT is precomputed once per turn, not per candidate tile: for each living enemy, how much damage
+// it could expect to do to us (`thrDmg`) and how far away it can start from to do it (`thrReach`,
+// its move plus its longest affordable reach). A tile's danger is then just a distance test per
+// enemy. Ignoring the height/facing they would attack from keeps this a cheap estimate — it is a
+// fear heuristic, not a prediction.
+// A SNAPSHOT of the board, taken once per turn and read by every candidate. Nothing moves during
+// planning — the unit has not walked yet — so asking the engine for the same unit's column six
+// hundred times is pure interpreter overhead. Measured: hoisting these out of the inner loops took a
+// candidate tile from ~5000 timer ticks (more than a whole frame's budget, for ONE tile) to a
+// fraction of that, which is the difference between a quarter-second hitch at the start of every turn
+// and one you cannot see.
+let thrIds = []     // enemies that can threaten a tile, paired with the two arrays below
+let thrDmg = []
+let thrReach = []
+let planCol: i32 = 0
+let planRow: i32 = 0
+let planAction = -1
+let planTarget = -1
+let planScore: i32 = 0
+let planTileI: i32 = 0
+let planStartDist: i32 = 0
+let planDone: i32 = 0
+let AI_TILES_PER_FRAME: i32 = 4
+
+function threatAt(col, row) {
+  let total = 0
+  let i = 0
+  while (i < thrIds.length) {
+    let id = thrIds[i]
+    if (iabs(col - sCol[id]) + iabs(row - sRow[id]) <= thrReach[i]) { total = total + thrDmg[i] }
+    i = i + 1
+  }
+  return total
+}
+
+// Snapshot positions/HP, sort the cast into who this unit may hit and who it may heal, and price each
+// enemy's threat: how hard it hits (`thrDmg`) and from how far away it could start (`thrReach` = its
+// move plus its longest affordable reach). Ignoring the height and facing an enemy would attack from
+// keeps this a fear heuristic rather than a prediction — cheap, and good enough to choose a tile.
+function buildPlanTables() {
+  let myTeam = tac_unit_team(turnUnit)
+  let myCls = statsOf(turnUnit)
+  foeIds = []
+  allyIds = []
+  buffIds = []
+  itemIds = []
+  fallenIds = []
+  thrIds = []
+  thrDmg = []
+  thrReach = []
+  let id = 0
+  while (id < UNIT_COUNT) {
+    sCol[id] = tac_unit_col(id)
+    sRow[id] = tac_unit_row(id)
+    sHp[id] = tac_unit_hp(id)
+    if (tac_unit_alive(id) > 0) {
+      if (tac_unit_team(id) === myTeam) {
+        if (sHp[id] < tac_unit_maxhp(id)) { allyIds.push(id) }
+        if (unitStatus[id] === ST_NONE) { buffIds.push(id) }
+        itemIds.push(id)
+      } else {
+        foeIds.push(id)
+        let cls = statsOf(id)
+        let list = actionsOf(id)
+        let best = 0
+        let reach = 0
+        let a = 0
+        while (a < list.length) {
+          let ability = list[a]
+          if (ability.kind !== KIND_HEAL && ability.kind !== KIND_BUFF && unitMp[id] >= ability.mp) {
+            let ex = expectedDamage(cls, cls.weapon.power, myCls, ability, 0)
+            if (ex > best) { best = ex }
+            if (ability.range > reach) { reach = ability.range }
+          }
+          a = a + 1
+        }
+        if (best > 0) {
+          thrIds.push(id)
+          thrDmg.push(best)
+          thrReach.push(reach + cls.move)
+        }
+      }
+    } else if (tac_unit_team(id) === myTeam) {
+      // Only bodies that can actually be raised: death releases the cell, so a corpse somebody has
+      // since walked onto is not a target. Filtered here rather than at scoring, because the tile
+      // search prices candidates by range alone and would otherwise plan a revival that the check at
+      // resolution then refuses — costing the unit its turn.
+      if (tac_occupant(sCol[id], sRow[id]) < 0) { fallenIds.push(id) }
+    }
+    id = id + 1
+  }
+}
+
+// Score one candidate destination, and remember it if it is the best seen so far.
+function evaluateTile(col, row) {
+  let w = statsOf(turnUnit).ai
+  // High ground no longer pays damage or accuracy (see formula.tish), so this is the AI's whole
+  // reason to climb, and what it now stands for is REACH: from up there, everything with a short
+  // vertical range simply cannot answer you. Scored per visible TIER rather than per elevation step —
+  // the map stacks two steps to a tier, so per-step this was quietly worth double what the weights in
+  // components.tish read like, enough to keep a caster parked on the peak against a kill worth 45.
+  let score = w.high * ifloor(isoCellHeight(col, row) / 2)
+  let span = actionSpan(turnUnit)
+  let bestV = 0
+  let bestA = -1
+  let bestT = -1
+  let a = 0
+  while (a < span) {
+    let ability = actionAt(turnUnit, a)
+    if (aiCanUse(turnUnit, ability)) {
+      let pool = foeIds
+      if (ability.kind === KIND_HEAL) { pool = allyIds }
+      if (ability.kind === KIND_BUFF) { pool = buffIds }
+      // An item goes to an ally, and a revive to a body — which is not in any of the living pools,
+      // so it is the one action that has to look at the whole roster.
+      if (ability.kind === KIND_ITEM) { pool = itemIds }
+      if (ability.kind === KIND_ITEM && ability.revive > 0) { pool = fallenIds }
+      let i = 0
+      while (i < pool.length) {
+        let id = pool[i]
+        if (inReach(ability, col, row, sCol[id], sRow[id]) > 0) {
+          let v = splashValue(turnUnit, ability, id, col, row)
+          if (v > bestV) { bestV = v; bestA = a; bestT = id }
+        }
+        i = i + 1
+      }
+    }
+    a = a + 1
+  }
+  // CAUTION IS FOR TILES YOU CAN FIGHT FROM, and the approach is fearless. Scored the other way — a
+  // penalty on every dangerous tile, whether or not you can act from it — both armies simply refuse
+  // to close: no tile in reach of the enemy is ever worth entering, so every unit backs off, forever.
+  // That is exactly what this AI did on its first run (twenty turns, `act=none`, two teams edging
+  // away from each other). Fear is only useful once there is a choice to be afraid ABOUT: given two
+  // tiles a mage can cast from, it takes the one the brutes cannot reach.
+  let acting = bestA >= 0
+  if (acting) {
+    score = score + bestV - w.caution * threatAt(col, row)
+  } else {
+    score = score + w.close * (planStartDist - nearestEnemyDist(col, row))
+  }
+  // A tile it can ACT from always beats one it can only stand on, however pretty the standing tile's
+  // height and safety score: a turn spent doing nothing is a turn the other side gets for free. Only
+  // among tiles of the same kind does the score decide.
+  let planning = planAction >= 0
+  let take = 0
+  if (acting && !planning) { take = 1 }
+  else if (acting === planning && score > planScore) { take = 1 }
+  if (take > 0) {
+    planScore = score
+    planCol = col
+    planRow = row
+    planAction = bestA
+    planTarget = bestT
+  }
+}
+
+function aiPlanBegin() {
+  let ac = tac_unit_col(turnUnit)
+  let ar = tac_unit_row(turnUnit)
+  buildPlanTables()
+  planStartDist = nearestEnemyDist(ac, ar)
+  planCol = ac
+  planRow = ar
+  planAction = -1
+  planTarget = -1
+  planScore = -999999
+  planTileI = 0
+  planDone = 0
+  evaluateTile(ac, ar)   // standing still is always a candidate
+}
+
+function aiPlanStep() {
+  let n = tac_range_count()
+  let budget = 0
+  while (budget < AI_TILES_PER_FRAME && planTileI < n) {
+    evaluateTile(tac_range_col(planTileI), tac_range_row(planTileI))
+    planTileI = planTileI + 1
+    budget = budget + 1
+  }
+  if (planTileI >= n) { planDone = 1 }
+  return planDone
+}
+
+// Distance to the closest enemy — off the plan snapshot, so it is a couple of array reads per call
+// rather than a walk of the whole registry through the engine.
+function nearestEnemyDist(col, row) {
+  let best = 9999
+  let i = 0
+  while (i < foeIds.length) {
+    let id = foeIds[i]
+    let d = iabs(col - sCol[id]) + iabs(row - sRow[id])
+    if (d < best) { best = d }
+    i = i + 1
+  }
+  return best
+}
+
+// ═══ Turn flow ═══════════════════════════════════════════════════════════════════
+// ═══ Status, the Judge, and growth ═══════════════════════════════════════════════
+
+// Put a condition on a unit. A fresh application replaces whatever was there rather than stacking:
+// two conditions at once needs a second slot in the HUD and a rule for which one ticks first, and
+// neither earns its complexity in a battle this size.
+function inflict(id, st, turns) {
+  if (st === ST_NONE) { return }
+  unitStatus[id] = st
+  unitStTurns[id] = turns
+  tac_unit_set_speed_scale(id, SPEED_SCALE[st])
+}
+function clearStatus(id) {
+  unitStatus[id] = ST_NONE
+  unitStTurns[id] = 0
+  // Back to 100 rather than to a remembered original: the scale is derived from the status every
+  // time it changes, so there is nothing to restore and no way to leave a unit permanently hasted by
+  // applying something twice.
+  tac_unit_set_speed_scale(id, SPEED_SCALE[ST_NONE])
+}
+
+// Floating text over a unit — the same popup slot the damage numbers use.
+function popupOver(id, text) {
+  let c = tac_unit_col(id)
+  let r = tac_unit_row(id)
+  hud_text(SLOT_POPUP, isoX(c, r) + 8, isoUnitTopY(c, r) - 8, text)
+}
+
+// Resolve `id`'s condition at the top of its turn. Returns 1 if the turn is CONSUMED — either the
+// condition costs it (Sleep, Slow) or the unit died to it.
+function tickStatus(id) {
+  let st = unitStatus[id]
+  if (st === ST_NONE) { return 0 }
+  if (st === ST_POISON) {
+    tac_damage(id, POISON_DMG)
+    popupOver(id, "-" + POISON_DMG)
+    if (tac_unit_alive(id) === 0) {
+      unitDead[id] = 1
+      unitStTurns[id] = 0
+      return 1
+    }
+  } else if (st === ST_REGEN) {
+    tac_heal(id, REGEN_HEAL)
+    popupOver(id, "+" + REGEN_HEAL)
+  }
+  let skip = skipsTurn(st)
+  if (skip > 0) { popupOver(id, STATUS_NAMES[st]) }
+  // The counter runs down whether or not the turn was lost, so a condition always expires.
+  unitStTurns[id] = unitStTurns[id] - 1
+  if (unitStTurns[id] <= 0) { clearStatus(id) }
+  return skip
+}
+
+// The Judge's response to a unit using a forbidden action. Yellow first, red on the repeat — and a
+// red card takes the unit out of the battle, which is a far heavier price than the EXP.
+function judgeCard(id) {
+  unitExp[id] = unitExp[id] - CARD_EXP_PENALTY
+  if (unitExp[id] < 0) { unitExp[id] = 0 }
+  if (unitCard[id] === CARD_NONE) {
+    unitCard[id] = CARD_YELLOW
+    popupOver(id, "YELLOW")
+    return
+  }
+  unitCard[id] = CARD_RED
+  popupOver(id, "RED CARD")
+  tac_damage(id, tac_unit_hp(id))   // removed from the battle
+  unitDead[id] = 1
+}
+
+// The Judge's other hand. FFTA pays a Judge Point for a **legal kill** or for doing what the law
+// **recommends**, and the two do not stack — a kill made with the recommended element is one point,
+// not two — which is why every caller comes through here and here alone.
+//
+// A unit that has already been paid this turn cannot be paid again, so the currency measures whether
+// the turn obeyed the Judge rather than how much happened in it. A lawless battle has no judge to
+// award anything, which `lawRecommends` and this function's callers both get from the null law.
+function awardJudge(id, why) {
+  if (jpTurn[id] > 0) { return }
+  if (unitJp[id] >= JP_MAX) { return }
+  jpTurn[id] = 1
+  unitJp[id] = unitJp[id] + 1
+  popupOver(id, why)
+}
+
+// Did the Judge card anybody on our side? One card is enough — FFTA does not grade a clan on how many
+// laws it broke, it decides whether it broke one.
+function clanCarded() {
+  let id = 0
+  while (id < UNIT_COUNT) {
+    if (tac_unit_team(id) === 0 && unitCard[id] !== CARD_NONE) { return 1 }
+    id = id + 1
+  }
+  return 0
+}
+
+// The end of a won battle, and the only place the law pays rather than punishes. Obeying it all the
+// way through is worth a prize; one card anywhere in the clan and the Judge applies **Volunteer** —
+// FFTA's own name for the penalty — and the clan fought it for nothing.
+//
+// This is what makes a law a decision rather than a nuisance. Breaking one already cost the offender
+// EXP on the spot, but a fine on one unit is easy to shrug off in a battle you are winning; forfeiting
+// the whole clan's reward is the part that makes "I could break this law" a question worth asking.
+function awardSpoils() {
+  if (clanCarded() > 0) { spoilsText = "Volunteer: no reward"; return }
+  let prize = LOOT[rnd(LOOT.length)]
+  stockAdd(prize)
+  spoilsText = "Spoils: " + prize.name
+}
+
+// Pay a unit for work done: EXP toward the next level, AP toward the next thing its weapon teaches.
+// Levels raise the stats the example owns (growth.tish explains why HP is not one of them).
+//
+// One act, two curves: EXP makes a unit better at what it already does, AP gives it something new to
+// do. They are paid together because they are EARNED together — there is no separate "training"
+// action, and a unit that spends the battle waiting learns nothing, which is the incentive worth
+// having. How much of each is growth.tish's, not this function's: `amount` is a measure of work, and
+// `apFor` turns it into AP at whatever rate that file currently believes in.
+function awardWork(id, amount) {
+  if (amount <= 0) { return }
+  unitAp[id] = unitAp[id] + apFor(amount)
+  let learned = learnCheck(id)
+  if (learned !== "") { popupOver(id, "LEARNED " + learned) }
+  unitExp[id] = unitExp[id] + amount
+  while (unitExp[id] >= EXP_PER_LEVEL) {
+    unitExp[id] = unitExp[id] - EXP_PER_LEVEL
+    unitLevel[id] = unitLevel[id] + 1
+    applyLevel(statsOf(id))
+    popupOver(id, "LEVEL UP")
+  }
+}
+
+// BEGIN: end the battle if a side is wiped; else take the next unit's turn — a human opens the menu,
+// everyone else (AI, or attract mode) shows its range and thinks.
+// Whose turn it is, announced for a beat. Sides read as Ally/Foe from team 0's point of view — the
+// same words the inspect readout uses, so one vocabulary covers both.
+function showBanner() {
+  let side = "Foe"
+  if (tac_unit_team(turnUnit) === 0) { side = "Ally" }
+  hud_text(SLOT_BANNER, 62, 22, side + " turn: " + statsOf(turnUnit).race.name + " " + statsOf(turnUnit).name)
+  bannerTimer = BANNER_FRAMES
+}
+function tickBanner() {
+  if (bannerTimer <= 0) { return }
+  bannerTimer = bannerTimer - 1
+  if (bannerTimer === 0) { hud_text(SLOT_BANNER, 0, 0, "") }
+}
+
+// Push what the battle earned back onto the town's roster.
+//
+// This is the other half of the clan bridge: without it a battle is a sandbox — you deploy the
+// clan's people, they level, and none of it is there when you walk back into the Party menu.
+//
+// **Levels and AP carry. Learned abilities do not, yet** — and that gap is not an oversight, it is
+// the same unsolved mapping the data archive ran into. This battle tracks what a unit knows as
+// `unitKnown[id]`, a COUNT: the prefix of its weapon's `teaches` list it has paid for. The clan
+// stores `known` as a list of ability IDs. Converting between them needs the rule that resolves a
+// weapon's `teaches` ordinal to an actual ability, which is exactly what data/ffta/CONFLICTS.md
+// records as still unidentified. Writing a guess here would put wrong ability ids in a save.
+//
+// HP and MP deliberately do NOT carry either: the engine owns the HP pool for the duration of a
+// fight, and a squad that walked out of one battle on 3 HP should be healed by the town's clinic
+// (which already exists and charges for it), not silently restored or silently crippled. That is
+// the town's decision to make, not this file's.
+//
+// Runs once, on the frame the result is decided, for every unit that came from the roster —
+// including the dead, since a unit that died still learned what it learned before it fell.
+function writeBackToClan() {
+  let id = 0
+  while (id < UNIT_COUNT) {
+    let cu = clanSlotOf[id]
+    if (cu !== null) {
+      cu.level = cu.level + unitLevel[id]
+      cu.ap = cu.ap + unitAp[id]
+    }
+    id = id + 1
+  }
+}
+
+function beginTurn() {
+  if (countLiving(1) === 0) { resultText = "Victory!"; awardSpoils(); writeBackToClan(); phase = PHASE_DONE }
+  else if (countLiving(0) === 0) { resultText = "Defeat"; writeBackToClan(); phase = PHASE_DONE }
+  if (phase === PHASE_DONE) { return }
+  turnUnit = tac_turn_next()
+  jpTurn[turnUnit] = 0
+  showBanner()
+  // The condition resolves BEFORE anything else this turn: poison can finish a unit, and a unit that
+  // dies to it must not then get to act.
+  if (tickStatus(turnUnit) > 0) {
+    phaseTimer = 0
+    hideWeapon()
+    hideMenu()
+    phase = PHASE_PAUSE   // the turn is spent — show what happened, then move on
+    return
+  }
+  tac_unit_move_range(turnUnit)
+  facePending = 1
+  didMove = 0
+  didAct = 0
+  phaseTimer = 0
+  hideWeapon()
+  hideMenu()
+  if (isHumanTurn() > 0) {
+    menuSel = MENU_MOVE
+    hasMoved = 0
+    tacHideMoveRange()
+    tacHideCursor()
+    phase = PHASE_MENU
+  } else {
+    tacShowMoveRange()
+    tacHideCursor()
+    aiPlanBegin()
+    phase = PHASE_THINK
+  }
+}
+
+// MENU (player): Move / Action / Item / Status / Wait — FFTA's own five, and the reason Attack and
+// Skill were folded together: they were two doors onto one list, and the sixth entry had nowhere to go
+// on a 240px row. The weapon's own action is the first row of the list, named after what it does, so
+// a healer's reads "Heal".
+//
+// Fixed labels + a pointer sprite at the selected one. Only the pointer moves, so nothing reflows.
+// Move greys to "----" once spent, and so does Item once the stock is empty.
+function drawMenu() {
+  let moveLabel = "Move"
+  if (hasMoved > 0) { moveLabel = "----" }
+  let itemLabel = "Item"
+  if (stockTotal() === 0) { itemLabel = "----" }
+  hud_text(SLOT_MOVE, MENU_X_MOVE, MENU_Y, moveLabel)
+  hud_text(SLOT_ACT, MENU_X_ACT, MENU_Y, "Action")
+  hud_text(SLOT_SKILL, MENU_X_ITEM, MENU_Y, itemLabel)
+  hud_text(SLOT_STATUS, MENU_X_STATUS, MENU_Y, "Status")
+  hud_text(SLOT_WAIT, MENU_X_WAIT, MENU_Y, "Wait")
+  let px = MENU_X_MOVE
+  if (menuSel === MENU_ACT) { px = MENU_X_ACT }
+  else if (menuSel === MENU_ITEM) { px = MENU_X_ITEM }
+  else if (menuSel === MENU_STATUS) { px = MENU_X_STATUS }
+  else if (menuSel === MENU_WAIT) { px = MENU_X_WAIT }
+  sprite_set_pos(menuPointer, px - 13, MENU_Y)   // vertically centred on the label row
+  sprite_set_visible(menuPointer, 1)
+}
+function hideMenu() {
+  hud_text(SLOT_MOVE, MENU_X_MOVE, MENU_Y, "")
+  hud_text(SLOT_ACT, MENU_X_ACT, MENU_Y, "")
+  hud_text(SLOT_SKILL, MENU_X_ITEM, MENU_Y, "")
+  hud_text(SLOT_STATUS, MENU_X_STATUS, MENU_Y, "")
+  hud_text(SLOT_WAIT, MENU_X_WAIT, MENU_Y, "")
+  hud_text(SLOT_INFO, 0, 0, "")
+  sprite_set_visible(menuPointer, 0)
+}
+// Open the target picker for `ability`, or say why not.
+function beginTargeting(ability) {
+  collectTargets(ability)
+  if (targetCount > 0) {
+    pickedAbility = ability
+    hideMenu(); hideSkillList(); phaseTimer = 0; targetIdx = 0; phase = PHASE_TARGET
+  } else {
+    hud_text(SLOT_INFO, MENU_X_ACT, MENU_Y - 16, "No target")   // nothing in reach — say so
+  }
+}
+function confirmMenu() {
+  if (menuSel === MENU_MOVE) {
+    if (hasMoved > 0) { return }
+    hideMenu()
+    tacShowMoveRange()
+    curCol = tac_unit_col(turnUnit)
+    curRow = tac_unit_row(turnUnit)
+    tacShowCursor(curCol, curRow)
+    phaseTimer = 0; phase = PHASE_PICK
+  } else if (menuSel === MENU_ACT) {
+    // FFTA's own shape: one Action entry opening the unit's command list, with its plain weapon
+    // action as the first row. It was two entries here (Attack and Skill) and the split cost a menu
+    // slot the sixth entry needed — and the weapon action was already row 0 of the same list, so the
+    // Attack entry was a shortcut into a list it was a member of.
+    skillSel = 0
+    hud_text(SLOT_INFO, 0, 0, "")
+    phaseTimer = 0; phase = PHASE_SKILL
+  } else if (menuSel === MENU_ITEM) {
+    if (stockTotal() === 0) { return }
+    itemSel = 0
+    hud_text(SLOT_INFO, 0, 0, "")
+    phaseTimer = 0; phase = PHASE_ITEM
+  } else if (menuSel === MENU_STATUS) {
+    // Opens ON the active unit, because that is the block you most often want, and it makes the
+    // control obvious: the cursor is already where you are, so the first d-pad press teaches that
+    // it goes anywhere.
+    hideMenu()
+    curCol = tac_unit_col(turnUnit)
+    curRow = tac_unit_row(turnUnit)
+    tacShowCursor(curCol, curRow)
+    phaseTimer = 0; phase = PHASE_INSPECT
+  } else {
+    hideMenu(); phaseTimer = 0; phase = PHASE_PAUSE
+  }
+}
+function menuTurn() {
+  if (key_pressed(9) > 0) { if (menuSel < MENU_WAIT) { menuSel = menuSel + 1; hud_text(SLOT_INFO, 0, 0, "") } }
+  if (key_pressed(8) > 0) { if (menuSel > MENU_MOVE) { menuSel = menuSel - 1; hud_text(SLOT_INFO, 0, 0, "") } }
+  drawMenu()
+  if (key_pressed(0) > 0) { confirmMenu() }
+}
+
+// SKILL (player): the class's abilities as a vertical list above the action row — name, MP cost and
+// range each. Up/Down move, A picks (straight into the target picker), B backs out. Anything the unit
+// cannot pay for is still LISTED, greyed with its cost, because "what could I do with more MP" is
+// information a tactics player wants; it just refuses to be selected.
+function drawSkillList() {
+  let rows = actionRowCount(turnUnit)
+  let a = 0
+  while (a < rows && a < SKILL_SLOTS) {
+    let ability = actionRowAt(turnUnit, a)
+    let label = ability.name + "  " + ability.mp + "MP  R" + ability.range
+    if (ability.kind === KIND_COMBO) { label = "Combo  " + unitJp[turnUnit] + "JP  R" + ability.range }
+    if (!canPay(turnUnit, ability)) { label = "(" + ability.name + "  " + ability.mp + "MP)" }
+    // Illegal abilities stay selectable and are flagged instead of hidden — the player is allowed to
+    // break the law, they just have to see the Judge coming.
+    else if (lawOk(ability) === 0) { label = ability.name + "  LAW!" }
+    hud_text(SLOT_SKILL0 + a, SKILL_X + 12, skillRowY(a), label)
+    a = a + 1
+  }
+  sprite_set_pos(menuPointer, SKILL_X, skillRowY(skillSel))
+  sprite_set_visible(menuPointer, 1)
+}
+// Rows stack UPWARDS from just above the action menu, so a list of any length ends in the same place
+// and the eye does not have to hunt for the bottom row. Shared by the Action list and the Item list.
+function listRowY(n, i) { return MENU_Y - 16 * (n - i) }
+function skillRowY(a) { return listRowY(actionRowCount(turnUnit), a) }
+function hideSkillList() {
+  let s = 0
+  while (s < SKILL_SLOTS) { hud_text(SLOT_SKILL0 + s, 0, 0, ""); s = s + 1 }
+}
+function skillTurn() {
+  if (key_pressed(7) > 0) { if (skillSel < actionRowCount(turnUnit) - 1) { skillSel = skillSel + 1 } }
+  if (key_pressed(6) > 0) { if (skillSel > 0) { skillSel = skillSel - 1 } }
+  drawSkillList()
+  if (key_pressed(0) > 0) {
+    let ability = actionRowAt(turnUnit, skillSel)
+    if (canPay(turnUnit, ability)) { beginTargeting(ability) }
+  }
+  if (key_pressed(1) > 0) { hideSkillList(); menuSel = MENU_ACT; phase = PHASE_MENU }
+}
+
+// TARGET (player): cycle the collected targets; the unit rotates to face the pick; A commits, B backs.
+function targetTurn() {
+  if (key_pressed(9) > 0) { targetIdx = (targetIdx + 1) % targetCount }
+  if (key_pressed(8) > 0) { targetIdx = (targetIdx + targetCount - 1) % targetCount }
+  let tc = targetCols[targetIdx]
+  let tr = targetRows[targetIdx]
+  tacShowCursor(tc, tr)
+  let ac = tac_unit_col(turnUnit)
+  let ar = tac_unit_row(turnUnit)
+  let f = facing(ac, ar, tc, tr)
+  drawUnits(turnUnit, isoX(ac, ar), isoUnitTopY(ac, ar), isoUnitDepth(ac, ar), f.base + ANIM_WALK, f.flip)
+  // The readout is the whole point of a tactics target picker: name, HP, and what THIS attack from
+  // THIS tile is expected to do to them — which is where the player sees flanking pay off.
+  let tgt = targetIds[targetIdx]
+  let atkCls = statsOf(turnUnit)
+  let rel = relTo(tgt, ac, ar)
+  let ex = expectedDamage(atkCls, atkCls.weapon.power, statsOf(tgt), pickedAbility, rel)
+  // FFTA puts a hit PERCENTAGE in front of the player before they commit, and it is the number that
+  // makes the rest of the system legible: flanking moves it, and without it a player has no way to
+  // tell a good tile from a lucky roll. `ex` is damage already discounted by these odds, so showing
+  // both is showing the working, not repeating it.
+  let mark = " ~" + ex + "  " + hitChance(atkCls, statsOf(tgt), pickedAbility, rel) + "%"
+  if (pickedAbility.kind === KIND_HEAL) { mark = " +" + ex }
+  else if (pickedAbility.kind === KIND_BUFF) { mark = " " + STATUS_NAMES[pickedAbility.status] }
+  // An item shows what it will actually do here and nothing else. It cannot miss, so a hit
+  // percentage would be a lie, and it has no attacker — flanking and height do not enter into
+  // drinking a potion. The heal is shown CAPPED at the gap, so "+4" on a unit four HP down is the
+  // honest figure and the player can see they are about to spend most of a bottle on nothing.
+  else if (pickedAbility.kind === KIND_ITEM) {
+    mark = " " + pickedAbility.name
+    if (pickedAbility.revive > 0) { mark = " revive +" + ifloor(tac_unit_maxhp(tgt) / 2) }
+    else if (pickedAbility.heal > 0) {
+      let gap = tac_unit_maxhp(tgt) - tac_unit_hp(tgt)
+      if (gap > pickedAbility.heal) { gap = pickedAbility.heal }
+      mark = " +" + gap
+    } else if (pickedAbility.restore > 0) {
+      let gap = statsOf(tgt).mp - unitMp[tgt]
+      if (gap > pickedAbility.restore) { gap = pickedAbility.restore }
+      mark = " +" + gap + " MP"
+    } else if (pickedAbility.cure > 0) { mark = " cures " + STATUS_NAMES[unitStatus[tgt]] }
+  }
+  else {
+    // Why the number is what it is — the player chose it by standing somewhere, so naming it is what
+    // turns a good roll into a repeatable tactic. Height is deliberately absent: it no longer moves
+    // this number, and a readout that named it would be describing a rule the game does not have.
+    if (rel === REL_BACK) { mark = mark + " BACK" }
+    else if (rel === REL_SIDE) { mark = mark + " SIDE" }
+  }
+  // A blast paints its footprint and counts the friends standing in it. Naming the number rather
+  // than only lighting the tiles is the difference between a warning and a decoration: "ALLIES 1"
+  // is a thing you can decide about at a glance.
+  if (fpIsArea(pickedAbility) > 0) {
+    fpBuild(pickedAbility, ac, ar, tc, tr)
+    tacShowFootprint()
+    let friends = alliesInFootprint()
+    if (friends > 0) { mark = mark + "  ALLIES " + friends }
+  }
+  hud_text(SLOT_INFO, 60, MENU_Y, statsOf(tgt).name + " " + tac_unit_hp(tgt) + "/" + tac_unit_maxhp(tgt) + mark)
+  if (key_pressed(0) > 0) { beginAction(tgt, pickedAbility) }
+  if (key_pressed(1) > 0) {
+    hud_text(SLOT_INFO, 0, 0, "")
+    tacHideCursor()
+    if (fpIsArea(pickedAbility) > 0) { tacHideMoveRange() }   // wipe the footprint on the way out
+    menuSel = MENU_ACT
+    phase = PHASE_MENU
+  }
+}
+
+// INSPECT (player): the free cursor. Reads out whatever it is over — ANY unit, either team, not just
+// your own — because "can that Brute reach me, and can it kill me if it does" is the question a
+// tactics player asks before every commitment, and a game that hides the enemy's numbers is asking
+// them to guess. B returns to the menu; the turn is not spent by looking.
+function inspectTurn() {
+  if (key_pressed(9) > 0) { if (curCol < MAPW - 1) { curCol = curCol + 1 } }
+  if (key_pressed(8) > 0) { if (curCol > 0) { curCol = curCol - 1 } }
+  if (key_pressed(7) > 0) { if (curRow < MAPH - 1) { curRow = curRow + 1 } }
+  if (key_pressed(6) > 0) { if (curRow > 0) { curRow = curRow - 1 } }
+  tacShowCursor(curCol, curRow)
+  let id = tac_occupant(curCol, curRow)
+  if (id >= 0 && tac_unit_alive(id) > 0) {
+    let st = statsOf(id)
+    let side = "Ally"
+    if (tac_unit_team(id) !== tac_unit_team(turnUnit)) { side = "Foe" }
+    let head = side + " " + st.race.name + " " + st.name + "  " + tac_unit_hp(id) + "/" + tac_unit_maxhp(id) + "  MP " + unitMp[id]
+    if (unitLevel[id] > 0) { head = head + "  L" + unitLevel[id] }
+    // Judge Points sit on the headline beside HP and MP because they are a resource spent from the
+    // same menu, and because a Combo appears on the Action list only while there are some — a player
+    // who cannot see the number cannot tell whether the row is missing or the option never existed.
+    if (unitJp[id] > 0) { head = head + "  JP " + unitJp[id] }
+    if (unitStatus[id] !== ST_NONE) { head = head + "  " + STATUS_NAMES[unitStatus[id]] }
+    hud_text(SLOT_INFO, 8, MENU_Y - 36, head)
+    hud_text(SLOT_INSPECT, 8, MENU_Y - 24, "ATK " + st.atk + " MAG " + st.mag + " DEF " + st.def + " RES " + st.res + " EVA " + st.eva)
+    // The second half of a unit: how often it acts, how far it reaches, and which way it is looking.
+    // Facing belongs on a STATUS screen and not only in the attack preview — deciding where to stand
+    // is done before you commit to a target, and until you can read a unit's facing without aiming
+    // at it, flanking is guesswork.
+    let sl = "SPD " + st.speed + " MOV " + st.move + " JMP " + st.jump + " FACE " + FACE_NAMES[unitFaceDir[id]]
+    if (st.race.fly > 0) { sl = sl + " FLY" }
+    hud_text(SLOT_INSPECT2, 8, MENU_Y - 12, sl)
+  } else {
+    // An empty tile still answers something worth knowing: how high it is, which is what decides
+    // whether a unit can step onto it and how hard it hits from there.
+    let tl = tac_tile(curCol, curRow)
+    let cst = terrainCost(tl)
+    let ground = terrainName(tl) + "  Height " + isoCellHeight(curCol, curRow)
+    if (cst > 1) { ground = ground + "  Move " + cst }
+    hud_text(SLOT_INFO, 8, MENU_Y - 36, ground)
+    hud_text(SLOT_INSPECT, 0, 0, "")
+    hud_text(SLOT_INSPECT2, 0, 0, "")
+  }
+  if (key_pressed(1) > 0) {
+    hud_text(SLOT_INFO, 0, 0, "")
+    hud_text(SLOT_INSPECT, 0, 0, "")
+    hud_text(SLOT_INSPECT2, 0, 0, "")
+    tacHideCursor()
+    menuSel = MENU_STATUS
+    phase = PHASE_MENU
+  }
+}
+
+// ═══ Item list ═══════════════════════════════════════════════════════════════════
+// The stock, with what is left of each. Rows for exhausted items stay on the list, greyed, rather
+// than vanishing: a list that reorders itself as you spend it makes the player re-read it every turn,
+// and "Potion 0" is more useful than a gap where the Potions were.
+function drawItemList() {
+  let i = 0
+  while (i < STOCK.length && i < SKILL_SLOTS) {
+    let e = STOCK[i]
+    let label = e.item.name + "  x" + e.count
+    if (e.count === 0) { label = "(" + e.item.name + ")" }
+    else if (lawOk(e.item) === 0) { label = e.item.name + "  LAW!" }
+    hud_text(SLOT_SKILL0 + i, SKILL_X + 12, listRowY(STOCK.length, i), label)
+    i = i + 1
+  }
+  sprite_set_pos(menuPointer, SKILL_X, listRowY(STOCK.length, itemSel))
+  sprite_set_visible(menuPointer, 1)
+}
+
+function itemTurn() {
+  if (key_pressed(7) > 0) { if (itemSel < STOCK.length - 1) { itemSel = itemSel + 1 } }
+  if (key_pressed(6) > 0) { if (itemSel > 0) { itemSel = itemSel - 1 } }
+  drawItemList()
+  if (key_pressed(0) > 0) {
+    let e = STOCK[itemSel]
+    if (e.count > 0) { beginTargeting(e.item) }
+  }
+  if (key_pressed(1) > 0) { hideSkillList(); menuSel = MENU_ITEM; phase = PHASE_MENU }
+}
+
+// ═══ Facing ═════════════════════════════════════════════════════════════════════
+// Which way a unit stands when its turn ends — the last decision of every turn, and the one that
+// decides how much the NEXT attack on it is worth. The damage formula has read facing since it was
+// written; until now nothing ever chose it, so a unit simply kept looking wherever its last step or
+// swing happened to leave it. That made back attacks something you stumbled into.
+//
+// Turning to point at a neighbouring cell rather than setting a direction index means one function
+// owns the mapping from "a direction" to the sprite's base/flip pair, and it is the same one the
+// walk and the swing already use.
+function setFacing(id, dir) {
+  let c = tac_unit_col(id)
+  let r = tac_unit_row(id)
+  if (dir === 0) { faceToward(id, c, r, c + 1, r) }
+  else if (dir === 1) { faceToward(id, c, r, c, r + 1) }
+  else if (dir === 2) { faceToward(id, c, r, c, r - 1) }
+  else { faceToward(id, c, r, c - 1, r) }
+}
+
+// FACE (player): the d-pad turns the unit, A ends the turn. The directions are bound the same way the
+// cursor is — right is +col — so the stick does on the unit what it does everywhere else.
+// The four markers sit at the MIDPOINTS OF THE TILE'S EDGES, which is where a direction actually
+// lives on an isometric grid: the diamond's four edges are the four grid directions, so an edge
+// marker points at exactly one neighbouring cell and there is no ambiguity about which way "up" is.
+// A tile is 2·ISO_TILE_HALF_W across and 2·ISO_TILE_HALF_H tall, so an edge midpoint is half of each from the
+// centre: ±(8, 4), one sign per direction, in `dirOf` order.
+//
+// They are pushed out PAST the edge rather than sitting exactly on it. Units are drawn a head taller
+// than their tile and lifted clear of it, so a marker on the true midpoint of a back edge lands on
+// the character's chest and reads as decoration on the sprite instead of a direction on the ground.
+let FACE_DOT_DX = [13, -13, 13, -13]
+let FACE_DOT_DY = [7, 7, -7, -7]
+function showFaceDots(id) {
+  let cx = isoX(tac_unit_col(id), tac_unit_row(id)) + ISO_TILE_HALF_W
+  let cy = isoTileTopY(tac_unit_col(id), tac_unit_row(id)) + ISO_TILE_HALF_H
+  let d = 0
+  while (d < 4) {
+    // −8 centres a 16×16 sprite on the point; ISO_BIAS_CURSOR keeps the markers above the unit, which is
+    // the only way the two behind it stay readable.
+    sprite_set_pos(faceDots[d], cx + FACE_DOT_DX[d] - 8, cy + FACE_DOT_DY[d] - 8)
+    sprite_set_depth(faceDots[d], isoDepthAt(tac_unit_col(id), tac_unit_row(id), ISO_BIAS_CURSOR))
+    let lit = 0
+    if (d === unitFaceDir[id]) { lit = 1 }
+    sprite_set_frame(faceDots[d], lit)
+    sprite_set_visible(faceDots[d], 1)
+    d = d + 1
+  }
+}
+function hideFaceDots() {
+  let d = 0
+  while (d < 4) { sprite_set_visible(faceDots[d], 0); d = d + 1 }
+}
+
+function beginFacing(id, ret) {
+  faceWho = id
+  faceReturn = ret
+  tacHideCursor()
+  phase = PHASE_FACE
+}
+function faceTurn() {
+  if (key_pressed(9) > 0) { setFacing(faceWho, 0) }
+  if (key_pressed(7) > 0) { setFacing(faceWho, 1) }
+  if (key_pressed(6) > 0) { setFacing(faceWho, 2) }
+  if (key_pressed(8) > 0) { setFacing(faceWho, 3) }
+  showFaceDots(faceWho)
+  hud_text(SLOT_INFO, 8, MENU_Y - 24, "Face " + FACE_NAMES[unitFaceDir[faceWho]] + "   A to confirm")
+  if (key_pressed(0) > 0) {
+    hud_text(SLOT_INFO, 0, 0, "")
+    hideFaceDots()
+    tacHideCursor()
+    phase = faceReturn
+  }
+}
+
+// The AI's facing: look at the nearest living enemy. It is the choice a human makes most of the time
+// and it costs one pass over the roster, where scoring all four against every threat would cost a
+// search for a decision that is rarely close.
+function aiChooseFacing() {
+  let c = tac_unit_col(turnUnit)
+  let r = tac_unit_row(turnUnit)
+  let best = -1
+  let bestD = 9999
+  let id = 0
+  while (id < UNIT_COUNT) {
+    if (tac_unit_alive(id) > 0 && tac_unit_team(id) !== tac_unit_team(turnUnit)) {
+      let d = manhattan(c, r, tac_unit_col(id), tac_unit_row(id))
+      if (d < bestD) { bestD = d; best = id }
+    }
+    id = id + 1
+  }
+  if (best < 0) { return }
+  faceToward(turnUnit, c, r, tac_unit_col(best), tac_unit_row(best))
+}
+
+// End of turn: everyone still standing picks a facing before the next unit is called.
+function endTurnFacing() {
+  // Charged here, and only here, because this is the one place every turn passes through exactly
+  // once — whether it ended in a swing, a Wait, or a unit sleeping through it.
+  tac_turn_end(turnUnit, didMove, didAct)
+  if (facePending === 0 || tac_unit_alive(turnUnit) === 0) {
+    facePending = 0
+    phase = PHASE_BEGIN
+    return
+  }
+  facePending = 0
+  if (isHumanTurn() > 0) {
+    phaseTimer = 0
+    beginFacing(turnUnit, PHASE_BEGIN)
+    return
+  }
+  aiChooseFacing()
+  phase = PHASE_BEGIN
+}
+
+// PICK (player): d-pad moves the cursor, A confirms a reachable tile, B cancels back to the menu.
+function pickMove() {
+  if (key_pressed(9) > 0) { if (curCol < MAPW - 1) { curCol = curCol + 1 } }
+  if (key_pressed(8) > 0) { if (curCol > 0) { curCol = curCol - 1 } }
+  if (key_pressed(7) > 0) { if (curRow < MAPH - 1) { curRow = curRow + 1 } }
+  if (key_pressed(6) > 0) { if (curRow > 0) { curRow = curRow - 1 } }
+  tacShowCursor(curCol, curRow)
+  // What this tile actually COSTS to reach, not what it looks like it should. With terrain costs and
+  // zone of control in play the two disagree often — the tile behind an enemy is two steps away and
+  // four points away — and the highlight alone can't say so.
+  if (tac_in_range(curCol, curRow) > 0) {
+    hud_text(SLOT_INFO, 8, MENU_Y - 24, "Move " + tac_move_cost(curCol, curRow) + " / " + statsOf(turnUnit).move)
+  } else {
+    hud_text(SLOT_INFO, 8, MENU_Y - 24, "Out of reach")
+  }
+  if (key_pressed(0) > 0) {
+    if (tac_in_range(curCol, curRow) > 0) { aiDestCol = curCol; aiDestRow = curRow; startWalk() }
+  }
+  if (key_pressed(1) > 0) {
+    hud_text(SLOT_INFO, 0, 0, "")
+    tacHideMoveRange(); tacHideCursor(); menuSel = MENU_MOVE; phase = PHASE_MENU
+  }
+}
+
+// THINK (AI): search a few candidate tiles per frame while the "thinking" beat plays, then commit to
+// the best (tile, ability, target) it found. The beat is a floor, not the cost — a search that needs
+// longer than 18 frames simply takes the frames it needs instead of dropping one.
+function think() {
+  let done = aiPlanStep()
+  if (done > 0 && timerElapsed(AI_THINK_FRAMES) > 0) {
+    aiDestCol = planCol
+    aiDestRow = planRow
+    startWalk()
+  }
+}
+
+function startWalk() {
+  didMove = 1
+  hud_text(SLOT_INFO, 0, 0, "")
+  tac_path(aiDestCol, aiDestRow)
+  walkSegments = tac_path_len()
+  walkDestCol = aiDestCol
+  walkDestRow = aiDestRow
+  walkSeg = 0
+  walkFrame = 0
+  tacHideMoveRange()
+  tacHideCursor()
+  phaseTimer = 0
+  if (walkSegments <= 1) {
+    // Stayed put: a human returns to the menu to choose an action; everyone else resolves.
+    if (isHumanTurn() > 0) { hasMoved = 1; menuSel = MENU_ACT; phase = PHASE_MENU } else { phase = PHASE_ACT }
+  } else {
+    phase = PHASE_WALK
+  }
+}
+
+// WALK: interpolate along the path, facing + animating the direction of travel.
+function walkTurn() {
+  let fromCol = tac_path_col(walkSeg)
+  let fromRow = tac_path_row(walkSeg)
+  let toCol = tac_path_col(walkSeg + 1)
+  let toRow = tac_path_row(walkSeg + 1)
+  let f = faceToward(turnUnit, fromCol, fromRow, toCol, toRow)
+  let x = lerp(isoX(fromCol, fromRow), isoX(toCol, toRow), walkFrame, FRAMES_PER_TILE)
+  let y = lerp(isoUnitTopY(fromCol, fromRow), isoUnitTopY(toCol, toRow), walkFrame, FRAMES_PER_TILE)
+  drawUnits(turnUnit, x, y, isoUnitDepth(toCol, toRow), f.base + ANIM_WALK + walkFrameNow(), f.flip)
+  walkFrame = walkFrame + 1
+  if (walkFrame >= FRAMES_PER_TILE) {
+    walkFrame = 0
+    walkSeg = walkSeg + 1
+    if (walkSeg >= walkSegments - 1) {
+      tac_unit_set_pos(turnUnit, walkDestCol, walkDestRow)
+      phaseTimer = 0
+      if (isHumanTurn() > 0) { hasMoved = 1; menuSel = MENU_ACT; phase = PHASE_MENU } else { phase = PHASE_ACT }
+    }
+  }
+}
+
+// ACT (AI): carry out the ability the search committed to. It is re-checked rather than trusted —
+// the plan was made from the destination tile before walking there, and a fight is allowed to change
+// underneath it — and if it no longer holds, the best action available from where the unit actually
+// stands is used instead.
+function resolveAct() {
+  if (planAction >= 0 && planTarget >= 0) {
+    let ability = actionAt(turnUnit, planAction)
+    if (stillValid(ability, planTarget) > 0) { beginAction(planTarget, ability); return }
+  }
+  if (pickBestActionHere() > 0) { return }
+  phaseTimer = 0
+  phase = PHASE_PAUSE
+}
+
+function stillValid(ability, victim) {
+  if (isTargetOf(turnUnit, ability, victim) === 0) { return 0 }
+  if (!canPay(turnUnit, ability)) { return 0 }
+  if (inReach(ability, tac_unit_col(turnUnit), tac_unit_row(turnUnit), tac_unit_col(victim), tac_unit_row(victim)) === 0) { return 0 }
+  return 1
+}
+
+// Best (ability, target) from the current tile — the fallback when a plan went stale, and what a unit
+// that never moved uses.
+function pickBestActionHere() {
+  let span = actionSpan(turnUnit)
+  let bestV = 0
+  let bestA = -1
+  let bestT = -1
+  let a = 0
+  while (a < span) {
+    let ability = actionAt(turnUnit, a)
+    if (aiCanUse(turnUnit, ability)) {
+      collectTargets(ability)
+      let t = bestTarget(ability)
+      if (t >= 0) {
+        let v = splashValue(turnUnit, ability, t, tac_unit_col(turnUnit), tac_unit_row(turnUnit))
+        if (v > bestV) { bestV = v; bestA = a; bestT = t }
+      }
+    }
+    a = a + 1
+  }
+  if (bestA < 0) { return 0 }
+  beginAction(bestT, actionAt(turnUnit, bestA))
+  return 1
+}
+
+// Begin `ability` against `targetId`: face it, pay for it, and start the animation — melee swings
+// straight away, a caster charges first. MP is spent HERE, at the commitment, not when the blow
+// lands: the cost of a spell is paid for casting it, hit or miss.
+function beginAction(targetId, ability) {
+  didAct = 1
+  attackTarget = targetId
+  actAbility = ability
+  let ac = tac_unit_col(turnUnit)
+  let ar = tac_unit_row(turnUnit)
+  let f = faceToward(turnUnit, ac, ar, tac_unit_col(targetId), tac_unit_row(targetId))
+  actBase = f.base
+  actFlip = f.flip
+  actKind = ability.kind
+  actHit = 0
+  unitMp[turnUnit] = unitMp[turnUnit] - ability.mp
+  // The Judge rules at the moment of commitment, not when the blow lands: the offence is *using* the
+  // forbidden thing, so a spell that then misses is carded all the same. The reward reads the same
+  // way, and for the same reason — the law is about what you chose to do, not how the dice went.
+  if (lawOk(ability) === 0) { judgeCard(turnUnit) }
+  else if (lawRecommends(battleLaw, ability) > 0) { awardJudge(turnUnit, "JUDGE") }
+  tacHideCursor()
+  hideMenu()
+  if (fpIsArea(ability) > 0) { tacHideMoveRange() }   // the footprint has served its purpose
+  phaseTimer = 0
+  if (actKind === KIND_MELEE) { phase = PHASE_SWING } else { phase = PHASE_WINDUP }
+}
+
+// Resolve the ability against ONE victim and report it into `slot`. The dice are rolled HERE rather
+// than at commitment, so the height and facing that count are the ones at the moment of the blow —
+// and each victim of a blast rolls its own, because a spell that catches two units at different
+// elevations should not land identically on both. `formula.tish` owns the math; this only reports
+// it: +N healed, −N (with a "!" when it crits), or a clean Miss.
+function strike(victim, slot) {
+  let ac = tac_unit_col(turnUnit)
+  let ar = tac_unit_row(turnUnit)
+  let tc = tac_unit_col(victim)
+  let tr = tac_unit_row(victim)
+  let atkCls = statsOf(turnUnit)
+  let rel = relTo(victim, ac, ar)
+  rollAction(atkCls, atkCls.weapon.power, statsOf(victim), actAbility, rel)
+  let px = isoX(tc, tr) + 8
+  let py = isoUnitTopY(tc, tr) - 8
+  // A buff neither rolls to hit nor touches HP: it lands, or the ability would not have offered the
+  // target in the first place. Paid in EXP at a flat rate because there is no damage figure to scale
+  // by — the work is the same however good the recipient turns out to be.
+  if (actKind === KIND_BUFF) {
+    inflict(victim, actAbility.status, actAbility.statusTurns)
+    hud_text(slot, px, py, STATUS_NAMES[actAbility.status])
+    awardWork(turnUnit, EXP_PER_HEAL)
+    return
+  }
+  // An item lands rather than rolls — there is no accuracy on drinking a potion — and it is spent
+  // here, at the moment the effect happens, so a picker backed out of costs nothing.
+  if (actKind === KIND_ITEM) {
+    stockUse(actAbility)
+    let note = actAbility.name
+    if (actAbility.revive > 0) {
+      // Half health, FFTA's own revival: enough that the unit is back in the fight, little enough
+      // that reviving under fire is a gamble rather than a reset.
+      tac_revive(victim, ifloor(tac_unit_maxhp(victim) / 2))
+      unitDead[victim] = 0
+      note = "Revived"
+    }
+    if (actAbility.heal > 0) {
+      tac_heal(victim, actAbility.heal)
+      note = "+" + actAbility.heal
+    }
+    if (actAbility.restore > 0) {
+      let cap = statsOf(victim).mp
+      unitMp[victim] = unitMp[victim] + actAbility.restore
+      if (unitMp[victim] > cap) { unitMp[victim] = cap }
+      note = "+" + actAbility.restore + " MP"
+    }
+    if (actAbility.cure > 0 && isAffliction(unitStatus[victim]) > 0) {
+      clearStatus(victim)
+      note = "cured"
+    }
+    hud_text(slot, px, py, note)
+    awardWork(turnUnit, EXP_PER_HEAL)
+    return
+  }
+  if (actKind === KIND_HEAL) {
+    // Healing is also a cleanse: a Cure that only restored HP would leave the Cleric no answer to
+    // Poison, and the poison out-ticks the healing over a long fight.
+    let missing = tac_unit_maxhp(victim) - tac_unit_hp(victim)
+    let restored = RES.dmg
+    if (restored > missing) { restored = missing }
+    tac_heal(victim, RES.dmg)
+    let note = "+" + RES.dmg
+    if (isAffliction(unitStatus[victim]) > 0) {
+      clearStatus(victim)
+      note = note + " cured"
+    }
+    hud_text(slot, px, py, note)
+    awardWork(turnUnit, ifloor(restored / EXP_PER_HEAL))
+    return
+  }
+  // A Combo spends EVERY Judge Point the initiator has and pulls in every ally already in reach of the
+  // target. Only the initiator's blow is multiplied — the others contribute their ordinary swing and
+  // pay nothing, which is FFTA's rule and is what makes a Combo a question about POSITION rather than
+  // about the initiator: the points decide how hard it hits, the board decides how many hit at all.
+  //
+  // Each participant rolls its own accuracy against its own angle on the target, so a Combo is not a
+  // guaranteed hit, and standing behind somebody still matters inside one.
+  if (actKind === KIND_COMBO) {
+    let spend = unitJp[turnUnit]
+    unitJp[turnUnit] = 0
+    let total = 0
+    let joined = 0
+    if (RES.hit > 0) { total = ifloor(RES.dmg * (4 + spend) / 4); joined = 1 }
+    let jId = 0
+    while (jId < UNIT_COUNT) {
+      let ja = ATTACKS[unitClass[jId]]
+      if (jId !== turnUnit && tac_unit_alive(jId) > 0 && tac_unit_team(jId) === tac_unit_team(turnUnit) && comboJoins(jId) > 0) {
+        let jc = tac_unit_col(jId)
+        let jr = tac_unit_row(jId)
+        if (inReach(ja, jc, jr, tc, tr) > 0) {
+          let jCls = statsOf(jId)
+          rollAction(jCls, jCls.weapon.power, statsOf(victim), ja, relTo(victim, jc, jr))
+          if (RES.hit > 0) { total = total + RES.dmg; joined = joined + 1 }
+        }
+      }
+      jId = jId + 1
+    }
+    if (total === 0) {
+      hud_text(slot, px, py, "Miss")
+      return
+    }
+    tac_damage(victim, total)
+    hud_text(slot, px, py, "COMBO -" + total + " x" + joined)
+    recoilId = victim
+    recoilTimer = RECOIL_FRAMES
+    if (unitStatus[victim] === ST_SLEEP) { clearStatus(victim) }
+    awardWork(turnUnit, ifloor(total / EXP_PER_DAMAGE))
+    if (tac_unit_alive(victim) === 0) {
+      unitDead[victim] = 1
+      awardWork(turnUnit, EXP_KILL)
+      awardJudge(turnUnit, "JUDGE")
+    }
+    return
+  }
+  if (RES.hit === 0) {
+    hud_text(slot, px, py, "Miss")
+    return
+  }
+  tac_damage(victim, RES.dmg)
+  let popup = "-" + RES.dmg
+  if (RES.crit > 0) { popup = popup + "!" }
+  hud_text(slot, px, py, popup)
+  recoilId = victim
+  recoilTimer = RECOIL_FRAMES
+  // A blow wakes a sleeper — otherwise Sleep is a stun-lock, since the sleeping unit never gets the
+  // turn on which its own counter would run down.
+  if (unitStatus[victim] === ST_SLEEP) { clearStatus(victim) }
+  else if (actAbility.status !== ST_NONE) { inflict(victim, actAbility.status, actAbility.statusTurns) }
+  awardWork(turnUnit, ifloor(RES.dmg / EXP_PER_DAMAGE))
+  // The shove lands only if the victim is still standing — pushing a corpse around reads as a bug,
+  // and a dead unit's cell has already been freed.
+  if (actAbility.knock > 0 && tac_unit_alive(victim) > 0) { shove(victim, ac, ar, slot, px, py) }
+  if (tac_unit_alive(victim) === 0) {
+    unitDead[victim] = 1
+    awardWork(turnUnit, EXP_KILL)
+    // "Legally" is the whole qualifier: a kill scored with a forbidden action is the case that earns a
+    // RED card in FFTA, and paying it a Judge Point as well would have the same swing both rewarded
+    // and arrested.
+    if (lawOk(actAbility) > 0) { awardJudge(turnUnit, "JUDGE") }
+  }
+}
+
+// Shove `victim` one tile away from (ac,ar) and charge it for the drop.
+//
+// FALL DAMAGE IS THE POINT, not a garnish. A shove that only repositions is worth about one tile of
+// movement; a shove that can drop a unit off the terraces the map is built out of turns the Brute
+// into something you have to think about standing next to, and it is the one attack whose value
+// depends on where its target is rather than on what its target is. The pond is the other half of
+// it: nothing is lost falling in, but wading back out costs 2 of next turn's move.
+//
+// The height is read from the board on both sides rather than tracked, because the engine owns
+// position and the drop is exactly the difference between two cells it already knows.
+function shove(victim, ac, ar, slot, px, py) {
+  let h0 = isoCellHeight(tac_unit_col(victim), tac_unit_row(victim))
+  if (tac_knockback(victim, ac, ar) === 0) { return }
+  let drop = h0 - isoCellHeight(tac_unit_col(victim), tac_unit_row(victim))
+  if (drop <= 0) { return }
+  tac_damage(victim, drop)
+  // One popup carrying both numbers, in the slot the hit already claimed and at the tile the victim
+  // was standing on when it was hit. A second popup would want a second slot and would land on top
+  // of the first anyway, since the two are a tile apart at most.
+  hud_text(slot, px, py, "-" + RES.dmg + " fall " + drop)
+  awardWork(turnUnit, ifloor(drop / EXP_PER_DAMAGE))
+}
+
+// Land the effect once, mid-swing: the chosen target, then — for a blast — everything else standing
+// within its radius, FRIEND OR FOE. The centre is captured before the first strike so a blast still
+// resolves around the tile it was aimed at.
+function applyEffect() {
+  if (actHit > 0) { return }
+  actHit = 1
+  // Built BEFORE the first strike, so the shape is the one that was aimed and previewed — a line
+  // recomputed after its target died would be a different line.
+  fpBuild(actAbility, tac_unit_col(turnUnit), tac_unit_row(turnUnit),
+                 tac_unit_col(attackTarget), tac_unit_row(attackTarget))
+  strike(attackTarget, SLOT_POPUP)
+  if (fpIsArea(actAbility) === 0) { return }
+  let used = 0
+  let id = 0
+  while (id < UNIT_COUNT) {
+    if (id !== attackTarget && used < SPLASH_SLOTS && tac_unit_alive(id) > 0) {
+      if (fpCovers(tac_unit_col(id), tac_unit_row(id)) > 0) {
+        strike(id, SLOT_SPLASH0 + used)
+        used = used + 1
+      }
+    }
+    id = id + 1
+  }
+}
+
+// WINDUP (magic/heal): hold the CHARGE pose with the weapon raised, then swing.
+function actWindup() {
+  let ac = tac_unit_col(turnUnit)
+  let ar = tac_unit_row(turnUnit)
+  let bx = isoX(ac, ar)
+  let by = isoUnitTopY(ac, ar)
+  let dep = isoUnitDepth(ac, ar)
+  drawUnits(turnUnit, bx, by, dep, actBase + ANIM_CHARGE, actFlip)
+  showWeapon(turnUnit, bx, by, actBase, 0, actFlip, dep)
+  if (timerElapsed(WINDUP_FRAMES) > 0) { phaseTimer = 0; phase = PHASE_SWING }
+}
+
+// SWING: melee cycles the ATTACK frames with a lunge; a caster holds RELEASE. The weapon overlay
+// swings through sub-frames 0..3; the effect lands at HIT_SUB.
+function actSwing() {
+  let ac = tac_unit_col(turnUnit)
+  let ar = tac_unit_row(turnUnit)
+  let tc = tac_unit_col(attackTarget)
+  let tr = tac_unit_row(attackTarget)
+  let baseX = isoX(ac, ar)
+  let baseY = isoUnitTopY(ac, ar)
+  let sub = phaseTimer * 4 / SWING_FRAMES
+  if (sub > 3) { sub = 3 }
+  let bx = baseX
+  let by = baseY
+  let bodyFrame = actBase + ANIM_RELEASE
+  if (actKind === KIND_MELEE) {
+    bodyFrame = actBase + ANIM_ATTACK + sub
+    let lunge = sub
+    if (lunge > HIT_SUB) { lunge = 2 * HIT_SUB - lunge }   // ramp toward the target, then back
+    bx = baseX + (isoX(tc, tr) - baseX) * lunge / 8
+    by = baseY + (isoUnitTopY(tc, tr) - baseY) * lunge / 8
+  }
+  let dep = isoUnitDepth(ac, ar)
+  drawUnits(turnUnit, bx, by, dep, bodyFrame, actFlip)
+  showWeapon(turnUnit, bx, by, actBase, sub, actFlip, dep)
+  if (sub >= HIT_SUB) { applyEffect() }
+  if (timerElapsed(SWING_FRAMES) > 0) {
+    hideWeapon()
+    hud_text(SLOT_POPUP, 0, 0, "")
+    let s = 0
+    while (s < SPLASH_SLOTS) { hud_text(SLOT_SPLASH0 + s, 0, 0, ""); s = s + 1 }
+    phaseTimer = 0
+    phase = PHASE_PAUSE
+  }
+}
+
+// ═══ HP HUD refresh ══════════════════════════════════════════════════════════════
+function updateHpHud() {
+  // The top row belongs to the front menu and the deploy headline until the battle starts, bar and
+  // all — a health bar for a unit that has not been placed yet is measuring nothing.
+  if (inSetup > 0) { sprite_set_visible(hpBar, 0); return }
+  sprite_set_visible(hpBar, 1)
+  let who = turnUnit
+  if (who < 0) { who = PLAYER_ID }
+  let hp = tac_unit_hp(who)
+  let mx = tac_unit_maxhp(who)
+  sprite_set_frame(hpBar, hp * HP_BAR_FRAMES / mx)
+  // Name, pools, and — only when they apply — the level gained and the condition running. Appending
+  // rather than using more slots keeps the readout one line: on a 240px screen a second HUD row
+  // costs more than the information is worth.
+  let line = statsOf(who).name + " " + hp + "/" + mx + "  MP " + unitMp[who]
+  if (unitLevel[who] > 0) { line = line + "  L" + unitLevel[who] }
+  if (unitStatus[who] !== ST_NONE) { line = line + "  " + STATUS_NAMES[unitStatus[who]] }
+  hud_text(SLOT_HP, 42, 2, line)
+}
+
+
+// ═══ Front menu ══════════════════════════════════════════════════════════════════
+// Two ways into the battle. Deploy is the game; Auto Deploy takes the map's own placement and starts
+// immediately, which is what you want the twentieth time you are checking whether a formula change
+// broke anything — a debug door, but one worth having on the front of the game rather than behind a
+// recompile, because a flag you have to rebuild to flip is a flag nobody uses.
+//
+// It borrows the action menu's text slots and its pointer sprite: this IS a menu, and the turn menu
+// they belong to cannot be on screen before the first turn has begun.
+let TITLE_DEPLOY: i32 = 0
+let TITLE_AUTO: i32 = 1
+let titleSel = TITLE_DEPLOY
+// HUD text is priority 0, so nothing is drawing OVER these lines — they are losing glyphs to the
+// object budget. The board is built from sprites, and a row crossing the middle of it can already be
+// carrying more objects than the hardware will show on a scanline, so the tail of a string floated
+// there simply never appears. The two rows the action menu uses are the safe ones, because the board
+// is thinnest at the bottom and those rows have carried text all along.
+let TITLE_Y = MENU_Y - 12
+
+function titleTurn() {
+  if (key_pressed(6) > 0) { titleSel = TITLE_DEPLOY }
+  if (key_pressed(7) > 0) { titleSel = TITLE_AUTO }
+  hud_text(SLOT_HP, 6, 2, "ISO TACTICS")
+  hud_text(SLOT_MOVE, 84, TITLE_Y, "Deploy")
+  hud_text(SLOT_ACT, 84, TITLE_Y + 12, "Auto Deploy")
+  let py = TITLE_Y
+  if (titleSel === TITLE_AUTO) { py = TITLE_Y + 12 }
+  sprite_set_pos(menuPointer, 71, py)
+  sprite_set_visible(menuPointer, 1)
+  if (key_pressed(0) > 0) {
+    hud_text(SLOT_MOVE, 0, 0, "")
+    hud_text(SLOT_ACT, 0, 0, "")
+    sprite_set_visible(menuPointer, 0)
+    if (titleSel === TITLE_DEPLOY) { deployBegin() } else { inSetup = 0; phase = PHASE_BEGIN }
+  }
+}
+
+// ═══ Deployment ══════════════════════════════════════════════════════════════════
+// Before the first turn, you place your own squad and choose what each unit is looking at. It is the
+// one part of an FFTA battle you get to decide with full information and no clock, and it is where
+// the rules the rest of the game runs on first become choices: high ground, who stands in front, and
+// which way the line faces.
+//
+// The zone is bigger than the squad, so placement is a real decision rather than an assignment.
+let DEPLOY_RANGE: i32 = 3
+let dzCols = []
+let dzRows = []
+let dzN: i32 = 0
+let deployList = []    // your unit ids, in the order they are placed
+let deployDone = []    // per unit: already placed, so its tile is no longer up for grabs
+let deployAt: i32 = 0
+
+function zoneHas(c, r) {
+  let k = 0
+  while (k < dzN) {
+    if (dzCols[k] === c && dzRows[k] === r) { return 1 }
+    k = k + 1
+  }
+  return 0
+}
+// Capped at the highlight pool on purpose: a zone with more cells than the overlay can draw would be
+// a zone you are allowed to use and cannot see, and a placement rule the player can't read is worse
+// than a smaller one they can. The linear duplicate scan is O(pool²) once at boot — forty cells.
+function zoneAdd(c, r) {
+  if (dzN >= tacHighlightCap()) { return }
+  if (zoneHas(c, r) > 0) { return }
+  dzCols.push(c)
+  dzRows.push(r)
+  dzN = dzN + 1
+}
+
+// The zone is flooded by the ENGINE rather than measured as a radius here, so it can only ever
+// contain cells that are genuinely on the board and walkable — the same test the move range passes.
+//
+// It floods at the SQUAD's jump, not at some large number, and that is the whole reason this isn't a
+// plain radius: the board has pillars, and a flood that ignored height would offer you the top of one
+// as a deploy tile. Legal ground, and a unit put there might not be able to climb back down — a
+// placement screen that can strand a unit before the battle starts is a trap, not a choice. Taking
+// the smallest jump in the squad means every cell offered is one every one of them can use.
+//
+// No team, so zone of control is off: nothing has taken a turn yet, so there is no line to respect.
+//
+// Each spawn cell is added by hand because the flood cannot return it: a cell with a unit standing on
+// it is blocked, and every unit is standing on its spawn at this point.
+function squadJump() {
+  let j = 99
+  let id = 0
+  while (id < UNIT_COUNT) {
+    if (tac_unit_team(id) === 0 && statsOf(id).jump < j) { j = statsOf(id).jump }
+    id = id + 1
+  }
+  return j
+}
+
+function buildDeployZone() {
+  let s = 0
+  while (s < SPAWN_COUNT) {
+    if (tac_spawn_team(board, s) === 0) {
+      let sc = tac_spawn_col(board, s)
+      let sr = tac_spawn_row(board, s)
+      zoneAdd(sc, sr)
+      let n = tac_move_range(sc, sr, DEPLOY_RANGE, squadJump(), 0, -1)
+      let k = 0
+      while (k < n) {
+        zoneAdd(tac_range_col(k), tac_range_row(k))
+        k = k + 1
+      }
+    }
+    s = s + 1
+  }
+}
+
+function showDeployZone() {
+  let k = 0
+  while (k < dzN && k < tacHighlightCap()) { tacPlaceHighlight(k, dzCols[k], dzRows[k]); k = k + 1 }
+  tacHideHighlightsFrom(k)
+}
+
+// Placing onto an occupied cell SWAPS, rather than being refused. The unit standing there has not
+// been placed yet (deployTurn refuses a cell held by one that has), so it is still on the spawn the
+// map happened to give it and has lost nothing worth keeping — where a refusal would mean the one
+// tile you most want for your Fighter is the one your Cleric is accidentally standing on.
+function placeUnit(id, c, r) {
+  let occ = tac_occupant(c, r)
+  if (occ >= 0 && occ !== id) { tac_unit_set_pos(occ, tac_unit_col(id), tac_unit_row(id)) }
+  tac_unit_set_pos(id, c, r)
+}
+
+function deployBegin() {
+  buildDeployZone()
+  let id = 0
+  while (id < UNIT_COUNT) {
+    deployDone.push(0)
+    if (tac_unit_team(id) === 0) { deployList.push(id) }
+    id = id + 1
+  }
+  deployAt = 0
+  deployNext()
+}
+
+function deployNext() {
+  if (deployAt >= deployList.length) {
+    tacHideMoveRange()
+    tacHideCursor()
+    hud_text(SLOT_INFO, 0, 0, "")
+    inSetup = 0
+    phase = PHASE_BEGIN
+    return
+  }
+  let id = deployList[deployAt]
+  curCol = tac_unit_col(id)
+  curRow = tac_unit_row(id)
+  showDeployZone()
+  phase = PHASE_DEPLOY
+}
+
+function deployTurn() {
+  let id = deployList[deployAt]
+  if (key_pressed(9) > 0) { if (curCol < MAPW - 1) { curCol = curCol + 1 } }
+  if (key_pressed(8) > 0) { if (curCol > 0) { curCol = curCol - 1 } }
+  if (key_pressed(7) > 0) { if (curRow < MAPH - 1) { curRow = curRow + 1 } }
+  if (key_pressed(6) > 0) { if (curRow > 0) { curRow = curRow - 1 } }
+  tacShowCursor(curCol, curRow)
+  hud_text(SLOT_HP, 6, 2, "Deploy " + statsOf(id).name + "  " + (deployAt + 1) + "/" + deployList.length)
+  // What the tile is worth, not just whether it is legal: height is the one placement decision that
+  // pays off in the damage formula, so it is the one the readout has to name.
+  let ok = 0
+  let note = "Outside the deploy zone"
+  if (zoneHas(curCol, curRow) > 0) {
+    let occ = tac_occupant(curCol, curRow)
+    if (occ >= 0 && occ !== id && deployDone[occ] > 0) {
+      note = "Taken by " + statsOf(occ).name
+    } else {
+      ok = 1
+      note = terrainName(tac_tile(curCol, curRow)) + "  Height " + isoCellHeight(curCol, curRow)
+      if (occ >= 0 && occ !== id) { note = note + "  swap " + statsOf(occ).name }
+    }
+  }
+  hud_text(SLOT_INFO, 8, MENU_Y - 12, note)
+  if (ok > 0 && key_pressed(0) > 0) {
+    placeUnit(id, curCol, curRow)
+    deployDone[id] = 1
+    deployAt = deployAt + 1
+    hud_text(SLOT_INFO, 0, 0, "")
+    beginFacing(id, PHASE_DEPLOY_NEXT)
+  }
+}
+
+// ═══ Main loop ═══════════════════════════════════════════════════════════════════
+while (true) {
+  if (phase === PHASE_BEGIN) {
+    beginTurn()
+  } else if (phase === PHASE_MENU) {
+    menuTurn()
+  } else if (phase === PHASE_PICK) {
+    pickMove()
+  } else if (phase === PHASE_SKILL) {
+    skillTurn()
+  } else if (phase === PHASE_ITEM) {
+    itemTurn()
+  } else if (phase === PHASE_INSPECT) {
+    inspectTurn()
+  } else if (phase === PHASE_FACE) {
+    faceTurn()
+  } else if (phase === PHASE_TITLE) {
+    titleTurn()
+  } else if (phase === PHASE_DEPLOY) {
+    deployTurn()
+  } else if (phase === PHASE_DEPLOY_NEXT) {
+    deployNext()
+  } else if (phase === PHASE_TARGET) {
+    targetTurn()
+  } else if (phase === PHASE_THINK) {
+    think()
+  } else if (phase === PHASE_WALK) {
+    walkTurn()
+  } else if (phase === PHASE_ACT) {
+    resolveAct()
+  } else if (phase === PHASE_WINDUP) {
+    actWindup()
+  } else if (phase === PHASE_SWING) {
+    actSwing()
+  } else if (phase === PHASE_PAUSE) {
+    if (timerElapsed(PAUSE_FRAMES) > 0) { endTurnFacing() }
+  } else if (phase === PHASE_DONE) {
+    hud_text(SLOT_RESULT, 92, 68, resultText)
+    // Not under the result, which is the middle of the board: a line that long crosses the densest
+    // rows of terrain sprites and loses glyphs to the per-scanline object limit ("Spoils: Pot"). The
+    // row just above the action menu is clear once the menu is gone, and it is where every other
+    // verdict in this game already appears.
+    hud_text(SLOT_SPOILS, 60, MENU_Y - 10, spoilsText)
+  }
+
+  // The animating phases draw the whole cast themselves (via drawUnits); the rest need an at-rest pass.
+  if (phase !== PHASE_WALK && phase !== PHASE_TARGET && phase !== PHASE_WINDUP && phase !== PHASE_SWING) {
+    drawUnitsAtRest()
+  }
+  if (recoilTimer > 0) { recoilTimer = recoilTimer - 1 }
+  tickBanner()
+  updateHpHud()
+  frame()
+}

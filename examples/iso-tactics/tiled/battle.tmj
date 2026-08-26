@@ -1,0 +1,251 @@
+{ "compressionlevel":-1,
+ "height":8,
+ "infinite":false,
+ "layers":[
+        {
+         "data":[1, 1, 1, 83, 83, 1, 1, 1,
+            1, 1, 1, 83, 1, 1, 1, 1,
+            1, 83, 83, 83, 1, 1, 1, 1,
+            1, 83, 33, 33, 1, 1, 1, 1,
+            1, 83, 33, 33, 83, 83, 83, 1,
+            1, 1, 33, 33, 1, 1, 83, 1,
+            1, 1, 1, 1, 1, 1, 83, 1,
+            1, 1, 1, 1, 1, 1, 1, 1],
+         "height":8,
+         "id":1,
+         "name":"terrain",
+         "opacity":1,
+         "type":"tilelayer",
+         "visible":true,
+         "width":8,
+         "x":0,
+         "y":0
+        }, 
+        {
+         "data":[0, 0, 0, 0, 83, 1, 1, 0,
+            0, 0, 0, 0, 1, 1, 12, 0,
+            0, 0, 0, 0, 1, 1, 12, 0,
+            0, 0, 0, 0, 1, 12, 1, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 12, 0, 0, 0, 12, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0],
+         "height":8,
+         "id":4,
+         "name":"level1",
+         "offsetx":0,
+         "offsety":-16,
+         "opacity":1,
+         "type":"tilelayer",
+         "visible":true,
+         "width":8,
+         "x":0,
+         "y":0
+        }, 
+        {
+         "data":[0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 1, 1, 1, 0,
+            0, 0, 0, 0, 1, 1, 1, 0,
+            0, 0, 0, 0, 0, 1, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 12, 0, 0, 0, 12, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0],
+         "height":8,
+         "id":5,
+         "name":"level2",
+         "offsetx":0,
+         "offsety":-32,
+         "opacity":1,
+         "type":"tilelayer",
+         "visible":true,
+         "width":8,
+         "x":0,
+         "y":0
+        }, 
+        {
+         "data":[0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 1, 0, 0,
+            0, 0, 0, 0, 0, 1, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 1, 0, 0, 0, 1, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0],
+         "height":8,
+         "id":6,
+         "name":"level3",
+         "offsetx":0,
+         "offsety":-48,
+         "opacity":1,
+         "type":"tilelayer",
+         "visible":true,
+         "width":8,
+         "x":0,
+         "y":0
+        }, 
+        {
+         "draworder":"topdown",
+         "id":3,
+         "name":"units",
+         "objects":[
+                {
+                 "height":32,
+                 "id":1,
+                 "name":"unit",
+                 "opacity":1,
+                 "properties":[
+                        {
+                         "name":"cls",
+                         "type":"int",
+                         "value":0
+                        }, 
+                        {
+                         "name":"team",
+                         "type":"int",
+                         "value":0
+                        }],
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":32,
+                 "x":32,
+                 "y":192
+                }, 
+                {
+                 "height":32,
+                 "id":2,
+                 "name":"unit",
+                 "opacity":1,
+                 "properties":[
+                        {
+                         "name":"cls",
+                         "type":"int",
+                         "value":1
+                        }, 
+                        {
+                         "name":"team",
+                         "type":"int",
+                         "value":0
+                        }],
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":32,
+                 "x":0,
+                 "y":192
+                }, 
+                {
+                 "height":32,
+                 "id":3,
+                 "name":"unit",
+                 "opacity":1,
+                 "properties":[
+                        {
+                         "name":"cls",
+                         "type":"int",
+                         "value":2
+                        }, 
+                        {
+                         "name":"team",
+                         "type":"int",
+                         "value":0
+                        }],
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":32,
+                 "x":32,
+                 "y":224
+                }, 
+                {
+                 "height":32,
+                 "id":4,
+                 "name":"unit",
+                 "opacity":1,
+                 "properties":[
+                        {
+                         "name":"cls",
+                         "type":"int",
+                         "value":3
+                        }, 
+                        {
+                         "name":"team",
+                         "type":"int",
+                         "value":1
+                        }],
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":32,
+                 "x":192,
+                 "y":32
+                }, 
+                {
+                 "height":32,
+                 "id":5,
+                 "name":"unit",
+                 "opacity":1,
+                 "properties":[
+                        {
+                         "name":"cls",
+                         "type":"int",
+                         "value":1
+                        }, 
+                        {
+                         "name":"team",
+                         "type":"int",
+                         "value":1
+                        }],
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":32,
+                 "x":224,
+                 "y":32
+                }, 
+                {
+                 "height":32,
+                 "id":6,
+                 "name":"unit",
+                 "opacity":1,
+                 "properties":[
+                        {
+                         "name":"cls",
+                         "type":"int",
+                         "value":2
+                        }, 
+                        {
+                         "name":"team",
+                         "type":"int",
+                         "value":1
+                        }],
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":32,
+                 "x":192,
+                 "y":0
+                }],
+         "opacity":1,
+         "type":"objectgroup",
+         "visible":true,
+         "x":0,
+         "y":0
+        }],
+ "nextlayerid":4,
+ "nextobjectid":7,
+ "orientation":"isometric",
+ "renderorder":"right-down",
+ "tiledversion":"1.12.2",
+ "tileheight":16,
+ "tilesets":[
+        {
+         "firstgid":1,
+         "source":"terrain.tsj"
+        }],
+ "tilewidth":32,
+ "type":"map",
+ "version":"1.10",
+ "width":8
+}

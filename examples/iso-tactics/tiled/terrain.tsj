@@ -1,0 +1,21 @@
+{
+ "columns": 16,
+ "grid": {
+  "height": 32,
+  "orientation": "isometric",
+  "width": 32
+ },
+ "image": "../assets/tiles.png",
+ "imageheight": 416,
+ "imagewidth": 512,
+ "margin": 0,
+ "name": "terrain",
+ "spacing": 0,
+ "tilecount": 208,
+ "tiledversion": "1.12.2",
+ "tileheight": 32,
+ "tilewidth": 32,
+ "type": "tileset",
+ "version": "1.10",
+ "tiles": []
+}

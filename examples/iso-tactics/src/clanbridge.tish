@@ -1,0 +1,111 @@
+// clanbridge.tish — turn the town's clan roster into units this battle can fight with.
+//
+// This is what makes iso-town and iso-tactics one game instead of two demos. `clanFormation()` has
+// always been documented as "deploy order for tactics"; until now nothing read it, and the battle
+// built its squad from a hardcoded ROSTER plus whatever the Tiled map happened to spawn.
+//
+// ── What this bridge does and does NOT unify ──────────────────────────────────────────────────
+//
+// It carries **identity and progression**: who the unit is (name, race, job, level) and what it has
+// earned (EXP, AP, learned abilities), so a level gained in a battle is still there in the Party
+// menu and a job changed in town changes how the unit fights.
+//
+// It deliberately does NOT carry **stat scale**. The clan's numbers and this game's are on different
+// scales on purpose: iso-tactics is balanced in single digits (a hit should cost about a quarter of
+// a health bar — see the tuning note in components.tish), while the FFTA tables the clan is drawn
+// from store raw ROM values an order of magnitude larger.
+//
+// The tempting move is to convert one into the other. Do not, yet: **FFTA's stat growth formula is
+// not known.** The archive has every job's base and growth bytes from the ROM
+// (data/ffta/tables/jobs.csv) but nothing that says how they become a displayed stat, and the
+// weapon FAQ that supplied the rest of our data calls stat growth an unsolved "mystery" outright.
+// Guessing at the scale would silently rebalance every formula in the game against numbers nobody
+// has verified. So a job decides WHICH archetype a unit fights as, and the archetype's own tuned
+// block supplies the numbers.
+//
+// When the formula is worked out, the change is local: `statsForClanUnit` is the only thing that
+// would need to read the raw stats instead of the archetype.
+import { CLASSES, CLS_FIGHTER, CLS_MAGE, CLS_CLERIC, CLS_BRUTE } from './components'
+import { Human, Bangaa, NuMou, Viera, Moogle } from './races'
+import { cloneStats, applyLevel } from '../../../packages/ffta/growth'
+
+// ── job → tactical archetype ──────────────────────────────────────────────────────────────────
+// The clan speaks in real FFTA job ids (Soldier = 2, Paladin = 3, …; see packages/clan/jobs_gen).
+// This game has four archetypes. The mapping is a design statement — "a White Monk fights like the
+// Brute" — not a lookup that can be derived, so it lives here as data.
+//
+// Anything unlisted falls back to Fighter rather than failing: a clan that recruits a job this
+// battle has no profile for should still be able to deploy it, and a plain melee unit is the
+// reading least likely to be mistaken for correct behaviour if it is wrong.
+export function archetypeForJob(jobId) {
+  if (jobId === 2) { return CLS_FIGHTER }    // Soldier
+  if (jobId === 3) { return CLS_FIGHTER }    // Paladin
+  if (jobId === 4) { return CLS_BRUTE }      // Fighter — FFTA's is the heavy two-hander
+  if (jobId === 5) { return CLS_FIGHTER }    // Thief
+  if (jobId === 7) { return CLS_CLERIC }     // White Mage
+  if (jobId === 8) { return CLS_MAGE }       // Black Mage
+  if (jobId === 11) { return CLS_FIGHTER }   // Archer
+  if (jobId === 13) { return CLS_BRUTE }     // Warrior
+  if (jobId === 17) { return CLS_BRUTE }     // White Monk
+  if (jobId === 28) { return CLS_FIGHTER }   // Fencer
+  // Animist — a caster, not a healer. FFTA's Animist calls on animals for offensive nature magic
+  // rather than curing, and the demo clan's Montblanc is one: mapping it to Cleric put two healers
+  // and no caster in the starting squad, which is both wrong about the job and a worse fight than
+  // the Fighter / Mage / Cleric the map used to spawn.
+  if (jobId === 36) { return CLS_MAGE }      // Animist
+  if (jobId === 37) { return CLS_FIGHTER }   // Mog Knight
+  return CLS_FIGHTER
+}
+
+// ── race id → race record ─────────────────────────────────────────────────────────────────────
+// The clan stores a race as the ROM's id (1..5); races.tish holds the stat deltas and the flight
+// flag. Human is the identity race, so an unknown id costs a unit its racial rather than the battle.
+export function raceForClanRace(raceId) {
+  if (raceId === 2) { return Bangaa }
+  if (raceId === 3) { return NuMou }
+  if (raceId === 4) { return Viera }
+  if (raceId === 5) { return Moogle }
+  return Human
+}
+
+// ── the conversion ────────────────────────────────────────────────────────────────────────────
+// Build a battle stat block for one clan unit. The result is the same shape `cloneStats` produces
+// for a map-spawned unit, so every downstream reader — the damage formula, the AI, the Status
+// screen — cannot tell the two apart, which is the point.
+//
+// ⚠️ The caller MUST use this before `tac_add_unit`: speed, move, jump and max HP are the engine's
+// own copy and drive the turn queue and the move-range fill, and there are no setters for them. A
+// stat applied afterwards would reach the formula and not the board.
+export function statsForClanUnit(u) {
+  let cls = CLASSES[archetypeForJob(u.job)]
+  let st = cloneStats(cls, raceForClanRace(u.race))
+  // The unit's own name, not the archetype's — the roster is people, and a squad of four "Fighter"s
+  // is exactly the readout the Party menu exists to avoid.
+  st.name = u.name
+  // Levels earned in town or in previous battles are re-applied here, because the stat block is
+  // rebuilt from the class every time a battle starts. `applyLevel` follows the class's own shape,
+  // so a levelled Mage is still a Mage.
+  let n = 0
+  while (n < u.level) {
+    applyLevel(st)
+    n = n + 1
+  }
+  return st
+}
+
+// ── who deploys ───────────────────────────────────────────────────────────────────────────────
+// There is deliberately NO `deployList(roster, formation)` here returning the squad as an array.
+//
+// ⚠️ The precise rule, because the loose version is wrong and would make people avoid a pattern
+// that works: an **imported** function that CONSTRUCTS and returns a new array fails to resolve
+// when it is called during MODULE INITIALISATION —
+//
+//     cannot find value `deployList__m18` in this scope
+//
+// Called from inside another function it is fine. `packages/clan/state.tish`'s `clanJobsForRace`
+// does exactly the same thing (build a local array, push, return) and works, because every one of
+// its three call sites is inside a function body. `deployList` was called at top level
+// (`let SQUAD = deployList(...)`) and that is the whole difference.
+//
+// So the caller flattens the formation inline at module level instead, which is a handful of lines
+// and allocates nothing extra. Everything here returns a scalar or a single record.

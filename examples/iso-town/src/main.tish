@@ -1,0 +1,389 @@
+// iso-town — isometric plaza: free walk, talk to NPCs, merchant opens packages/shop.
+//
+// Map/render stack from ffta-tactics (tactics: bake + depth-sorted raised tiles + actor sheets).
+// Motion from iso-sprite (quarter-tile d-pad glide). Camera follows the player like akari
+// (`camera_set` + `bg_scroll`). Talk/shop from packages/dialog + packages/shop.
+import { board } from 'tactics:../tiled/town.tmj'
+import { tiles } from 'sheet32:../assets/tiles.png'
+import { fighter } from 'sheet32:../assets/fighter.png'
+import { mage } from 'sheet32:../assets/mage.png'
+import { cleric } from 'sheet32:../assets/cleric.png'
+import { knight } from 'sheet32:../assets/knight.png'
+import { shop } from 'sheet32:../assets/shop32.png'
+import { clanIcons } from 'sheet:../assets/clan16.png'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { arrowFont } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_depth, sprite_set_flip,
+  key_held, key_pressed, key_live, frame
+} from 'cargo:tish_agb'
+import {
+  tac_spawn_count, tac_spawn_col, tac_spawn_row, tac_spawn_cls, tac_walkable
+} from 'cargo:tish_gba_game_engine'
+import {
+  isoInit, isoW, isoH, isoX, isoUnitTopY, isoUnitDepth, isoDrawRisers,
+  isoFollowCam, isoCellHeight, isoXSub, isoUnitYSub
+} from '../../../packages/iso'
+import { uiInit } from '../../../packages/ui'
+import { dialogInit, dialogSay, dialogActive, dialogUpdate } from '../../../packages/dialog'
+import { shopInit, shopOpen, shopUpdate, shopActive } from '../../../packages/shop'
+import {
+  clanSeedDemo, clanBagList, clanGoldFn, clanOnBuy, clanOnSell, clanItemByName,
+  clanCanBuy, clanClinicHeal, clanGil
+} from '../../../packages/clan/state'
+import {
+  partyInit, partyOpen, partyUpdate, partyActive, partyOnTitle, partyOnTravel
+} from '../../../packages/clan/party'
+import { DIR_STRIDE, ANIM_WALK, facing } from '../../../packages/iso_actors'
+import { CLS_PLAYER, npcDef } from './npcs'
+
+// ═══ Iso projection + floor + raised occluders ══════════════════════════════════
+// All of this now lives in packages/iso: the projection, the atlas-size inference (256px for
+// small boards, 512px once the town outgrows them) and the camera clamp. `isoInit` also runs
+// `tac_load`, so the engine grid is up before anything asks a cell its height.
+isoInit({ board: board, tiles: tiles })
+let MAPW = isoW()
+let MAPH = isoH()
+isoDrawRisers(board)
+
+// ═══ Actor sheets by spawn cls ══════════════════════════════════════════════════
+function sheetFor(cls) {
+  if (cls === 0) { return fighter }
+  if (cls === 1) { return mage }
+  if (cls === 2) { return cleric }
+  if (cls === 3) { return knight }
+  return mage
+}
+
+// ═══ NPCs (cls > 0) ═════════════════════════════════════════════════════════════
+let npcs = []
+let SPAWN_COUNT = tac_spawn_count(board)
+let playerStartCol: i32 = 6
+let playerStartRow: i32 = 10
+
+let placeI: i32 = 0
+while (placeI < SPAWN_COUNT) {
+  let cls = tac_spawn_cls(board, placeI)
+  let col = tac_spawn_col(board, placeI)
+  let row = tac_spawn_row(board, placeI)
+  if (cls === CLS_PLAYER) {
+    playerStartCol = col
+    playerStartRow = row
+  } else {
+    let def = npcDef(cls)
+    let spr = sprite_new(sheetFor(cls))
+    sprite_set_frame(spr, ANIM_WALK)
+    sprite_set_pos(spr, isoX(col, row), isoUnitTopY(col, row))
+    sprite_set_depth(spr, isoUnitDepth(col, row))
+    npcs.push({
+      col: col, row: row, cls: cls, def: def, spr: spr,
+      faceBase: 0, faceFlip: 0
+    })
+  }
+  placeI = placeI + 1
+}
+
+function npcAt(col, row) {
+  let i = 0
+  while (i < npcs.length) {
+    if (npcs[i].col === col && npcs[i].row === row) { return npcs[i] }
+    i = i + 1
+  }
+  return null
+}
+
+function drawNpcs() {
+  let i = 0
+  while (i < npcs.length) {
+    let n = npcs[i]
+    sprite_set_frame(n.spr, n.faceBase + ANIM_WALK)
+    sprite_set_flip(n.spr, n.faceFlip)
+    sprite_set_pos(n.spr, isoX(n.col, n.row), isoUnitTopY(n.col, n.row))
+    sprite_set_depth(n.spr, isoUnitDepth(n.col, n.row))
+    i = i + 1
+  }
+}
+
+// ═══ Player (quarter-tile motion) ═══════════════════════════════════════════════
+let Q: i32 = 4
+let MAX_U_C = (MAPW - 1) * Q
+let MAX_U_R = (MAPH - 1) * Q
+let px = playerStartCol * Q
+let py = playerStartRow * Q
+let faceBase = DIR_STRIDE
+let faceFlip: i32 = 0
+let faceDir: i32 = 2
+let walkTick: i32 = 0
+let playerSpr = sprite_new(fighter)
+sprite_set_frame(playerSpr, ANIM_WALK)
+
+function clampU(v, lo, hi) {
+  if (v < lo) { return lo }
+  if (v > hi) { return hi }
+  return v
+}
+
+// The cell the character is VISUALLY standing on — nearest, not floored.
+//
+// Motion is in quarter tiles but the world is whole tiles, so the two must not disagree about which
+// cell you are on. `cellOf` floors, which means at 3/4 across you are drawn 24px into the next tile
+// while every whole-tile test still answers for the old one: you walk a body's width into a wall or
+// an NPC before the step is refused, and a raised tile's lift snaps a beat late. Rounding bounds that
+// error at half a tile in both directions, which is the most the art can hide.
+//
+// Everything that asks "which cell am I on" uses THIS — movement, collision, height, depth, facing
+// and interaction. There is deliberately no floored variant any more: having two answers is what let
+// the player render on one tile and interact from another.
+function cellNear(u) {
+  let v = u + (Q - (Q % 2)) / 2
+  return (v - (v % Q)) / Q
+}
+
+function canStand(col, row) {
+  if (col < 0) { return 0 }
+  if (row < 0) { return 0 }
+  if (col >= MAPW) { return 0 }
+  if (row >= MAPH) { return 0 }
+  if (!tac_walkable(col, row)) { return 0 }
+  if (npcAt(col, row) !== null) { return 0 }
+  return 1
+}
+
+function tryStep(npx, npy) {
+  npx = clampU(npx, 0, MAX_U_C)
+  npy = clampU(npy, 0, MAX_U_R)
+  let tc = cellNear(npx)
+  let tr = cellNear(npy)
+  let oc = cellNear(px)
+  let or_ = cellNear(py)
+  if (tc !== oc || tr !== or_) {
+    if (canStand(tc, tr) === 0) { return 0 }
+  }
+  px = npx
+  py = npy
+  return 1
+}
+
+function setFaceFromDelta(dc, dr) {
+  if (dc > 0) { faceDir = 0 }
+  else if (dr > 0) { faceDir = 1 }
+  else if (dr < 0) { faceDir = 2 }
+  else if (dc < 0) { faceDir = 3 }
+  if (dc === 0 && dr === 0) { return }
+  let f = facing(0, 0, dc, dr)
+  faceBase = f.base
+  faceFlip = f.flip
+}
+
+function playerWorldPos() {
+  let col = cellNear(px)
+  let row = cellNear(py)
+  return {
+    x: isoXSub(px, py, Q),
+    y: isoUnitYSub(px, py, Q, isoCellHeight(col, row)),
+    col: col, row: row
+  }
+}
+
+function movePlayer() {
+  let moved = 0
+  let dc = 0
+  let dr = 0
+  if (key_held(9) > 0) { dc = 1 }
+  else if (key_held(8) > 0) { dc = 0 - 1 }
+  else if (key_held(7) > 0) { dr = 1 }
+  else if (key_held(6) > 0) { dr = 0 - 1 }
+
+  if (dc !== 0 || dr !== 0) {
+    setFaceFromDelta(dc, dr)
+    if (tryStep(px + dc, py + dr) > 0) {
+      moved = 1
+      walkTick = walkTick + 1
+    }
+  } else {
+    walkTick = 0
+  }
+
+  let sub = 0
+  if (moved > 0) { sub = (walkTick / 2) % 8 }
+  sprite_set_frame(playerSpr, faceBase + ANIM_WALK + sub)
+  sprite_set_flip(playerSpr, faceFlip)
+
+  let p = playerWorldPos()
+  sprite_set_pos(playerSpr, p.x, p.y)
+  sprite_set_depth(playerSpr, isoUnitDepth(p.col, p.row))
+  isoFollowCam(p.x, p.y)
+}
+
+function facingNeighbor() {
+  // cellNear, like movement and rendering. These must ALL agree on which cell you are in: while this
+  // floored and the rest rounded, the neighbour was computed from a different origin than the one you
+  // were standing on, so an NPC directly in front could only be reached from a diagonal.
+  let col = cellNear(px)
+  let row = cellNear(py)
+  if (faceDir === 0) { return { col: col + 1, row: row } }
+  if (faceDir === 1) { return { col: col, row: row + 1 } }
+  if (faceDir === 2) { return { col: col, row: row - 1 } }
+  return { col: col - 1, row: row }
+}
+
+// ═══ Shop economy → packages/clan (Gil + bag) ═════════════════════════════════
+function merchantStock() {
+  let names = ["Potion", "Antidote", "Jack Knife", "Feather Cap", "Fortune Ring", "Hi-Potion", "Ether"]
+  let out = []
+  let i = 0
+  while (i < names.length) {
+    let it = clanItemByName(names[i])
+    if (it !== null) {
+      out.push({ id: it.id, name: it.name, icon: it.icon, price: it.buy, desc: it.desc })
+    }
+    i = i + 1
+  }
+  return out
+}
+let STOCK = merchantStock()
+let KEEPER = {
+  name: "Merchant", portrait: 8,
+  greet: ["Welcome to my stall, traveler!", "Have a look at my wares."],
+  thanks: "Come back anytime!"
+}
+
+function openShop() {
+  shopOpen({
+    title: "Item Shop", keeper: KEEPER, mode: "greet", cur: "Gil",
+    stock: STOCK, bag: clanBagList, gold: clanGoldFn,
+    onBuy: clanOnBuy, onSell: clanOnSell, canBuy: clanCanBuy
+  })
+}
+
+function openClinic() {
+  let cost = 100
+  if (clanGil() < cost) {
+    dialogSay([
+      "It costs " + cost + " Gil to heal the clan.",
+      "Come back when you can pay."
+    ], { speaker: "Healer" })
+    return
+  }
+  if (clanClinicHeal(cost) > 0) {
+    dialogSay([
+      "There — your clan is fully restored.",
+      "That will be " + cost + " Gil."
+    ], { speaker: "Healer" })
+  } else {
+    dialogSay(["I cannot heal you right now."], { speaker: "Healer" })
+  }
+}
+
+function tryInteract() {
+  let t = facingNeighbor()
+  let n = npcAt(t.col, t.row)
+  if (n === null) {
+    let col = cellNear(px)
+    let row = cellNear(py)
+    let dirs = [
+      { col: col + 1, row: row },
+      { col: col - 1, row: row },
+      { col: col, row: row + 1 },
+      { col: col, row: row - 1 }
+    ]
+    let di = 0
+    while (di < 4) {
+      n = npcAt(dirs[di].col, dirs[di].row)
+      if (n !== null) { break }
+      di = di + 1
+    }
+  }
+  if (n === null) { return }
+  if (n.def.merchant > 0) {
+    openShop()
+    return
+  }
+  if (n.def.clinic > 0) {
+    openClinic()
+    return
+  }
+  if (n.def.portrait >= 0) {
+    dialogSay(n.def.lines, { speaker: n.def.name, portrait: n.def.portrait })
+  } else {
+    dialogSay(n.def.lines, { speaker: n.def.name })
+  }
+}
+
+// 320, not 160: a full shop tab lights ~290-310 canvas tiles, and agb grows its live-tile map in
+// doubling steps at 3/5 load — so 160 pre-pays only the 256→512 step and leaves the 512→1024 one
+// (a 20 KB request) to happen MID-OPEN, on a heap already holding the board, the clan and the
+// keeper's dialog. It failed there, and the shop took the game down. Reserving past 307 takes that
+// step at boot instead, on an empty heap. Size this to the game's measured peak (`ui_mem_report()`).
+uiInit({ font: body, sheet: shop, icons: 24, iconSize: 32, tileReserve: 320 })
+dialogInit({
+  font: body, arrowFont: arrowFont, cursorSheet: shop, cursorFrame: 9,
+  cacheShapes: 1
+})
+shopInit({ font: body, cursorSheet: shop, cursorFrame: 9,
+  // The keeper's box. Passed in rather than imported by the shop: linking `./dialog`
+  // from the shop pulls dialog AND chipsfx into every ROM that has a shop, which cost
+  // examples/ffta 38 KB at boot and killed it. A game that wants a greeting links it.
+  dialog: { say: dialogSay, update: dialogUpdate, active: dialogActive, free: dialogFree },
+})
+clanSeedDemo()
+partyInit({ font: body, sheet: clanIcons, shopSheet: shop, shopIconSize: 32, cursorSheet: clanIcons, cursorFrame: 18 })
+
+drawNpcs()
+movePlayer()
+
+partyOnTitle(() => {
+  // Soft title: return to spawn (no separate title scene in iso-town).
+  px = playerStartCol * Q
+  py = playerStartRow * Q
+  faceDir = 2
+  movePlayer()
+  dialogSay(["Returned to the plaza.", "Your clan waits for the next adventure."], { speaker: "Title" })
+})
+partyOnTravel((_id, name) => {
+  dialogSay(["The road to " + name + " is not open yet.", "Stay a while in the plaza."], { speaker: "World" })
+})
+
+let startHeld: i32 = 0
+
+while (true) {
+  if (partyActive() > 0) {
+    partyUpdate()
+    frame()
+    continue
+  }
+  if (shopActive() > 0) {
+    shopUpdate()
+    drawNpcs()
+    let p = playerWorldPos()
+    isoFollowCam(p.x, p.y)
+    frame()
+    continue
+  }
+  if (dialogActive() > 0) {
+    dialogUpdate()
+    drawNpcs()
+    let p = playerWorldPos()
+    isoFollowCam(p.x, p.y)
+    frame()
+    continue
+  }
+
+  // Start → Party menu (blocked while dialog/shop own input). Latch like akari.
+  let startDown = 0
+  if (key_live(3) > 0) { startDown = 1 }
+  let startEdge = 0
+  if (startDown > 0) { if (startHeld === 0) { startEdge = 1 } }
+  startHeld = startDown
+  if (startEdge > 0) {
+    partyOpen()
+    startHeld = 1
+    frame()
+    continue
+  }
+
+  movePlayer()
+  if (key_pressed(0) > 0) { tryInteract() }
+  drawNpcs()
+  frame()
+}

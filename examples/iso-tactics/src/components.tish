@@ -1,0 +1,96 @@
+// Unit classes as COMPONENTS — the same behaviour-component pattern the ninja demos use
+// (`update({ this })`), adapted to a turn-based game. Each class bundles its stats, sprite sheet, an
+// equipped WEAPON (which decides its attack style + swing overlay — see weapons.tish), an ABILITY
+// list (abilities.tish), and the weights that steer its AI. The battle controller (main.tish)
+// registers a unit from a class's stats and, on that unit's turn, searches move × action space and
+// scores each candidate with these weights. A new class — or re-arming an old one — is just data
+// here; the engine owns the rules, the component owns the decisions.
+import { fighter } from 'sheet32:../assets/fighter.png'
+import { mage } from 'sheet32:../assets/mage.png'
+import { cleric } from 'sheet32:../assets/cleric.png'
+import { knight } from 'sheet32:../assets/knight.png'
+import { IronSword, IronAxe, WoodenStaff, Scepter } from './weapons'
+import { EL_FIRE, EL_ICE, EL_BOLT, EL_HOLY, EL_NONE } from '../../../packages/ffta/elements'
+
+// ── the AI weight block ────────────────────────────────────────────────────────────────────────
+// The controller's search is shared; these numbers are the class's PERSONALITY, and they are the
+// whole reason a cleric plays differently from a brute without a line of its own AI code:
+//
+//   aggro   — per point of expected damage dealt
+//   kill    — flat bonus for an action that would finish the target (a tactics AI that trades 9 damage
+//             for a kill it could have taken is the classic mistake)
+//   support — per point of healing actually restored (overheal is not counted, so it won't waste a
+//             Cure on a scratch)
+//   caution — per point of damage the unit expects to TAKE on that tile next turn; this is the threat
+//             map, and it is what makes a mage refuse a tile it could be swarmed on
+//   high    — per elevation step of the tile it ends on (high ground is worth holding for its own sake)
+//   close   — per tile of distance closed toward the nearest enemy, used only when no action is
+//             possible from anywhere in range; without it an AI with nothing to do stands still
+// Scale matters more than the individual numbers, and it is easy to get wrong: `threat` is the SUM of
+// every enemy that could reach the tile, so it runs to 20-40 on a contested square while a good hit is
+// worth ~100 (aggro × expected damage) and a kill ~145. Caution in the double digits therefore doesn't
+// make a mage careful, it makes it a coward that walks away from a lethal spell to stand one tile
+// safer. Keep caution low single digits: enough to break a tie between two tiles it can cast from,
+// never enough to outbid a kill.
+let WEIGHT_MELEE   = { aggro: 10, kill: 45, support: 0,  caution: 2, high: 3, close: 4 }
+let WEIGHT_BRUTE   = { aggro: 11, kill: 50, support: 0,  caution: 1, high: 2, close: 5 }   // reckless
+let WEIGHT_CASTER  = { aggro: 10, kill: 45, support: 0,  caution: 5, high: 4, close: 3 }   // fragile: keeps its distance
+let WEIGHT_SUPPORT = { aggro: 6,  kill: 30, support: 13, caution: 4, high: 2, close: 3 }
+
+// stats:
+//   speed — turn-queue tick rate      move/jump — reach of the move-range fill
+//   hp/mp — pools                     atk/mag   — scales physical / magical power
+//   def/res — mitigates physical / magical       eva — subtracted from an attacker's hit chance
+//   weak/resist — elemental affinity (150% / 50% damage taken)
+//
+// A class does NOT list its abilities. Those come from the weapon it equips and are learned with AP
+// (weapons.tish `teaches`), so the way to change what a Fighter can do is to re-arm it.
+//
+// TUNING: a hit should cost roughly a quarter of a health bar. Damage is weapon power + atk/mag +
+// the ability's own power, so with weapons in the 5-9 range the mitigations have to sit close behind
+// them or a battle is over in two blows — which is exactly what the first pass here did, with a Bolt
+// doing 28 to a 20 HP fighter. Read the numbers as a set: raise a weapon and the armour must follow.
+export const Fighter = {
+  name: 'Fighter', sheet: fighter, weapon: IronSword,
+  speed: 50, move: 4, jump: 2, hp: 26, mp: 12,
+  atk: 3, mag: 0, def: 5, res: 3, eva: 8,
+  weak: EL_NONE, resist: EL_NONE,
+  ai: WEIGHT_MELEE
+}
+
+export const Mage = {
+  name: 'Mage', sheet: mage, weapon: WoodenStaff,
+  speed: 45, move: 3, jump: 2, hp: 18, mp: 24,
+  atk: 0, mag: 5, def: 2, res: 5, eva: 5,
+  weak: EL_BOLT, resist: EL_FIRE,
+  ai: WEIGHT_CASTER
+}
+
+export const Cleric = {
+  name: 'Cleric', sheet: cleric, weapon: Scepter,
+  speed: 47, move: 3, jump: 2, hp: 22, mp: 20,
+  atk: 1, mag: 4, def: 4, res: 5, eva: 6,
+  weak: EL_NONE, resist: EL_HOLY,
+  ai: WEIGHT_SUPPORT
+}
+
+// The armoured axeman. It used to wear the Fighter's sheet — same art, heavier weapon — which proved
+// the equip system but read badly on the board: the two melee classes were told apart only by the
+// swing overlay, and at 32px in an isometric scrum that is not a distinction a player can make.
+export const Brute = {
+  name: 'Brute', sheet: knight, weapon: IronAxe,
+  speed: 42, move: 3, jump: 2, hp: 30, mp: 16,
+  atk: 4, mag: 0, def: 6, res: 2, eva: 4,
+  weak: EL_FIRE, resist: EL_ICE,
+  ai: WEIGHT_BRUTE
+}
+
+// Indexed by the Tiled map's unit `cls` field: 0 = Fighter, 1 = Mage, 2 = Cleric, 3 = Brute.
+export const CLASSES = [Fighter, Mage, Cleric, Brute]
+
+// The same indices, named. races.tish states which jobs a race may take in this vocabulary rather
+// than by class record, so it does not have to import the records back out of this file.
+export let CLS_FIGHTER: i32 = 0
+export let CLS_MAGE: i32 = 1
+export let CLS_CLERIC: i32 = 2
+export let CLS_BRUTE: i32 = 3

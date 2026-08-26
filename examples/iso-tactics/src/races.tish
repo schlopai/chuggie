@@ -1,0 +1,64 @@
+// Races — the second half of "race × job", laid over the classes as flat stat deltas plus a rule
+// about which jobs a race may take at all.
+//
+// The deltas are FLAT, not percentages, because the classes are tuned in single digits (see the
+// tuning note in components.tish): a Mage with `mag: 5` and a −20% racial would lose 1 point after
+// rounding, which is either invisible or a doubled effect depending on which way it lands. At this
+// scale "+2 ATK" is a number a designer can reason about and a player can read off the Status screen.
+//
+// The deltas are also deliberately PAIRED — every race gives up roughly what it gains — so a race is
+// a shape rather than a tier. A Bangaa Fighter is not a better Fighter, it is a Fighter that hits and
+// survives more and dodges and casts less; the Human is the flat baseline the classes were balanced
+// against, and it exists so there is something to read the others against.
+import { CLS_FIGHTER, CLS_MAGE, CLS_CLERIC, CLS_BRUTE } from './components'
+
+// `jobs` lists the class indices a race may take — the same 0..3 vocabulary the Tiled map's spawn
+// `cls` field uses. It is indices rather than class records on purpose: components.tish would
+// otherwise have to import this file back, and the map already speaks in indices.
+//
+// This is the FFTA rule that a Bangaa cannot be a Mage. It is worth having even in a fixed six-unit
+// battle because it is what stops "race" collapsing into a stat bonus you would always want: the
+// races with the best magic are the ones barred from swinging an axe.
+export const Human = {
+  name: 'Human', jobs: [CLS_FIGHTER, CLS_MAGE, CLS_CLERIC, CLS_BRUTE],
+  hp: 0, mp: 0, atk: 0, mag: 0, def: 0, res: 0, eva: 0, speed: 0, move: 0, jump: 0, fly: 0
+}
+// Bangaa: heavy, slow, and magically deaf. Barred from both casting jobs.
+export const Bangaa = {
+  name: 'Bangaa', jobs: [CLS_FIGHTER, CLS_BRUTE],
+  hp: 6, mp: -4, atk: 2, mag: -2, def: 1, res: -2, eva: -2, speed: -3, move: 0, jump: 0, fly: 0
+}
+// Nu Mou: the strongest casters and the worst legs — a full move slower, which on a map this size is
+// the difference between casting this turn and walking toward it.
+export const NuMou = {
+  name: 'Nu Mou', jobs: [CLS_MAGE, CLS_CLERIC],
+  hp: -4, mp: 6, atk: -2, mag: 2, def: -1, res: 2, eva: 0, speed: -5, move: -1, jump: 0, fly: 0
+}
+// Viera: fast and evasive, fragile. The generalist of the three non-Humans — barred only from the
+// Brute's axe.
+export const Viera = {
+  name: 'Viera', jobs: [CLS_FIGHTER, CLS_MAGE, CLS_CLERIC],
+  hp: -2, mp: 0, atk: 0, mag: 1, def: -1, res: 0, eva: 4, speed: 4, move: 0, jump: 0, fly: 0
+}
+// Moogle: the only race that changes the MAP rather than the maths, and the only one that FLIES.
+// +1 move and +1 jump already reach tiles nothing else can; flight means it pays 1 per tile whatever
+// the ground is and ignores height deltas entirely, so the pond and the cliffs both stop existing
+// for it. That is not a bigger budget — over open ground a Moogle is no faster than anyone else —
+// it is a different set of tiles to spend the same budget on, which is what makes it worth the
+// worst HP in the game.
+export const Moogle = {
+  name: 'Moogle', jobs: [CLS_FIGHTER, CLS_CLERIC, CLS_BRUTE],
+  hp: -5, mp: 0, atk: -1, mag: 0, def: -1, res: 0, eva: 3, speed: 3, move: 1, jump: 1, fly: 1
+}
+
+export const RACES = [Human, Bangaa, NuMou, Viera, Moogle]
+
+// May this race take that job? The roster asks before it spawns anything.
+export function raceAllows(race, clsId) {
+  let i = 0
+  while (i < race.jobs.length) {
+    if (race.jobs[i] === clsId) { return 1 }
+    i = i + 1
+  }
+  return 0
+}
