@@ -21,7 +21,7 @@
 //
 // ── WHY THESE CONSTANTS ────────────────────────────────────────────────────────────────────────
 //
-// `rngNext` is bit-for-bit Numerical Recipes' LCG, the same stream the retired Magical Drop rules
+// `rngNext` is bit-for-bit Numerical Recipes' LCG, the same stream the retired match-3 rules
 // core used (`archive/crates/tish-gba-drop/src/rng.rs:24` in schlop/drop-gba).
 //
 // ⚠️ THAT IS A CROSS-REPO CONTRACT, not an implementation note. drop-gba's conformance corpus —

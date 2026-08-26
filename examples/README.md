@@ -9,143 +9,135 @@ Every description below is taken from that example's own README, so this page ca
 
 ## Games and demos
 
-| | example | what it is |
-|---|---|---|
-| <img src="akari/preview.png" width="480"> | **[AKARI](akari/README.md)**<br>`akari` | Puzzle game demo (Akari / Light Up). |
-| <img src="anim-demo/preview.gif" width="480"> | **[ANIM DEMO](anim-demo/README.md)**<br>`anim-demo` | Demonstrates sprite animation loops, frames, and state machines. |
-| <img src="artillery/preview.gif" width="480"> | **[ARTILLERY](artillery/README.md)**<br>`artillery` | Two turrets, three planets, and one shot at a time. |
-| <img src="asset-sprite/preview.png" width="480"> | **[ASSET SPRITE](asset-sprite/README.md)**<br>`asset-sprite` | Demonstrates how to import and render 2D sprite assets using the asset pipeline. |
-| <img src="asteroids/preview.gif" width="480"> | **[ASTEROIDS](asteroids/README.md)**<br>`asteroids` | Asteroids: a rotate-and-thrust wrap-around arena on the shmup toolkit's bullets. |
-| <img src="audio-adaptive/preview.png" width="480"> | **[AUDIO ADAPTIVE](audio-adaptive/README.md)**<br>`audio-adaptive` | Adaptive music made testable: what a pause keeps, and what the hush it replaces throws away. |
-| <img src="bands-demo/preview.gif" width="480"> | **[BANDS DEMO](bands-demo/README.md)**<br>`bands-demo` | Demonstrates background parallax scrolling or affine transformations. |
-| <img src="beatemup/preview.gif" width="480"> | **[beatemup — a Final Fight-shaped brawler](beatemup/README.md)**<br>`beatemup` | A Final Fight-shaped brawler: four actors on a road with real depth, a chaining light attack, knockdowns and wave-locked arenas. |
-| <img src="bg-demo/preview.png" width="480"> | **[BG DEMO](bg-demo/README.md)**<br>`bg-demo` | Demonstrates background layers, tilemaps, and scrolling. |
-| <img src="blockfall/preview.gif" width="480"> | **[blockfall](blockfall/README.md)**<br>`blockfall` | A falling-block puzzle game on the guideline ruleset: SRS kicks, 7-bag, hold, ghost, T-spins, and a budgeted search that plays it. The example tilemap_set8 was added for. |
-| <img src="button-demo/preview.png" width="480"> | **[BUTTON DEMO](button-demo/README.md)**<br>`button-demo` | Demonstrates reading hardware input from the GBA buttons. |
-| <img src="chiptune/preview.png" width="480"> | **[CHIPTUNE](chiptune/README.md)**<br>`chiptune` | Demonstrates audio playback for chiptunes/music tracks. |
-| <img src="collect-demo/preview.png" width="480"> | **[COLLECT DEMO](collect-demo/README.md)**<br>`collect-demo` | Demonstrates collision detection and entity collection logic. |
-| <img src="cosmo-kitchen/preview.png" width="480"> | **[COSMO KITCHEN](cosmo-kitchen/README.md)**<br>`cosmo-kitchen` | A complete mini-game demo (Cosmo Kitchen) showing game loop and UI. |
-| <img src="crawler/preview.gif" width="480"> | **[crawler](crawler/README.md)**<br>`crawler` | A first-person grid maze drawn from rectangles — the one thing 137 examples could not do. |
-| <img src="creature-rpg/preview.png" width="480"> | **[CREATURE RPG](creature-rpg/README.md)**<br>`creature-rpg` | A creature-collection RPG: a tile-locked overworld, tall grass that ambushes you, and a turn-based fight you can win, lose, flee — or end by catching the thing. |
-| <img src="cutscene-raw/preview.gif" width="480"> | **[CUTSCENE RAW](cutscene-raw/README.md)**<br>`cutscene-raw` | A staged scene in a game that cannot link the game-engine crate. |
-| <img src="dark-hero/preview.gif" width="480"> | **[DARK HERO](dark-hero/README.md)**<br>`dark-hero` | A genre template or demo for a dark-themed action game. |
-| <img src="deck-demo/preview.png" width="480"> | **[DECK DEMO](deck-demo/README.md)**<br>`deck-demo` | Demonstrates the Deck audio synthesizer format. |
-| <img src="deckbuild/preview.gif" width="480"> | **[deckbuild — a deckbuilding combat, on `packages/cards.tish`](deckbuild/README.md)**<br>`deckbuild` | A deckbuilding combat — draw, play, discard, reshuffle — on packages/cards.tish, with solitaire untouched. |
-| <img src="dialog-demo/preview.gif" width="480"> | **[DIALOG DEMO](dialog-demo/README.md)**<br>`dialog-demo` | Demonstrates text rendering and typewriter-style dialog boxes. |
-| <img src="dpad-sprite/preview.png" width="480"> | **[DPAD SPRITE](dpad-sprite/README.md)**<br>`dpad-sprite` | Demonstrates moving a sprite across the screen using the D-Pad. |
-| <img src="earshot/preview.gif" width="480"> | **[earshot](earshot/README.md)**<br>`earshot` | A sound source orbits you, and you can hear where it is. |
-| <img src="engine-demo/preview.gif" width="480"> | **[ENGINE DEMO](engine-demo/README.md)**<br>`engine-demo` | A comprehensive showcase of multiple engine features working together. |
-| <img src="feel-demo/preview.gif" width="480"> | **[FEEL DEMO](feel-demo/README.md)**<br>`feel-demo` | Every feedback in packages/feel.tish: presets, springs, hit-stop and the event channel. |
-| <img src="fonts-demo/preview.png" width="480"> | **[FONTS DEMO](fonts-demo/README.md)**<br>`fonts-demo` | Demonstrates custom font loading and text rendering. |
-| <img src="fx-demo/preview.gif" width="480"> | **[FX DEMO](fx-demo/README.md)**<br>`fx-demo` | Demonstrates visual effects, blending modes, and palettes. |
-| <img src="fx-particles/preview.png" width="480"> | **[FX PARTICLES](fx-particles/README.md)**<br>`fx-particles` | A particle system, screen flash and screen shake — owned, stepped and **budgeted** by the engine. |
-| <img src="golf/preview.gif" width="480"> | **[GOLF](golf/README.md)**<br>`golf` | Nine holes of top-down mini-golf — and the acceptance test for the engine's rigid discs. |
-| <img src="gradient-demo/preview.gif" width="480"> | **[GRADIENT DEMO](gradient-demo/README.md)**<br>`gradient-demo` | Demonstrates hardware color gradients and raster effects. |
-| <img src="grid-demo/preview.gif" width="480"> | **[grid-demo](grid-demo/README.md)**<br>`grid-demo` | A floor-stacked match-3 on packages/grid.tish — the generic cell-grid kit, proven on the opposite gravity anchor from Magical Drop. |
-| <img src="illusions/preview.png" width="480"> | **[illusions](illusions/README.md)**<br>`illusions` | Optical illusions on GBA hardware — cafe wall, Hermann grid, Ouchi, Kanizsa, Ebbinghaus, Muller-Lyer, lilac chaser and a negative afterimage. |
-| <img src="input-demo/preview.png" width="480"> | **[INPUT DEMO](input-demo/README.md)**<br>`input-demo` | Demonstrates advanced input handling and key state debouncing. |
-| <img src="iso-sprite/preview.png" width="480"> | **[ISO SPRITE](iso-sprite/README.md)**<br>`iso-sprite` | An isometric SRPG subsystem demo showcasing sprite. |
-| <img src="jrpg-party/preview.gif" width="480"> | **[jrpg-party](jrpg-party/README.md)**<br>`jrpg-party` | Four heroes, four monsters and a clock: the front-view party battle the catalogue did not have. |
-| <img src="kart-circuit/preview.gif" width="480"> | **[kart-circuit](kart-circuit/README.md)**<br>`kart-circuit` | A Mode 7 kart racer on a real Mode 7 ground plane: drift, boost pads, off-road penalties and three rubber-banded AI opponents around a generated circuit. |
-| <img src="keep/preview.gif" width="480"> | **[keep — dungeon lock-and-key, as a package](keep/README.md)**<br>`keep` | A dungeon room of locks, keys, bombs, shutters and pushable blocks — the acceptance test for packages/keylock.tish. |
-| <img src="link-demo/preview.png" width="480"> | **[LINK DEMO](link-demo/README.md)**<br>`link-demo` | Demonstrates GBA multiplayer link cable communication. |
-| <img src="metroidvania/preview.gif" width="480"> | **[METROIDVANIA](metroidvania/README.md)**<br>`metroidvania` | One castle, three ability gates, and walls that were always passable. |
-| <img src="microgame/preview.gif" width="480"> | **[MICROGAME](microgame/README.md)**<br>`microgame` | A WarioWare-shaped bag of four-second games — and the acceptance test for the engine's entity pool. |
-| <img src="minimal/preview.png" width="480"> | **[MINIMAL](minimal/README.md)**<br>`minimal` | A bare-bones minimal project template with just a game loop. |
-| <img src="mode7-demo/preview.png" width="480"> | **[mode7-demo](mode7-demo/README.md)**<br>`mode7-demo` | A Mode 7 ground plane: per-scanline affine transforms driven by a 3D camera. |
-| <img src="mono-demo/preview.png" width="480"> | **[MONO DEMO](mono-demo/README.md)**<br>`mono-demo` | Demonstrates monophonic audio or monochrome rendering. |
-| <img src="ninja-adventure/preview.png" width="480"> | **[NINJA ADVENTURE](ninja-adventure/README.md)**<br>`ninja-adventure` | A top-down ninja action RPG template. |
-| <img src="ninja-village/preview.png" width="480"> | **[NINJA VILLAGE](ninja-village/README.md)**<br>`ninja-village` | A top-down village exploration template. |
-| <img src="oakhollow/preview.gif" width="480"> | **[OAKHOLLOW](oakhollow/README.md)**<br>`oakhollow` | A farming/life-sim template (Stardew Valley style). |
-| <img src="overworld-demo/preview.png" width="480"> | **[OVERWORLD DEMO](overworld-demo/README.md)**<br>`overworld-demo` | A grid-walking top-down overworld: tile-locked movement, door warps between scenes, and NPCs you face and talk to. |
-| <img src="pinball/preview.gif" width="480"> | **[pinball](pinball/README.md)**<br>`pinball` | A table with no tiles: per-pixel walls, a ball integrated in fixed point, and two flippers that actually swing. |
-| <img src="platformer-combat/preview.gif" width="480"> | **[PLATFORMER COMBAT](platformer-combat/README.md)**<br>`platformer-combat` | Demonstrates a platformer with health, a hearts HUD and stompable patrol enemies. |
-| <img src="platformer-rooms/preview.png" width="480"> | **[PLATFORMER ROOMS](platformer-rooms/README.md)**<br>`platformer-rooms` | Demonstrates a platformer with room-based camera transitions. |
-| <img src="platformer-scroll/preview.png" width="480"> | **[PLATFORMER SCROLL](platformer-scroll/README.md)**<br>`platformer-scroll` | Demonstrates a platformer with a smoothly scrolling camera. |
-| <img src="polyglot/preview.png" width="480"> | **[polyglot](polyglot/README.md)**<br>`polyglot` | One merchant screen, four languages, and a layout that survives all of them. |
-| <img src="pong-link/preview.gif" width="480"> | **[pong-link](pong-link/README.md)**<br>`pong-link` | Two-player Pong over the link cable: lockstep, where the only thing crossing the wire is a button mask. |
-| <img src="prismfall/preview.gif" width="480"> | **[PRISMFALL](prismfall/README.md)**<br>`prismfall` | A metroidvania-shaped game whose abilities are colours. |
-| <img src="rap-dojo/preview.gif" width="480"> | **[rap-dojo](rap-dojo/README.md)**<br>`rap-dojo` | A call-and-response rhythm game: fake 3D from per-scanline background bands, judged against the deck sequencer's own playhead. |
-| <img src="rerun/preview.gif" width="480"> | **[rerun](rerun/README.md)**<br>`rerun` | Record a run, play it back, and check that the game did the same thing twice — on the cartridge, every twelve seconds. |
-| <img src="ringside/preview.gif" width="480"> | **[ringside](ringside/README.md)**<br>`ringside` | A Punch-Out-style boxing bout seen over the player's shoulder: an opponent that is a data table of readable tells, and a fight that is pure reaction timing. |
-| <img src="roguelike/preview.gif" width="480"> | **[ROGUELIKE](roguelike/README.md)**<br>`roguelike` | A dungeon generated on the cartridge from a seed — and checkable against a Python oracle, seed for seed. |
-| <img src="rpg-menu/preview.gif" width="480"> | **[RPG MENU](rpg-menu/README.md)**<br>`rpg-menu` | Demonstrates nested UI menus for RPGs. |
-| <img src="rts-flow/preview.png" width="480"> | **[RTS FLOW](rts-flow/README.md)**<br>`rts-flow` | RTS de-risk A1: 24 units following one shared flow field through an obstacle course, measured against the 60fps frame budget. |
-| <img src="rts-fog/preview.gif" width="480"> | **[RTS FOG](rts-fog/README.md)**<br>`rts-fog` | RTS de-risk A2: fog of war as a wrapping shroud layer over a scrolling scene map, and whether the BG budget holds. |
-| <img src="rts-select/preview.gif" width="480"> | **[RTS SELECT](rts-select/README.md)**<br>`rts-select` | RTS de-risk A3: cursor selection, order issue and attack-move over a live world, with a panel that repaints only on change. |
-| <img src="shmup/preview.gif" width="480"> | **[SHMUP](shmup/README.md)**<br>`shmup` | A shoot-em-up (shmup) genre template with bullet patterns and enemies. |
-| <img src="shop-demo/preview.gif" width="480"> | **[SHOP DEMO](shop-demo/README.md)**<br>`shop-demo` | Demonstrates a shop UI and inventory management. |
-| <img src="soccer/preview.gif" width="480"> | **[SOCCER](soccer/README.md)**<br>`soccer` | Six players and a ball — the acceptance test for disc-vs-disc contact. |
-| <img src="solitaire/preview.gif" width="480"> | **[solitaire](solitaire/README.md)**<br>`solitaire` | Klondike solitaire drawn entirely from ui_rect and ui_text — no art, no sprites, no OAM. A cold screen that repaints only when the table changes. |
-| <img src="spectra/preview.gif" width="480"> | **[SPECTRA](spectra/README.md)**<br>`spectra` | Four colours at a time. What is not in your lens is not there. |
-| <img src="sunny-land/preview.gif" width="480"> | **[SUNNY LAND](sunny-land/README.md)**<br>`sunny-land` | A platformer template using the Sunny Land asset pack. |
-| <img src="sunnyside/preview.png" width="480"> | **[Sunnyside — a farming life-sim on a generated island](sunnyside/README.md)**<br>`sunnyside` | A Harvest-Moon-style farming life-sim on a procedurally generated Sunnyside island. |
-| <img src="sunnyside-day/preview.gif" width="480"> | **[Sunnyside day — the clock, the night, and the bed](sunnyside-day/README.md)**<br>`sunnyside-day` | Sunnyside de-risk 5: the day clock, night dim, sleep and pass-out. |
-| <img src="sunnyside-farm/preview.gif" width="480"> | **[Sunnyside farm — the farming core](sunnyside-farm/README.md)**<br>`sunnyside-farm` | Sunnyside de-risk 4: till/plant/water/harvest through streamed-layer patches. |
-| <img src="sunnyside-save/preview.png" width="480"> | **[Sunnyside save — the farm state through the cartridge](sunnyside-save/README.md)**<br>`sunnyside-save` | Sunnyside de-risk 6: the farm-state save schema through prefs.tish. |
-| <img src="sunnyside-sheet/preview.gif" width="480"> | **[Sunnyside sheet — character animation smoke test](sunnyside-sheet/README.md)**<br>`sunnyside-sheet` | Sunnyside de-risk 1: baked character sheets, action cycling, left/right by hflip. |
-| <img src="sunnyside-terrain/preview.gif" width="480"> | **[Sunnyside terrain — runtime autotiling of a generated island](sunnyside-terrain/README.md)**<br>`sunnyside-terrain` | Sunnyside de-risk 2: runtime mask-table autotiling of a generated island. |
-| <img src="sunnyside-worldgen/preview.gif" width="480"> | **[Sunnyside worldgen — the island generator against its Python twin](sunnyside-worldgen/README.md)**<br>`sunnyside-worldgen` | Sunnyside de-risk 3: the full island generator against its Python twin. |
-| <img src="title-demo/title-demo.png" width="480"> | **[TITLE DEMO](title-demo/README.md)**<br>`title-demo` | Demonstrates a main menu and title screen flow. |
-| <img src="tower-def/preview.gif" width="480"> | **[tower-def](tower-def/README.md)**<br>`tower-def` | A fixed-track tower defence: every creep shares one flow field, and a tower is a soldier that cannot move. |
-| <img src="transitions/preview.gif" width="480"> | **[transitions](transitions/README.md)**<br>`transitions` | Every scene transition the GBA can do — hardware fade, white, iris, box, wipe, curtain, bars, mosaic; software rain and checker dissolve. |
-| <img src="ui-builder-vs-literal/preview.png" width="480"> | **[UI BUILDER VS LITERAL](ui-builder-vs-literal/README.md)**<br>`ui-builder-vs-literal` | The same screen authored two ways, measured — so the API choice is a number, not an opinion. |
-| <img src="ui-demo/preview.gif" width="480"> | **[UI DEMO](ui-demo/README.md)**<br>`ui-demo` | Demonstrates UI components, layouts, and rendering. |
-| <img src="ui-shell/preview.png" width="480"> | **[UI SHELL](ui-shell/README.md)**<br>`ui-shell` | Demonstrates a complex UI shell or operating-system style interface. |
-| <img src="vault/preview.gif" width="480"> | **[vault](vault/README.md)**<br>`vault` | Six chests, two triggers, and a cartridge that still knows what you did after the power goes off. |
-| <img src="versus/preview.gif" width="480"> | **[versus — a Street Fighter–style 1v1 fighter](versus/README.md)**<br>`versus` | A Street Fighter-style 1v1 fighter: frame data, hitboxes, motion commands and best-of-three rounds, with no entity system in the loop. |
-| <img src="visual-novel/preview.png" width="480"> | **[visual-novel](visual-novel/README.md)**<br>`visual-novel` | A branching story on `packages/cutscene-core`: choices, portraits, and a flag set three scenes earlier being read back. |
-| <img src="warforge/preview.gif" width="480"> | **[WARFORGE](warforge/README.md)**<br>`warforge` | A Warcraft-shaped RTS campaign: harvest, build, train and a hero who levels across three missions. |
-| <img src="warheads/preview.gif" width="480"> | **[WARHEADS](warheads/README.md)**<br>`warheads` | Pick a hull, choose a rock, and take turns dismantling the solar system it is standing on. |
-| — | **[warsong — Warsong Gulch battlegrounds](warsong/README.md)**<br>`warsong` | Warsong Gulch–style CTF battleground: 3v3, classic WoW classes x specs, R soft-target, A/B skills, L skill wheel, double-tap dash, AI bots. |
-| <img src="win-demo/preview.gif" width="480"> | **[win-demo](win-demo/README.md)**<br>`win-demo` | The GBA's window registers, reachable from tish for the first time: a rectangle, a per-scanline circular iris, and darkness everywhere else. |
-
-<details><summary>1 of these show no image in their README yet</summary>
-
-The thumbnail above is whatever image an example's own README embeds. Capturing a good one needs a built ROM, an emulator and a judgement call about the moment, so it is done by hand (`npm run shot` gets you a frame; choosing a *good* frame is the work). `asteroids/arena.png` and `solitaire/table.png` are the pattern to follow — note that `screenshot.png` is a CI validation artifact, not a chosen shot. Still missing one:
-
-`warsong`
-
-</details>
+| | example |
+|---|---|
+| <img src="akari/preview.gif" width="480"> | **[akari — puzzle game demo (Akari / Light Up)](akari/README.md)**<br>`akari` |
+| <img src="anim-demo/preview.gif" width="480"> | **[anim demo — demonstrates sprite animation loops, frames, and state machines](anim-demo/README.md)**<br>`anim-demo` |
+| <img src="artillery/preview.gif" width="480"> | **[artillery — two turrets, three planets, and one shot at a time](artillery/README.md)**<br>`artillery` |
+| <img src="asset-sprite/preview.gif" width="480"> | **[asset sprite — demonstrates how to import and render 2D sprite assets using the asset pipeline](asset-sprite/README.md)**<br>`asset-sprite` |
+| <img src="asteroids/preview.gif" width="480"> | **[asteroids](asteroids/README.md)**<br>`asteroids` |
+| <img src="audio-adaptive/preview.png" width="480"> | **[audio adaptive — adaptive music made testable](audio-adaptive/README.md)**<br>`audio-adaptive` |
+| <img src="bands-demo/preview.gif" width="480"> | **[bands demo — demonstrates background parallax scrolling or affine transformations](bands-demo/README.md)**<br>`bands-demo` |
+| <img src="beatemup/preview.gif" width="480"> | **[beatemup — a Final Fight-shaped brawler](beatemup/README.md)**<br>`beatemup` |
+| <img src="bg-demo/preview.gif" width="480"> | **[bg demo — demonstrates background layers, tilemaps, and scrolling](bg-demo/README.md)**<br>`bg-demo` |
+| <img src="blockfall/preview.gif" width="480"> | **[blockfall — a falling-block puzzle game on the guideline ruleset](blockfall/README.md)**<br>`blockfall` |
+| <img src="button-demo/preview.png" width="480"> | **[button demo — demonstrates reading hardware input from the GBA buttons](button-demo/README.md)**<br>`button-demo` |
+| <img src="chiptune/preview.gif" width="480"> | **[chiptune — demonstrates audio playback for chiptunes/music tracks](chiptune/README.md)**<br>`chiptune` |
+| <img src="collect-demo/preview.gif" width="480"> | **[collect demo — demonstrates collision detection and entity collection logic](collect-demo/README.md)**<br>`collect-demo` |
+| <img src="cosmo-kitchen/preview.gif" width="480"> | **[cosmo kitchen — a complete mini-game demo (Cosmo Kitchen) showing game loop and UI](cosmo-kitchen/README.md)**<br>`cosmo-kitchen` |
+| <img src="crawler/preview.gif" width="480"> | **[crawler — a first-person grid maze drawn from rectangles](crawler/README.md)**<br>`crawler` |
+| <img src="creature-rpg/preview.gif" width="480"> | **[creature rpg — a creature-collection RPG](creature-rpg/README.md)**<br>`creature-rpg` |
+| <img src="cutscene-raw/preview.png" width="480"> | **[cutscene raw — a staged scene in a game that cannot link the game-engine crate](cutscene-raw/README.md)**<br>`cutscene-raw` |
+| <img src="dark-hero/preview.gif" width="480"> | **[dark hero — a genre template or demo for a dark-themed action game](dark-hero/README.md)**<br>`dark-hero` |
+| <img src="deck-demo/preview.gif" width="480"> | **[deck demo — demonstrates the Deck audio synthesizer format](deck-demo/README.md)**<br>`deck-demo` |
+| <img src="deckbuild/preview.gif" width="480"> | **[deckbuild — a deckbuilding combat, on `packages/cards.tish`](deckbuild/README.md)**<br>`deckbuild` |
+| <img src="dialog-demo/preview.gif" width="480"> | **[dialog demo — demonstrates text rendering and typewriter-style dialog boxes](dialog-demo/README.md)**<br>`dialog-demo` |
+| <img src="dpad-sprite/preview.gif" width="480"> | **[dpad sprite — demonstrates moving a sprite across the screen using the D-Pad](dpad-sprite/README.md)**<br>`dpad-sprite` |
+| <img src="earshot/preview.gif" width="480"> | **[earshot — a sound source orbits you, and you can hear where it is](earshot/README.md)**<br>`earshot` |
+| <img src="engine-demo/preview.gif" width="480"> | **[engine demo — a comprehensive showcase of multiple engine features working together](engine-demo/README.md)**<br>`engine-demo` |
+| <img src="feel-demo/preview.gif" width="480"> | **[feel demo — every feedback in packages/feel.tish](feel-demo/README.md)**<br>`feel-demo` |
+| <img src="fonts-demo/preview.gif" width="480"> | **[fonts demo — demonstrates custom font loading and text rendering](fonts-demo/README.md)**<br>`fonts-demo` |
+| <img src="fx-demo/preview.gif" width="480"> | **[fx demo — demonstrates visual effects, blending modes, and palettes](fx-demo/README.md)**<br>`fx-demo` |
+| <img src="fx-particles/preview.gif" width="480"> | **[fx particles — a particle system, screen flash and screen shake](fx-particles/README.md)**<br>`fx-particles` |
+| <img src="golf/preview.gif" width="480"> | **[golf — nine holes of top-down mini-golf](golf/README.md)**<br>`golf` |
+| <img src="gradient-demo/preview.gif" width="480"> | **[gradient demo — demonstrates hardware color gradients and raster effects](gradient-demo/README.md)**<br>`gradient-demo` |
+| <img src="grid-demo/preview.gif" width="480"> | **[grid-demo — a floor-stacked match-3 on packages/grid.tish](grid-demo/README.md)**<br>`grid-demo` |
+| <img src="illusions/preview.gif" width="480"> | **[illusions — optical illusions on GBA hardware](illusions/README.md)**<br>`illusions` |
+| <img src="input-demo/preview.gif" width="480"> | **[input demo — demonstrates advanced input handling and key state debouncing](input-demo/README.md)**<br>`input-demo` |
+| <img src="iso-sprite/preview.gif" width="480"> | **[iso sprite — an isometric SRPG subsystem demo showcasing sprite](iso-sprite/README.md)**<br>`iso-sprite` |
+| <img src="jrpg-party/preview.gif" width="480"> | **[jrpg-party — four heroes, four monsters and a clock](jrpg-party/README.md)**<br>`jrpg-party` |
+| <img src="kart-circuit/preview.gif" width="480"> | **[kart-circuit — a Mode 7 kart racer on a real Mode 7 ground plane](kart-circuit/README.md)**<br>`kart-circuit` |
+| <img src="keep/preview.gif" width="480"> | **[keep — dungeon lock-and-key, as a package](keep/README.md)**<br>`keep` |
+| <img src="link-demo/preview.gif" width="480"> | **[link demo — demonstrates GBA multiplayer link cable communication](link-demo/README.md)**<br>`link-demo` |
+| <img src="metroidvania/preview.gif" width="480"> | **[metroidvania — one castle, three ability gates, and walls that were always passable](metroidvania/README.md)**<br>`metroidvania` |
+| <img src="microgame/preview.gif" width="480"> | **[microgame — a WarioWare-shaped bag of four-second games](microgame/README.md)**<br>`microgame` |
+| <img src="minimal/preview.png" width="480"> | **[minimal — a bare-bones minimal project template with just a game loop](minimal/README.md)**<br>`minimal` |
+| <img src="mode7-demo/preview.gif" width="480"> | **[mode7-demo — a Mode 7 ground plane](mode7-demo/README.md)**<br>`mode7-demo` |
+| <img src="mono-demo/preview.gif" width="480"> | **[mono demo — demonstrates monophonic audio or monochrome rendering](mono-demo/README.md)**<br>`mono-demo` |
+| <img src="ninja-adventure/preview.gif" width="480"> | **[ninja adventure — a top-down ninja action RPG template](ninja-adventure/README.md)**<br>`ninja-adventure` |
+| <img src="ninja-village/preview.gif" width="480"> | **[ninja village — a top-down village exploration template](ninja-village/README.md)**<br>`ninja-village` |
+| <img src="oakhollow/preview.gif" width="480"> | **[oakhollow — a farming/life-sim template (Stardew Valley style)](oakhollow/README.md)**<br>`oakhollow` |
+| <img src="overworld-demo/preview.gif" width="480"> | **[overworld demo — a grid-walking top-down overworld](overworld-demo/README.md)**<br>`overworld-demo` |
+| <img src="pinball/preview.gif" width="480"> | **[pinball — a table with no tiles](pinball/README.md)**<br>`pinball` |
+| <img src="platformer-combat/preview.gif" width="480"> | **[platformer combat — demonstrates a platformer with health, a hearts HUD and stompable patrol enemies](platformer-combat/README.md)**<br>`platformer-combat` |
+| <img src="platformer-rooms/preview.gif" width="480"> | **[platformer rooms — demonstrates a platformer with room-based camera transitions](platformer-rooms/README.md)**<br>`platformer-rooms` |
+| <img src="platformer-scroll/preview.gif" width="480"> | **[platformer scroll — demonstrates a platformer with a smoothly scrolling camera](platformer-scroll/README.md)**<br>`platformer-scroll` |
+| <img src="polyglot/preview.png" width="480"> | **[polyglot — one merchant screen, four languages, and a layout that survives all of them](polyglot/README.md)**<br>`polyglot` |
+| <img src="pong-link/preview.gif" width="480"> | **[pong-link — two-player Pong over the link cable](pong-link/README.md)**<br>`pong-link` |
+| <img src="prismfall/preview.gif" width="480"> | **[prismfall — a metroidvania-shaped game whose abilities are colours](prismfall/README.md)**<br>`prismfall` |
+| <img src="rap-dojo/preview.gif" width="480"> | **[rap-dojo — a call-and-response rhythm game](rap-dojo/README.md)**<br>`rap-dojo` |
+| <img src="rerun/preview.gif" width="480"> | **[rerun — record a run, play it back, and check that the game did the same thing twice](rerun/README.md)**<br>`rerun` |
+| <img src="ringside/preview.gif" width="480"> | **[ringside — a Punch-Out-style boxing bout seen over the player's shoulder](ringside/README.md)**<br>`ringside` |
+| <img src="roguelike/preview.gif" width="480"> | **[roguelike — a dungeon generated on the cartridge from a seed](roguelike/README.md)**<br>`roguelike` |
+| <img src="rpg-menu/preview.gif" width="480"> | **[rpg menu — demonstrates nested UI menus for RPGs](rpg-menu/README.md)**<br>`rpg-menu` |
+| <img src="rts-flow/preview.gif" width="480"> | **[rts flow — rTS de-risk A1](rts-flow/README.md)**<br>`rts-flow` |
+| <img src="rts-fog/preview.gif" width="480"> | **[rts fog — rTS de-risk A2](rts-fog/README.md)**<br>`rts-fog` |
+| <img src="rts-select/preview.gif" width="480"> | **[rts select — rTS de-risk A3](rts-select/README.md)**<br>`rts-select` |
+| <img src="shmup/preview.gif" width="480"> | **[shmup — a shoot-em-up (shmup) genre template with bullet patterns and enemies](shmup/README.md)**<br>`shmup` |
+| <img src="shop-demo/preview.gif" width="480"> | **[shop demo — demonstrates a shop UI and inventory management](shop-demo/README.md)**<br>`shop-demo` |
+| <img src="soccer/preview.gif" width="480"> | **[soccer — six players and a ball](soccer/README.md)**<br>`soccer` |
+| <img src="solitaire/preview.gif" width="480"> | **[solitaire — klondike solitaire drawn entirely from ui_rect and ui_text](solitaire/README.md)**<br>`solitaire` |
+| <img src="spectra/preview.gif" width="480"> | **[spectra — four colours at a time](spectra/README.md)**<br>`spectra` |
+| <img src="sunny-land/preview.gif" width="480"> | **[sunny land — a platformer template using the Sunny Land asset pack](sunny-land/README.md)**<br>`sunny-land` |
+| <img src="sunnyside/preview.gif" width="480"> | **[Sunnyside — a farming life-sim on a generated island](sunnyside/README.md)**<br>`sunnyside` |
+| <img src="sunnyside-day/preview.gif" width="480"> | **[Sunnyside day — the clock, the night, and the bed](sunnyside-day/README.md)**<br>`sunnyside-day` |
+| <img src="sunnyside-farm/preview.gif" width="480"> | **[Sunnyside farm — the farming core](sunnyside-farm/README.md)**<br>`sunnyside-farm` |
+| <img src="sunnyside-save/preview.png" width="480"> | **[Sunnyside save — the farm state through the cartridge](sunnyside-save/README.md)**<br>`sunnyside-save` |
+| <img src="sunnyside-sheet/preview.gif" width="480"> | **[Sunnyside sheet — character animation smoke test](sunnyside-sheet/README.md)**<br>`sunnyside-sheet` |
+| <img src="sunnyside-terrain/preview.gif" width="480"> | **[Sunnyside terrain — runtime autotiling of a generated island](sunnyside-terrain/README.md)**<br>`sunnyside-terrain` |
+| <img src="sunnyside-worldgen/preview.gif" width="480"> | **[Sunnyside worldgen — the island generator against its Python twin](sunnyside-worldgen/README.md)**<br>`sunnyside-worldgen` |
+| <img src="title-demo/preview.png" width="480"> | **[title demo — demonstrates a main menu and title screen flow](title-demo/README.md)**<br>`title-demo` |
+| <img src="tower-def/preview.gif" width="480"> | **[tower-def — a fixed-track tower defence](tower-def/README.md)**<br>`tower-def` |
+| <img src="transitions/preview.gif" width="480"> | **[transitions — every scene transition the GBA can do](transitions/README.md)**<br>`transitions` |
+| <img src="ui-builder-vs-literal/preview.png" width="480"> | **[ui builder vs literal — the same screen authored two ways, measured](ui-builder-vs-literal/README.md)**<br>`ui-builder-vs-literal` |
+| <img src="ui-demo/preview.gif" width="480"> | **[ui demo — demonstrates UI components, layouts, and rendering](ui-demo/README.md)**<br>`ui-demo` |
+| <img src="ui-shell/preview.gif" width="480"> | **[ui shell — demonstrates a complex UI shell or operating-system style interface](ui-shell/README.md)**<br>`ui-shell` |
+| <img src="vault/preview.gif" width="480"> | **[vault — six chests, two triggers, and a cartridge that still knows what you did after the power goes off](vault/README.md)**<br>`vault` |
+| <img src="versus/preview.gif" width="480"> | **[versus — a Street Fighter–style 1v1 fighter](versus/README.md)**<br>`versus` |
+| <img src="visual-novel/preview.png" width="480"> | **[visual-novel — a branching story on `packages/cutscene-core`](visual-novel/README.md)**<br>`visual-novel` |
+| <img src="warforge/preview.gif" width="480"> | **[warforge — a Warcraft-shaped RTS campaign](warforge/README.md)**<br>`warforge` |
+| <img src="warheads/preview.gif" width="480"> | **[warheads — pick a hull, choose a rock, and take turns dismantling the solar system it is standing on](warheads/README.md)**<br>`warheads` |
+| <img src="warsong/preview.gif" width="480"> | **[warsong — Warsong Gulch battlegrounds](warsong/README.md)**<br>`warsong` |
+| <img src="win-demo/preview.gif" width="480"> | **[win-demo — the GBA's window registers, reachable from tish for the first time](win-demo/README.md)**<br>`win-demo` |
 
 ## Benchmarks, probes and regression repros
 
 Not things to play — these measure something or reproduce a specific bug.
 
-| | example | what it is |
-|---|---|---|
-| — | **[BENCH ACCESS](bench-access/README.md)**<br>`bench-access` | What a data access and a function call actually cost on GBA. |
-| <img src="bench-ai/preview.png" width="480"> | **[BENCH AI](bench-ai/README.md)**<br>`bench-ai` | A benchmark testing the performance of the ai subsystem. |
-| <img src="bench-behav/preview.gif" width="480"> | **[BENCH BEHAV](bench-behav/README.md)**<br>`bench-behav` | A benchmark testing the performance of the behav subsystem. |
-| <img src="bench-boot/preview.png" width="480"> | **[BENCH BOOT](bench-boot/README.md)**<br>`bench-boot` | A benchmark testing the performance of the boot subsystem. |
-| — | **[BENCH BUILD](bench-build/README.md)**<br>`bench-build` | A benchmark testing the performance of the build subsystem. |
-| — | **[BENCH ENTITIES](bench-entities/README.md)**<br>`bench-entities` | A benchmark testing the performance of the entities subsystem. |
-| <img src="bench-memory/preview.gif" width="480"> | **[BENCH MEMORY](bench-memory/README.md)**<br>`bench-memory` | A benchmark testing the performance of the memory subsystem. |
-| <img src="bench-room/preview.gif" width="480"> | **[BENCH ROOM](bench-room/README.md)**<br>`bench-room` | A benchmark testing the performance of the room subsystem. |
-| — | **[BENCH SYSTEMS](bench-systems/README.md)**<br>`bench-systems` | Where the native pass goes, system by system. |
-| — | **[BENCH TABLES](bench-tables/README.md)**<br>`bench-tables` | What a generated table costs to read, and whether caching one is worth anything. |
-| — | **[P0 SPIKE](p0-spike/README.md)**<br>`p0-spike` | A prototype or technical spike for engine core mechanics. |
-| — | **[PROBE ARRAYARG](probe-arrayarg/README.md)**<br>`probe-arrayarg` | Does passing a typed module array to a native de-optimise every OTHER read of it? Yes — 3.8x. |
-| <img src="probe-arrayret/preview.png" width="480"> | **[PROBE ARRAYRET](probe-arrayret/README.md)**<br>`probe-arrayret` | A technical test for array returns over FFI or WASM. |
-| — | **[PROBE MODULE LET](probe-module-let/README.md)**<br>`probe-module-let` | Does a bare module-level `let` read back correctly after reassignment on the GBA target? |
-| — | **[REPRO 654 AGG PUSH](repro-654-agg-push/README.md)**<br>`repro-654-agg-push` | Aggregate repro for #654: push + length via a shared cell. |
-| — | **[REPRO 654 CAPT SHADOW](repro-654-capt-shadow/README.md)**<br>`repro-654-capt-shadow` | A body-local must shadow its never-assigned `_capt` alias. |
-| — | **[REPRO 654 CAPT STACK](repro-654-capt-stack/README.md)**<br>`repro-654-capt-stack` | ~40 never-assigned Value captures + a nested arrow should not clone at entry. |
-| — | **[REPRO 654 HEAP NATIVES](repro-654-heap-natives/README.md)**<br>`repro-654-heap-natives` | Many FunDecls naming `log` must not multiply VmRef allocations. |
-| — | **[REPRO 654 SIBLING STACK](repro-654-sibling-stack/README.md)**<br>`repro-654-sibling-stack` | One hot FunDecl naming ~40 sibling fns keeps VmRefs, not Value extracts. |
-| — | **[REPRO 654 VEC CELL ARROW](repro-654-vec-cell-arrow/README.md)**<br>`repro-654-vec-cell-arrow` | A nested arrow over a cell-captured native array must not double-wrap the VmRef. |
-| — | **[REPRO ECO NATIVES](repro-eco-natives/README.md)**<br>`repro-eco-natives` | Proof ROM for the ecosystem/platformer engine natives. |
-| — | **[REPRO: struct-global store shadows a user variable](repro-globalset-shadow/README.md)**<br>`repro-globalset-shadow` | `G.cur = BASE + c` did not compile, because the emitted `with(|c| …)` closure shadowed the author's own `c`. |
-| <img src="repro-hub-cave-heap/preview.png" width="480"> | **[REPRO HUB CAVE HEAP](repro-hub-cave-heap/README.md)**<br>`repro-hub-cave-heap` | A bug reproduction or regression test case. |
-| — | **[REPRO INTRO HEAP](repro-intro-heap/README.md)**<br>`repro-intro-heap` | *Where the large SRPG example's memory actually goes — measured in 30 seconds instead of guessed at over five-minute |
-| — | **[REPRO MIXED STRUCT](repro-mixed-struct/README.md)**<br>`repro-mixed-struct` | A struct param qualifies on ONE numeric field, not all of them. |
-| — | **[REPRO PLATFORMER COST](repro-platformer-cost/README.md)**<br>`repro-platformer-cost` | Where does packages/platformer.tish spend its ticks? |
-| — | **[REPRO: PSG SFX vs MUSIC](repro-psg-sfx/README.md)**<br>`repro-psg-sfx` | Does firing a PSG sound effect on a channel the music is using damage the music? |
-| <img src="repro-sprite-y/preview.png" width="480"> | **[REPRO SPRITE Y](repro-sprite-y/README.md)**<br>`repro-sprite-y` | A bug reproduction or regression test case for sprite Y coordinates. |
-| — | **[REPRO STACKFRAME](repro-stackframe/README.md)**<br>`repro-stackframe` | Struct params and locals across calls read back correctly. |
-| <img src="repro-structwrite/preview.png" width="480"> | **[REPRO STRUCTWRITE](repro-structwrite/README.md)**<br>`repro-structwrite` | A bug reproduction or regression test case for struct writes. |
-| — | **[REPRO UI LAYOUT](repro-ui-layout/README.md)**<br>`repro-ui-layout` | Native flex solver vs the boxed arithmetic it replaces. |
-| — | **[REPRO UI PAINT](repro-ui-paint/README.md)**<br>`repro-ui-paint` | Native paint vs the boxed paint it replaces, on the same screen. |
-| — | **[repro-uibar](repro-uibar/README.md)**<br>`repro-uibar` | *(repro-uibar)* |
-| — | **[REPRO VALIDATE 653](repro-validate-653/README.md)**<br>`repro-validate-653` | Cross-module const/identifier validation must accept this program. |
-| — | **[REPRO VALIDATE 655](repro-validate-655/README.md)**<br>`repro-validate-655` | Simple recursion must validate and run. |
+| | example |
+|---|---|
+| <img src="bench-access/preview.png" width="480"> | **[bench access — what a data access and a function call actually cost on GBA](bench-access/README.md)**<br>`bench-access` |
+| <img src="bench-ai/preview.png" width="480"> | **[bench ai — a benchmark testing the performance of the ai subsystem](bench-ai/README.md)**<br>`bench-ai` |
+| — | **[bench behav — a benchmark testing the performance of the behav subsystem](bench-behav/README.md)**<br>`bench-behav` |
+| — | **[bench boot — a benchmark testing the performance of the boot subsystem](bench-boot/README.md)**<br>`bench-boot` |
+| — | **[bench build — a benchmark testing the performance of the build subsystem](bench-build/README.md)**<br>`bench-build` |
+| <img src="bench-entities/preview.png" width="480"> | **[bench entities — a benchmark testing the performance of the entities subsystem](bench-entities/README.md)**<br>`bench-entities` |
+| <img src="bench-memory/preview.gif" width="480"> | **[bench memory — a benchmark testing the performance of the memory subsystem](bench-memory/README.md)**<br>`bench-memory` |
+| <img src="bench-room/preview.gif" width="480"> | **[bench room — a benchmark testing the performance of the room subsystem](bench-room/README.md)**<br>`bench-room` |
+| <img src="bench-systems/preview.png" width="480"> | **[bench systems — where the native pass goes, system by system](bench-systems/README.md)**<br>`bench-systems` |
+| <img src="bench-tables/preview.png" width="480"> | **[bench tables — what a generated table costs to read, and whether caching one is worth anything](bench-tables/README.md)**<br>`bench-tables` |
+| — | **[p0 spike — a prototype or technical spike for engine core mechanics](p0-spike/README.md)**<br>`p0-spike` |
+| <img src="probe-arrayarg/preview.png" width="480"> | **[probe arrayarg — does passing a typed module array to a native de-optimise every OTHER read of it? Yes](probe-arrayarg/README.md)**<br>`probe-arrayarg` |
+| <img src="probe-arrayret/preview.png" width="480"> | **[probe arrayret — a technical test for array returns over FFI or WASM](probe-arrayret/README.md)**<br>`probe-arrayret` |
+| <img src="probe-module-let/preview.png" width="480"> | **[probe module let — does a bare module-level `let` read back correctly after reassignment on the GBA target?](probe-module-let/README.md)**<br>`probe-module-let` |
+| <img src="repro-654-agg-push/preview.png" width="480"> | **[repro 654 agg push — aggregate repro for #654](repro-654-agg-push/README.md)**<br>`repro-654-agg-push` |
+| <img src="repro-654-capt-shadow/preview.png" width="480"> | **[repro 654 capt shadow — a body-local must shadow its never-assigned `_capt` alias](repro-654-capt-shadow/README.md)**<br>`repro-654-capt-shadow` |
+| <img src="repro-654-capt-stack/preview.png" width="480"> | **[repro 654 capt stack — ~40 never-assigned Value captures + a nested arrow should not clone at entry](repro-654-capt-stack/README.md)**<br>`repro-654-capt-stack` |
+| <img src="repro-654-heap-natives/preview.png" width="480"> | **[repro 654 heap natives — many FunDecls naming `log` must not multiply VmRef allocations](repro-654-heap-natives/README.md)**<br>`repro-654-heap-natives` |
+| <img src="repro-654-sibling-stack/preview.png" width="480"> | **[repro 654 sibling stack — one hot FunDecl naming ~40 sibling fns keeps VmRefs, not Value extracts](repro-654-sibling-stack/README.md)**<br>`repro-654-sibling-stack` |
+| <img src="repro-654-vec-cell-arrow/preview.png" width="480"> | **[repro 654 vec cell arrow — a nested arrow over a cell-captured native array must not double-wrap the VmRef](repro-654-vec-cell-arrow/README.md)**<br>`repro-654-vec-cell-arrow` |
+| <img src="repro-eco-natives/preview.gif" width="480"> | **[repro eco natives — proof ROM for the ecosystem/platformer engine natives](repro-eco-natives/README.md)**<br>`repro-eco-natives` |
+| <img src="repro-globalset-shadow/preview.png" width="480"> | **[REPRO: struct-global store shadows a user variable — `G.cur = BASE + c` did not compile, because the emitted `with(|c| …)` closure shadowed the author's own `c`](repro-globalset-shadow/README.md)**<br>`repro-globalset-shadow` |
+| <img src="repro-hub-cave-heap/preview.png" width="480"> | **[repro hub cave heap — a bug reproduction or regression test case](repro-hub-cave-heap/README.md)**<br>`repro-hub-cave-heap` |
+| <img src="repro-intro-heap/preview.png" width="480"> | **[repro intro heap — *Where the large SRPG example's memory actually goes](repro-intro-heap/README.md)**<br>`repro-intro-heap` |
+| <img src="repro-mixed-struct/preview.png" width="480"> | **[repro mixed struct — a struct param qualifies on ONE numeric field, not all of them](repro-mixed-struct/README.md)**<br>`repro-mixed-struct` |
+| <img src="repro-platformer-cost/preview.png" width="480"> | **[repro platformer cost — where does packages/platformer.tish spend its ticks?](repro-platformer-cost/README.md)**<br>`repro-platformer-cost` |
+| <img src="repro-psg-sfx/preview.png" width="480"> | **[REPRO: PSG SFX vs MUSIC — does firing a PSG sound effect on a channel the music is using damage the music?](repro-psg-sfx/README.md)**<br>`repro-psg-sfx` |
+| <img src="repro-sprite-y/preview.png" width="480"> | **[repro sprite y — a bug reproduction or regression test case for sprite Y coordinates](repro-sprite-y/README.md)**<br>`repro-sprite-y` |
+| <img src="repro-stackframe/preview.png" width="480"> | **[repro stackframe — struct params and locals across calls read back correctly](repro-stackframe/README.md)**<br>`repro-stackframe` |
+| <img src="repro-structwrite/preview.png" width="480"> | **[repro structwrite — a bug reproduction or regression test case for struct writes](repro-structwrite/README.md)**<br>`repro-structwrite` |
+| <img src="repro-ui-layout/preview.png" width="480"> | **[repro ui layout — native flex solver vs the boxed arithmetic it replaces](repro-ui-layout/README.md)**<br>`repro-ui-layout` |
+| <img src="repro-ui-paint/preview.png" width="480"> | **[repro ui paint — native paint vs the boxed paint it replaces, on the same screen](repro-ui-paint/README.md)**<br>`repro-ui-paint` |
+| <img src="repro-uibar/preview.png" width="480"> | **[repro-uibar](repro-uibar/README.md)**<br>`repro-uibar` |
+| <img src="repro-validate-653/preview.png" width="480"> | **[repro validate 653 — cross-module const/identifier validation must accept this program](repro-validate-653/README.md)**<br>`repro-validate-653` |
+| <img src="repro-validate-655/preview.png" width="480"> | **[repro validate 655 — simple recursion must validate and run](repro-validate-655/README.md)**<br>`repro-validate-655` |

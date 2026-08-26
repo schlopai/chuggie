@@ -4,7 +4,7 @@
 Deliberately tiny and generated rather than pulled from the catalog: this demo exists to prove
 packages/grid.tish is generic, and hand-picked art would make it look like a specific game. Each
 gem carries a distinct GLYPH as well as a hue, which is the readable-without-colour rule the
-Magical Drop art already follows.
+the retired match-3 art already follows.
 """
 import struct, zlib, pathlib
 

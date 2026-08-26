@@ -2,6 +2,8 @@
 
 > *Does passing a typed module array to a native de-optimise every OTHER read of it? Yes — 3.8x.*
 
+<img src="preview.png" alt="preview" width="480">
+
 A compiler probe, in the style of [`bench-tables`](../bench-tables/README.md). Two arrays in one
 module, declared identically, filled identically, read by identical loops. The only difference in
 the whole program is that one of them is handed to a native function **once**.

@@ -1,5 +1,7 @@
 # warsong — Warsong Gulch battlegrounds
 
+<img src="preview.gif" alt="preview" width="480">
+
 3v3 CTF on the top-down engine: soft targeting (R), A/B primary/secondary skills, L skill wheel,
 double-tap dash, classic WoW classes × 3 specs, frame-loop bots.
 

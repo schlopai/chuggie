@@ -63,7 +63,7 @@ export let P_MARK: i32 = 256
 export let P_SEED: i32 = 512
 export let P_PASS: i32 = 1024
 export let P_JOIN: i32 = 2048
-/// POPPING: cleared, still on the board. Magical Drop's clear is not instantaneous — a matched
+/// POPPING: cleared, still on the board. The match-3 clear is not instantaneous — a matched
 /// balloon bursts IN PLACE for the whole clear window (~0.667s) and only then disappears, at which
 /// point the cells beyond it slide in. The sandwich chain is built on exactly this: the popping
 /// cell keeps the two halves apart until it vanishes. So a popping cell OCCUPIES (throws land past
@@ -89,7 +89,7 @@ let MATCHBITS: i32 = 16711680
 //
 // Neither was caught by examples/grid-demo, and could not have been: it uses cell bytes 1..5, whose
 // bits all survive a mask of 231. The bug needed a game whose cells set bit 4, which is the entire
-// Magical Drop vocabulary. A constant that is correct for one caller's data and destroys another's
+// the retired match-3 port vocabulary. A constant that is correct for one caller's data and destroys another's
 // is exactly what a hand-computed bitmask buys you.
 //
 //   KEEP_ON_UNMARK  drop MARK / PASS / JOIN; keep the cell, its class, its wild bit AND its seed
@@ -108,18 +108,18 @@ export let CP_OBSTACLE: i32 = 2
 export let CP_INDESTRUCTIBLE: i32 = 4
 // CAN BE PICKED UP, BUT NOT PUT DOWN — it pops out of the hands instead of landing on the board.
 //
-// Magical Drop's Bubble Balloon is the case: `cell.rs:is_throwable` is `kind != BUBBLE`, and the
+// the retired match-3 port's Bubble Balloon is the case: `cell.rs:is_throwable` is `kind != BUBBLE`, and the
 // only way one ever leaves the field is being pulled into the pierrot's hands to burst. Without this
 // the kit has no way to say it, and `packages/drop_game.tish` was pushing a bubble onto the board
 // like any other cell — a cell that matches nothing, cannot be cleared, and would sit there forever.
 export let CP_NOTHROW: i32 = 8
 // WHEN THIS CELL CLEARS, THE WHOLE CLASS GOES WITH IT.
 //
-// Magical Drop's Special Balloon: three in a row containing one does not clear three, it clears
+// the retired match-3 port's Special Balloon: three in a row containing one does not clear three, it clears
 // every balloon of that colour on the board (`board.rs:446-460`). A wildcard in the set escalates
 // the same way, which is why `gridEscalate` treats `P_WILD` as escalating too.
 export let CP_ESCALATE: i32 = 16
-// TRANSMUTES WHEN A CLEAR HAPPENS BESIDE IT — Magical Drop's Ice Balloon.
+// TRANSMUTES WHEN A CLEAR HAPPENS BESIDE IT — the retired match-3 port's Ice Balloon.
 //
 // Ice matches nothing and no run can contain it, so on its own it is a permanent obstacle. Touching
 // a clear THAWS IT, and the rule is asymmetric in a way that is easy to get backwards: the thaw is
@@ -256,7 +256,7 @@ export function gridDefineCell(cell: i32, matchMask: i32, grabMask: i32, props: 
 
 /// What a thawable cell becomes, overriding the `become` its thaw was called with.
 ///
-/// Magical Drop has two ices: clear ice takes the colour that popped it, and COLOUR ice — new in
+/// the retired match-3 port has two ices: clear ice takes the colour that popped it, and COLOUR ice — new in
 /// MD3 — has its colour predetermined and keeps it. The caller of `gridThaw` knows the first; only
 /// the cell knows the second.
 export function gridDefineThaw(cell: i32, becomes: i32) {
@@ -286,7 +286,7 @@ export function gridDefineLine(cell: i32, dirs: i32) {
 
 // ── boards ──────────────────────────────────────────────────────────────────────────────────────
 
-/// Create a board. `anchor` 0 packs cells toward row 0 (a ceiling-fed board like Magical Drop);
+/// Create a board. `anchor` 0 packs cells toward row 0 (a ceiling-fed board like the retired match-3 port);
 /// `anchor` 1 packs toward the last row (a floor-stacked board like Puyo). Everything below reads
 /// the anchor, so the same collapse serves both.
 export function gridInit(slot: i32, cols: i32, rows: i32, anchor: i32) {
@@ -1324,11 +1324,11 @@ export function gridSpread(slot: i32, col: i32, row: i32, cls: i32): i32 {
 }
 
 /// Mark every cell on the board whose match mask intersects `classMask`. This is how a game
-/// implements a bomb, a boardwide colour sweep or a Magical Drop Special.
+/// implements a bomb, a boardwide colour sweep or a the retired match-3 port Special.
 /// Thaw every `CP_THAW` cell on the board, and clear the ones touching the cleared set.
 ///
 /// `become` is what they turn into for the class being resolved; `becomeWild` is what they turn into
-/// instead when the marked set contains a wildcard — Magical Drop turns thawing ice into Rainbows in
+/// instead when the marked set contains a wildcard — the retired match-3 port turns thawing ice into Rainbows in
 /// that case rather than into plain colours. Returns how many joined the cleared set.
 ///
 /// THE ASYMMETRY IS THE RULE, and it is the part worth reading twice: the THAW is board-wide and the
@@ -1446,7 +1446,7 @@ export function gridThaw(slot: i32, cls: i32, become: i32, becomeWild: i32): i32
 /// Escalate, thaw, fire lines, read the props and CONVERT THE MARKED SET TO POPPING — the back
 /// half of a match-and-clear pass, in ONE call. Returns `(props << 16) | (anyThawed << 12) | popped`.
 ///
-/// NOTHING FALLS HERE. Magical Drop does not collapse on the clear: the matched balloons burst in
+/// NOTHING FALLS HERE. the retired match-3 port does not collapse on the clear: the matched balloons burst in
 /// place for the whole clear window and only vanish when it closes — `gridPopRemove` is that
 /// close, and it is where the collapse (and the cascade seeding) lives. The sandwich chain is this
 /// gap: the popping cell keeps two separated groups apart until it disappears, and only THEN do

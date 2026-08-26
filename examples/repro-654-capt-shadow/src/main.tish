@@ -1,7 +1,15 @@
 // Isolate an E0369 seen in the topdown RPG port: outer never-assigned `secret` snapped to _capt; body local `secret`
 // must shadow the alias (compare local f64, not secret_capt == f64).
-import { log, vblank } from 'cargo:tish_agb'
+import { log, vblank, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "repro-654-capt-shadow")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 let secret = 9
 
 function uwSecret() {
@@ -22,3 +30,5 @@ while (f < 130) {
   f = f + 1
 }
 log("repro-654-capt-shadow done")
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }

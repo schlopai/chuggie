@@ -31,9 +31,17 @@
 // Only the noise channel is safe, and only because a percussive part has nothing to sustain.
 // Conclusion: pitched feedback over a PSG arrangement costs you a voice. Take the tick.
 import { tune } from 'deck:../assets/tune.deck'
-import { frame, chip_borrow, psg_square, psg_noise, hud_text } from 'cargo:tish_agb'
+import { frame, chip_borrow, psg_square, psg_noise, hud_text, backdrop } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 import { deckPlay } from '../../../packages/deck'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "repro-psg-sfx")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 let SFX_CH: i32 = 4
 let SFX_EVERY: i32 = 40
 
@@ -54,3 +62,5 @@ while (true) {
   }
   frame()
 }
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }

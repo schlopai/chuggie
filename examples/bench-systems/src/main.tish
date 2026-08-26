@@ -11,11 +11,19 @@
 // scan cost S2 (live-slot list) exists to delete.
 //
 // ⚠️ Short log lines on purpose — a long concat chain is a heap OOM on the frame it prints.
-import { log } from 'cargo:tish_agb'
+import { log, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 import { spawn, set_transform, set_collider, set_body, world_step,
          step_ticks, frame_period, entity_count,
          sys_prof, sys_ticks, sys_count, sys_name } from 'cargo:tish_gba_game_engine'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "bench-systems")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 sys_prof(1)
 
 let n: i32 = 0
@@ -55,3 +63,5 @@ while (f < 1300) {
   }
 }
 log("bench-systems done")
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }

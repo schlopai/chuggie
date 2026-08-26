@@ -27,8 +27,16 @@
 // assigned to, which silently changes an `f64` field initialised from an integer literal.
 // Three emitters interpolate user code inside such a closure and all three need it:
 // `struct_global_field_set`, `native_global_set`, and the module-struct-global initialiser.
-import { log } from 'cargo:tish_agb'
+import { log, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "repro-globalset-shadow")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 interface Game { cur: i32 }
 let G: Game = { cur: 0 }
 let BASE: i32 = 4
@@ -40,4 +48,5 @@ function bump() {
 
 bump()
 log("cur=" + G.cur)
-while (true) {}
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }

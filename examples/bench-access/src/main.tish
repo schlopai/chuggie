@@ -35,9 +35,17 @@
 // ⚠️ `timer_read()` is 16 bit and wraps every ~15 frames. Every span here is a few thousand ticks
 // inside one frame, which is safe; do not extend a span across a `frame()`.
 
-import { timer_read, frame, log, backdrop } from 'cargo:tish_agb'
+import { timer_read, frame, log, backdrop, hud_text } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 import { call0, call1, call4, call8, call4arr, call4arr7, farRead, bigRead } from './lib'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "bench-access")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 let N: i32 = 1000
 
 // The subject: a module-level typed array, exactly the shape grid.tish and drop_game.tish use.
@@ -301,4 +309,5 @@ if (worst >= 4389) { ok = 0 }
 log("BENCH-ACCESS SANE " + ok + " worstSpan=" + worst + " (must be 1, and worstSpan < 4389)")
 log("BENCH-ACCESS DONE")
 
+hud_text(1, 8, 24, "done - numbers are in the log")
 while (true) { frame() }

@@ -2,7 +2,7 @@
 
 > *A particle system, screen flash and screen shake — owned, stepped and **budgeted** by the engine.*
 
-<img src="preview.png" alt="preview" width="480">
+<img src="preview.gif" alt="preview" width="480">
 
 Seven demos, each fired with a single call. There is **no per-frame effect code in this example**:
 nothing here steps a particle, integrates the shake spring, or counts a sprite. That is the point.

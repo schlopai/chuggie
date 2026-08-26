@@ -1,6 +1,6 @@
 # grid-demo
 
-> *A floor-stacked match-3 on packages/grid.tish — the generic cell-grid kit, proven on the opposite gravity anchor from Magical Drop.*
+> *A floor-stacked match-3 on packages/grid.tish — the generic cell-grid kit, proven on the opposite gravity anchor from the match-3 it came from.*
 
 <img src="preview.gif" alt="preview" width="480">
 
@@ -16,9 +16,9 @@ npm run start
 npm run verify
 ```
 
-## Why this game and not Magical Drop
+## Why this game and not the match-3 it came from
 
-`packages/grid.tish` was extracted from the Magical Drop rules, so a Magical Drop demo would prove
+`packages/grid.tish` was extracted from the retired match-3 port's rules, so a match-3 demo would prove
 nothing — it would pass whether the kit were genuinely generic or merely the old code under a new
 name. This is the **opposite board**: gravity toward the floor instead of the ceiling, gems dropped in
 from the top instead of pulled from the bottom, runs cleared where they land. The same
@@ -50,7 +50,7 @@ exercising fix that.
 
 | | call | why this one |
 |---|---|---|
-| the rising floor | `gridFeed` | a fed cell arrives at the **anchor**, which on this board is the floor, so garbage pushes the stack toward the ceiling instead of landing on top of it. `gridPush` does the opposite, and that exact mix-up once inverted the descent in the Magical Drop port. It also arrives **unseeded**, so an incoming row cannot detonate itself — a clear is something the player caused. |
+| the rising floor | `gridFeed` | a fed cell arrives at the **anchor**, which on this board is the floor, so garbage pushes the stack toward the ceiling instead of landing on top of it. `gridPush` does the opposite, and that exact mix-up once inverted the descent in the match-3 port. It also arrives **unseeded**, so an incoming row cannot detonate itself — a clear is something the player caused. |
 | the loss | `gridAnyOver` | ⚠️ not `gridAnyFull`. The kit is explicit that these differ by a whole row of play: a column packed to exactly `ROWS` is full but still playable, and a game that ends there ends one row early. Asserted both ways in one value, because a test that only checks "one past the line is a loss" passes either way. |
 | the level | cleared **cells** | so a chain advances it three times as fast as three singles, which is what the score already rewards. |
 

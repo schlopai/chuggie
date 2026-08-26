@@ -13,6 +13,9 @@
     "rustDependencies": {
       "tish_agb": {
         "path": "../../crates/tish-agb"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
       }
     }
   },

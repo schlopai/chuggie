@@ -2,6 +2,8 @@
 
 > *`G.cur = BASE + c` did not compile, because the emitted `with(|c| …)` closure shadowed the author's own `c`.*
 
+<img src="preview.png" alt="preview" width="480">
+
 **Status: builds today, and is kept as a tripwire.** The lowering that caused this was reverted
 upstream (`ad68e6388`, "core tish must stay untouched"), so the emitter no longer exists — this file
 compiles because there is nothing left to shadow. If struct-global lowering ever returns, this fails

@@ -2,4 +2,6 @@
 
 > *Cross-module const/identifier validation must accept this program.*
 
+<img src="preview.png" alt="preview" width="480">
+
 Validation repro for #653: imports across two sibling modules plus a module-level const used in an equality check.

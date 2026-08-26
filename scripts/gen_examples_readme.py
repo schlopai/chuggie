@@ -50,7 +50,16 @@ DIAGNOSTIC = ("bench-", "repro-", "p0-", "probe-")
 # and re-run, then `python3 scripts/set_preview_width.py` for the example READMEs.
 PREVIEW_WIDTH = 480
 
-IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
+# BOTH embed forms, in document order. Markdown's ![alt](src) cannot carry a width, so every
+# example that shows its preview at PREVIEW_WIDTH writes it as <img> — and an index that matched
+# only the markdown form silently skipped the image the README actually leads with and picked some
+# later screenshot instead. That is what put battle.png / de.png / talk.png on the index and made
+# `--check` fail on main.
+IMG_RE = re.compile(r'!\[[^\]]*\]\(([^)\s]+)\)|<img\s[^>]*?src="([^"]+)"')
+
+def images_in(text):
+    """Every embedded image path in the README, markdown or <img>, in document order."""
+    return [md or html for md, html in IMG_RE.findall(text)]
 
 
 def describe(path):
@@ -97,7 +106,7 @@ def describe(path):
     if os.path.exists(os.path.join(path, "preview.gif")):
         return title, tagline, "preview.gif"
 
-    local = [c for c in IMG_RE.findall(text)
+    local = [c for c in images_in(text)
              if not c.startswith("http") and os.path.exists(os.path.join(path, c))]
     chosen = [c for c in local if os.path.basename(c) != "screenshot.png"]
     img = chosen[0] if chosen else (local[0] if local else None)
@@ -125,16 +134,41 @@ def collect():
     return rows, missing_readme
 
 
+def display_title(name, title, tagline):
+    """`beatemup — a Final Fight-shaped brawler`: what the example is, in one line.
+
+    Titles that SHOUT get lowercased — 88 of the 123 READMEs head with an all-caps slug, and a wall
+    of them reads as an error log, not an index. A title that already carries its own `— …` keeps
+    it; otherwise the FIRST clause of the tagline supplies one, which is where the good short
+    descriptions already live ("A Final Fight-shaped brawler: four actors on a road with real
+    depth, …" gives up exactly the phrase you want). The rest of the tagline stays where it
+    belongs, on the example's own page.
+    """
+    if title.upper() == title and any(c.isalpha() for c in title):
+        title = title.lower()
+    if "—" in title:
+        return title
+    short = re.split(r"[:—]|\. ", tagline or "", 1)[0].strip().rstrip(".")
+    if not short:
+        return title
+    # "A Final Fight-shaped brawler" -> "a Final Fight-shaped brawler": it is a clause now, not a
+    # sentence. Only the first letter, so "A Star Wars-ish…" keeps its capitals further in.
+    short = short[0].lower() + short[1:]
+    if short.lower() == title.lower():
+        return title            # "asteroids — asteroids" helps nobody
+    return f"{title} — {short}"
+
+
 def table(rows):
-    out = ["| | example | what it is |", "|---|---|---|"]
+    out = ["| | example |", "|---|---|"]
     for name, title, tagline, shot in rows:
         # The previews are committed at native 240x160 — one GBA pixel per pixel, the smallest the
         # files can be. How big they APPEAR is set here, in the markup, at the same PREVIEW_WIDTH
         # the example READMEs use, so the display size is one decision in one place instead of
-        # something baked into 57 committed binaries.
+        # something baked into 80-odd committed binaries.
         img = f'<img src="{name}/{shot}" width="{PREVIEW_WIDTH}">' if shot else "—"
-        desc = tagline or f"*({title})*"
-        out.append(f"| {img} | **[{title}]({name}/README.md)**<br>`{name}` | {desc} |")
+        out.append(f"| {img} | **[{display_title(name, title, tagline)}]({name}/README.md)**"
+                   f"<br>`{name}` |")
     return "\n".join(out)
 
 
