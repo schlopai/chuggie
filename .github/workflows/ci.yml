@@ -296,11 +296,26 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # @sem/github opens a failure issue when a release throws. Without this it cannot, and the
+      # 403 from the issues API is what surfaces instead of the real error.
+      issues: write
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@v7
         with: { node-version: "24" }
+
+      # WHY THIS REPO HAS NO RELEASES. sem computes the version correctly every time — the last main
+      # run logged "Forced version: 0.1.0 / Next tag: v0.1.0" — and then died on the next line:
+      #
+      #   Failed to create tag v0.1.0: Committer identity unknown
+      #
+      # A tag is a commit-shaped object and actions/checkout does not configure an author, so every
+      # prerelease since the sem migration has failed at exactly that point.
+      - name: Configure git identity for the release tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Next version via sem (dry-run)
         id: sem
