@@ -12176,7 +12176,7 @@ pub fn iso_tile(args: &[Value]) -> Value {
 pub fn iso_walkable(args: &[Value]) -> Value {
     Value::Bool(with_iso_grid(|t| {
         t.idx(n(args, 0) as i32, n(args, 1) as i32)
-            .map_or(false, |i| t.cells[i].walkable)
+            .is_some_and(|i| t.cells[i].walkable)
     }))
 }
 
@@ -12411,7 +12411,7 @@ pub fn iso_unit_move_range(args: &[Value]) -> Value {
 /// as it sweeps outward, and the cheapest way to say "this tile is free to cross" is a flier.
 pub fn iso_set_terrain_cost(args: &[Value]) -> Value {
     let tile = n(args, 0) as usize;
-    let cost = (n(args, 1) as i32).max(1).min(255) as u8;
+    let cost = (n(args, 1) as i32).clamp(1, 255) as u8;
     with_iso_grid(|t| {
         if tile < t.cost.len() {
             t.cost[tile] = cost;
