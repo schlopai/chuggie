@@ -6,7 +6,7 @@ A classic side-scrolling platformer built on the reusable engine, using Luis Zun
 CC0 **Sunny Land** pixel art. The camera follows a fox across a 102×15 streamed level of grass,
 pits, floating platforms, coins, a powerup, and patrolling opossums.
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 ## Controls
 - **d-pad** — move

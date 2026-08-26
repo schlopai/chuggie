@@ -2,7 +2,7 @@
 
 > *A grid-walking top-down overworld: tile-locked movement, door warps between scenes, and NPCs you face and talk to.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 A grid-walking overworld written in tish: tile-by-tile grid walking, wall/rock
 collision, and an NPC you face and talk to. The genre lives in the engine (a `GridPos`

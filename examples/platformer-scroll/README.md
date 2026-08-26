@@ -2,7 +2,7 @@
 
 > *Demonstrates a platformer with a smoothly scrolling camera.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 A side-scrolling platformer with a **smooth follow camera** — the side-scroll
 counterpart of `ninja-adventure` (top-down). Foundation for the metroidvania.

@@ -2,7 +2,7 @@
 
 > *A bug reproduction or regression test case.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 Intended isolated repro for hub→cave `AllocError` when a fat boxed index survives `scene_stream`.
 

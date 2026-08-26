@@ -9,7 +9,7 @@ calls that write straight into that pool, with no tree in between.
 This example draws one screen (a panel of eight rows, nine nodes) both ways, proves the output is
 **pixel-identical**, and prints what each costs.
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 ## The numbers
 

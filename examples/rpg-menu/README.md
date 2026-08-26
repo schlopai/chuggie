@@ -2,7 +2,7 @@
 
 > *Demonstrates nested UI menus for RPGs.*
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 The RPG **"gear up" loop** — inventory, equipment, and a shop — and the first real consumer of the
 `packages/ui.tish` layout engine. Each screen is a declarative flex **tree**; the engine lays it out

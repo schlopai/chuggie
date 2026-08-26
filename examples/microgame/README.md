@@ -2,7 +2,7 @@
 
 > *A WarioWare-shaped bag of four-second games — and the acceptance test for the engine's entity pool.*
 
-<img src="preview.gif">
+<img src="preview.gif" width="480">
 
 Four microgames, three lives, a speed ramp. The point of this example is not the four games in it —
 it is that **the fifth one is an `else if` and a function**, and costs nothing until it is written.

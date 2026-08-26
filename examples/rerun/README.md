@@ -2,7 +2,7 @@
 
 > *Record a run, play it back, and check that the game did the same thing twice — on the cartridge, every twelve seconds.*
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 The acceptance test for **`packages/replay.tish`**, which is new.
 

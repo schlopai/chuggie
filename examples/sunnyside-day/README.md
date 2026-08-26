@@ -1,6 +1,6 @@
 # Sunnyside day — the clock, the night, and the bed
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 Sunnyside de-risk 5, part of the `sunnyside` example family (see
 `examples/sunnyside/SPEC.md`).  A quarter-minute-per-frame day clock (~96s

@@ -2,7 +2,7 @@
 
 > *Demonstrates custom font loading and text rendering.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 Paginated specimens (sprite VRAM is finite). **D-pad Left / Right** flips pages.
 Every face is baked at its **native** pixel size via `font:path@N` (1px stems).

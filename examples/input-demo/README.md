@@ -2,7 +2,7 @@
 
 > *Demonstrates advanced input handling and key state debouncing.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 A small game written entirely in tish, exercising the current `tish-agb` surface:
 

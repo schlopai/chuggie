@@ -2,7 +2,7 @@
 
 > *A benchmark testing the performance of the ai subsystem.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 The same patrol AI over 100 entities, written five ways, timed on hardware-accurate emulation. It
 answers the question every game in this repo eventually runs into: **how many things can I update per

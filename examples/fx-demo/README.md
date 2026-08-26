@@ -2,7 +2,7 @@
 
 > *Demonstrates visual effects, blending modes, and palettes.*
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 One-shot attack / magic VFX from the **Ninja Adventure** pack (`sheet32:`),
 paired with PSG sound effects from `packages/chipsfx` and a looping chiptune bed.

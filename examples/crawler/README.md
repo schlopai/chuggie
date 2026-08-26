@@ -2,7 +2,7 @@
 
 > *A first-person grid maze drawn from rectangles — the one thing 137 examples could not do.*
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 The acceptance test for **`packages/fpview.tish`**, which is new.
 

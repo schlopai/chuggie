@@ -2,7 +2,7 @@
 
 > *Klondike solitaire drawn entirely from ui_rect and ui_text — no art, no sprites, no OAM. A cold screen that repaints only when the table changes.*
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 > Klondike solitaire drawn entirely from `ui_rect` and `ui_text` — no art, no sprites, no OAM. A
 > cold screen that repaints only when the table changes.

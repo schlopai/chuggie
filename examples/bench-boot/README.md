@@ -2,7 +2,7 @@
 
 > *A benchmark testing the performance of the boot subsystem.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 The isoboard SRPG example shows its first pixel on **frame 70** (~1.2s). `akari` takes **465** (~7.8s), the topdown RPG port
 380, `sunny-land` 548. That is a black screen for the length of the GBA BIOS intro, twice over, and

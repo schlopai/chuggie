@@ -2,7 +2,7 @@
 
 > *Demonstrates GBA multiplayer link cable communication.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 A diagnostic ROM for the serial port. It has no gameplay; everything it does is on screen, so you
 can tell at a glance whether two units are talking and how well.

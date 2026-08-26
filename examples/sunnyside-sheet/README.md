@@ -1,6 +1,6 @@
 # Sunnyside sheet — character animation smoke test
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 Sunnyside de-risk 1, part of the `sunnyside` example family (see
 `examples/sunnyside/SPEC.md`).  Proves the baked Sunnyside character sheets on

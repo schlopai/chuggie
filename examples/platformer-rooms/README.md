@@ -2,7 +2,7 @@
 
 > *Demonstrates a platformer with room-based camera transitions.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 A side-scrolling platformer with a **room-pan camera** (classic room-lock style) —
 the side-scroll counterpart of `ninja-village` (top-down). Foundation for the

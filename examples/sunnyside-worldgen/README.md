@@ -1,6 +1,6 @@
 # Sunnyside worldgen — the island generator against its Python twin
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 Sunnyside de-risk 3, part of the `sunnyside` example family (see
 `examples/sunnyside/SPEC.md`).  Generates the whole farming island on

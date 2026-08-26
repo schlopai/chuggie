@@ -7,7 +7,7 @@ Version) character pack. One combined 64×64 sheet holds every clip, and the `He
 [src/components.tish](src/components.tish)) is a mostly self-contained state machine that drives all
 ten states from physics + input + tile probes — the same pattern as the sunny-land example.
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 ## The ten states
 | State | Trigger |

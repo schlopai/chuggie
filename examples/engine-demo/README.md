@@ -2,7 +2,7 @@
 
 > *A comprehensive showcase of multiple engine features working together.*
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 The **Behaviour bridge** — a game component written in *tish*, ticked by the *Rust*
 engine. This is the Unity split made concrete: the engine (Rust) owns the store,

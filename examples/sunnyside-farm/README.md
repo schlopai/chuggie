@@ -1,6 +1,6 @@
 # Sunnyside farm — the farming core
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 Sunnyside de-risk 4, part of the `sunnyside` example family (see
 `examples/sunnyside/SPEC.md`).  The loop the game is named for: till a plot

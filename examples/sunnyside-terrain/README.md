@@ -1,6 +1,6 @@
 # Sunnyside terrain — runtime autotiling of a generated island
 
-![preview](preview.gif)
+<img src="preview.gif" alt="preview" width="480">
 
 Sunnyside de-risk 2, part of the `sunnyside` example family (see
 `examples/sunnyside/SPEC.md`).  Proves the terrain pipeline the farming game
