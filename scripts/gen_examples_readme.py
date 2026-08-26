@@ -86,6 +86,12 @@ def describe(path):
     # READMEs lead with the CI validation frame and then show the good ones (`shmup` does), so
     # "first image wins" would still put a validation artifact on the index. screenshot.png is only
     # used when it is the only image there is.
+    # An animated preview.gif wins outright. A still cannot show what a GBA example actually does —
+    # movement, animation, a transition — so where `scripts/gen_previews.js` managed to record real
+    # motion, that clip is the truest answer to "what is this example" and belongs on the index.
+    if os.path.exists(os.path.join(path, "preview.gif")):
+        return title, tagline, "preview.gif"
+
     local = [c for c in IMG_RE.findall(text)
              if not c.startswith("http") and os.path.exists(os.path.join(path, c))]
     chosen = [c for c in local if os.path.basename(c) != "screenshot.png"]
@@ -117,7 +123,10 @@ def collect():
 def table(rows):
     out = ["| | example | what it is |", "|---|---|---|"]
     for name, title, tagline, shot in rows:
-        img = f'<img src="{name}/{shot}" width="140">' if shot else "—"
+        # No width= — the thumbnails are 240x160 GBA framebuffers and belong on the page at their
+        # true size. Scaling them down resamples pixel art into mush, which is the one thing a
+        # preview of a pixel-art example must not do.
+        img = f'<img src="{name}/{shot}">' if shot else "—"
         desc = tagline or f"*({title})*"
         out.append(f"| {img} | **[{title}]({name}/README.md)**<br>`{name}` | {desc} |")
     return "\n".join(out)

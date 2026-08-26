@@ -22,6 +22,21 @@
 // rather than a thing someone has to put headphones on for. Both the software mixer (Direct Sound)
 // and the PSG/DMG channels land in the same capture, so it also shows the two coexisting.
 //
+// Set GBA_SHOT_SEQ=<dir> to also dump EVERY captured frame as <dir>/fNNNNN.ppm, which is how
+// `scripts/gif.sh` turns one headless run into an animated GIF. A still cannot show movement,
+// animation or a transition; a clip can, and this gets the whole clip out of a SINGLE boot rather
+// than re-running the emulator once per frame. Tune it with GBA_SHOT_SEQ_FROM (first frame to
+// emit, default 0), GBA_SHOT_SEQ_EVERY (emit one frame in N, default 1) and GBA_SHOT_SEQ_MAX
+// (stop after N frames, default 600 — a disk/time backstop; hitting it warns on stderr).
+//
+// Recording will NOT START on a blank frame: a GBA spends its first frames on a flat black or
+// white screen, and a clip that opens on one looks broken. So the first frame emitted is the first
+// one with an actual picture on it, and GBA_SHOT_SEQ_FROM is a floor rather than an exact start.
+// Only the OPENING is guarded — once recording has started a deliberate fade to black is kept.
+// Set GBA_SHOT_SEQ_BLANK=1 to record from GBA_SHOT_SEQ_FROM exactly, blank or not.
+//
+// The positional <out.ppm> is still written, so this composes with everything above.
+//
 // Build:  cc tools/gba-shot.c -o tools/gba-shot -I<mgba>/include -L<mgba>/lib -lmgba
 //         (scripts/screenshot.sh discovers <mgba> via brew/apt/MGBA_PREFIX.)
 #include <mgba/core/blip_buf.h>
@@ -194,6 +209,50 @@ static void audio_close(void) {
             audio_peak == 0 ? "  — SILENT" : "");
 }
 
+// A positive integer from the environment, or `def` when unset/empty/unparseable. Clamped to
+// `lo` so a typo cannot turn "every 0 frames" into a divide-by-zero.
+static int env_int(const char* name, int def, int lo) {
+    const char* v = getenv(name);
+    if (!v || !*v) return def;
+    int n = atoi(v);
+    return n < lo ? lo : n;
+}
+
+// Is this frame a flat colour — i.e. the boot screen, a cleared backdrop, a fully-faded frame —
+// rather than a picture? Measured as "essentially every pixel matches the top-left one", which is
+// what a blank GBA screen looks like. Cheap: one pass, no histogram, the same cost as the
+// GBA_SHOT_TRACE hash that already runs over every frame.
+//
+// The threshold has to be this close to 1. A single 16x16 sprite on an empty backdrop paints 0.7%
+// of a 240x160 screen, so anything as loose as "98% uniform" throws away real frames — it read
+// half the sprite demos in examples/ as blank.
+#define BLANK_PIXEL_FRACTION 0.999
+static int frame_is_blank(const color_t* buf, unsigned w, unsigned h) {
+    size_t n = (size_t)w * h, same = 0;
+    color_t first = buf[0] & 0xFFFFFF;
+    for (size_t i = 0; i < n; i++) {
+        if ((buf[i] & 0xFFFFFF) == first) same++;
+    }
+    return (double)same >= BLANK_PIXEL_FRACTION * (double)n;
+}
+
+// Write one framebuffer as a binary PPM (P6). Shared by the final screenshot and, under
+// GBA_SHOT_SEQ, by every frame of a captured sequence.
+static int write_ppm(const char* path, const color_t* buf, unsigned w, unsigned h) {
+    FILE* f = fopen(path, "wb");
+    if (!f) { fprintf(stderr, "gba-shot: cannot open %s for writing\n", path); return 0; }
+    fprintf(f, "P6\n%u %u\n255\n", w, h);
+    for (size_t i = 0; i < (size_t)w * h; i++) {
+        color_t c = buf[i];                                 // native: 0xAABBGGRR (byte0=R,1=G,2=B)
+        unsigned char px[3] = { (unsigned char)(c & 0xFF),
+                                (unsigned char)((c >> 8) & 0xFF),
+                                (unsigned char)((c >> 16) & 0xFF) };
+        fwrite(px, 1, 3, f);
+    }
+    fclose(f);
+    return 1;
+}
+
 // Swallow mGBA's internal BIOS/DMA/etc. logging so only the framebuffer + our status line show.
 // If GBA_SHOT_LOG is set in the environment, forward log lines to stderr instead (so a ROM's
 // `agb::println!`/tish `log()` output — e.g. timing instrumentation — is visible to the harness).
@@ -276,6 +335,16 @@ int main(int argc, char** argv) {
         blip_set_rates(core->getAudioChannel(core, 0), core->frequency(core), AUDIO_RATE);
         blip_set_rates(core->getAudioChannel(core, 1), core->frequency(core), AUDIO_RATE);
     }
+    // Optional frame-sequence dump (see GBA_SHOT_SEQ in the header comment). Read once: these are
+    // per-run settings, and the run loop is hot enough that repeated getenv() would be silly.
+    const char* seq_dir = getenv("GBA_SHOT_SEQ");
+    if (seq_dir && !*seq_dir) seq_dir = NULL;
+    const int seq_from = env_int("GBA_SHOT_SEQ_FROM", 0, 0);
+    const int seq_every = env_int("GBA_SHOT_SEQ_EVERY", 1, 1);
+    const int seq_max = env_int("GBA_SHOT_SEQ_MAX", 600, 1);
+    const int seq_allow_blank = getenv("GBA_SHOT_SEQ_BLANK") != NULL;
+    int seq_written = 0, seq_capped = 0, seq_blanks_skipped = 0;
+
     // Re-assert keys BEFORE each frame — mGBA samples the key state per frame.
     const int trace = getenv("GBA_SHOT_TRACE") != NULL;
     unsigned prev_hash = 0;
@@ -286,6 +355,22 @@ int main(int argc, char** argv) {
         else core->setKeys(core, 0);
         core->runFrame(core);
         audio_drain(core);
+        if (seq_dir && i >= seq_from && (i - seq_from) % seq_every == 0) {
+            // Hold off until there is something to look at. Checked only while nothing has been
+            // recorded yet, so a fade or a flash mid-clip is recorded like any other frame.
+            if (seq_written == 0 && !seq_allow_blank && frame_is_blank(buffer, w, h)) {
+                seq_blanks_skipped++;
+            } else if (seq_written >= seq_max) {
+                seq_capped = 1;
+            } else {
+                // Index by frames EMITTED, not by i, so lexical filename order is playback order
+                // whatever GBA_SHOT_SEQ_FROM/EVERY are set to.
+                char path[4096];
+                snprintf(path, sizeof path, "%s/f%05d.ppm", seq_dir, seq_written);
+                if (!write_ppm(path, buffer, w, h)) return 1;
+                seq_written++;
+            }
+        }
         if (trace) {
             // FNV-1a over the framebuffer, plus a non-white count so a forced-blank/white screen
             // is distinguishable from real picture at a glance.
@@ -302,17 +387,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    FILE* f = fopen(out, "wb");
-    if (!f) { fprintf(stderr, "gba-shot: cannot open %s for writing\n", out); return 1; }
-    fprintf(f, "P6\n%u %u\n255\n", w, h);
-    for (size_t i = 0; i < (size_t)w * h; i++) {
-        color_t c = buffer[i];                              // native: 0xAABBGGRR (byte0=R,1=G,2=B)
-        unsigned char px[3] = { (unsigned char)(c & 0xFF),
-                                (unsigned char)((c >> 8) & 0xFF),
-                                (unsigned char)((c >> 16) & 0xFF) };
-        fwrite(px, 1, 3, f);
-    }
-    fclose(f);
+    if (!write_ppm(out, buffer, w, h)) return 1;
     free(buffer);
     audio_close();
     // Flush save data before tearing the core down; unloading is what commits it to disk.
@@ -322,5 +397,16 @@ int main(int argc, char** argv) {
     core->deinit(core);
     fprintf(stderr, "gba-shot: rendered %ux%u @ frame %d%s\n", w, h, frames,
             is_schedule ? " (key schedule)" : (keys ? " (keys held)" : ""));
+    if (seq_dir) {
+        fprintf(stderr, "gba-shot: sequence %d frames -> %s\n", seq_written, seq_dir);
+        if (seq_blanks_skipped) {
+            fprintf(stderr, "gba-shot: skipped %d blank frame(s) before the picture appeared\n",
+                    seq_blanks_skipped);
+        }
+        // Never truncate silently: a capped clip looks exactly like a short one otherwise.
+        if (seq_capped) {
+            fprintf(stderr, "gba-shot: warning: stopped at GBA_SHOT_SEQ_MAX=%d frames\n", seq_max);
+        }
+    }
     return 0;
 }

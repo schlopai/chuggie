@@ -96,6 +96,22 @@
       "detail": "Headless screenshot -> examples/<name>/screenshot.png"
     },
     {
+      "label": "Gif: current example",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/rom.sh gif \"${file}\"",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "showReuseMessage": false
+      },
+      "problemMatcher": [],
+      "detail": "Headless animated clip -> examples/<name>/screenshot.gif"
+    },
+    {
       "label": "Play: akari",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/rom.sh play akari",

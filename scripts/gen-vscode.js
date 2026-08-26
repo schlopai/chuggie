@@ -49,6 +49,9 @@ const tasks = [
   task('Shot: current example', 'shot', '"${file}"', {
     detail: 'Headless screenshot -> examples/<name>/screenshot.png',
   }),
+  task('Gif: current example', 'gif', '"${file}"', {
+    detail: 'Headless animated clip -> examples/<name>/screenshot.gif',
+  }),
   ...examples.map((n) => task(`Play: ${n}`, 'play', n, { detail: `Run examples/${n} (no build)` })),
   ...examples.map((n) => task(`Build: ${n}`, 'build', n, { detail: `Build examples/${n}` })),
 ];

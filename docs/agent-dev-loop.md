@@ -94,6 +94,24 @@ right left up down r l`.
 Read the PNG back with the image reader — the model can see it. This is the primary form of evidence
 in this repo: a screenshot showing the thing working is worth more than a passing assertion.
 
+When the thing to show is *motion* — a walk cycle, a scene transition, a particle burst, an AI
+actually reacting — a still cannot carry it. `scripts/gif.sh` takes the same four arguments and
+records the run as a looping GIF out of a single emulator boot:
+
+```bash
+scripts/gif.sh <rom.gba | src/main.tish> [out.gif] [frames] [keys]
+```
+
+Recording never opens on a blank frame — a GBA spends its first frames on flat black or white, and
+a clip that starts there looks broken — so `GIF_FROM` is a floor, not an exact start, and the first
+frame you get is the first one with a picture on it. (`GBA_SHOT_SEQ_BLANK=1` turns that guard off.)
+Only the opening is guarded: a deliberate fade to black mid-clip is recorded like anything else.
+
+Tune it with `GIF_FROM` (first frame recorded, default 60 — skips the boot frames), `GIF_EVERY`
+(record one frame in N, default 3 ≈ 20fps), `GIF_SCALE` (default 2) and `GIF_MAX_FRAMES`
+(default 300). Every example exposes it as `npm run gif`, inheriting that example's own `shot`
+frame count and key schedule.
+
 > **Trap — a schedule entry HOLDS until the next entry.** `"300:right,320:right"` presses right
 > *once*: the key was already down at 320, so no new press is registered. Every press needs an
 > explicit release:

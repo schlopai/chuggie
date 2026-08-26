@@ -22,16 +22,16 @@ jobs:
       # Lay the repos out to mirror the local checkout layout (see ci.yml's header note):
       #   $GITHUB_WORKSPACE/chuggie/chuggie-engine + $GITHUB_WORKSPACE/chuggie/agb + $GITHUB_WORKSPACE/tish/tish
       - name: Checkout chuggie-engine
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: chuggie/chuggie-engine
       - name: Checkout tish compiler
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: tishlang/tish
           path: tish/tish
       - name: Checkout the agb fork (patched in .cargo/config.toml)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: spacedevin/agb
           ref: chuggie
@@ -41,7 +41,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y imagemagick python3-pil libfreetype6-dev pkg-config cmake libpng-dev zlib1g-dev
       - name: Cache libmgba
         id: mgba-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/mgba-prefix
           key: mgba-0.10.5-${{ runner.os }}
@@ -79,7 +79,7 @@ jobs:
         run: ./scripts/screenshot.sh examples/overworld-demo/src/main.tish screenshot.png 200
 
       - name: Upload screenshot
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: overworld-demo-screenshot
           path: chuggie/chuggie-engine/screenshot.png

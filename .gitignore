@@ -6,8 +6,10 @@ target
 # npm: examples reference the tish CLI (@tishlang/tish) as a normal dependency; installs are local.
 node_modules/
 package-lock.json
-# `npm run shot` writes a headless preview here (committed specimens are named <example>.png).
+# `npm run shot` / `npm run gif` write headless previews here (committed specimens are named
+# <example>.png).
 **/screenshot.png
+**/screenshot.gif
 
 # itch.io HTML5 packages from `npm run itch -- publish <example>`
 /dist/itch/
