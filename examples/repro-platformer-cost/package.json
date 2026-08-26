@@ -12,17 +12,10 @@
   },
   "tish": {
     "rustDependencies": {
-      "tish_agb": {
-        "path": "../../crates/tish-agb"
-      },
-      "tish_gba_game_engine": {
-        "path": "../../crates/tish-gba-game-engine"
-      },
-      "tish_gba_scenepack": {
-        "path": "../../crates/tish-gba-scenepack"
-      }
+      "tish_agb": { "path": "../../crates/tish-agb" },
+      "tish_gba_game_engine": { "path": "../../crates/tish-gba-game-engine" }
     }
   },
   "version": "0.0.0",
-  "description": "Measure where packages/platformer.tish spends its ticks: drive vs animate vs the hook dispatch itself \u2014 the numbers behind the platformer de-boxing pass."
+  "description": "Measure where packages/platformer.tish spends its ticks: drive vs animate vs the hook dispatch itself — the numbers behind the platformer de-boxing pass."
 }

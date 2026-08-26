@@ -41,9 +41,19 @@ const AUTOPLAY_FRAMES = 720;    // long enough to get through a title/intro and 
 // The four timer ROMs are here for a different reason: they draw nothing because they cannot. See
 // scripts/add_screen_readout.py — a readout ahead of the measurement lands inside it, and
 // bench-tables' SANE gate caught it (fill64=-64532, a wrapped counter). They stay blank on purpose.
-const NO_PREVIEW = new Set([
-  'bench-behav', 'bench-boot',
+// Examples that get NO preview, for two different reasons — kept apart so the report says which.
+//
+// Unlicensed art: built against ripped sprites/tilesets, so a committed preview would redistribute
+// someone else's artwork. They need their assets replaced (or the example dropping).
+const NO_PREVIEW_ART = new Set(['bench-behav', 'bench-boot']);
+
+// Reads a clock: a preview needs the ROM to draw, and drawing costs time. A backdrop, two hud_text
+// calls and a frame() ahead of a measurement IS the measurement for these — bench-tables came back
+// with a one-frame fill of ~-194664 ticks, a wrapped counter rather than a number. Correct beats
+// photogenic, so they keep their blank screen. scripts/add_screen_readout.py refuses them too.
+const NO_PREVIEW_CLOCK = new Set([
   'bench-tables', 'bench-access', 'bench-entities', 'probe-arrayarg',
+  'bench-systems', 'repro-platformer-cost',
 ]);
 
 // Per-example capture-window overrides, for the few where the generic window produces something
@@ -174,6 +184,7 @@ function isFlat(png) {
 }
 
 const done = [], skipped = [], failed = [], stills = [], nothing = [], unpublishable = [], kept = [],
+  timed = [],
   undriven = [];
 for (const name of examples) {
   const exDir = path.join(dir, name);
@@ -181,7 +192,8 @@ for (const name of examples) {
   const script = (pkg.scripts && (pkg.scripts.gif || pkg.scripts.shot)) || '';
   const m = CAP_RE.exec(script);
 
-  if (NO_PREVIEW.has(name)) { unpublishable.push(name); continue; }
+  if (NO_PREVIEW_ART.has(name)) { unpublishable.push(name); continue; }
+  if (NO_PREVIEW_CLOCK.has(name)) { timed.push(name); continue; }
 
   const rom = findRom(exDir, pkg, m);
   if (!rom) { skipped.push(`${name} (no ROM — build it first)`); continue; }
@@ -322,6 +334,10 @@ if (kept.length) {
 }
 if (stills.length) {
   console.log(`no motion, wrote a still instead: ${stills.join(', ')}`);
+}
+if (timed.length) {
+  console.log(`no preview — reads a clock, and drawing one would land inside its measurement:`
+    + ` ${timed.join(', ')}`);
 }
 if (unpublishable.length) {
   console.log(`no preview by policy (unlicensed art — replace the assets or drop the example):`
