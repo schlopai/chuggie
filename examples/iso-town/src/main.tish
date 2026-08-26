@@ -1,6 +1,6 @@
 // iso-town — isometric plaza: free walk, talk to NPCs, merchant opens packages/shop.
 //
-// Map/render stack from iso-tactics (tactics: bake + depth-sorted raised tiles + actor sheets).
+// Map/render stack from iso-tactics (isoboard bake + depth-sorted raised tiles + actor sheets).
 // Motion from iso-sprite (quarter-tile d-pad glide). Camera follows the player like akari
 // (`camera_set` + `bg_scroll`). Talk/shop from packages/dialog + packages/shop.
 import { board } from 'isoboard:../tiled/town.tmj'
@@ -17,9 +17,9 @@ import {
   sprite_set_depth, sprite_set_flip, key_held, key_pressed, frame
 } from 'cargo:tish_agb'
 import {
-  tac_load, tac_board_bg, tac_board_ox, tac_board_oy, tac_w, tac_h, tac_height,
-  tac_stack_count, tac_stack_elev, tac_stack_tile, tac_spawn_count, tac_spawn_col,
-  tac_spawn_row, tac_spawn_cls, tac_walkable
+  iso_load, iso_board_bg, iso_board_ox, iso_board_oy, iso_w, iso_h, iso_height,
+  iso_stack_count, iso_stack_elev, iso_stack_tile, iso_spawn_count, iso_spawn_col,
+  iso_spawn_row, iso_spawn_cls, iso_walkable
 } from 'cargo:tish_gba_game_engine'
 import { uiInit } from '../../../packages/ui'
 import { dialogInit, dialogSay, dialogActive, dialogUpdate } from '../../../packages/dialog'
@@ -28,11 +28,11 @@ import { DIR_STRIDE, ANIM_WALK, facing } from './anim'
 import { CLS_PLAYER, npcDef } from './npcs'
 
 // ═══ Iso projection (origin comes from the bake so large boards stay in sync) ═══
-tac_load(board)
-let MAPW = tac_w()
-let MAPH = tac_h()
-let ORIGIN_X = tac_board_ox(board)
-let ORIGIN_Y = tac_board_oy(board)
+iso_load(board)
+let MAPW = iso_w()
+let MAPH = iso_h()
+let ORIGIN_X = iso_board_ox(board)
+let ORIGIN_Y = iso_board_oy(board)
 let TILE_HALF_W = 16
 let TILE_HALF_H = 8
 let LIFT_PER_STEP = 8
@@ -47,7 +47,7 @@ let CAM_MAX_Y = BOARD_PX - 160
 if (CAM_MAX_X < 0) { CAM_MAX_X = 0 }
 if (CAM_MAX_Y < 0) { CAM_MAX_Y = 0 }
 
-function cellHeight(col, row) { return tac_height(col, row) }
+function cellHeight(col, row) { return iso_height(col, row) }
 function isoX(col, row) { return ORIGIN_X + (col - row) * TILE_HALF_W }
 function isoY(col, row) { return ORIGIN_Y + (col + row) * TILE_HALF_H }
 function tileTopY(col, row) { return isoY(col, row) - cellHeight(col, row) * LIFT_PER_STEP }
@@ -61,7 +61,7 @@ function clampCam(v, lo, hi) {
 }
 
 // ═══ Floor + raised occluders (world space; camera offsets them at draw time) ═══
-let boardBg = bg_new(tac_board_bg(board))
+let boardBg = bg_new(iso_board_bg(board))
 
 // Centre the camera on a world-pixel focus (akari-style smooth follow), clamped to the board.
 function followCam(wx, wy) {
@@ -75,12 +75,12 @@ let riseI = 0
 while (riseI < MAPW * MAPH) {
   let rc = riseI % MAPW
   let rr = (riseI - rc) / MAPW
-  let nStack = tac_stack_count(board, rc, rr)
+  let nStack = iso_stack_count(board, rc, rr)
   let si = 0
   while (si < nStack) {
-    let elev = tac_stack_elev(board, rc, rr, si)
+    let elev = iso_stack_elev(board, rc, rr, si)
     let s = sprite_new(tiles)
-    sprite_set_frame(s, tac_stack_tile(board, rc, rr, si))
+    sprite_set_frame(s, iso_stack_tile(board, rc, rr, si))
     sprite_set_pos(s, isoX(rc, rr), isoY(rc, rr) - elev * LIFT_PER_STEP)
     sprite_set_depth(s, depthAt(rc, rr, elev))
     si = si + 1
@@ -99,15 +99,15 @@ function sheetFor(cls) {
 
 // ═══ NPCs (cls > 0) ═════════════════════════════════════════════════════════════
 let npcs = []
-let SPAWN_COUNT = tac_spawn_count(board)
+let SPAWN_COUNT = iso_spawn_count(board)
 let playerStartCol = 6
 let playerStartRow = 10
 
 let placeI = 0
 while (placeI < SPAWN_COUNT) {
-  let cls = tac_spawn_cls(board, placeI)
-  let col = tac_spawn_col(board, placeI)
-  let row = tac_spawn_row(board, placeI)
+  let cls = iso_spawn_cls(board, placeI)
+  let col = iso_spawn_col(board, placeI)
+  let row = iso_spawn_row(board, placeI)
   if (cls === CLS_PLAYER) {
     playerStartCol = col
     playerStartRow = row
@@ -174,7 +174,7 @@ function canStand(col, row) {
   if (row < 0) { return 0 }
   if (col >= MAPW) { return 0 }
   if (row >= MAPH) { return 0 }
-  if (!tac_walkable(col, row)) { return 0 }
+  if (!iso_walkable(col, row)) { return 0 }
   if (npcAt(col, row) !== null) { return 0 }
   return 1
 }
