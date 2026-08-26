@@ -1,4 +1,4 @@
-# CONTRACT — tish compiler ⇄ chuggie-engine framework
+# CONTRACT — tish compiler ⇄ chuggie framework
 
 This file pins the interface between the two tracks so they move independently:
 

@@ -1,5 +1,6 @@
 {
   "name": "bench-tables",
+  "version": "0.0.0",
   "private": true,
   "scripts": {
     "assets": "python3 ../../scripts/gen_bench_tables.py",

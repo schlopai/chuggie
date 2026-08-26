@@ -1,4 +1,4 @@
-// scene.tish — a tiny, genre-agnostic SCENE-TRANSITION system for chuggie-engine.
+// scene.tish — a tiny, genre-agnostic SCENE-TRANSITION system for chuggie.
 //
 // A "scene" is just an object with three closures:
 //     { enter: () => {…}, update: () => {…}, leave: () => {…} }

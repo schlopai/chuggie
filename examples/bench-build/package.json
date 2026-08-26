@@ -1,5 +1,6 @@
 {
   "name": "bench-build",
+  "version": "0.0.0",
   "private": true,
   "scripts": {
     "build": "tish build src/engine_only.tish --target gba -o engine_only.gba",

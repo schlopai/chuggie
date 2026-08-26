@@ -42,6 +42,7 @@
         }
       }
     },
+    "_sheet_comment": "`sheet:path@N` bakes a PNG strip as N×N cells (default @16 when omitted). Prefer this over the legacy `sheet32:`/`sheet64:`/`sheet8:` prefixes — same bake, one scheme. Non-square cells (`sheet3264:`, `sheet6432:`) still need their own prefix.",
     "sheet": {
       "file": true,
       "targets": {
@@ -51,7 +52,7 @@
             "use agb::display::{Palette16, Rgb15};",
             "use agb::align_bytes;"
           ],
-          "module": "agb::include_aseprite_inner!(16x16 {path});",
+          "module": "agb::include_aseprite_inner!({size}x{size} {path});",
           "accessor": "pub fn sheet() -> &'static [Sprite] { SPRITES }",
           "register": "tishlang_runtime::gba::__asset_register_sheet({mod}::sheet())",
           "bind": "handle"

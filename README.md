@@ -1,4 +1,4 @@
-# chuggie-engine
+# chuggie
 
 Write Game Boy Advance games in **[tish](https://tishlang.com/)** (a TS/JS-like
 language that transpiles to Rust), running on **[agb](https://github.com/agbrs/agb)

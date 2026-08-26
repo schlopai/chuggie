@@ -10,8 +10,8 @@ in `card-gba`.
 
 ## What it resolves
 
-[#63](https://github.com/schlopai/chuggie-engine/issues/63) and
-[#66](https://github.com/schlopai/chuggie-engine/issues/66). `packages/cutscene.tish` documented three
+[#63](https://github.com/schlopai/chuggie/issues/63) and
+[#66](https://github.com/schlopai/chuggie/issues/66). `packages/cutscene.tish` documented three
 hooks so that *"a game that draws with raw sprites and presents its own frames can use every verb
 here"* — then imported five game-engine natives at module top for the defaults behind them. tish's
 native merge links whole modules, so the escape hatch never reached.
@@ -45,7 +45,7 @@ Same ROM, same scene, one import line different:
 | `packages/cutscene` (links the engine + dialog + chipsfx) | 146,432 |
 
 **32 KB**, for a scene that uses neither entities nor the dialogue package. That is
-[#64](https://github.com/schlopai/chuggie-engine/issues/64)'s shape with a hard number on it.
+[#64](https://github.com/schlopai/chuggie/issues/64)'s shape with a hard number on it.
 
 ## The contract
 

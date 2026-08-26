@@ -21,7 +21,7 @@
 //
 // `package.json` lists `tish_agb` only. There is no entity system here and nothing to step — the
 // sequencer runs on the four hooks `cutscene-core` asks for, and `cutSetStep` is a bare `frame()`.
-// A visual novel is exactly the game shape schlopai/chuggie-engine#63 and #66 were about.
+// A visual novel is exactly the game shape schlopai/chuggie#63 and #66 were about.
 
 import { faces32 } from 'sheet32:../assets/faces32.png'
 import {

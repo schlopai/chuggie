@@ -1,5 +1,6 @@
 {
   "name": "warforge",
+  "version": "0.0.0",
   "private": true,
   "scripts": {
     "assets": "python3 ../../scripts/gen_warforge.py",

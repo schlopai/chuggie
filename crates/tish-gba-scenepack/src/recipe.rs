@@ -1,4 +1,4 @@
-//! The declarative scene-recipe schema. A recipe describes a small chuggie-engine map purely as
+//! The declarative scene-recipe schema. A recipe describes a small chuggie map purely as
 //! references into the vendored Ninja Adventure catalog (autotile.json + tileset PNGs) — no
 //! prebuilt atlas or binary is checked in; `include_scene!` (see lib.rs) packs both at compile
 //! time from this file alone.

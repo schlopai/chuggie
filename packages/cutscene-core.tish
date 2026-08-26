@@ -7,7 +7,7 @@
 // Then it imported five natives from `cargo:tish_gba_game_engine` at module top for the DEFAULTS
 // behind those hooks, and tish's native merge links whole modules. So the escape hatch did not
 // reach: a game that supplied all three hooks still linked the engine, and a game that could not
-// link it could not use the package at all (schlopai/chuggie-engine#63).
+// link it could not use the package at all (schlopai/chuggie#63).
 //
 // The cost of that was not theoretical. `card-gba` ships three card RPGs on `tish_agb` with 33
 // Tiled towns between them, and a grep across all three for `cutSay` / `cutMove` / `camera_set`

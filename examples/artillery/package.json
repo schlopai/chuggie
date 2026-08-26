@@ -1,5 +1,6 @@
 {
   "name": "artillery",
+  "version": "0.0.0",
   "private": true,
   "scripts": {
     "assets": "python3 ../../scripts/gen_artillery_tables.py && python3 ../../scripts/gen_artillery.py",

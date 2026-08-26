@@ -1,8 +1,8 @@
 {
-  "name": "chuggie-engine",
+  "name": "chuggie",
   "version": "0.0.0",
   "private": true,
-  "description": "Write Game Boy Advance games in tish (a TS/JS-like language → Rust) on agb 0.25.",
+  "description": "Write Game Boy Advance games in tish (a TS/JS-like language \u2192 Rust) on agb 0.25.",
   "workspaces": [
     "examples/*"
   ],

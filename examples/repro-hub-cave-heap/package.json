@@ -1,5 +1,6 @@
 {
   "name": "repro-hub-cave-heap",
+  "version": "0.0.0",
   "private": true,
   "scripts": {
     "build": "TISH_FAST_NATIVE_BUILD=1 tish build src/main.tish --target gba -o repro-hub-cave-heap.gba",

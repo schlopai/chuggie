@@ -1,5 +1,5 @@
 // AKARI — a top-down action-RPG on the Ninja Adventure pack, built entirely from tish components on the
-// chuggie-engine engine. The whole game is here: a title screen, an opening cutscene, the town of Willow
+// chuggie engine. The whole game is here: a title screen, an opening cutscene, the town of Willow
 // Vale, and the Hollow Shrine dungeon with real-time sword combat, chase-AI enemies, a boss, and a
 // heart-container upgrade. Both areas are Tiled maps baked into ROM (`scene:`), streamed as the
 // camera scrolls; entities are spawned from each map's object layer and given a component by kind.

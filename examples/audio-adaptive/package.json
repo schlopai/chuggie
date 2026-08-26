@@ -1,5 +1,6 @@
 {
   "name": "audio-adaptive",
+  "version": "0.0.0",
   "private": true,
   "scripts": {
     "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",

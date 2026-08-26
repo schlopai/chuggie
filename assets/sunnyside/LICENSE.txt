@@ -11,5 +11,5 @@ asset page at download time, 2026-08-18):
 - Cannot be resold or redistributed as an asset pack.
 - Cannot be used in NFTs or to train AI models.
 
-This vendored copy is included for use by the chuggie-engine examples with
+This vendored copy is included for use by the chuggie examples with
 attribution to Daniel Diggle.

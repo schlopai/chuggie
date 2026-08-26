@@ -1,5 +1,6 @@
 {
   "name": "cutscene-raw",
+  "version": "0.0.0",
   "private": true,
   "scripts": {
     "assets": "python3 ../../scripts/gen_cutscene_raw.py",
@@ -17,5 +18,5 @@
       "tish_gba_scenepack": { "path": "../../crates/tish-gba-scenepack" }
     }
   },
-  "description": "A staged cutscene in a game that cannot link the game-engine crate: raw sprites, no entities, no dialog package. The actor walks into frame, the camera pans, and a choice branches — the three beats schlopai/chuggie-engine#66 records as currently impossible."
+  "description": "A staged cutscene in a game that cannot link the game-engine crate: raw sprites, no entities, no dialog package. The actor walks into frame, the camera pans, and a choice branches — the three beats schlopai/chuggie#66 records as currently impossible."
 }

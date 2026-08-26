@@ -1,4 +1,4 @@
-// cutscene.tish — a small scripted-sequence API for the chuggie-engine engine.
+// cutscene.tish — a small scripted-sequence API for the chuggie engine.
 //
 // A cutscene is written as a plain SEQUENCE of blocking calls — each `cut*` owns its own vsync loop
 // (it calls `present()` every frame, so actors keep animating + rendering) and returns only when
@@ -52,7 +52,7 @@
 // read an actor back and therefore genuinely requires an engine entity.
 //
 // Every existing scene is unchanged: importing this file installs exactly the defaults that used to
-// be hardcoded. A game that cannot link the engine crate (schlopai/chuggie-engine#58, #63) imports
+// be hardcoded. A game that cannot link the engine crate (schlopai/chuggie#58, #63) imports
 // `./cutscene-core` directly and supplies its own hooks.
 //
 // ⚠️ Re-exported rather than re-implemented. A game importing `packages/cutscene` gets the same

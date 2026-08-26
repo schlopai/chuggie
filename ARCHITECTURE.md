@@ -1,4 +1,4 @@
-# chuggie-engine architecture — layers & separation of concerns
+# chuggie architecture — layers & separation of concerns
 
 What lives where, and the dependency rules that keep the layers clean. This is the map;
 `CONTRACT.md` pins the exact compiler↔framework wire format, and the tish repo's

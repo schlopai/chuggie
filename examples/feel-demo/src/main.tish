@@ -4,11 +4,11 @@
 // REPO COMPILED IT. It was never dead code — it had three consumers, but every one of them lived in
 // the sibling card-gba tree and reached across the repo boundary to get here:
 //
-//     card-gba/examples/fx-demo/src/main.tish  ->  ../../../../../chuggie-engine/packages/feel
-//     card-gba/packages/qb-view.tish           ->  ../../../chuggie-engine/packages/feel
-//     card-gba/packages/qb-engine.tish         ->  ../../../chuggie-engine/packages/feel
+//     card-gba/examples/fx-demo/src/main.tish  ->  ../../../../../chuggie/packages/feel
+//     card-gba/packages/qb-view.tish           ->  ../../../chuggie/packages/feel
+//     card-gba/packages/qb-engine.tish         ->  ../../../chuggie/packages/feel
 //
-// which is the actual problem. chuggie-engine owns the file and ships it, and had no way to find out it
+// which is the actual problem. chuggie owns the file and ships it, and had no way to find out it
 // had broken it: every build that would have said so lived in another checkout. A package whose only
 // compiler is downstream is a package this repo cannot maintain.
 //
@@ -17,7 +17,7 @@
 // stacking bumps, hit-stop against a stalling game counter, the intensity dial from 0 to 2x, the
 // two-pass draw, `feelStop` on a scene change and the caller's erase-colour contract — plus the
 // things it never reached: the event CHANNEL, the raw primitives behind the presets, `feelPalette`,
-// and a verify.sh, which neither had. (Not to be confused with chuggie-engine's OWN examples/fx-demo,
+// and a verify.sh, which neither had. (Not to be confused with chuggie's OWN examples/fx-demo,
 // which shares the name and nothing else: that one is Ninja Adventure sprite sheets and PSG
 // one-shots and never touches this file.)
 //

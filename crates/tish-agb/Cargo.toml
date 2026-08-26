@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Low-level agb bindings exposed to tish (imported via cargo:tish_agb)"
-repository = "https://github.com/schlopai/chuggie-engine"
+repository = "https://github.com/schlopai/chuggie"
 
 # Linked into the generated GBA ROM crate. Exposes the tish native-module ABI
 # (`pub fn name(args: &[Value]) -> Value`); the tish compiler auto-generates the
