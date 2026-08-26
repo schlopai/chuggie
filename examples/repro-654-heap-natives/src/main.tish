@@ -1,7 +1,15 @@
 // Repro #654 heap: many FunDecls each naming `log`.
 // Assert: VmRef::new(log…) count stays tiny (snapshots), no allocation OOM.
-import { log, vblank } from 'cargo:tish_agb'
+import { log, vblank, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "repro-654-heap-natives")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 function f0() { log("f0") }
 function f1() { log("f1") }
 function f2() { log("f2") }
@@ -43,3 +51,5 @@ while (i < 130) {
   i = i + 1
 }
 log("repro-654-heap-natives done")
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }

@@ -12,7 +12,8 @@
 // Screen-space discipline: no camera target is set, so everything must stay inside the
 // 240x160 view or the off-screen cull freezes it mid-test. Floor row 8 (y=128), walls at
 // cols 0 and 14.
-import { log } from 'cargo:tish_agb'
+import { log, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 import {
   spawn, despawn, set_transform, set_collider, set_platformer, set_tag, set_stun, set_patrol,
   platformer_jump, platformer_walk, platformer_grounded, platformer_vy,
@@ -20,6 +21,13 @@ import {
   entity_x, entity_y, grid_setup, grid_set_solid, world_step
 } from 'cargo:tish_gba_game_engine'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "repro-eco-natives")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 // ── the little world ──────────────────────────────────────────────────────────
 grid_setup(15, 10)
 let c: i32 = 0
@@ -200,3 +208,5 @@ while (f < 640) {
   f = f + 1
 }
 log("repro-eco-natives done")
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }

@@ -3,9 +3,16 @@
 // Both sides lay out the SAME tree and print the same numbers, so a mismatch is a diff in the log
 // rather than a subtly wrong menu three screens into a game. The boxed side here is a transcription
 // of packages/ui.tish's flat LN pass — deliberately, so this file is the parity contract.
-import { log, vblank, lay_reset, lay_push, lay_set_measured, lay_solve,
-         lay_x, lay_y, lay_w, lay_h, lay_hide, lay_content, lay_view } from 'cargo:tish_agb'
+import { log, vblank, lay_reset, lay_push, lay_set_measured, lay_solve, lay_x, lay_y, lay_w, lay_h, lay_hide, lay_content, lay_view, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "repro-ui-layout")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 // A row of three fixed boxes in a padded container, then a column scroll container that must cull.
 function buildNative(): i32 {
   lay_reset()
@@ -49,3 +56,5 @@ log("scroll hide: " + lay_hide(1) + lay_hide(2) + lay_hide(3) + lay_hide(4))
 let f: i32 = 0
 while (f < 30) { vblank() f = f + 1 }
 log("done")
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }

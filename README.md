@@ -2,7 +2,7 @@
 
 Write Game Boy Advance games in **[tish](https://tishlang.com/)** (a TS/JS-like
 language that transpiles to Rust), running on **[agb](https://github.com/agbrs/agb)
-0.25**. Two layers, both usable:
+0.25**. Docs and marketing: **[chuggie.dev](https://chuggie.dev)**. Two layers, both usable:
 
 - **`tish-agb`** — low-level bindings (sprites, backgrounds, input, audio, save,
   timers, rng, log). Enough to build a whole game by itself.
@@ -36,15 +36,35 @@ frame in tish, measured. `scripts/const_to_let.py` applies the biggest one in bu
 
 ## Status
 
-Bootstrapping (**P0**). Done: toolchain validated, workspace scaffold, and the two
-de-risking spikes —
-- **P0a ✅** a hand-written no_std mock of generated code builds for
-  `thumbv4t-none-eabi` and produces a valid `.gba` ROM (`examples/p0-spike`).
-- **P0c ✅ (negative)** hecs can't compile on GBA (atomics) → engine uses a custom
-  SoA store.
+**Pre-1.0** — production demos and CI, not a finished public 1.0 API.
 
-Two key plan corrections came out of P0: the portable value map hashes with
-**FxHasher**, not foldhash (foldhash needs atomics), and **hecs is out**.
+- 120+ examples, 50+ authoring packages, headless mGBA verify in CI
+- SoA ECS (`tish-gba-game-engine`) + low-level `tish-agb` bindings on agb 0.25
+- Genre kits (shmup, platformer, top-down, iso, fighter, UI, deck, …); some full
+  games live in sibling repos (drop, tactics, …)
+- npm / crates.io publish still gated (see release workflows); versions are `0.x`
+
+Early P0 spikes (hand-written ROM, hecs rejected for atomics → custom SoA) are
+documented in [`docs/findings/P0-findings.md`](./docs/findings/P0-findings.md).
+
+## Releases
+
+Version bumps and GitHub prereleases are driven by [**sem**](https://github.com/tishlang/sem)
+([`tishlang/sem@v1`](https://github.com/tishlang/sem) in CI). Config lives in [`.semrc.json`](./.semrc.json).
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) on `main`:
+
+| Commit | Release |
+|--------|---------|
+| `feat:` | minor |
+| `fix:` / `perf:` | patch |
+| `feat!:` / `fix!:` / `BREAKING CHANGE:` footer | major |
+| `chore:` / `docs:` / `ci:` / … | none |
+
+Flow: green `main` → CI creates a **prerelease** with the npm tarball → promote the GitHub
+release (uncheck pre-release) → `npm-release.yml` and `crates-release.yml` publish.
+
+Preview locally (optional): `npx @tishlang/sem --dry-run` from the repo root.
 
 ## Prerequisites
 

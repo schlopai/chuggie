@@ -1,5 +1,7 @@
 # repro-uibar
 
+<img src="preview.png" alt="preview" width="480">
+
 `uiRender` laid out every node with the **previous** render's geometry, from the second render on.
 
 `packages/ui.tish` imported `lay_reset` but never called it. The native layout pool

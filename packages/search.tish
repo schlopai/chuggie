@@ -1,7 +1,7 @@
 // search.tish — a frame-budgeted incremental best-move search.
 //
 // The generic shape behind any tile-game AI: enumerate candidate moves, score each, keep the best,
-// and spread the work across frames so a decision never blows a frame budget. Magical Drop's CPU is
+// and spread the work across frames so a decision never blows a frame budget. The retired match-3 port's CPU is
 // one instance (24 pickup orders x 7 target columns, ~130 simulated moves per decision); a match-3
 // dropper is another; an SRPG unit picking a tile is a third.
 //

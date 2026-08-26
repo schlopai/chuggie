@@ -1,7 +1,7 @@
 // dialog-demo — a tour of the packages/dialog.tish CHAT DIALOG component in the styles common to
 // console RPGs. It cycles through five VARIATIONS, each captioned:
 //   1. SRPG        — portrait + name, multi-page, blinking continue arrow.
-//   2. FF7         — a borderless-name boxed prompt with a Yes/No choice menu.
+//   2. JRPG        — a borderless-name boxed prompt with a Yes/No choice menu.
 //   3. Visual novel — portrait on the RIGHT, bouncing arrow.
 //   4. Narration   — no portrait/name, box pinned to the TOP of the screen.
 //   5. Branch      — a three-way decision (portrait + name + choices).
@@ -44,7 +44,7 @@ let VARIATIONS = [
     ]
   },
   {
-    label: "2. FF7 - boxed Yes / No",
+    label: "2. JRPG - boxed Yes / No",
     beats: [
       {
         speaker: "", portrait: -1,

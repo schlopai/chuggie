@@ -1,5 +1,13 @@
-import { log, vblank } from 'cargo:tish_agb'
+import { log, vblank, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "repro-stackframe")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 type M = { x: i32, y: i32, name: string }
 const m0: M = { x: 4, y: 5, name: "hi" }
 function sum(m: M): i32 { return m.x + m.y }
@@ -7,3 +15,5 @@ log("s=" + sum(m0))
 let fr: i32 = 0
 while (fr < 20) { vblank() fr = fr + 1 }
 log("done")
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }

@@ -1,5 +1,8 @@
 # Test on every push/PR; on a green main, cut a PRERELEASE carrying the npm tarball.
 #
+# Version bumps use tishlang/sem (@tishlang/sem) — Conventional Commits drive semver
+# (feat/fix/perf/BREAKING release; chore/docs/ci do not). Config: .semrc.json
+#
 # Promoting that prerelease to a full release is what fires npm-release.yml and crates-release.yml.
 # The two-step exists so a release is never published by the same run that decided to make one —
 # there is a human between "CI is green" and "this is on npm forever".
@@ -250,28 +253,38 @@ jobs:
     name: Examples index
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check examples/README.md is current
         run: python3 scripts/gen_examples_readme.py --check
 
   # ── Would this land a release? Runs on PRs so a bad commit type is caught before merge. ───────
   release_check:
-    name: Release check (semantic-release dry-run)
+    name: Release check (sem dry-run)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: "24" }
-      - name: Dry-run semantic-release
+      - name: Dry-run sem
+        id: sem
+        uses: tishlang/sem@v1
+        with:
+          dry_run: true
+          config: |
+            branches: [main]
+            plugins:
+              - "@sem/commit-analyzer"
+              - "@sem/release-notes-generator"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Report bump
         run: |
-          npx --yes -p semantic-release@25 -p @semantic-release/commit-analyzer@13 \
-            -p @semantic-release/release-notes-generator@14 -p @semantic-release/npm@13 \
-            -p @semantic-release/github@12 \
-            semantic-release --dry-run --extends ./.releaserc.json 2>&1 | tee release-check.log
-          if grep -q "There are no relevant changes" release-check.log; then
+          if [ "${{ steps.sem.outputs.new_release_published }}" = "true" ]; then
+            echo "::notice::Would release ${{ steps.sem.outputs.new_release_version }} from these commits."
+          elif [ "${{ steps.sem.outputs.skipped }}" = "true" ]; then
+            echo "::notice::Soft-skipped (${{ steps.sem.outputs.skip_reason }})."
+          else
             echo "::notice::No release would be cut from these commits."
           fi
 
@@ -284,27 +297,35 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: "24" }
 
-      - name: Decide the next version
-        id: ver
+      - name: Next version via sem (dry-run)
+        id: sem
+        uses: tishlang/sem@v1
+        with:
+          dry_run: true
+          config: |
+            branches: [main]
+            plugins:
+              - "@sem/commit-analyzer"
+              - "@sem/release-notes-generator"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip when no bump
+        id: gate
         run: |
-          npx --yes -p semantic-release@25 -p @semantic-release/commit-analyzer@13 \
-            -p @semantic-release/release-notes-generator@14 -p @semantic-release/npm@13 \
-            -p @semantic-release/github@12 \
-            semantic-release --dry-run --extends ./.releaserc.json 2>&1 | tee release.log || true
-          V=$(grep -oE 'next release version is [0-9]+\.[0-9]+\.[0-9]+' release.log | tail -1 | awk '{print $NF}')
-          if [ -z "$V" ]; then
-            echo "::notice::No release-triggering commits — nothing to prerelease."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=$V" >> "$GITHUB_OUTPUT"
+          if [ "${{ steps.sem.outputs.new_release_published }}" != "true" ]; then
+            echo "::notice::No version bump — skipping prerelease."
+            echo "continue=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "continue=true" >> "$GITHUB_OUTPUT"
+          echo "version=${{ steps.sem.outputs.new_release_version }}" >> "$GITHUB_OUTPUT"
+          echo "Next version: ${{ steps.sem.outputs.new_release_version }}"
 
       # The licence gate. crates.io has no delete — only yank — and npm unpublish is a 72-hour
       # window, so an artifact published under the wrong licence is effectively permanent. The repo
@@ -312,7 +333,7 @@ jobs:
       # release artifact until those two agree. (This is not hypothetical: @spacedevin/deck shipped
       # two versions under the wrong licence and both had to be yanked.)
       - name: Refuse to package without a licence
-        if: steps.ver.outputs.skip != 'true'
+        if: steps.gate.outputs.continue == 'true'
         run: |
           if [ ! -f LICENSE ] && [ ! -f LICENSE.md ] && [ ! -f LICENSE.txt ]; then
             echo "::error::No LICENSE file at the repo root, but crates/*/Cargo.toml and packages/package.json declare \"MIT OR Apache-2.0\". Add the LICENSE file, or correct the declarations, before anything is published."
@@ -320,9 +341,9 @@ jobs:
           fi
 
       - name: Stamp the version and pack the engine package
-        if: steps.ver.outputs.skip != 'true'
+        if: steps.gate.outputs.continue == 'true'
         run: |
-          V="${{ steps.ver.outputs.version }}"
+          V="${{ steps.gate.outputs.version }}"
           node -e '
             const fs = require("fs"), p = "packages/package.json";
             const j = JSON.parse(fs.readFileSync(p, "utf8"));
@@ -330,19 +351,27 @@ jobs:
             fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
           ' "$V"
           (cd packages && npm pack)
-          mv packages/tish-gba-*.tgz tish-gba-npm-package.tgz
+          mv packages/chuggie-engine-*.tgz tish-gba-npm-package.tgz
           ls -l tish-gba-npm-package.tgz
 
-      - name: Create the prerelease
-        if: steps.ver.outputs.skip != 'true'
+      - name: Create the prerelease via @sem/github
+        if: steps.gate.outputs.continue == 'true'
+        uses: tishlang/sem@v1
+        with:
+          force: ${{ steps.gate.outputs.version }}
+          config: |
+            branches: [main]
+            plugins:
+              - "@sem/commit-analyzer"
+              - "@sem/release-notes-generator"
+              - - "@sem/npm"
+                - npmPublish: false
+                  pkgRoot: packages
+              - - "@sem/github"
+                - prerelease: true
+                  successComment: false
+                  assets:
+                    - path: tish-gba-npm-package.tgz
+                      name: tish-gba-npm-package.tgz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          V="${{ steps.ver.outputs.version }}"
-          if gh release view "v$V" >/dev/null 2>&1; then
-            echo "Release v$V already exists — uploading the tarball to it."
-            gh release upload "v$V" tish-gba-npm-package.tgz --clobber
-          else
-            gh release create "v$V" tish-gba-npm-package.tgz \
-              --title "v$V" --prerelease --generate-notes
-          fi

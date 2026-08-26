@@ -6,8 +6,16 @@
 // its sibling port's design wants bare typed scalars. This probe
 // decides it: if all cases print PASS, the wrapper idiom is dead; if any prints FAIL,
 // file the repro upstream (tishlang/tish) and keep wrappers.
-import { log, vblank } from 'cargo:tish_agb'
+import { log, vblank, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "probe-module-let")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 let A: i32 = 0            // written and read across function boundaries
 let B: i32 = 100          // written by one function, read by another
 let C: i32 = 0            // accumulated across frames in the game-loop shape
@@ -49,3 +57,5 @@ while (f < 5) {
 if (C === 10) { log("case3 PASS C=" + C) } else { log("case3 FAIL C=" + C + " want 10") }
 if (SUM === 30) { log("case4 PASS SUM=" + SUM) } else { log("case4 FAIL SUM=" + SUM + " want 30") }
 log("probe done")
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }

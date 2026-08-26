@@ -17,6 +17,9 @@
       },
       "tish_gba_game_engine": {
         "path": "../../crates/tish-gba-game-engine"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
       }
     }
   },

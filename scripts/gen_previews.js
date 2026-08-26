@@ -30,6 +30,7 @@ const PREVIEW_FRAMES = '60';    // recorded frames
 const PREVIEW_EVERY = '3';      // one frame in 3 => ~20fps playback, so ~3s of motion
 const MIN_FROM = 60;            // never open on the boot frames — see the window comment below
 const DEFAULT_FRAMES = 240;     // for examples with no shot/gif script of their own to inherit
+const STILL_SCAN_FRAMES = 700;  // how far a still fallback looks for the frame with the most on it
 const AUTOPLAY_FRAMES = 720;    // long enough to get through a title/intro and then play a while
 
 // Examples whose art cannot be published. bench-behav and bench-boot were built against ripped
@@ -37,6 +38,23 @@ const AUTOPLAY_FRAMES = 720;    // long enough to get through a title/intro and 
 // they get no image until their assets are replaced (or the examples go). Recording is skipped
 // rather than the file being deleted afterwards, so a re-run cannot quietly put it back.
 const NO_PREVIEW = new Set(['bench-behav', 'bench-boot']);
+
+// Per-example capture-window overrides, for the few where the generic window produces something
+// actively bad rather than merely dull.
+//
+// sunnyside-day's clock runs ~96s per in-game day, so its light should change slowly. It came out
+// strobing — luminance sweeping 124 -> 8 -> 153 twice in three seconds — because AUTOPLAY was
+// mashing START into it and skipping the clock forward. It needs no input at all: it animates on
+// its own. `drive: false` opts an example out of autoplay, which is the fix whenever driving it
+// does something worse than leaving it alone.
+const WINDOW = {
+  // Its clock runs ~96s per in-game day, so every 3rd frame shows nothing travelling and every 8th
+  // shows the light actually moving. (Autoplay is dropped automatically — see the both-ways
+  // capture below — because driving it skips the clock and strobes.)
+  'sunnyside-day': { every: 8 },
+  // Pages turn on a timer; give the window room for several of them.
+  'fonts-demo': { from: 90, frames: 420 },
+};
 
 const root = path.resolve(__dirname, '..');
 const dir = path.join(root, 'examples');
@@ -94,6 +112,21 @@ function autoplay(until) {
 
 // Stored frame count. Pillow dedupes frames identical to their predecessor, so 1 means the picture
 // never changed across the whole window. Returns 2 ("keep it") if Pillow is unavailable.
+// Stored frame count plus the worst frame-to-frame brightness jump. The jump separates motion from
+// STROBING: a clip whose mean luminance slams between frames reads as a flashing screen, however
+// much "movement" that technically is.
+function clipStats(gif) {
+  const res = spawnSync('python3', ['-c',
+    'import sys\n'
+    + 'from PIL import Image, ImageSequence, ImageStat\n'
+    + 'i = Image.open(sys.argv[1])\n'
+    + 'v = [ImageStat.Stat(f.convert("L")).mean[0] for f in ImageSequence.Iterator(i)]\n'
+    + 'j = max((abs(b - a) for a, b in zip(v, v[1:])), default=0)\n'
+    + 'print(i.n_frames, round(j))', gif], { encoding: 'utf8' });
+  const [n, jump] = (res.stdout || '').trim().split(/\s+/).map(Number);
+  return Number.isFinite(n) && n > 0 ? { frames: n, jump: jump || 0 } : { frames: 2, jump: 0 };
+}
+
 function frameCount(gif) {
   const res = spawnSync('python3', ['-c',
     'import sys;from PIL import Image;print(Image.open(sys.argv[1]).n_frames)', gif],
@@ -133,7 +166,8 @@ function isFlat(png) {
   return (res.stdout || '').trim() === '1';
 }
 
-const done = [], skipped = [], failed = [], stills = [], nothing = [], unpublishable = [], kept = [];
+const done = [], skipped = [], failed = [], stills = [], nothing = [], unpublishable = [], kept = [],
+  undriven = [];
 for (const name of examples) {
   const exDir = path.join(dir, name);
   const pkg = JSON.parse(fs.readFileSync(path.join(exDir, 'package.json'), 'utf8'));
@@ -153,12 +187,13 @@ for (const name of examples) {
     continue;
   }
 
+  const over = WINDOW[name] || {};
   const tunedFrames = Number((m && m[2]) || DEFAULT_FRAMES);
   const tunedKeys = ((m && m[3]) || '').trim().replace(/^"|"$/g, '');
   let frames = tunedFrames;
   let keys = tunedKeys;
   // An authored schedule always wins — it knows the example's controls and this does not.
-  const driving = !keys;
+  const driving = !keys && over.drive !== false;
   if (driving) {
     frames = Math.max(frames, AUTOPLAY_FRAMES);
     keys = autoplay(frames);
@@ -172,8 +207,10 @@ for (const name of examples) {
   // frame 120 or 180 would otherwise have its whole window start at power-on. When that floor
   // leaves too little room, run PAST the tuned frame instead of shortening the clip — a short
   // capture is what made an earlier pass emit one-frame previews.
-  const span = Number(PREVIEW_FRAMES) * Number(PREVIEW_EVERY);
-  const from = Math.max(MIN_FROM, frames - span);
+  const every = String(over.every || PREVIEW_EVERY);
+  if (over.frames) frames = over.frames;
+  const span = Number(PREVIEW_FRAMES) * Number(every);
+  const from = over.from !== undefined ? over.from : Math.max(MIN_FROM, frames - span);
   const run = Math.max(frames, from + span);
 
   // Capture to a scratch path and promote only on success. Several of these previews are original
@@ -182,17 +219,43 @@ for (const name of examples) {
   // Keep the real extension: both gif.sh and Pillow pick their format from it.
   const gifTmp = path.join(exDir, '.preview.new.gif');
   const pngTmp = path.join(exDir, '.preview.new.png');
-  const res = spawnSync(path.join(root, 'scripts', 'gif.sh'), [rom, gifTmp, String(run), keys], {
-    env: {
-      ...process.env,
-      GIF_SCALE: PREVIEW_SCALE,
-      GIF_MAX_FRAMES: PREVIEW_FRAMES,
-      GIF_EVERY: PREVIEW_EVERY,
-      GIF_FROM: String(from),
-    },
-    stdio: ['ignore', 'ignore', 'pipe'],
-    encoding: 'utf8',
-  });
+  const record = (out, withKeys) =>
+    spawnSync(path.join(root, 'scripts', 'gif.sh'), [rom, out, String(run), withKeys], {
+      env: {
+        ...process.env,
+        GIF_SCALE: PREVIEW_SCALE,
+        GIF_MAX_FRAMES: PREVIEW_FRAMES,
+        GIF_EVERY: every,
+        GIF_FROM: String(from),
+      },
+      stdio: ['ignore', 'ignore', 'pipe'],
+      encoding: 'utf8',
+    });
+
+  let res = record(gifTmp, keys);
+
+  // Where we supplied the input ourselves, check that it HELPED. Autoplay mashes START, and START is
+  // a toggle in plenty of demos: it switched mode7-demo's camera orbit OFF, and skipped
+  // sunnyside-day's day/night clock forward until the clip strobed. Both animate perfectly well
+  // untouched. So record undriven as well and keep the better take — more frames that differ, or
+  // the one that is not flashing.
+  if (driving) {
+    const STROBE = 25;
+    const plainTmp = path.join(exDir, '.preview.plain.gif');
+    const plain = record(plainTmp, '');
+    const drivenS = res.status === 0 ? clipStats(gifTmp) : { frames: 0, jump: 0 };
+    const plainS = plain.status === 0 ? clipStats(plainTmp) : { frames: 0, jump: 0 };
+    const preferPlain = plainS.frames > drivenS.frames
+      || (drivenS.jump > STROBE && plainS.jump <= STROBE && plainS.frames > 1);
+    if (preferPlain) {
+      if (fs.existsSync(gifTmp)) fs.unlinkSync(gifTmp);
+      fs.renameSync(plainTmp, gifTmp);
+      res = plain;
+      undriven.push(name);
+    } else if (fs.existsSync(plainTmp)) {
+      fs.unlinkSync(plainTmp);
+    }
+  }
 
   // gif.sh exits 3 for "nothing to record" — a screen that is blank for the whole window. Anything
   // else non-zero is a real tooling failure.
@@ -218,7 +281,11 @@ for (const name of examples) {
     // diagnostics paint their output for a frame or two and then clear. It exits 2 when even the
     // best frame is a dead screen.
     const shot = spawnSync('python3',
-      [path.join(root, 'scripts', 'best_still.py'), rom, pngTmp, String(tunedFrames), tunedKeys],
+      // Scan well past the tuned frame. These ROMs draw their readout only once their measurement
+      // finishes — bench-systems is still printing at frame 389 — so a 240-frame scan sees the
+      // blank screen that comes before it.
+      [path.join(root, 'scripts', 'best_still.py'), rom, pngTmp,
+        String(Math.max(tunedFrames, STILL_SCAN_FRAMES)), tunedKeys],
       { stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' });
     if (shot.status !== 0) {
       if (fs.existsSync(pngTmp)) fs.unlinkSync(pngTmp);
@@ -240,6 +307,9 @@ for (const name of examples) {
 
 console.log(`\nclips ${done.length}, stills ${stills.length}, kept ${kept.length},`
   + ` blank ${nothing.length}, skipped ${skipped.length}, failed ${failed.length}`);
+if (undriven.length) {
+  console.log(`animates better untouched, autoplay dropped: ${undriven.join(', ')}`);
+}
 if (kept.length) {
   console.log(`no motion, kept the existing hand-picked still: ${kept.join(', ')}`);
 }

@@ -1,7 +1,15 @@
-import { log, vblank } from 'cargo:tish_agb'
+import { log, vblank, backdrop, hud_text, frame } from 'cargo:tish_agb'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
 import { modeName } from './moda.tish'
 import { slotOf } from './modb.tish'
 
+
+// --- screen readout (scripts/add_screen_readout.py) ---
+// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
+backdrop(0x101018)
+hud_text(0, 8, 8, "repro-validate-653")
+hud_text(1, 8, 24, "running - numbers go to the log")
+frame()
 const WALK: i32 = 7
 
 function check(m) {
@@ -17,3 +25,5 @@ log("slotOf=" + slotOf())
 let f: i32 = 0
 while (f < 60) { vblank() f = f + 1 }
 log("done")
+hud_text(1, 8, 24, "done - numbers are in the log")
+while (true) { frame() }
