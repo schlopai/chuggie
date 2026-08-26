@@ -6,7 +6,7 @@ A puzzle-platformer whose verb is the **palette**. The world is painted in more 
 screen shows at once; your lantern holds four. The two bands your lens is not showing are not dimmed
 or greyed out — they are **not there**: not visible, not solid, not standing under your feet.
 
-![preview](preview.png)
+![preview](preview.gif)
 
 ## Controls
 

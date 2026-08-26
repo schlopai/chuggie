@@ -2,7 +2,7 @@
 
 > *A sound source orbits you, and you can hear where it is.*
 
-![preview](preview.png)
+![preview](preview.gif)
 
 The acceptance test for **`packages/sfx.tish`** and the new **`sound_play_ex`** native — the
 positional half of the engine review's audio gap.

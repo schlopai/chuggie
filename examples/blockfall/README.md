@@ -2,7 +2,7 @@
 
 > *A falling-block puzzle game on the guideline ruleset: SRS kicks, 7-bag, hold, ghost, T-spins, and a budgeted search that plays it. The example tilemap_set8 was added for.*
 
-![preview](preview.png)
+![preview](preview.gif)
 
 A falling-block puzzle game on the modern guideline ruleset — SRS rotation with wall kicks, a 7-bag,
 hold, ghost, lock delay, T-spins, combos and a level curve — with a budgeted search that plays it by

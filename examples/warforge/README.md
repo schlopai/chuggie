@@ -1,6 +1,6 @@
 # WARFORGE
 
-![preview](preview.png)
+![preview](preview.gif)
 
 A Warcraft-shaped RTS campaign: harvest, build, train, and a hero who levels across three missions.
 

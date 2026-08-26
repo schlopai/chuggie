@@ -2,7 +2,7 @@
 
 > *Two-player Pong over the link cable: lockstep, where the only thing crossing the wire is a button mask.*
 
-![preview](preview.png)
+![preview](preview.gif)
 
 Two-player Pong over the link cable, in lockstep. The only thing that ever crosses the wire is a
 button mask.

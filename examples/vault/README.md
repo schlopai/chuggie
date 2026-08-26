@@ -2,7 +2,7 @@
 
 > *Six chests, two triggers, and a cartridge that still knows what you did after the power goes off.*
 
-![preview](preview.png)
+![preview](preview.gif)
 
 The acceptance test for **`packages/flags.tish`**, which is new.
 

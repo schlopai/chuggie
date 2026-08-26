@@ -2,7 +2,7 @@
 
 > *Two turrets, three planets, and one shot at a time.*
 
-<img src="preview.png">
+<img src="preview.gif">
 
 Turn-based artillery in space. Aim, charge, fire — and watch the shot bend through the gravity wells
 on its way. This is the spike for a full Warheads/Gunbound-style game, and the thing it exists to

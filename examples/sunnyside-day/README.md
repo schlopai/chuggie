@@ -1,5 +1,7 @@
 # Sunnyside day — the clock, the night, and the bed
 
+![preview](preview.gif)
+
 Sunnyside de-risk 5, part of the `sunnyside` example family (see
 `examples/sunnyside/SPEC.md`).  A quarter-minute-per-frame day clock (~96s
 per day) with the time-of-day tint that the main game reuses — and a design

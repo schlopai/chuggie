@@ -2,7 +2,7 @@
 
 > *Four heroes, four monsters and a clock: the front-view party battle the catalogue did not have.*
 
-![preview](preview.png)
+![preview](preview.gif)
 
 A classic JRPG-shaped fight. The party stands on the right, the monsters on the left, and every
 combatant fills an ATB gauge at its own speed; when one fills, that side acts. Heroes get a command

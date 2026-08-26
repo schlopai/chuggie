@@ -1,5 +1,7 @@
 # keep — dungeon lock-and-key, as a package
 
+![preview](preview.gif)
+
 A one-room keep that exercises every rule in **`packages/keylock.tish`**: keys, a Magic Key, a
 bombable wall, a false door, a shutter that opens on its own, and two blocks that have to go on two
 sockets. It plays itself — no input needed — and it saves.

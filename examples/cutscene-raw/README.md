@@ -2,7 +2,7 @@
 
 > *A staged scene in a game that cannot link the game-engine crate.*
 
-<img src="preview.png">
+<img src="preview.gif">
 
 This ROM depends on **`tish_agb` alone**. No entities, no `world_step`, no `packages/dialog`.
 Everything on screen is a raw sprite moved with `sprite_set_pos` — exactly like the three card RPGs

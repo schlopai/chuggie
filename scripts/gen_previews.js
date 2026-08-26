@@ -7,9 +7,10 @@
 // Each clip inherits that example's own `gif` npm script — its ROM name, frame count and key
 // schedule — because those were tuned so the capture lands on something worth looking at.
 //
-// Deliberately smaller than `npm run gif`'s defaults: preview.gif is COMMITTED, so it is captured
-// at native 240x160 (matching preview.png) and capped to PREVIEW_FRAMES, which keeps a clip in the
-// tens-of-KB-to-low-hundreds range instead of the ~1MB a 480x320 clip costs.
+// Captured at 2x (480x320) and capped to PREVIEW_FRAMES. The 2x is what makes the clip READ as a
+// preview on a README page — and it has to come from the pixels, not from a width= on the img tag,
+// because a fixed dimension in markup resamples pixel art and is exactly what these previews are
+// meant to show off. The frame cap is what keeps a committed binary in the low hundreds of KB.
 //
 // Usage: node scripts/gen_previews.js [--force] [example ...]
 //   --force  re-record even when preview.gif is newer than the ROM (default: skip those)
@@ -18,7 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const PREVIEW_SCALE = '1';
+const PREVIEW_SCALE = '2';
 const PREVIEW_FRAMES = '60';    // recorded frames
 const PREVIEW_EVERY = '3';      // one frame in 3 => ~20fps playback, so ~3s of motion
 const MIN_FROM = 60;            // never open on the boot frames — see the window comment below

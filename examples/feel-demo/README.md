@@ -2,7 +2,7 @@
 
 > *Every feedback in packages/feel.tish: presets, springs, hit-stop and the event channel.*
 
-![preview](preview.png)
+![preview](preview.gif)
 
 `packages/feel.tish` is 670 lines of game-feel helpers — screen shake, hit-stop, springs, sparks,
 PSG hits — and **nothing in this repo compiled it**. It was not dead code: it had three consumers,

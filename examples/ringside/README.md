@@ -5,7 +5,7 @@
 One opponent — BRUNO THE BULL — with seven attacks, three rounds, hearts, stars, knockdowns and a
 ten-count.
 
-![ringside](preview.png)
+![ringside](preview.gif)
 
 **L / R** dodge · **DOWN** duck · **UP** guard · **A** right · **B** left · **UP + punch** to the
 head, otherwise the body · **START** star uppercut · **A/B** to beat the count · **SELECT** perf

@@ -1,6 +1,6 @@
 # RTS SELECT
 
-![preview](preview.png)
+![preview](preview.gif)
 
 RTS de-risk A3: cursor selection, order issue and attack-move over a live world, with a panel that
 repaints only when it changes.

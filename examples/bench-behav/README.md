@@ -2,7 +2,7 @@
 
 > *A benchmark testing the performance of the behav subsystem.*
 
-![preview](preview.png)
+![preview](preview.gif)
 
 `bench-room` answered "are native enemies expensive?" — they are not. Twenty-four of them on
 `chase`/`hopper` hold 60fps, at roughly 115 ticks each. This bench answers the question that was

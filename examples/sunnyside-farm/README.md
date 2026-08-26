@@ -1,5 +1,7 @@
 # Sunnyside farm — the farming core
 
+![preview](preview.gif)
+
 Sunnyside de-risk 4, part of the `sunnyside` example family (see
 `examples/sunnyside/SPEC.md`).  The loop the game is named for: till a plot
 cell with the hoe, plant seeds, water them, sleep on it, and cut the grown

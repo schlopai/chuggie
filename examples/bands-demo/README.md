@@ -5,7 +5,7 @@
 Stars that barely move, mountains that drift, a treeline that rushes past. All three are **one
 background layer**.
 
-![bands-demo](preview.png)
+![bands-demo](preview.gif)
 
 ## Why
 

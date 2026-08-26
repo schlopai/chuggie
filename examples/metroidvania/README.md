@@ -5,7 +5,7 @@
 A side-scrolling castle you re-cross as you get stronger, built on `packages/platformer.tish` with
 Luis Zuno's (ansimuz) CC0 **GothicVania** art.
 
-![preview](preview.png)
+![preview](preview.gif)
 
 ## Controls
 - **d-pad** — move · **A** — jump (hold higher, tap for a hop) · **B** — **attack** · **R** — run

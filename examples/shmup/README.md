@@ -6,7 +6,7 @@ A vertical space shooter: fly the ship, auto-fire upward, clear waves of enemies
 beat a three-phase battlecruiser boss. Built almost entirely from the reusable
 [`packages/shmup`](../../packages/shmup.tish) toolkit — this example is just the **level**.
 
-![The ship firing up at descending enemies over a scrolling starfield, score/lives/weapon HUD](preview.png)
+![The ship firing up at descending enemies over a scrolling starfield, score/lives/weapon HUD](preview.gif)
 
 ![The battlecruiser boss firing a ring of bullets, with its health bar along the bottom](boss.png)
 

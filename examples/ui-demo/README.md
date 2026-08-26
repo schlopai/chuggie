@@ -2,7 +2,7 @@
 
 > *Demonstrates UI components, layouts, and rendering.*
 
-![preview](preview.png)
+![preview](preview.gif)
 
 Thin showcase of **`packages/ui.tish`** — the demo only supplies data and a self-play loop; stream /
 panel / list / detail-patch live in the shared library (same patterns as `shop-demo`).

@@ -2,7 +2,7 @@
 
 > *A floor-stacked match-3 on packages/grid.tish — the generic cell-grid kit, proven on the opposite gravity anchor from Magical Drop.*
 
-![preview](preview.png)
+![preview](preview.gif)
 
 A floor-stacked match-3 on `packages/grid.tish`, with a rising garbage floor that eventually beats
 you, and a real budgeted search that plays it until somebody presses a button.

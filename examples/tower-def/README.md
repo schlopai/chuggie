@@ -2,7 +2,7 @@
 
 > *A fixed-track tower defence: every creep shares one flow field, and a tower is a soldier that cannot move.*
 
-![preview](preview.png)
+![preview](preview.gif)
 
 Ten waves come down one road. You get gold for kills and spend it on towers beside the route; they
 acquire and fire on their own. Twenty lives. Leave it alone and it plays itself.

@@ -2,7 +2,7 @@
 
 > *Demonstrates hardware color gradients and raster effects.*
 
-![preview](preview.png)
+![preview](preview.gif)
 
 GBA fonts are 1bpp masks. Colour comes from the OBJ palette:
 
