@@ -40,7 +40,6 @@ iso-abilities	PASS	54	iso-abilities.gba 2169840
 iso-ai	PASS	58	iso-ai.gba 2327792
 iso-campaign	PASS	63	iso-campaign.gba 2466672
 iso-cardkeeper	PASS	50	iso-cardkeeper.gba 2120968
-iso-clanmenu	PASS	60	iso-clanmenu.gba 2303400
 iso-clanrank	PASS	52	iso-clanrank.gba 2142384
 iso-clinic	PASS	62	iso-clinic.gba 2407120
 iso-combo	PASS	53	iso-combo.gba 2154800
@@ -50,7 +49,6 @@ iso-equip	PASS	54	iso-equip.gba 2169480
 iso-formation	PASS	53	iso-formation.gba 2239624
 iso-hud	PASS	56	iso-hud.gba 2289752
 iso-jobtree	PASS	55	iso-jobtree.gba 2236392
-iso-judge	PASS	55	iso-judge.gba 2240328
 iso-levelup	PASS	51	iso-levelup.gba 2125320
 iso-moverange	PASS	56	iso-moverange.gba 2267472
 iso-npc	PASS	67	iso-npc.gba 2584976

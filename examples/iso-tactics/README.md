@@ -2,7 +2,7 @@
 
 <img src="preview.gif" alt="preview" width="480">
 
-A Final Fantasy Tactics Advance-style battle: an isometric, height-mapped board authored in **Tiled**,
+An isometric tactics battle: a height-mapped board authored in **Tiled**,
 units with class stats, and the active unit's **move range** flooded and highlighted. The reusable
 tactics logic lives in the **engine**; this example is the game on top. See the full feature roadmap
 in the tactics plan.

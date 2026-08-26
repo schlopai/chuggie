@@ -10259,7 +10259,7 @@ impl IsoBoardGrid {
 
     /// What a unit actually adds to its turn counter per tick, after Haste or Slow.
     ///
-    /// Floored at 1, which matters: a Nu Mou Mage's Speed can be low enough that halving it rounds to
+    /// Floored at 1, which matters: a slow caster's Speed can be low enough that halving it rounds to
     /// zero, and a unit accruing zero never reaches the threshold — it would not be slowed, it would
     /// be removed from the game until the status wore off, and `turn_next` would spin looking for a
     /// tick count that lets it act.
