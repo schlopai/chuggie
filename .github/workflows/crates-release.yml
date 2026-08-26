@@ -39,6 +39,21 @@ jobs:
       # Set to "false" once tishlang_runtime_gba is on crates.io — see the header note.
       PUBLISH_BLOCKED_ON_RUNTIME_GBA: "true"
     steps:
+      # FIRST, before anything costly. crates.io only reports a missing token at UPLOAD — "please
+      # provide a non-empty token" — which is the very last thing the job does, so a repo without the
+      # secret spends a checkout, a rustup install, a version stamp and a patch strip to learn it.
+      # It also reads as a publish failure rather than a configuration one.
+      #
+      # No `if:` on a secret here — GitHub does not expose `secrets` to job-level `if`, and an empty
+      # env var is exactly the condition we want to catch.
+      - name: Require a crates.io token
+        run: |
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN is not set on this repository. Add it under Settings → Secrets and variables → Actions → New repository secret, then re-dispatch this workflow with the tag. Nothing can publish until it exists."
+            exit 1
+          fi
+          echo "crates.io token present."
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
