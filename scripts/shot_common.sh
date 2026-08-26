@@ -39,13 +39,18 @@ ensure_gba_shot() {
       cflags=(-I"$mgba_prefix/include")
       ldflags=(-L"$mgba_prefix/lib" -lmgba -lm -Wl,-rpath,"$mgba_prefix/lib")
     fi
-    cc "$here/tools/gba-shot.c" -o "$shot" "${cflags[@]}" "${ldflags[@]}"
+    cc "$here/tools/gba-shot.c" -o "$shot" "${cflags[@]}" "${ldflags[@]}" >&2
   fi
   echo "$shot"
 }
 
 # Turn the script's input into a ROM path, building it first when given a .tish source.
 # Usage: resolve_rom <input>; prints the ROM path on stdout.
+#
+# ⚠️ Every command in here MUST keep its own chatter off stdout, because the caller reads stdout as
+# the return value. `tish build` prints "Built: <rom>" there, and without the redirect the caller
+# gets "Built: examples/x/src/main.gba" as the ROM path and mGBA reports "no emulator core for" it.
+# CI caught that; local runs never did, because they all pass a .gba and skip this branch.
 resolve_rom() {
   local input="$1" rom="$1" tish
   if [[ "$input" == *.tish ]]; then
@@ -53,7 +58,7 @@ resolve_rom() {
     tish="${TISH:-$(command -v tish || true)}"
     [ -n "$tish" ] || { echo "error: building a .tish needs 'tish' on PATH or TISH=..." >&2; return 1; }
     echo "building $input -> $rom" >&2
-    "$tish" build "$input" --target gba -o "$rom"
+    "$tish" build "$input" --target gba -o "$rom" >&2
   fi
   [ -f "$rom" ] || { echo "error: ROM not found: $rom" >&2; return 1; }
   echo "$rom"

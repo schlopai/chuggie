@@ -34,15 +34,15 @@ jobs:
       # `../agb/agb`, so the tree must look like
       #   $GITHUB_WORKSPACE/chuggie/chuggie-engine + $GITHUB_WORKSPACE/chuggie/agb
       #   $GITHUB_WORKSPACE/tish/tish
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: chuggie/chuggie-engine
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: spacedevin/agb
           ref: chuggie
           path: chuggie/agb
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: tishlang/tish
           path: tish/tish
@@ -96,14 +96,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: chuggie/chuggie-engine
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: tishlang/tish
           path: tish/tish
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: spacedevin/agb
           ref: chuggie
@@ -133,7 +133,7 @@ jobs:
         run: |
           "$TISH" build src/main.tish --target gba -o grid-demo.gba
           ls -l grid-demo.gba
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: grid-demo-rom
           path: chuggie/chuggie-engine/examples/grid-demo/grid-demo.gba
@@ -158,14 +158,14 @@ jobs:
       matrix:
         example: ${{ fromJSON(needs.discover.outputs.examples) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: chuggie/chuggie-engine
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: tishlang/tish
           path: tish/tish
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: spacedevin/agb
           ref: chuggie
@@ -178,7 +178,7 @@ jobs:
       # packages 0.10.2, and the version gap shows up as emulator-timing and capture failures).
       - name: Cache libmgba
         id: mgba-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/mgba-prefix
           key: mgba-0.10.5-${{ runner.os }}
@@ -229,7 +229,7 @@ jobs:
     outputs:
       examples: ${{ steps.list.outputs.examples }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: list
         run: |
           # Every examples/<name>/verify.sh, as a JSON array for the matrix above.
