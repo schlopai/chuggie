@@ -1,5 +1,7 @@
 # Sunnyside — a farming life-sim on a generated island
 
+<img src="preview.gif" alt="preview" width="480">
+
 The flagship of the `sunnyside-*` family (SPEC.md here; six de-risk ROMs
 prove the pieces).  A Harvest-Moon-style day on a GBA cartridge, built
 entirely from the vendored Sunnyside World pack and the existing engine:

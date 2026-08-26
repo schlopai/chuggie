@@ -2,7 +2,7 @@
 
 > *A Mode 7 ground plane: per-scanline affine transforms driven by a 3D camera.*
 
-<img src="preview.png" alt="preview" width="480">
+<img src="preview.gif" alt="preview" width="480">
 
 A real 3D ground plane on the GBA — the smallest thing that proves it.
 

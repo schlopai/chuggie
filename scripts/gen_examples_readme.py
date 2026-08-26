@@ -50,7 +50,20 @@ DIAGNOSTIC = ("bench-", "repro-", "p0-", "probe-")
 # and re-run, then `python3 scripts/set_preview_width.py` for the example READMEs.
 PREVIEW_WIDTH = 480
 
-IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
+# Both embed forms, in document order. Markdown's ![alt](src) cannot carry a width, so every
+# example that displays a preview at PREVIEW_WIDTH writes it as <img> — and an index that matched
+# only the markdown form silently skipped the image the README actually leads with, picking some
+# later screenshot instead. That is what put battle.png / de.png / talk.png on the index.
+# BOTH embed forms, in document order. Markdown's ![alt](src) cannot carry a width, so every
+# example that shows its preview at PREVIEW_WIDTH writes it as <img> — and an index that matched
+# only the markdown form silently skipped the image the README actually leads with and picked some
+# later screenshot instead. That is what put battle.png / de.png / talk.png on the index and made
+# `--check` fail on main.
+IMG_RE = re.compile(r'!\[[^\]]*\]\(([^)\s]+)\)|<img\s[^>]*?src="([^"]+)"')
+
+def images_in(text):
+    """Every embedded image path in the README, markdown or <img>, in document order."""
+    return [md or html for md, html in IMG_RE.findall(text)]
 
 
 def describe(path):
@@ -97,7 +110,7 @@ def describe(path):
     if os.path.exists(os.path.join(path, "preview.gif")):
         return title, tagline, "preview.gif"
 
-    local = [c for c in IMG_RE.findall(text)
+    local = [c for c in images_in(text)
              if not c.startswith("http") and os.path.exists(os.path.join(path, c))]
     chosen = [c for c in local if os.path.basename(c) != "screenshot.png"]
     img = chosen[0] if chosen else (local[0] if local else None)

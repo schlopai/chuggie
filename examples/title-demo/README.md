@@ -2,6 +2,8 @@
 
 > *Demonstrates a main menu and title screen flow.*
 
+<img src="preview.png" alt="preview" width="480">
+
 The screen every RPG opens with: a full-screen **background**, a big **title** in a fancy font, a
 **menu** with a moving cursor, and a **copyright** line — all from one reusable component
 ([`packages/title.tish`](../../packages/title.tish)).

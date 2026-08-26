@@ -2,7 +2,7 @@
 
 > *An isometric SRPG subsystem demo showcasing sprite.*
 
-<img src="preview.png" alt="preview" width="480">
+<img src="preview.gif" alt="preview" width="480">
 
 Isometric rendering the honest way on the GBA, which has **no isometric hardware mode**: every tile
 is an isometric-cube **sprite** placed by an iso projection and drawn back-to-front (painter's

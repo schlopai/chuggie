@@ -1,5 +1,7 @@
 # Sunnyside save — the farm state through the cartridge
 
+<img src="preview.png" alt="preview" width="480">
+
 Sunnyside de-risk 6, part of the `sunnyside` example family (see
 `examples/sunnyside/SPEC.md`).  The whole mutable farm — 96 plot cells of
 state/stage/watered plus day, gold, harvest count and the world seed — packed

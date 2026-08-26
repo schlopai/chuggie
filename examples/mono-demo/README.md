@@ -2,7 +2,7 @@
 
 > *Demonstrates monophonic audio or monochrome rendering.*
 
-<img src="preview.png" alt="preview" width="480">
+<img src="preview.gif" alt="preview" width="480">
 
 The tish component-authoring model, final form. Components are **exported object
 literals**; each lifecycle hook takes a **single context object** and destructures only
