@@ -2,7 +2,6 @@
 
 > *What a data access and a function call actually cost on GBA.*
 
-
 Every optimisation in this repo has come from removing calls or removing array accesses — and until
 this ROM, the numbers behind those decisions were **divided out of a larger measurement** rather than
 measured on their own. `packages/grid.tish` justified `gridSimMove` with "~150 ticks per user tish

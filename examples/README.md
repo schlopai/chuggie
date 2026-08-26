@@ -116,7 +116,7 @@ Not things to play — these measure something or reproduce a specific bug.
 | — | **[bench entities — a benchmark testing the performance of the entities subsystem](bench-entities/README.md)**<br>`bench-entities` |
 | <img src="bench-memory/preview.gif" width="480"> | **[bench memory — a benchmark testing the performance of the memory subsystem](bench-memory/README.md)**<br>`bench-memory` |
 | <img src="bench-room/preview.gif" width="480"> | **[bench room — a benchmark testing the performance of the room subsystem](bench-room/README.md)**<br>`bench-room` |
-| <img src="bench-systems/preview.png" width="480"> | **[bench systems — where the native pass goes, system by system](bench-systems/README.md)**<br>`bench-systems` |
+| — | **[bench systems — where the native pass goes, system by system](bench-systems/README.md)**<br>`bench-systems` |
 | — | **[bench tables — what a generated table costs to read, and whether caching one is worth anything](bench-tables/README.md)**<br>`bench-tables` |
 | — | **[p0 spike — a prototype or technical spike for engine core mechanics](p0-spike/README.md)**<br>`p0-spike` |
 | — | **[probe arrayarg — does passing a typed module array to a native de-optimise every OTHER read of it? Yes](probe-arrayarg/README.md)**<br>`probe-arrayarg` |
@@ -133,7 +133,7 @@ Not things to play — these measure something or reproduce a specific bug.
 | <img src="repro-hub-cave-heap/preview.png" width="480"> | **[repro hub cave heap — a bug reproduction or regression test case](repro-hub-cave-heap/README.md)**<br>`repro-hub-cave-heap` |
 | <img src="repro-intro-heap/preview.png" width="480"> | **[repro intro heap — *Where the large SRPG example's memory actually goes](repro-intro-heap/README.md)**<br>`repro-intro-heap` |
 | <img src="repro-mixed-struct/preview.png" width="480"> | **[repro mixed struct — a struct param qualifies on ONE numeric field, not all of them](repro-mixed-struct/README.md)**<br>`repro-mixed-struct` |
-| <img src="repro-platformer-cost/preview.png" width="480"> | **[repro platformer cost — where does packages/platformer.tish spend its ticks?](repro-platformer-cost/README.md)**<br>`repro-platformer-cost` |
+| — | **[repro platformer cost — where does packages/platformer.tish spend its ticks?](repro-platformer-cost/README.md)**<br>`repro-platformer-cost` |
 | <img src="repro-psg-sfx/preview.png" width="480"> | **[REPRO: PSG SFX vs MUSIC — does firing a PSG sound effect on a channel the music is using damage the music?](repro-psg-sfx/README.md)**<br>`repro-psg-sfx` |
 | <img src="repro-sprite-y/preview.png" width="480"> | **[repro sprite y — a bug reproduction or regression test case for sprite Y coordinates](repro-sprite-y/README.md)**<br>`repro-sprite-y` |
 | <img src="repro-stackframe/preview.png" width="480"> | **[repro stackframe — struct params and locals across calls read back correctly](repro-stackframe/README.md)**<br>`repro-stackframe` |

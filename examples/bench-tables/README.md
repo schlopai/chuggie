@@ -2,7 +2,6 @@
 
 > *What a generated table costs to read, and whether caching one is worth anything.*
 
-
 This ROM was built to answer one question before any code was written against it:
 
 > The topdown RPG port ships 76 KB of `export let X: i32[] = [...]`, and its sibling port and the large SRPG example ship more.
