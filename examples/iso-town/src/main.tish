@@ -1,0 +1,372 @@
+// iso-town — isometric plaza: free walk, talk to NPCs, merchant opens packages/shop.
+//
+// Map/render stack from iso-tactics (tactics: bake + depth-sorted raised tiles + actor sheets).
+// Motion from iso-sprite (quarter-tile d-pad glide). Camera follows the player like akari
+// (`camera_set` + `bg_scroll`). Talk/shop from packages/dialog + packages/shop.
+import { board } from 'isoboard:../tiled/town.tmj'
+import { tiles } from 'sheet32:../assets/tiles.png'
+import { fighter } from 'sheet32:../assets/fighter.png'
+import { mage } from 'sheet32:../assets/mage.png'
+import { cleric } from 'sheet32:../assets/cleric.png'
+import { knight } from 'sheet32:../assets/knight.png'
+import { shop } from 'sheet32:../assets/shop32.png'
+import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { arrowFont } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import {
+  bg_new, bg_scroll, camera_set, sprite_new, sprite_set_frame, sprite_set_pos,
+  sprite_set_depth, sprite_set_flip, key_held, key_pressed, frame
+} from 'cargo:tish_agb'
+import {
+  tac_load, tac_board_bg, tac_board_ox, tac_board_oy, tac_w, tac_h, tac_height,
+  tac_stack_count, tac_stack_elev, tac_stack_tile, tac_spawn_count, tac_spawn_col,
+  tac_spawn_row, tac_spawn_cls, tac_walkable
+} from 'cargo:tish_gba_game_engine'
+import { uiInit } from '../../../packages/ui'
+import { dialogInit, dialogSay, dialogActive, dialogUpdate } from '../../../packages/dialog'
+import { shopInit, shopOpen, shopUpdate, shopActive } from '../../../packages/shop'
+import { DIR_STRIDE, ANIM_WALK, facing } from './anim'
+import { CLS_PLAYER, npcDef } from './npcs'
+
+// ═══ Iso projection (origin comes from the bake so large boards stay in sync) ═══
+tac_load(board)
+let MAPW = tac_w()
+let MAPH = tac_h()
+let ORIGIN_X = tac_board_ox(board)
+let ORIGIN_Y = tac_board_oy(board)
+let TILE_HALF_W = 16
+let TILE_HALF_H = 8
+let LIFT_PER_STEP = 8
+let UNIT_LIFT = 12
+let DEPTH_PER_TILE = 16
+let BIAS_UNIT = 3
+// Baked atlas is 256×256 for classic ≤8×8 boards, 512×512 when the town is larger.
+let BOARD_PX = 256
+if (ORIGIN_X !== 96 || ORIGIN_Y !== 24) { BOARD_PX = 512 }
+let CAM_MAX_X = BOARD_PX - 240
+let CAM_MAX_Y = BOARD_PX - 160
+if (CAM_MAX_X < 0) { CAM_MAX_X = 0 }
+if (CAM_MAX_Y < 0) { CAM_MAX_Y = 0 }
+
+function cellHeight(col, row) { return tac_height(col, row) }
+function isoX(col, row) { return ORIGIN_X + (col - row) * TILE_HALF_W }
+function isoY(col, row) { return ORIGIN_Y + (col + row) * TILE_HALF_H }
+function tileTopY(col, row) { return isoY(col, row) - cellHeight(col, row) * LIFT_PER_STEP }
+function depthAt(col, row, bias) { return (col + row) * DEPTH_PER_TILE + bias }
+function unitDepth(col, row) { return depthAt(col, row, cellHeight(col, row) + BIAS_UNIT) }
+
+function clampCam(v, lo, hi) {
+  if (v < lo) { return lo }
+  if (v > hi) { return hi }
+  return v
+}
+
+// ═══ Floor + raised occluders (world space; camera offsets them at draw time) ═══
+let boardBg = bg_new(tac_board_bg(board))
+
+// Centre the camera on a world-pixel focus (akari-style smooth follow), clamped to the board.
+function followCam(wx, wy) {
+  let cx = clampCam(wx + 16 - 120, 0, CAM_MAX_X)
+  let cy = clampCam(wy + 16 - 80, 0, CAM_MAX_Y)
+  camera_set(cx, cy)
+  bg_scroll(boardBg, cx, cy)
+}
+
+let riseI = 0
+while (riseI < MAPW * MAPH) {
+  let rc = riseI % MAPW
+  let rr = (riseI - rc) / MAPW
+  let nStack = tac_stack_count(board, rc, rr)
+  let si = 0
+  while (si < nStack) {
+    let elev = tac_stack_elev(board, rc, rr, si)
+    let s = sprite_new(tiles)
+    sprite_set_frame(s, tac_stack_tile(board, rc, rr, si))
+    sprite_set_pos(s, isoX(rc, rr), isoY(rc, rr) - elev * LIFT_PER_STEP)
+    sprite_set_depth(s, depthAt(rc, rr, elev))
+    si = si + 1
+  }
+  riseI = riseI + 1
+}
+
+// ═══ Actor sheets by spawn cls ══════════════════════════════════════════════════
+function sheetFor(cls) {
+  if (cls === 0) { return fighter }
+  if (cls === 1) { return mage }
+  if (cls === 2) { return cleric }
+  if (cls === 3) { return knight }
+  return mage
+}
+
+// ═══ NPCs (cls > 0) ═════════════════════════════════════════════════════════════
+let npcs = []
+let SPAWN_COUNT = tac_spawn_count(board)
+let playerStartCol = 6
+let playerStartRow = 10
+
+let placeI = 0
+while (placeI < SPAWN_COUNT) {
+  let cls = tac_spawn_cls(board, placeI)
+  let col = tac_spawn_col(board, placeI)
+  let row = tac_spawn_row(board, placeI)
+  if (cls === CLS_PLAYER) {
+    playerStartCol = col
+    playerStartRow = row
+  } else {
+    let def = npcDef(cls)
+    let spr = sprite_new(sheetFor(cls))
+    sprite_set_frame(spr, ANIM_WALK)
+    sprite_set_pos(spr, isoX(col, row), tileTopY(col, row) - UNIT_LIFT)
+    sprite_set_depth(spr, unitDepth(col, row))
+    npcs.push({
+      col: col, row: row, cls: cls, def: def, spr: spr,
+      faceBase: 0, faceFlip: 0
+    })
+  }
+  placeI = placeI + 1
+}
+
+function npcAt(col, row) {
+  let i = 0
+  while (i < npcs.length) {
+    if (npcs[i].col === col && npcs[i].row === row) { return npcs[i] }
+    i = i + 1
+  }
+  return null
+}
+
+function drawNpcs() {
+  let i = 0
+  while (i < npcs.length) {
+    let n = npcs[i]
+    sprite_set_frame(n.spr, n.faceBase + ANIM_WALK)
+    sprite_set_flip(n.spr, n.faceFlip)
+    sprite_set_pos(n.spr, isoX(n.col, n.row), tileTopY(n.col, n.row) - UNIT_LIFT)
+    sprite_set_depth(n.spr, unitDepth(n.col, n.row))
+    i = i + 1
+  }
+}
+
+// ═══ Player (quarter-tile motion) ═══════════════════════════════════════════════
+let Q = 4
+let MAX_U_C = (MAPW - 1) * Q
+let MAX_U_R = (MAPH - 1) * Q
+let px = playerStartCol * Q
+let py = playerStartRow * Q
+let faceBase = DIR_STRIDE
+let faceFlip = 0
+let faceDir = 2
+let walkTick = 0
+let playerSpr = sprite_new(fighter)
+sprite_set_frame(playerSpr, ANIM_WALK)
+
+function clampU(v, lo, hi) {
+  if (v < lo) { return lo }
+  if (v > hi) { return hi }
+  return v
+}
+
+function cellOf(u) {
+  return (u - (u % Q)) / Q
+}
+
+function canStand(col, row) {
+  if (col < 0) { return 0 }
+  if (row < 0) { return 0 }
+  if (col >= MAPW) { return 0 }
+  if (row >= MAPH) { return 0 }
+  if (!tac_walkable(col, row)) { return 0 }
+  if (npcAt(col, row) !== null) { return 0 }
+  return 1
+}
+
+function tryStep(npx, npy) {
+  npx = clampU(npx, 0, MAX_U_C)
+  npy = clampU(npy, 0, MAX_U_R)
+  let tc = cellOf(npx)
+  let tr = cellOf(npy)
+  let oc = cellOf(px)
+  let or_ = cellOf(py)
+  if (tc !== oc || tr !== or_) {
+    if (canStand(tc, tr) === 0) { return 0 }
+  }
+  px = npx
+  py = npy
+  return 1
+}
+
+function setFaceFromDelta(dc, dr) {
+  if (dc > 0) { faceDir = 0 }
+  else if (dr > 0) { faceDir = 1 }
+  else if (dr < 0) { faceDir = 2 }
+  else if (dc < 0) { faceDir = 3 }
+  if (dc === 0 && dr === 0) { return }
+  let f = facing(0, 0, dc, dr)
+  faceBase = f.base
+  faceFlip = f.flip
+}
+
+function playerWorldPos() {
+  let col = cellOf(px)
+  let row = cellOf(py)
+  let lift = cellHeight(col, row) * LIFT_PER_STEP
+  return {
+    x: ORIGIN_X + (px - py) * 4,
+    y: ORIGIN_Y + (px + py) * 2 - lift - UNIT_LIFT,
+    col: col, row: row
+  }
+}
+
+function movePlayer() {
+  let moved = 0
+  let dc = 0
+  let dr = 0
+  if (key_held(9) > 0) { dc = 1 }
+  else if (key_held(8) > 0) { dc = 0 - 1 }
+  else if (key_held(7) > 0) { dr = 1 }
+  else if (key_held(6) > 0) { dr = 0 - 1 }
+
+  if (dc !== 0 || dr !== 0) {
+    setFaceFromDelta(dc, dr)
+    if (tryStep(px + dc, py + dr) > 0) {
+      moved = 1
+      walkTick = walkTick + 1
+    }
+  } else {
+    walkTick = 0
+  }
+
+  let sub = 0
+  if (moved > 0) { sub = (walkTick / 2) % 8 }
+  sprite_set_frame(playerSpr, faceBase + ANIM_WALK + sub)
+  sprite_set_flip(playerSpr, faceFlip)
+
+  let p = playerWorldPos()
+  sprite_set_pos(playerSpr, p.x, p.y)
+  sprite_set_depth(playerSpr, unitDepth(p.col, p.row))
+  followCam(p.x, p.y)
+}
+
+function facingNeighbor() {
+  let col = cellOf(px)
+  let row = cellOf(py)
+  if (faceDir === 0) { return { col: col + 1, row: row } }
+  if (faceDir === 1) { return { col: col, row: row + 1 } }
+  if (faceDir === 2) { return { col: col, row: row - 1 } }
+  return { col: col - 1, row: row }
+}
+
+// ═══ Shop economy ═══════════════════════════════════════════════════════════════
+let CAT = [
+  { name: "Potion", icon: 0, buy: 20, sell: 10, desc: "Restores a little health." },
+  { name: "Antidote", icon: 1, buy: 40, sell: 20, desc: "Cures poison." },
+  { name: "Iron Knife", icon: 2, buy: 100, sell: 50, desc: "A simple blade." },
+  { name: "Leather Cap", icon: 4, buy: 80, sell: 40, desc: "Light headgear." },
+  { name: "Lucky Charm", icon: 6, buy: 200, sell: 100, desc: "A traveler's keepsake." }
+]
+let M = { gold: 500, inv: [2, 0, 0, 1, 0] }
+let STOCK = []
+let bi = 0
+while (bi < CAT.length) {
+  let c = CAT[bi]
+  STOCK.push({ id: bi, name: c.name, icon: c.icon, price: c.buy, desc: c.desc })
+  bi = bi + 1
+}
+function bagList() {
+  let out = []
+  let i = 0
+  while (i < CAT.length) {
+    let q = M.inv[i]
+    if (q > 0) {
+      let c = CAT[i]
+      out.push({ id: i, name: c.name, icon: c.icon, price: c.sell, qty: q, desc: c.desc })
+    }
+    i = i + 1
+  }
+  return out
+}
+let goldFn = () => { return M.gold }
+let bagFn = () => { return bagList() }
+let buyFn = (id, qty, cost) => {
+  if (M.gold >= cost) { M.gold = M.gold - cost; M.inv[id] = M.inv[id] + qty; return 1 }
+  return 0
+}
+let sellFn = (id, qty, gain) => {
+  if (M.inv[id] >= qty) { M.inv[id] = M.inv[id] - qty; M.gold = M.gold + gain; return 1 }
+  return 0
+}
+let KEEPER = {
+  name: "Merchant", portrait: 8,
+  greet: ["Welcome to my stall, traveler!", "Have a look at my wares."],
+  thanks: "Come back anytime!"
+}
+
+function openShop() {
+  shopOpen({
+    title: "Item Shop", keeper: KEEPER, mode: "greet",
+    stock: STOCK, bag: bagFn, gold: goldFn, onBuy: buyFn, onSell: sellFn
+  })
+}
+
+function tryInteract() {
+  let t = facingNeighbor()
+  let n = npcAt(t.col, t.row)
+  if (n === null) {
+    let col = cellOf(px)
+    let row = cellOf(py)
+    let dirs = [
+      { col: col + 1, row: row },
+      { col: col - 1, row: row },
+      { col: col, row: row + 1 },
+      { col: col, row: row - 1 }
+    ]
+    let di = 0
+    while (di < 4) {
+      n = npcAt(dirs[di].col, dirs[di].row)
+      if (n !== null) { break }
+      di = di + 1
+    }
+  }
+  if (n === null) { return }
+  if (n.def.merchant > 0) {
+    openShop()
+    return
+  }
+  if (n.def.portrait >= 0) {
+    dialogSay(n.def.lines, { speaker: n.def.name, portrait: n.def.portrait })
+  } else {
+    dialogSay(n.def.lines, { speaker: n.def.name })
+  }
+}
+
+uiInit({ font: body, sheet: shop, icons: 16, iconSize: 32, tileReserve: 224 })
+dialogInit({
+  font: body, arrowFont: arrowFont, cursorSheet: shop, cursorFrame: 9,
+  cacheShapes: 1
+})
+shopInit({ font: body, cursorSheet: shop, cursorFrame: 9 })
+
+drawNpcs()
+movePlayer()
+
+while (true) {
+  if (shopActive() > 0) {
+    shopUpdate()
+    drawNpcs()
+    let p = playerWorldPos()
+    followCam(p.x, p.y)
+    frame()
+    continue
+  }
+  if (dialogActive() > 0) {
+    dialogUpdate()
+    drawNpcs()
+    let p = playerWorldPos()
+    followCam(p.x, p.y)
+    frame()
+    continue
+  }
+  movePlayer()
+  if (key_pressed(0) > 0) { tryInteract() }
+  drawNpcs()
+  frame()
+}

@@ -3,7 +3,7 @@
 
 # Examples
 
-123 example ROMs. Each directory is a self-contained npm workspace: `npm run build` makes the `.gba`, `npm start` opens it in mGBA, `npm run shot` takes a headless screenshot.
+125 example ROMs. Each directory is a self-contained npm workspace: `npm run build` makes the `.gba`, `npm start` opens it in mGBA, `npm run shot` takes a headless screenshot.
 
 Every description below is taken from that example's own README, so this page cannot drift away from what it lists.
 
@@ -45,6 +45,8 @@ Every description below is taken from that example's own README, so this page ca
 | <img src="illusions/preview.gif" width="480"> | **[illusions — optical illusions on GBA hardware](illusions/README.md)**<br>`illusions` |
 | <img src="input-demo/preview.gif" width="480"> | **[input demo — demonstrates advanced input handling and key state debouncing](input-demo/README.md)**<br>`input-demo` |
 | <img src="iso-sprite/preview.gif" width="480"> | **[iso sprite — an isometric SRPG subsystem demo showcasing sprite](iso-sprite/README.md)**<br>`iso-sprite` |
+| <img src="iso-tactics/preview.gif" width="480"> | **[iso-tactics — isometric tactics prototype](iso-tactics/README.md)**<br>`iso-tactics` |
+| <img src="iso-town/preview.gif" width="480"> | **[iso-town — isometric plaza with talk + shop](iso-town/README.md)**<br>`iso-town` |
 | <img src="jrpg-party/preview.gif" width="480"> | **[jrpg-party — four heroes, four monsters and a clock](jrpg-party/README.md)**<br>`jrpg-party` |
 | <img src="kart-circuit/preview.gif" width="480"> | **[kart-circuit — a Mode 7 kart racer on a real Mode 7 ground plane](kart-circuit/README.md)**<br>`kart-circuit` |
 | <img src="keep/preview.gif" width="480"> | **[keep — dungeon lock-and-key, as a package](keep/README.md)**<br>`keep` |

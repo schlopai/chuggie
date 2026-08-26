@@ -1,0 +1,507 @@
+// iso-tactics — isometric tactics prototype (Phase 3: player vs AI, move + attack + HUD).
+//
+// The battlefield is a Tiled map (tiled/battle.tmj → tools/import_battle.py → src/battle_map.tish).
+// The reusable tactics core — height grid, unit registry, speed-based turn queue, move-range flood
+// fill, pathfinding, adjacent-enemy targeting, damage — lives in the ENGINE (`tac_*`, see
+// the tactics plan). Unit classes (stats + AI + attack power) are COMPONENTS in
+// components.tish. This file is the controller: iso rendering, the turn flow, player input, and the
+// shared hearts HUD. Team 0 is the player (d-pad + A/B); team 1 is AI. Art: vendored CC0 Tiny Tactics.
+import { tiles } from 'sheet32:../assets/tiles.png'
+import { cursor } from 'sheet32:../assets/cursor.png'
+import { highlight } from 'sheet32:../assets/highlight.png'
+import { hpbar } from 'sheet32:../assets/hpbar.png'
+import { sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_depth, sprite_set_visible, sprite_set_flip, sprite_set_hud, key_pressed, hud_text, frame } from 'cargo:tish_agb'
+import { tac_init, tac_set_cell, tac_add_unit, tac_unit_count, tac_unit_col, tac_unit_row, tac_unit_team, tac_unit_alive, tac_unit_hp, tac_unit_maxhp, tac_unit_move_range, tac_unit_set_pos, tac_turn_next, tac_range_count, tac_range_col, tac_range_row, tac_in_range, tac_path, tac_path_len, tac_path_col, tac_path_row, tac_adjacent_enemy, tac_occupant, tac_damage } from 'cargo:tish_gba_game_engine'
+import { MAPW, MAPH, frames, heights, walkable, units } from './battle_map'
+import { CLASSES } from './components'
+
+// ═══ Isometric projection ════════════════════════════════════════════════════════
+let ORIGIN_X = 96
+let ORIGIN_Y = 24
+let TILE_HALF_W = 16
+let TILE_HALF_H = 8
+let LIFT_PER_STEP = 6
+let UNIT_LIFT = 12
+function cellHeight(col, row) { return heights[row * MAPW + col] }
+function isoX(col, row) { return ORIGIN_X + (col - row) * TILE_HALF_W }
+function isoY(col, row) { return ORIGIN_Y + (col + row) * TILE_HALF_H }
+function tileTopY(col, row) { return isoY(col, row) - cellHeight(col, row) * LIFT_PER_STEP }
+function unitTopY(col, row) { return tileTopY(col, row) - UNIT_LIFT }
+
+// ═══ Depth (painter's sort): tile < range < unit < cursor within a tile ══════════
+let DEPTH_PER_TILE = 4
+let LAYER_TILE = 0
+let LAYER_RANGE = 1
+let LAYER_UNIT = 2
+let LAYER_CURSOR = 3
+function depthAt(col, row, layer) { return (col + row) * DEPTH_PER_TILE + layer }
+
+// ═══ Load the Tiled map into the engine grid ═════════════════════════════════════
+tac_init(MAPW, MAPH)
+let gi = 0
+while (gi < MAPW * MAPH) {
+  let col = gi % MAPW
+  let row = (gi - col) / MAPW
+  tac_set_cell(col, row, heights[gi], frames[gi], walkable[gi])
+  gi = gi + 1
+}
+
+// ═══ Static terrain ══════════════════════════════════════════════════════════════
+let trow = 0
+while (trow < MAPH) {
+  let tcol = 0
+  while (tcol < MAPW) {
+    let s = sprite_new(tiles)
+    sprite_set_frame(s, frames[trow * MAPW + tcol])
+    sprite_set_pos(s, isoX(tcol, trow), tileTopY(tcol, trow))
+    sprite_set_depth(s, depthAt(tcol, trow, LAYER_TILE))
+    tcol = tcol + 1
+  }
+  trow = trow + 1
+}
+
+// ═══ Register units from their class components ══════════════════════════════════
+let unitSprites = []
+let unitClass = []
+let unitFaceFrame = []   // persisted facing: frame 0 = SE, 8 = NE (per unit id)
+let unitFaceFlip = []    // persisted facing flip (per unit id)
+let placeI = 0
+while (placeI < units.length) {
+  let u = units[placeI]
+  let cls = CLASSES[u.cls]
+  tac_add_unit(u.col, u.row, u.team, cls.speed, cls.move, cls.jump, cls.hp)
+  unitSprites.push(sprite_new(cls.sheet))
+  unitClass.push(u.cls)
+  unitFaceFrame.push(0)
+  unitFaceFlip.push(0)
+  placeI = placeI + 1
+}
+let UNIT_COUNT = tac_unit_count()
+
+// The player commands team 0 — find its unit id for the HP HUD.
+let PLAYER_ID = 0
+let findP = 0
+while (findP < UNIT_COUNT) {
+  if (tac_unit_team(findP) === 0) { PLAYER_ID = findP }
+  findP = findP + 1
+}
+
+// ═══ HP HUD — a fill bar + "cur/max" text for the player unit ════════════════════
+// The bar is a HUD sprite whose frame (0..16) is the fill level; the number is drawn with the
+// engine's `hud_text`. Both refresh from the player's HP each frame in the main loop.
+let PLAYER_MAX = tac_unit_maxhp(PLAYER_ID)
+let HP_BAR_FRAMES = 16
+let hpBar = sprite_new(hpbar)
+sprite_set_hud(hpBar, 1)
+sprite_set_pos(hpBar, 6, 5)
+function updateHpHud() {
+  let hp = tac_unit_hp(PLAYER_ID)
+  sprite_set_frame(hpBar, hp * HP_BAR_FRAMES / PLAYER_MAX)
+  hud_text(0, 42, 2, "" + hp + "/" + PLAYER_MAX)   // slot 0 = HP readout
+}
+
+// ═══ Move-range highlight pool ═══════════════════════════════════════════════════
+let HIGHLIGHT_POOL = 40
+let highlightSprites = []
+let poolI = 0
+while (poolI < HIGHLIGHT_POOL) {
+  let h = sprite_new(highlight)
+  sprite_set_visible(h, 0)
+  highlightSprites.push(h)
+  poolI = poolI + 1
+}
+function showMoveRange() {
+  let reachable = tac_range_count()
+  let k = 0
+  while (k < HIGHLIGHT_POOL) {
+    if (k < reachable) {
+      let col = tac_range_col(k)
+      let row = tac_range_row(k)
+      sprite_set_pos(highlightSprites[k], isoX(col, row), tileTopY(col, row))
+      sprite_set_depth(highlightSprites[k], depthAt(col, row, LAYER_RANGE))
+      sprite_set_visible(highlightSprites[k], 1)
+    } else {
+      sprite_set_visible(highlightSprites[k], 0)
+    }
+    k = k + 1
+  }
+}
+function hideMoveRange() {
+  let k = 0
+  while (k < HIGHLIGHT_POOL) { sprite_set_visible(highlightSprites[k], 0); k = k + 1 }
+}
+
+// ═══ Drawing units ═══════════════════════════════════════════════════════════════
+function drawUnits(movingId, mx, my, mdepth, mframe, mflip) {
+  let id = 0
+  while (id < UNIT_COUNT) {
+    let sprite = unitSprites[id]
+    if (tac_unit_alive(id) > 0) {
+      if (id === movingId) {
+        sprite_set_pos(sprite, mx, my)
+        sprite_set_depth(sprite, mdepth)
+        sprite_set_frame(sprite, mframe)
+        sprite_set_flip(sprite, mflip)
+      } else {
+        let col = tac_unit_col(id)
+        let row = tac_unit_row(id)
+        sprite_set_pos(sprite, isoX(col, row), unitTopY(col, row))
+        sprite_set_depth(sprite, depthAt(col, row, LAYER_UNIT))
+        sprite_set_frame(sprite, unitFaceFrame[id])   // stay facing the last-attacked direction
+        sprite_set_flip(sprite, unitFaceFlip[id])
+      }
+      sprite_set_visible(sprite, 1)
+    } else {
+      sprite_set_visible(sprite, 0)
+    }
+    id = id + 1
+  }
+}
+function drawUnitsAtRest() { drawUnits(-1, 0, 0, 0, 0, 0) }
+
+// ═══ Cursor ══════════════════════════════════════════════════════════════════════
+let cursorSprite = sprite_new(cursor)
+sprite_set_visible(cursorSprite, 0)
+function showCursor(col, row) {
+  sprite_set_pos(cursorSprite, isoX(col, row), tileTopY(col, row))
+  sprite_set_depth(cursorSprite, depthAt(col, row, LAYER_CURSOR))
+  sprite_set_visible(cursorSprite, 1)
+}
+function hideCursor() { sprite_set_visible(cursorSprite, 0) }
+
+// ═══ Turn context passed to a class's `onTurn` AI ════════════════════════════════
+let aiDestCol = 0
+let aiDestRow = 0
+function iabs(x) { if (x < 0) { return 0 - x } return x }
+function nearestEnemyDist(unitId, col, row) {
+  let myTeam = tac_unit_team(unitId)
+  let best = 9999
+  let id = 0
+  while (id < UNIT_COUNT) {
+    if (tac_unit_alive(id) > 0 && tac_unit_team(id) !== myTeam) {
+      let d = iabs(col - tac_unit_col(id)) + iabs(row - tac_unit_row(id))
+      if (d < best) { best = d }
+    }
+    id = id + 1
+  }
+  return best
+}
+function makeTurnContext(unitId) {
+  return {
+    unit: unitId,
+    selfCol: tac_unit_col(unitId),
+    selfRow: tac_unit_row(unitId),
+    reachable: tac_range_count(),
+    rangeCol: (i) => tac_range_col(i),
+    rangeRow: (i) => tac_range_row(i),
+    enemyDist: (col, row) => nearestEnemyDist(unitId, col, row),
+    moveTo: (col, row) => { aiDestCol = col; aiDestRow = row }
+  }
+}
+
+// ═══ Turn state machine ══════════════════════════════════════════════════════════
+// BEGIN → (player) PICK a move / (AI) THINK → WALK there → ACT (attack an adjacent enemy?) →
+// STRIKE (lunge + damage) → PAUSE → next unit. The player picks with the d-pad + A (B or a timeout
+// waits); the AI's move comes from its class `onTurn`. Both auto-attack an adjacent enemy after moving.
+let PHASE_BEGIN = 0
+let PHASE_MENU = 1      // player: choose an action (Move / Attack / Wait)
+let PHASE_PICK = 2      // player: choose a move tile
+let PHASE_TARGET = 3    // player: choose which adjacent enemy to attack
+let PHASE_THINK = 4     // AI: brief delay, then decide
+let PHASE_WALK = 5
+let PHASE_ACT = 6       // resolve an attack on an adjacent enemy
+let PHASE_STRIKE = 7    // attack lunge
+let PHASE_PAUSE = 8
+let PHASE_DONE = 9      // battle over — show the result
+let lastDamage = 0      // damage dealt by the current strike (for the popup)
+let resultText = ""
+let MENU_MOVE = 0
+let MENU_ATTACK = 1
+let MENU_WAIT = 2
+let menuSel = 0
+let AI_THINK_FRAMES = 24
+
+// Which sprite frame + flip makes a unit face a target. The combined sheets put the SE walk in
+// frames 0-7 (idle 0) and NE walk in 8-15 (idle 8); the two "west" facings are those flipped.
+let FACE_FRAME = 0
+let FACE_FLIP = 0
+function faceToward(ac, ar, tc, tr) {
+  if (tc > ac) { FACE_FRAME = 0; FACE_FLIP = 0 }        // +col → SE (down-right)
+  else if (tr > ar) { FACE_FRAME = 0; FACE_FLIP = 1 }   // +row → SW (down-left) = SE flipped
+  else if (tr < ar) { FACE_FRAME = 8; FACE_FLIP = 0 }   // -row → NE (up-right)
+  else { FACE_FRAME = 8; FACE_FLIP = 1 }                // -col → NW (up-left) = NE flipped
+}
+// Persist the just-computed facing on a unit so it stays turned that way when it's at rest.
+function setFacing(unitId) { unitFaceFrame[unitId] = FACE_FRAME; unitFaceFlip[unitId] = FACE_FLIP }
+
+// Adjacent-enemy targets for the attack picker (rebuilt when Attack is chosen).
+let targetIds = []
+let targetCols = []
+let targetRows = []
+let targetCount = 0
+let targetIdx = 0
+let STRIKE_FRAMES = 20
+let PAUSE_FRAMES = 14
+let FRAMES_PER_TILE = 8
+let WALK_CYCLE = 8
+
+let phase = PHASE_BEGIN
+let phaseTimer = 0
+let turnUnit = -1
+let curCol = 0
+let curRow = 0
+let walkSeg = 0
+let walkFrame = 0
+let walkSegments = 0
+let walkDestCol = 0
+let walkDestRow = 0
+let attackTarget = -1
+
+function lerp(a, b, framesIn, total) { return a + (b - a) * framesIn / total }
+function walkFrameNow() { return (walkSeg * 4 + walkFrame / 2) % WALK_CYCLE }
+function timerElapsed(limit) {
+  phaseTimer = phaseTimer + 1
+  if (phaseTimer > limit) { phaseTimer = 0; return 1 }
+  return 0
+}
+
+function countLiving(team) {
+  let n = 0
+  let id = 0
+  while (id < UNIT_COUNT) {
+    if (tac_unit_alive(id) > 0 && tac_unit_team(id) === team) { n = n + 1 }
+    id = id + 1
+  }
+  return n
+}
+
+// BEGIN: end the battle if a side is wiped out; otherwise take the next unit's turn. A player unit
+// opens the action menu; an AI unit shows its range and thinks.
+function beginTurn() {
+  if (countLiving(1) === 0) { resultText = "Victory!"; phase = PHASE_DONE }
+  else if (countLiving(0) === 0) { resultText = "Defeat"; phase = PHASE_DONE }
+  if (phase === PHASE_DONE) { return }
+  turnUnit = tac_turn_next()
+  tac_unit_move_range(turnUnit)
+  phaseTimer = 0
+  if (tac_unit_team(turnUnit) === 0) {
+    menuSel = MENU_MOVE
+    hideMoveRange()
+    hideCursor()
+    phase = PHASE_MENU
+  } else {
+    showMoveRange()
+    hideCursor()
+    phase = PHASE_THINK
+  }
+}
+
+// MENU (player): a one-line action menu; Left/Right change the selection, A confirms.
+function menuLabel(i, label) {
+  if (i === menuSel) { return "[" + label + "]" }
+  return " " + label + " "
+}
+function drawMenu() {
+  hud_text(1, 30, 138, menuLabel(MENU_MOVE, "Move") + menuLabel(MENU_ATTACK, "Attack") + menuLabel(MENU_WAIT, "Wait"))
+}
+function confirmMenu() {
+  hud_text(1, 30, 138, "")   // clear the menu line
+  phaseTimer = 0
+  if (menuSel === MENU_MOVE) {
+    showMoveRange()
+    curCol = tac_unit_col(turnUnit)
+    curRow = tac_unit_row(turnUnit)
+    showCursor(curCol, curRow)
+    phase = PHASE_PICK
+  } else if (menuSel === MENU_ATTACK) {
+    buildTargets()
+    if (targetCount > 0) { phase = PHASE_TARGET } else { phase = PHASE_MENU }  // no enemy in reach
+  } else {
+    phase = PHASE_PAUSE
+  }
+}
+
+// Collect the living enemies on the active unit's 4 neighbouring tiles (the attack picker's list).
+function addTargetIfEnemy(c, r, myTeam) {
+  let occ = tac_occupant(c, r)
+  if (occ >= 0) {
+    if (tac_unit_alive(occ) > 0 && tac_unit_team(occ) !== myTeam) {
+      targetIds.push(occ); targetCols.push(c); targetRows.push(r)
+    }
+  }
+}
+function buildTargets() {
+  targetIds = []; targetCols = []; targetRows = []
+  let ac = tac_unit_col(turnUnit)
+  let ar = tac_unit_row(turnUnit)
+  let myTeam = tac_unit_team(turnUnit)
+  addTargetIfEnemy(ac + 1, ar, myTeam)
+  addTargetIfEnemy(ac - 1, ar, myTeam)
+  addTargetIfEnemy(ac, ar + 1, myTeam)
+  addTargetIfEnemy(ac, ar - 1, myTeam)
+  targetCount = targetIds.length
+  targetIdx = 0
+}
+
+// TARGET (player): pick which adjacent enemy to attack. Left/Right cycles targets; the player
+// rotates to face the selected one; A confirms the strike, B cancels back to the menu.
+function targetTurn() {
+  if (key_pressed(9) > 0) { targetIdx = (targetIdx + 1) % targetCount }
+  if (key_pressed(8) > 0) { targetIdx = (targetIdx + targetCount - 1) % targetCount }
+  let tc = targetCols[targetIdx]
+  let tr = targetRows[targetIdx]
+  showCursor(tc, tr)
+  let ac = tac_unit_col(turnUnit)
+  let ar = tac_unit_row(turnUnit)
+  faceToward(ac, ar, tc, tr)
+  drawUnits(turnUnit, isoX(ac, ar), unitTopY(ac, ar), depthAt(ac, ar, LAYER_UNIT), FACE_FRAME, FACE_FLIP)
+  if (key_pressed(0) > 0) {                    // A: strike the selected target
+    attackTarget = targetIds[targetIdx]
+    let cls = CLASSES[unitClass[turnUnit]]
+    lastDamage = cls.power
+    tac_damage(attackTarget, lastDamage)
+    setFacing(turnUnit)                        // keep facing this target
+    hideCursor()
+    phaseTimer = 0
+    phase = PHASE_STRIKE
+  }
+  if (key_pressed(1) > 0) { hideCursor(); menuSel = MENU_ATTACK; phase = PHASE_MENU }  // B: cancel
+}
+// The turn WAITS here for the player — the loop keeps rendering each frame but the turn does not
+// advance until A is pressed (Left/Right just move the selection).
+function menuTurn() {
+  if (key_pressed(9) > 0) { if (menuSel < MENU_WAIT) { menuSel = menuSel + 1 } }
+  if (key_pressed(8) > 0) { if (menuSel > MENU_MOVE) { menuSel = menuSel - 1 } }
+  drawMenu()
+  if (key_pressed(0) > 0) { confirmMenu() }
+}
+
+function startWalk() {
+  tac_path(aiDestCol, aiDestRow)
+  walkSegments = tac_path_len()
+  walkDestCol = aiDestCol
+  walkDestRow = aiDestRow
+  walkSeg = 0
+  walkFrame = 0
+  hideMoveRange()
+  hideCursor()
+  phaseTimer = 0
+  if (walkSegments <= 1) { phase = PHASE_ACT } else { phase = PHASE_WALK }
+}
+// PICK (player): waits for the player — d-pad moves the cursor, A confirms a reachable tile, B
+// cancels back to the action menu. The turn does not advance on its own.
+function pickMove() {
+  if (key_pressed(9) > 0) { if (curCol < MAPW - 1) { curCol = curCol + 1 } }
+  if (key_pressed(8) > 0) { if (curCol > 0) { curCol = curCol - 1 } }
+  if (key_pressed(7) > 0) { if (curRow < MAPH - 1) { curRow = curRow + 1 } }
+  if (key_pressed(6) > 0) { if (curRow > 0) { curRow = curRow - 1 } }
+  showCursor(curCol, curRow)
+  if (key_pressed(0) > 0) {
+    if (tac_in_range(curCol, curRow) > 0) { aiDestCol = curCol; aiDestRow = curRow; startWalk() }
+  }
+  if (key_pressed(1) > 0) {   // B: cancel back to the menu
+    hideMoveRange()
+    hideCursor()
+    menuSel = MENU_MOVE
+    phase = PHASE_MENU
+  }
+}
+
+// THINK (AI): a beat, then the class `onTurn` chooses a destination.
+function think() {
+  if (timerElapsed(AI_THINK_FRAMES) > 0) {
+    aiDestCol = tac_unit_col(turnUnit)
+    aiDestRow = tac_unit_row(turnUnit)
+    let cls = CLASSES[unitClass[turnUnit]]
+    cls.onTurn(makeTurnContext(turnUnit))
+    startWalk()
+  }
+}
+
+// WALK: interpolate the active unit along its path, one tile per FRAMES_PER_TILE frames.
+function walkTurn() {
+  let fromCol = tac_path_col(walkSeg)
+  let fromRow = tac_path_row(walkSeg)
+  let toCol = tac_path_col(walkSeg + 1)
+  let toRow = tac_path_row(walkSeg + 1)
+  let x = lerp(isoX(fromCol, fromRow), isoX(toCol, toRow), walkFrame, FRAMES_PER_TILE)
+  let y = lerp(unitTopY(fromCol, fromRow), unitTopY(toCol, toRow), walkFrame, FRAMES_PER_TILE)
+  let facingLeft = 0
+  if (isoX(toCol, toRow) < isoX(fromCol, fromRow)) { facingLeft = 1 }
+  drawUnits(turnUnit, x, y, depthAt(toCol, toRow, LAYER_UNIT), walkFrameNow(), facingLeft)
+  walkFrame = walkFrame + 1
+  if (walkFrame >= FRAMES_PER_TILE) {
+    walkFrame = 0
+    walkSeg = walkSeg + 1
+    if (walkSeg >= walkSegments - 1) {
+      tac_unit_set_pos(turnUnit, walkDestCol, walkDestRow)
+      phaseTimer = 0
+      phase = PHASE_ACT
+    }
+  }
+}
+
+// ACT: the AI (and a Move that ends adjacent) auto-attacks an adjacent enemy — pick one, face it,
+// apply damage, then strike; else end the turn.
+function resolveAct() {
+  attackTarget = tac_adjacent_enemy(turnUnit)
+  if (attackTarget >= 0) {
+    let cls = CLASSES[unitClass[turnUnit]]
+    lastDamage = cls.power
+    tac_damage(attackTarget, lastDamage)
+    faceToward(tac_unit_col(turnUnit), tac_unit_row(turnUnit), tac_unit_col(attackTarget), tac_unit_row(attackTarget))
+    setFacing(turnUnit)
+    phaseTimer = 0
+    phase = PHASE_STRIKE
+  } else {
+    phaseTimer = 0
+    phase = PHASE_PAUSE
+  }
+}
+
+// STRIKE: a short lunge toward the target, facing it (damage already landed).
+function strike() {
+  let ac = tac_unit_col(turnUnit)
+  let ar = tac_unit_row(turnUnit)
+  let tc = tac_unit_col(attackTarget)
+  let tr = tac_unit_row(attackTarget)
+  let baseX = isoX(ac, ar)
+  let baseY = unitTopY(ac, ar)
+  drawUnits(turnUnit, baseX + (isoX(tc, tr) - baseX) / 4, baseY + (unitTopY(tc, tr) - baseY) / 4,
+            depthAt(ac, ar, LAYER_UNIT), FACE_FRAME, FACE_FLIP)
+  hud_text(2, isoX(tc, tr) + 10, unitTopY(tc, tr) - 8, "-" + lastDamage)   // damage popup
+  if (timerElapsed(STRIKE_FRAMES) > 0) {
+    hud_text(2, 0, 0, "")   // clear the popup
+    phase = PHASE_PAUSE
+  }
+}
+
+// ═══ Main loop ═══════════════════════════════════════════════════════════════════
+while (true) {
+  if (phase === PHASE_BEGIN) {
+    beginTurn()
+  } else if (phase === PHASE_MENU) {
+    menuTurn()
+  } else if (phase === PHASE_PICK) {
+    pickMove()
+  } else if (phase === PHASE_TARGET) {
+    targetTurn()
+  } else if (phase === PHASE_THINK) {
+    think()
+  } else if (phase === PHASE_WALK) {
+    walkTurn()
+  } else if (phase === PHASE_ACT) {
+    resolveAct()
+  } else if (phase === PHASE_STRIKE) {
+    strike()
+  } else if (phase === PHASE_PAUSE) {
+    if (timerElapsed(PAUSE_FRAMES) > 0) { phase = PHASE_BEGIN }
+  } else if (phase === PHASE_DONE) {
+    hud_text(1, 96, 68, resultText)   // battle over — Victory! / Defeat
+  }
+
+  // WALK / STRIKE / TARGET draw the active unit themselves (moving, lunging, or facing a target).
+  if (phase !== PHASE_WALK && phase !== PHASE_STRIKE && phase !== PHASE_TARGET) { drawUnitsAtRest() }
+  updateHpHud()   // live player HP: bar + "cur/max" text
+  frame()
+}
