@@ -37,7 +37,14 @@ const AUTOPLAY_FRAMES = 720;    // long enough to get through a title/intro and 
 // Zelda sprites/tilesets, so a committed preview of either is redistribution of Nintendo's art —
 // they get no image until their assets are replaced (or the examples go). Recording is skipped
 // rather than the file being deleted afterwards, so a re-run cannot quietly put it back.
-const NO_PREVIEW = new Set(['bench-behav', 'bench-boot']);
+//
+// The four timer ROMs are here for a different reason: they draw nothing because they cannot. See
+// scripts/add_screen_readout.py — a readout ahead of the measurement lands inside it, and
+// bench-tables' SANE gate caught it (fill64=-64532, a wrapped counter). They stay blank on purpose.
+const NO_PREVIEW = new Set([
+  'bench-behav', 'bench-boot',
+  'bench-tables', 'bench-access', 'bench-entities', 'probe-arrayarg',
+]);
 
 // Per-example capture-window overrides, for the few where the generic window produces something
 // actively bad rather than merely dull.

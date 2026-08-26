@@ -2,7 +2,6 @@
 
 > *What a data access and a function call actually cost on GBA.*
 
-<img src="preview.png" alt="preview" width="480">
 
 Every optimisation in this repo has come from removing calls or removing array accesses — and until
 this ROM, the numbers behind those decisions were **divided out of a larger measurement** rather than

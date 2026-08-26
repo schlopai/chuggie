@@ -9,17 +9,10 @@
     "verify": "./verify.sh",
     "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\""
   },
-  "devDependencies": {
-    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
-  },
+  "devDependencies": { "@tishlang/tish": "file:../../../../tish/tish/npm/tish" },
   "tish": {
     "rustDependencies": {
-      "tish_agb": {
-        "path": "../../crates/tish-agb"
-      },
-      "tish_gba_scenepack": {
-        "path": "../../crates/tish-gba-scenepack"
-      }
+      "tish_agb": { "path": "../../crates/tish-agb" }
     }
   },
   "description": "What a data access and a function call actually cost on GBA: module vs local arrays, call overhead per argument, and passing an array across a module boundary."

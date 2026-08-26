@@ -106,18 +106,18 @@ Not things to play — these measure something or reproduce a specific bug.
 
 | | example |
 |---|---|
-| <img src="bench-access/preview.png" width="480"> | **[bench access — what a data access and a function call actually cost on GBA](bench-access/README.md)**<br>`bench-access` |
+| — | **[bench access — what a data access and a function call actually cost on GBA](bench-access/README.md)**<br>`bench-access` |
 | <img src="bench-ai/preview.png" width="480"> | **[bench ai — a benchmark testing the performance of the ai subsystem](bench-ai/README.md)**<br>`bench-ai` |
 | — | **[bench behav — a benchmark testing the performance of the behav subsystem](bench-behav/README.md)**<br>`bench-behav` |
 | — | **[bench boot — a benchmark testing the performance of the boot subsystem](bench-boot/README.md)**<br>`bench-boot` |
 | — | **[bench build — a benchmark testing the performance of the build subsystem](bench-build/README.md)**<br>`bench-build` |
-| <img src="bench-entities/preview.png" width="480"> | **[bench entities — a benchmark testing the performance of the entities subsystem](bench-entities/README.md)**<br>`bench-entities` |
+| — | **[bench entities — a benchmark testing the performance of the entities subsystem](bench-entities/README.md)**<br>`bench-entities` |
 | <img src="bench-memory/preview.gif" width="480"> | **[bench memory — a benchmark testing the performance of the memory subsystem](bench-memory/README.md)**<br>`bench-memory` |
 | <img src="bench-room/preview.gif" width="480"> | **[bench room — a benchmark testing the performance of the room subsystem](bench-room/README.md)**<br>`bench-room` |
 | <img src="bench-systems/preview.png" width="480"> | **[bench systems — where the native pass goes, system by system](bench-systems/README.md)**<br>`bench-systems` |
-| <img src="bench-tables/preview.png" width="480"> | **[bench tables — what a generated table costs to read, and whether caching one is worth anything](bench-tables/README.md)**<br>`bench-tables` |
+| — | **[bench tables — what a generated table costs to read, and whether caching one is worth anything](bench-tables/README.md)**<br>`bench-tables` |
 | — | **[p0 spike — a prototype or technical spike for engine core mechanics](p0-spike/README.md)**<br>`p0-spike` |
-| <img src="probe-arrayarg/preview.png" width="480"> | **[probe arrayarg — does passing a typed module array to a native de-optimise every OTHER read of it? Yes](probe-arrayarg/README.md)**<br>`probe-arrayarg` |
+| — | **[probe arrayarg — does passing a typed module array to a native de-optimise every OTHER read of it? Yes](probe-arrayarg/README.md)**<br>`probe-arrayarg` |
 | <img src="probe-arrayret/preview.png" width="480"> | **[probe arrayret — a technical test for array returns over FFI or WASM](probe-arrayret/README.md)**<br>`probe-arrayret` |
 | <img src="probe-module-let/preview.png" width="480"> | **[probe module let — does a bare module-level `let` read back correctly after reassignment on the GBA target?](probe-module-let/README.md)**<br>`probe-module-let` |
 | <img src="repro-654-agg-push/preview.png" width="480"> | **[repro 654 agg push — aggregate repro for #654](repro-654-agg-push/README.md)**<br>`repro-654-agg-push` |

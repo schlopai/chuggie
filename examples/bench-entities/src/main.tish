@@ -1,15 +1,7 @@
 // Frame-budget spike: 100-entity movement + O(n^2) AABB collision in typed tish.
 // Measures per-update cost against the ~4389-tick GBA frame budget (Divider64).
-import { timer_read, log, frame, backdrop, hud_text } from 'cargo:tish_agb'
-import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { timer_read, log, frame } from 'cargo:tish_agb'
 
-
-// --- screen readout (scripts/add_screen_readout.py) ---
-// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
-backdrop(0x101018)
-hud_text(0, 8, 8, "bench-entities")
-hud_text(1, 8, 24, "running - numbers go to the log")
-frame()
 let n: i32 = 100
 let xs: number[] = []
 let ys: number[] = []
@@ -76,5 +68,3 @@ while (f < 240) {
   f = f + 1
 }
 log("bench done")
-hud_text(1, 8, 24, "done - numbers are in the log")
-while (true) { frame() }
