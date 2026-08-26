@@ -1,0 +1,9 @@
+{
+  "branches": ["main"],
+  "plugins": [
+    "@sem/commit-analyzer",
+    "@sem/release-notes-generator",
+    ["@sem/npm", { "npmPublish": false, "pkgRoot": "packages" }],
+    ["@sem/github", { "prerelease": true }]
+  ]
+}
