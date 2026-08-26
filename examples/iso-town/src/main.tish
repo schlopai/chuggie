@@ -3,7 +3,7 @@
 // Map/render stack from ffta-tactics (tactics: bake + depth-sorted raised tiles + actor sheets).
 // Motion from iso-sprite (quarter-tile d-pad glide). Camera follows the player like akari
 // (`camera_set` + `bg_scroll`). Talk/shop from packages/dialog + packages/shop.
-import { board } from 'tactics:../tiled/town.tmj'
+import { board } from 'isoboard:../tiled/town.tmj'
 import { tiles } from 'sheet32:../assets/tiles.png'
 import { fighter } from 'sheet32:../assets/fighter.png'
 import { mage } from 'sheet32:../assets/mage.png'

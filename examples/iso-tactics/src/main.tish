@@ -10,7 +10,7 @@
 // carry a full animation set (walk / attack / charge / release / damage / weak / dead) laid out by
 // src/anim.tish + tools/pack_actors.py. This file is the controller: iso rendering, the turn flow,
 // the animation state machine, the weapon overlay, and the HUD.
-import { board } from 'tactics:../tiled/battle.tmj'
+import { board } from 'isoboard:../tiled/battle.tmj'
 import { tiles } from 'sheet32:../assets/tiles.png'
 import { cursor } from 'sheet32:../assets/cursor.png'
 import { highlight } from 'sheet32:../assets/highlight.png'

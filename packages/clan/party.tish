@@ -1,0 +1,1788 @@
+// packages/clan/party.tish — FFTA Start menu on packages/ui (same patterns as packages/shop).
+// Equip screen mirrors FFTA: header (name/job/Lv + HP/MP) · left STATUS · right EQUIP list
+// (16×16 icons). Bag pick swaps the right panel in place (shop detail↔qty style).
+import {
+  text_height, ui_begin, ui_hide, ui_text, ui_text_box, ui_rect,
+  sprite_new, sprite_set_frame, sprite_set_pos, sprite_set_visible, sprite_set_hud
+} from 'cargo:tish_agb'
+import { onSceneReset, onMemReport, memMark } from '../scene_hooks'
+import {
+  uiStreamBegin, uiStreamStep, uiUseSheet, uiHideIcons, uiRelayoutInner,
+  makeSelector, makePointer, makePanel, makeListRow, pointerHide, pointerAt, col2,
+  uiKeys, uiKeyDown, uiRowText,
+  BTN_A, BTN_B, BTN_START, BTN_L, BTN_R, BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT
+} from '../ui'
+import {
+  clanGil, clanCp, clanName, clanRosterLen, clanUnit, clanRaceName, clanJobName,
+  clanEquipStats, clanSlotLabel, clanSlotCount, clanEquipGet, clanBagForSlot,
+  clanEquipItem, clanUnequip, clanPreviewEquip, clanBagList, clanAbilityName,
+  clanItemById, clanItemIcon, clanCanEquip, clanSortRoster, clanJobsForRace,
+  clanChangeJob, clanLeaveUnit, clanSetAbility, clanLearnAbility, clanTeachFromEquip,
+  clanUnitKnows, clanUseItem, clanFormation, clanFormationSlots, clanFormationToggle,
+  clanAreas, clanAreaSetHere
+} from './state'
+import { clanAbilityById } from './abilities_gen'
+
+let ST_OFF: i32 = 0
+let ST_ROOT: i32 = 1
+let ST_ROSTER: i32 = 2
+let ST_EQUIP: i32 = 3
+let ST_BAG: i32 = 4
+let ST_ITEMS: i32 = 5
+let ST_SYSTEM: i32 = 6
+let ST_UNIT: i32 = 7
+let ST_OPTIONS: i32 = 8
+let ST_TITLE: i32 = 9
+let ST_CLAN: i32 = 10
+let ST_ABIL: i32 = 11
+let ST_JOBS: i32 = 12
+let ST_LEAVE: i32 = 13
+let ST_LINK: i32 = 14
+let ST_AREAS: i32 = 15
+let ST_FORM: i32 = 16
+
+let ROOT_LABELS = ["Party", "Clan", "Link", "Area List", "System", "Resume"]
+let SYS_LABELS = ["Resume", "Options", "Title"]
+let UNIT_LABELS = ["Equip Items", "Pick Abilities", "Change Jobs", "Leave Clan"]
+let ITEM_TABS = ["All", "Items", "Weapons", "Armor", "Acc"]
+let SORT_LABELS = ["name", "level", "job"]
+let ABIL_SLOT_LABELS = ["A", "R", "S"]
+
+let ICON_SZ: i32 = 16
+let CURSOR_FR: i32 = 18
+// Paint a whole Equip/Roster screen in one stream step after layout (was 6 → ~1s of blocked input).
+let STREAM_BUDGET: i32 = 200
+let MENU_BG = "bg"
+
+let CFG = {
+  font: -1, sheet: -1, shopSheet: -1, shopIconSize: 32, menuBg: MENU_BG,
+  // Cursor sheet/frame are RECORDED at init; the sprite is taken later (see ensurePtr).
+  cursorSheet: -1, cursorFrame: CURSOR_FR
+}
+let PTR = null
+
+let HOOKS = { onTitle: null, onTravel: null }
+
+let P = {
+  active: 0, state: ST_OFF,
+  idx: 0, unitIdx: 0, slot: 0, infoCol: 0, tab: 0, sortMode: 0,
+  abilSlot: 0, msgSpeed: 1,
+  msg: "", msgT: 0,
+  streaming: 0,
+  equipPending: 0,
+  sel: null,
+  listNode: null,
+  detailNode: null,
+  footerNode: null,
+  statusNode: null,
+  bagCache: null,
+  bagIdx: 0,
+  bagIconSp: -1,
+  equipIconSps: null,
+  rx: -1, ry: -1, rw: -1, rh: -1,
+  dName: null, dAtk: null, dDef: null, dMag: null, dSpd: null
+}
+
+export function partyOnTitle(fn) { HOOKS.onTitle = fn }
+export function partyOnTravel(fn) { HOOKS.onTravel = fn }
+
+function pick(v, d) {
+  if (v === null) { return d }
+  return v
+}
+function present(v) {
+  if (v === null) { return 0 }
+  return 1
+}
+
+function deltaStr(n) {
+  if (n > 0) { return "+" + n }
+  if (n < 0) { return "" + n }
+  return "0"
+}
+
+// Hand back the raw sprite handles this menu caches. `sprite_clear` (every `loadScene`) empties the
+// arena and restarts handle numbering, so these do not just go dead — they get reissued to whatever
+// the next scene spawns first, and the menu would then move and reframe that entity's sprite on its
+// next open. `ensureBagIcon` / `ensureEquipIcons` take fresh ones.
+function partyInvalidateSprites() {
+  P.bagIconSp = -1
+  P.equipIconSps = []
+}
+
+// One line for `packages/memdebug` — `held` must fall back to 0 after partyClose, which is exactly
+// the invariant releaseSel exists to keep and the one that was silently broken.
+function partyMemLine() {
+  let n = 0
+  if (present(P.sel) === 1) { n = n + 1 }
+  if (present(P.listNode) === 1) { n = n + 1 }
+  if (present(P.detailNode) === 1) { n = n + 1 }
+  if (present(P.statusNode) === 1) { n = n + 1 }
+  if (present(P.footerNode) === 1) { n = n + 1 }
+  if (present(P.bagCache) === 1) { n = n + 1 }
+  if (present(P.dName) === 1) { n = n + 1 }
+  let eq = 0
+  if (present(P.equipIconSps) === 1) { eq = P.equipIconSps.length }
+  return "party active " + P.active + "  held " + n + "  icons " + eq + "  bagSp " + P.bagIconSp
+}
+
+let HOOK = { done: 0 }
+
+export function partyInit(cfg) {
+  if (HOOK.done === 0) {
+    HOOK.done = 1
+    onSceneReset(partyInvalidateSprites)
+    onMemReport(partyMemLine)
+  }
+  CFG.font = pick(cfg.font, -1)
+  CFG.sheet = pick(cfg.sheet, -1)
+  CFG.shopSheet = pick(cfg.shopSheet, -1)
+  CFG.shopIconSize = pick(cfg.shopIconSize, 32)
+  CFG.menuBg = pick(cfg.menuBg, MENU_BG)
+  // RECORD the cursor's sheet/frame. Do NOT take the sprite here, and do not warm the equip icons
+  // here either -- both now happen on the first partyOpen (see ensurePtr / partyOpen).
+  //
+  // This menu is built at boot and may never be opened, but partyInit runs regardless, in the middle
+  // of every other package's startup. Taking sprites there is not free on a ~140 KB heap: it does not
+  // just cost their own bytes, it shifts the address every later allocation lands at. What fell over
+  // was the SHOP -- a different package, unchanged -- failing a 128-byte allocation with ~21 KB still
+  // free, i.e. fragmentation rather than exhaustion, the moment the player talked to the shopkeeper.
+  //
+  // Deferring restores what this file did before the rewrite (it warmed its icons inside partyOpen)
+  // and costs nothing visible: by the time either is needed the menu owns the screen, and the frame
+  // that opens it is already doing a full render.
+  CFG.cursorSheet = pick(cfg.cursorSheet, CFG.sheet)
+  CFG.cursorFrame = pick(cfg.cursorFrame, CURSOR_FR)
+}
+
+// Take the cursor sprite on first use. Safe to call repeatedly; no-op once PTR exists.
+function ensurePtr() {
+  if (present(PTR) === 1) { return }
+  if (CFG.cursorSheet < 0) { return }
+  PTR = makePointer({ sheet: CFG.cursorSheet, frame: CFG.cursorFrame, anim: "bob", hotY: 4 })
+}
+
+function enterSheet() {
+  if (CFG.sheet >= 0) { uiUseSheet(CFG.sheet, ICON_SZ) }
+}
+
+function leaveSheet() {
+  if (CFG.shopSheet >= 0) { uiUseSheet(CFG.shopSheet, CFG.shopIconSize) }
+  else { uiHideIcons() }
+}
+
+function releaseSel() {
+  if (present(P.sel) === 1) { P.sel.clear(); P.sel.hideCursor() }
+  P.sel = null
+  P.listNode = null
+  P.footerNode = null
+  P.statusNode = null
+  // These are the screen's content, not its chrome, and nothing else was dropping them: a closed
+  // menu went on holding a detail panel tree, the bag array it last listed, and the five stat leaves
+  // for the rest of the session.
+  P.detailNode = null
+  P.bagCache = null
+  P.dName = null
+  P.dAtk = null
+  P.dDef = null
+  P.dMag = null
+  P.dSpd = null
+  P.rx = -1
+  P.ry = -1
+  P.rw = -1
+  P.rh = -1
+}
+
+function cacheRightBox(n) {
+  if (present(n) === 0) { return }
+  if (present(n._x) === 0) { return }
+  P.rx = n._x
+  P.ry = n._y
+  P.rw = n._w
+  P.rh = n._h
+}
+
+export function partyActive() { return P.active }
+
+export function partyOpen() {
+  memMark("party open")
+  // The sprites this menu needs, taken now rather than at boot (see partyInit).
+  ensurePtr()
+  if (CFG.sheet >= 0) { ensureEquipIcons(clanSlotCount()) }
+  enterSheet()
+  uiHideIcons()
+  if (present(PTR) === 1) { pointerHide(PTR) }
+  P.active = 1
+  P.state = ST_ROOT
+  P.idx = 0
+  P.msg = ""
+  P.streaming = 0
+  P.equipPending = 0
+  releaseSel()
+  renderRoot(0)
+}
+
+export function partyClose() {
+  // HIDE THE CANVAS. The menu is drawn on the UI background layer, which sits at priority 0 — above
+  // everything the game draws — so releasing the menu's state without hiding the layer leaves the
+  // whole menu on screen with the world running invisibly underneath. It reads exactly like a freeze:
+  // input still works, the loop is still stepping, nothing moves. (packages/menu's dismiss does the
+  // same thing, for the same reason.)
+  ui_hide()
+  releaseSel()
+  hideBagIcon()
+  hideEquipIcons()
+  if (present(PTR) === 1) { pointerHide(PTR) }
+  P.active = 0
+  P.state = ST_OFF
+  P.streaming = 0
+  P.equipPending = 0
+  leaveSheet()
+  memMark("party close")
+}
+
+function flash(msg) {
+  P.msg = msg
+  P.msgT = 45
+  repaintFooter()
+}
+
+function footerText() {
+  if (P.msg !== "") { return P.msg }
+  if (P.state === ST_ROOT) { return "A select  B/Start resume" }
+  if (P.state === ST_ROSTER) { return "A unit L info R sort ST bag" }
+  if (P.state === ST_UNIT) { return "A select  B back" }
+  if (P.state === ST_EQUIP) { return "A change  L remove  B back" }
+  if (P.state === ST_BAG) { return "A equip  B cancel" }
+  if (P.state === ST_ITEMS) { return "L/R tabs  A use  B back" }
+  if (P.state === ST_SYSTEM) { return "A select  B back" }
+  if (P.state === ST_OPTIONS) { return "A/B back" }
+  if (P.state === ST_TITLE) { return "A confirm  B cancel" }
+  if (P.state === ST_CLAN) { return "A formation  B back" }
+  if (P.state === ST_ABIL) { return "LR slot A assign ST learn" }
+  if (P.state === ST_JOBS) { return "A change job  B back" }
+  if (P.state === ST_LEAVE) { return "A leave  B cancel" }
+  if (P.state === ST_LINK) { return "B back" }
+  if (P.state === ST_AREAS) { return "A travel  B back" }
+  if (P.state === ST_FORM) { return "A toggle  B back" }
+  return ""
+}
+
+function repaintFooter() {
+  let f = P.footerNode
+  if (present(f) === 0) { return 0 }
+  if (present(f._x) === 0) { return 0 }
+  // bg in blank glyphs — shorter hints don't leave transparent/map holes.
+  ui_text_box(CFG.font, f._x, f._y, footerText(), col2("dim"), f._w, 0, 0, 0, col2("bg"))
+  return 1
+}
+
+function paintTree(tree, stream) {
+  if (present(PTR) === 1) { pointerHide(PTR) }
+  // Always begin with an opaque menu bg — bare uiRender clears the canvas to transparent, so the
+  // gap between STATUS/EQUIP (and any panel-edge inset) showed the live map through.
+  uiStreamBegin(tree, CFG.menuBg)
+  if (stream === 1) {
+    P.streaming = 1
+  } else {
+    // Drain to completion, BOUNDED. Two fixed steps only ever painted ~12 nodes, which is short of
+    // even the root menu — so an "unstreamed" open still left the screen empty for the frames it took
+    // the caller to pump the rest, which reads as the menu flashing empty before it appears. The cap
+    // keeps the old promise that this can never spin unbounded and starve VBlank.
+    let guard = 0
+    while (guard < 24) {
+      if (uiStreamStep(STREAM_BUDGET) === 1) { guard = 24 } else { guard = guard + 1 }
+    }
+    P.streaming = 0
+    cacheRightBox(P.listNode)
+  }
+}
+
+// ── Root / roster / system (text lists, shop-style makeSelector) ─────────────
+
+function renderRoot(stream) {
+  releaseSel()
+  P.sel = makeSelector({
+    cols: 1, gap: 2, cursor: PTR, gutter: 10, rowH: text_height(CFG.font) + 2,
+    count: () => { return ROOT_LABELS.length },
+    cell: (i) => { return { text: ROOT_LABELS[i], color: "text" } }
+  })
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 8, gap: 6,
+    children: [
+      { dir: "row", justify: "between", children: [
+        { text: "CLAN MENU", color: "title" },
+        { text: "G " + clanGil(), color: "gold" }
+      ]},
+      makePanel({
+        title: "PAUSE", titleColor: "label", border: "border", fill: "panel", pad: 6, gap: 2, w: 140,
+        children: [P.sel.view()]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function rosterCell(i) {
+  let u = clanUnit(i)
+  let line = u.name
+  if (P.infoCol === 1) { line = u.name + " Lv" + u.level }
+  else if (P.infoCol === 2) { line = u.name + " " + clanJobName(u.job) }
+  else if (P.infoCol === 3) {
+    let st = clanEquipStats(u)
+    line = u.name + " " + st.atk + "/" + st.def
+  }
+  return { text: line, color: "text" }
+}
+
+function renderRoster(stream) {
+  releaseSel()
+  P.sel = makeSelector({
+    cols: 1, gap: 2, h: 88, cursor: PTR, gutter: 10, rowH: text_height(CFG.font) + 2, rowBg: "panel",
+    count: () => { return clanRosterLen() },
+    cell: (i) => { return rosterCell(i) }
+  })
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 6, gap: 4,
+    children: [
+      { text: "PARTY", color: "title" },
+      { text: "L info " + P.infoCol + "  R sort " + SORT_LABELS[P.sortMode] + "  Start items", color: "dim" },
+      makePanel({
+        title: "ROSTER", titleColor: "label", border: "border", fill: "panel", pad: 4, gap: 2, w: 200,
+        children: [P.sel.view()]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function renderSystem(stream) {
+  releaseSel()
+  P.sel = makeSelector({
+    cols: 1, gap: 2, cursor: PTR, gutter: 10, rowH: text_height(CFG.font) + 2,
+    count: () => { return SYS_LABELS.length },
+    cell: (i) => { return { text: SYS_LABELS[i], color: "text" } }
+  })
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 8, gap: 6,
+    children: [
+      { text: "SYSTEM", color: "title" },
+      makePanel({
+        title: "MENU", titleColor: "label", border: "border", fill: "panel", pad: 6, gap: 2, w: 140,
+        children: [P.sel.view()]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function renderUnit(stream) {
+  releaseSel()
+  let u = clanUnit(P.unitIdx)
+  P.sel = makeSelector({
+    cols: 1, gap: 2, cursor: PTR, gutter: 10, rowH: text_height(CFG.font) + 2,
+    count: () => { return UNIT_LABELS.length },
+    cell: (i) => { return { text: UNIT_LABELS[i], color: "text" } }
+  })
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 8, gap: 4,
+    children: [
+      { text: u.name, color: "title" },
+      { text: clanJobName(u.job) + "  Lv" + u.level, color: "text" },
+      makePanel({
+        title: "UNIT", titleColor: "label", border: "border", fill: "panel", pad: 6, gap: 2, w: 160,
+        children: [P.sel.view()]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function renderOptions(stream) {
+  releaseSel()
+  P.sel = makeSelector({
+    cols: 1, gap: 2, cursor: PTR, gutter: 10, rowH: text_height(CFG.font) + 2,
+    count: () => { return 2 },
+    cell: (i) => {
+      if (i === 0) { return { text: "Msg speed  " + P.msgSpeed, color: "text" } }
+      return { text: "Back", color: "text" }
+    }
+  })
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 8, gap: 6,
+    children: [
+      { text: "OPTIONS", color: "title" },
+      makePanel({
+        title: "SETTINGS", titleColor: "label", border: "border", fill: "panel", pad: 6, gap: 2, w: 160,
+        children: [P.sel.view()]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function renderTitleConfirm(stream) {
+  releaseSel()
+  P.sel = makeSelector({
+    cols: 1, gap: 2, cursor: PTR, gutter: 10, rowH: text_height(CFG.font) + 2,
+    count: () => { return 2 },
+    cell: (i) => {
+      if (i === 0) { return { text: "Return to Title", color: "bad" } }
+      return { text: "Cancel", color: "text" }
+    }
+  })
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 8, gap: 6,
+    children: [
+      { text: "TITLE", color: "title" },
+      { text: "Leave the field and return to title?", color: "dim", wrap: true, w: 200 },
+      makePanel({
+        title: "CONFIRM", titleColor: "label", border: "border", fill: "panel", pad: 6, gap: 2, w: 160,
+        children: [P.sel.view()]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function renderClan(stream) {
+  releaseSel()
+  P.sel = makeSelector({
+    cols: 1, gap: 2, cursor: PTR, gutter: 10, rowH: text_height(CFG.font) + 2,
+    count: () => { return 2 },
+    cell: (i) => {
+      if (i === 0) { return { text: "Formation", color: "text" } }
+      return { text: "Back", color: "text" }
+    }
+  })
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 8, gap: 4,
+    children: [
+      { text: clanName(), color: "title" },
+      { text: "Gil " + clanGil() + "   CP " + clanCp(), color: "gold" },
+      { text: "Members " + clanRosterLen(), color: "text" },
+      makePanel({
+        title: "CLAN HQ", titleColor: "label", border: "border", fill: "panel", pad: 6, gap: 2, w: 160,
+        children: [P.sel.view()]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function renderLink(stream) {
+  releaseSel()
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 8, gap: 4,
+    children: [
+      { text: "LINK", color: "title" },
+      makePanel({
+        title: "MULTIPLAYER", titleColor: "label", border: "border", fill: "panel", pad: 8, gap: 4, w: 200,
+        children: [
+          { text: "Wireless Link is not available", color: "text", wrap: true, w: 180 },
+          { text: "on this build.", color: "dim", wrap: true, w: 180 }
+        ]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function renderAreas(stream) {
+  releaseSel()
+  let areas = clanAreas()
+  P.sel = makeSelector({
+    cols: 1, gap: 2, cursor: PTR, gutter: 10, rowH: text_height(CFG.font) + 2,
+    count: () => { return clanAreas().length },
+    cell: (i) => {
+      let a = clanAreas()[i]
+      let mark = "  "
+      if (a.here > 0) { mark = "* " }
+      return { text: mark + a.name, color: "text" }
+    }
+  })
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 8, gap: 4,
+    children: [
+      { text: "AREA LIST", color: "title" },
+      makePanel({
+        title: "WORLD", titleColor: "label", border: "border", fill: "panel", pad: 6, gap: 2, w: 180,
+        children: [P.sel.view()]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function formCell(i) {
+  let form = clanFormation()
+  let ri = form[i]
+  if (ri < 0) { return { text: (i + 1) + ". ----", color: "dim" } }
+  let u = clanUnit(ri)
+  if (u === null) { return { text: (i + 1) + ". ----", color: "dim" } }
+  return { text: (i + 1) + ". " + u.name, color: "text" }
+}
+
+function renderFormation(stream) {
+  releaseSel()
+  P.sel = makeSelector({
+    cols: 1, gap: 2, h: 88, cursor: PTR, gutter: 10, rowH: text_height(CFG.font) + 2,
+    count: () => { return clanRosterLen() },
+    cell: (i) => {
+      let u = clanUnit(i)
+      let form = clanFormation()
+      let mark = "[ ] "
+      let fi = 0
+      while (fi < form.length) {
+        if (form[fi] === i) { mark = "[" + (fi + 1) + "] "; break }
+        fi = fi + 1
+      }
+      return { text: mark + u.name, color: "text" }
+    }
+  })
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 6, gap: 3,
+    children: [
+      { text: "FORMATION", color: "title" },
+      { text: "A toggle deploy slot", color: "dim" },
+      makePanel({
+        title: "DEPLOY", titleColor: "accent", border: "border", fill: "panel", pad: 4, gap: 2, w: 200,
+        children: [P.sel.view()]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function abilName(id) {
+  if (id < 0) { return "(none)" }
+  let a = clanAbilityById(id)
+  if (a === null) { return "?" }
+  return a.name
+}
+
+function renderAbilities(stream) {
+  releaseSel()
+  let u = clanUnit(P.unitIdx)
+  let teach = clanTeachFromEquip(u)
+  P.sel = makeSelector({
+    cols: 1, gap: 2, h: 72, cursor: PTR, gutter: 10, rowH: text_height(CFG.font) + 2,
+    count: () => {
+      let uu = clanUnit(P.unitIdx)
+      return uu.known.length + 1
+    },
+    cell: (i) => {
+      let uu = clanUnit(P.unitIdx)
+      if (i === 0) { return { text: "(clear slot)", color: "dim" } }
+      let id = uu.known[i - 1]
+      return { text: abilName(id), color: "text" }
+    }
+  })
+  let learnLine = "AP " + u.ap
+  if (teach !== null) {
+    learnLine = learnLine + "  Start: " + teach.name + " (" + teach.ap + " AP)"
+  }
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 6, gap: 3,
+    children: [
+      { text: u.name + "  Abilities", color: "title" },
+      { text: "A:" + abilName(u.abilA) + "  R:" + abilName(u.abilR) + "  S:" + abilName(u.abilS), color: "label" },
+      { text: "Slot [" + ABIL_SLOT_LABELS[P.abilSlot] + "]  " + learnLine, color: "dim" },
+      makePanel({
+        title: "KNOWN", titleColor: "accent", border: "border", fill: "panel", pad: 4, gap: 2, w: 200,
+        children: [P.sel.view()]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function renderJobs(stream) {
+  releaseSel()
+  let u = clanUnit(P.unitIdx)
+  let jobs = clanJobsForRace(u.race)
+  P.sel = makeSelector({
+    cols: 1, gap: 2, h: 88, cursor: PTR, gutter: 10, rowH: text_height(CFG.font) + 2,
+    count: () => { return clanJobsForRace(clanUnit(P.unitIdx).race).length },
+    cell: (i) => {
+      let uu = clanUnit(P.unitIdx)
+      let list = clanJobsForRace(uu.race)
+      let j = list[i]
+      let mark = "  "
+      if (j.id === uu.job) { mark = "* " }
+      return { text: mark + j.name, color: "text" }
+    }
+  })
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 6, gap: 3,
+    children: [
+      { text: "CHANGE JOB", color: "title" },
+      { text: u.name + "  " + clanRaceName(u.race), color: "text" },
+      makePanel({
+        title: "JOBS", titleColor: "label", border: "border", fill: "panel", pad: 4, gap: 2, w: 180,
+        children: [P.sel.view()]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function renderLeave(stream) {
+  releaseSel()
+  let u = clanUnit(P.unitIdx)
+  P.sel = makeSelector({
+    cols: 1, gap: 2, cursor: PTR, gutter: 10, rowH: text_height(CFG.font) + 2,
+    count: () => { return 2 },
+    cell: (i) => {
+      if (i === 0) { return { text: "Leave Clan", color: "bad" } }
+      return { text: "Cancel", color: "text" }
+    }
+  })
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let warn = "Remove " + u.name + " from the clan?"
+  if (u.leader > 0) { warn = u.name + " leads the clan and cannot leave." }
+  let tree = {
+    dir: "col", pad: 8, gap: 4,
+    children: [
+      { text: "LEAVE CLAN", color: "title" },
+      { text: warn, color: "dim", wrap: true, w: 200 },
+      makePanel({
+        title: "CONFIRM", titleColor: "label", border: "border", fill: "panel", pad: 6, gap: 2, w: 160,
+        children: [P.sel.view()]
+      }),
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+// ── FFTA Equip: header + STATUS + EQUIP (or BAG) ────────────────────────────
+
+function equipCell(i) {
+  let u = clanUnit(P.unitIdx)
+  let id = clanEquipGet(u, i)
+  if (id < 0) {
+    return makeListRow({ left: clanSlotLabel(i), right: "-", leftColor: "dim", rightColor: "dim" })
+  }
+  let it = clanItemById(id)
+  let name = "?"
+  let fr = 0
+  if (it !== null) { name = it.name; fr = clanItemIcon(it) }
+  return {
+    dir: "row", gap: 4, align: "center", grow: 1,
+    children: [
+      { icon: fr, size: ICON_SZ },
+      { text: name, color: "text", grow: 1 }
+    ]
+  }
+}
+
+function bagCell(i) {
+  let bag = P.bagCache
+  if (present(bag) === 0) { bag = clanBagForSlot(P.slot) }
+  let it = bag[i]
+  return {
+    dir: "row", gap: 4, align: "center", grow: 1,
+    children: [
+      { icon: clanItemIcon(it), size: ICON_SZ },
+      { text: it.name, color: "text", grow: 1 },
+      { text: "x" + it.qty, color: "dim" }
+    ]
+  }
+}
+
+function statRow(label, value, color) {
+  return {
+    dir: "row", justify: "between", grow: 1,
+    children: [
+      { text: label, color: color },
+      { text: "" + value, color: "text" }
+    ]
+  }
+}
+
+function statusKids(u, st) {
+  return [
+    statRow("Move", st.mov, "gold"),
+    statRow("Jump", st.jmp, "gold"),
+    statRow("Atk", st.atk, "accent"),
+    statRow("Def", st.def, "bad"),
+    statRow("Mag", st.mag, "accent"),
+    statRow("Res", st.res, "bad"),
+    statRow("Spd", st.spd, "gold"),
+    statRow("Eva", st.eva, "gold")
+  ]
+}
+
+// Paint STATUS into a fixed/cached box. One left-aligned "Label  N" line per row (no right-align /
+// dual text_box) — avoids over-tall footprints clearing the next row and mystery blank digits.
+function paintStatusFast() {
+  let b = P.statusNode
+  if (present(b) === 0) { return }
+  if (present(b._x) === 0) { return }
+  let u = clanUnit(P.unitIdx)
+  let st = clanEquipStats(u)
+  let x = b._x
+  let y = b._y
+  let w = b._w
+  let h = b._h
+  let font = CFG.font
+  let fh = text_height(font)
+  let pad = 8
+  let bg = col2("panel")
+  fillPanelExact(x, y, w, h, bg)
+  ui_text(font, x + pad, y + pad, "STATUS", col2("label"))
+  let cy = y + pad + fh + 2
+  let row = fh + 2
+  // Explicit fields (not a vals[] of props) — keeps every digit even if a prop read flakes.
+  ui_text(font, x + pad, cy, "Move  " + numStr(st.mov), col2("gold")); cy = cy + row
+  ui_text(font, x + pad, cy, "Jump  " + numStr(st.jmp), col2("gold")); cy = cy + row
+  ui_text(font, x + pad, cy, "Atk   " + numStr(st.atk), col2("accent")); cy = cy + row
+  ui_text(font, x + pad, cy, "Def   " + numStr(st.def), col2("bad")); cy = cy + row
+  ui_text(font, x + pad, cy, "Mag   " + numStr(st.mag), col2("accent")); cy = cy + row
+  ui_text(font, x + pad, cy, "Res   " + numStr(st.res), col2("bad")); cy = cy + row
+  ui_text(font, x + pad, cy, "Spd   " + numStr(st.spd), col2("gold")); cy = cy + row
+  ui_text(font, x + pad, cy, "Eva   " + numStr(st.eva), col2("gold"))
+  ui_rect(x, y, w, h, col2("border"))
+}
+
+function headerKids(u, st) {
+  return {
+    dir: "row", justify: "between", align: "start", gap: 6,
+    children: [
+      { dir: "col", gap: 1, children: [
+        { text: u.name, color: "title" },
+        { text: clanJobName(u.job) + "  Lv" + u.level, color: "text" }
+      ]},
+      { dir: "col", gap: 1, children: [
+        { text: "HP " + u.hp + "/" + u.hpMax, color: "text" },
+        { text: "MP " + u.mp + "/" + u.mpMax, color: "text" }
+      ]}
+    ]
+  }
+}
+
+function deltaColorTok(n) {
+  if (n > 0) { return "good" }
+  if (n < 0) { return "bad" }
+  return "dim"
+}
+
+function fillPanelExact(x, y, w, h, color) {
+  // Tall ui_rect snaps IN to 8×8 (shared solid tile — fast, low VRAM). Seal only the thin rims with
+  // chunked ≤48 spans (exact). Full-panel chunking was correct but exhausted the UI tile pool and
+  // dropped later glyphs (STATUS digits).
+  if (w <= 0) { return }
+  if (h <= 0) { return }
+  ui_rect(x, y, w, h, color, 1)
+  if (h <= 48) { return }
+  let x0 = x + 7
+  x0 = x0 - (x0 % 8)
+  let y0 = y + 7
+  y0 = y0 - (y0 % 8)
+  let x1 = x + w
+  x1 = x1 - (x1 % 8)
+  let y1 = y + h
+  y1 = y1 - (y1 % 8)
+  if (x0 > x) {
+    let yy = y
+    let left = h
+    while (left > 0) {
+      let chunk = left
+      if (chunk > 48) { chunk = 48 }
+      ui_rect(x, yy, x0 - x, chunk, color, 1)
+      yy = yy + chunk
+      left = left - chunk
+    }
+  }
+  if (x + w > x1) {
+    let yy = y
+    let left = h
+    while (left > 0) {
+      let chunk = left
+      if (chunk > 48) { chunk = 48 }
+      ui_rect(x1, yy, x + w - x1, chunk, color, 1)
+      yy = yy + chunk
+      left = left - chunk
+    }
+  }
+  if (y0 > y) { ui_rect(x, y, w, y0 - y, color, 1) }
+  if (y + h > y1) { ui_rect(x, y1, w, y + h - y1, color, 1) }
+}
+
+function numStr(v) {
+  if (v === null) { return "0" }
+  return "" + v
+}
+
+function ensureBagIcon() {
+  if (P.bagIconSp >= 0) { return P.bagIconSp }
+  if (CFG.sheet < 0) { return -1 }
+  let sp = sprite_new(CFG.sheet)
+  sprite_set_hud(sp, 1)
+  sprite_set_visible(sp, 0)
+  P.bagIconSp = sp
+  return sp
+}
+
+function hideBagIcon() {
+  if (P.bagIconSp < 0) { return }
+  sprite_set_visible(P.bagIconSp, 0)
+}
+
+// Paint BAG into the cached right-panel box with NO layout pass (shop-qty speed / better).
+// Layout of a makeSelector tree was ~0.5s on device; this is a handful of opaque text_box writes.
+function paintBagFast() {
+  let x = P.rx
+  let y = P.ry
+  let w = P.rw
+  let h = P.rh
+  if (x < 0) { return 0 }
+  let font = CFG.font
+  let fh = text_height(font)
+  let pad = 8
+  let bg = col2("panel")
+  // Drop leftover EQUIP list icons before we draw the bag's one icon.
+  uiHideIcons()
+  fillPanelExact(x, y, w, h, bg)
+
+  let title = "BAG · " + clanSlotLabel(P.slot)
+  ui_text_box(font, x + pad, y + pad, title, col2("label"), w - pad * 2, 0, fh, "center", bg)
+
+  P.bagCache = clanBagForSlot(P.slot)
+  let bag = P.bagCache
+  if (bag.length === 0) {
+    hideBagIcon()
+    ui_text_box(font, x + pad, y + pad + fh + 4, "(empty)", col2("dim"), w - pad * 2, 0, fh, 0, bg)
+    ui_rect(x, y, w, h, col2("border"))
+    P.listNode = { _x: x, _y: y, _w: w, _h: h, fill: "panel", border: "border", pad: pad }
+    return 1
+  }
+  if (P.bagIdx >= bag.length) { P.bagIdx = 0 }
+  if (P.bagIdx < 0) { P.bagIdx = 0 }
+  let it = bag[P.bagIdx]
+  let rowY = y + pad + fh + 6
+  let iconX = x + pad + 10
+  let sp = ensureBagIcon()
+  if (sp >= 0) {
+    sprite_set_frame(sp, clanItemIcon(it))
+    sprite_set_pos(sp, iconX, rowY)
+    sprite_set_visible(sp, 1)
+  }
+  let textX = iconX + ICON_SZ + 4
+  let textW = w - (textX - x) - pad - 20
+  if (textW < 20) { textW = 20 }
+  ui_text_box(font, textX, rowY + 2, it.name, col2("selected"), textW, 0, fh, 0, bg)
+  ui_text_box(font, x + w - pad - 18, rowY + 2, "x" + it.qty, col2("dim"), 18, 0, fh, 0, bg)
+
+  if (present(PTR) === 1) {
+    pointerAt(PTR, x + pad, rowY + ICON_SZ / 2 - 4)
+  }
+
+  let u = clanUnit(P.unitIdx)
+  let pv = clanPreviewEquip(u, P.slot, it.id)
+  let dy = rowY + ICON_SZ + 8
+  ui_text_box(font, x + pad, dy, it.name, col2("accent"), w - pad * 2, 0, fh, 0, bg)
+  dy = dy + fh + 2
+  ui_text_box(font, x + pad, dy, "ATK" + deltaStr(pv.dAtk), col2(deltaColorTok(pv.dAtk)), 44, 0, fh, 0, bg)
+  ui_text_box(font, x + pad + 52, dy, "DEF" + deltaStr(pv.dDef), col2(deltaColorTok(pv.dDef)), 44, 0, fh, 0, bg)
+  dy = dy + fh + 2
+  ui_text_box(font, x + pad, dy, "MAG" + deltaStr(pv.dMag), col2(deltaColorTok(pv.dMag)), 44, 0, fh, 0, bg)
+  ui_text_box(font, x + pad + 52, dy, "SPD" + deltaStr(pv.dSpd), col2(deltaColorTok(pv.dSpd)), 44, 0, fh, 0, bg)
+  if (it.teaches !== "") {
+    dy = dy + fh + 2
+    ui_text_box(font, x + pad, dy, "->" + clanAbilityName(it.teaches), col2("label"), w - pad * 2, 0, fh, 0, bg)
+  }
+
+  ui_rect(x, y, w, h, col2("border"))
+  P.listNode = { _x: x, _y: y, _w: w, _h: h, fill: "panel", border: "border", pad: pad }
+  return 1
+}
+
+function hideEquipIcons() {
+  if (present(P.equipIconSps) === 0) { return }
+  let i = 0
+  while (i < P.equipIconSps.length) {
+    sprite_set_visible(P.equipIconSps[i], 0)
+    i = i + 1
+  }
+}
+
+function ensureEquipIcons(n) {
+  if (present(P.equipIconSps) === 0) { P.equipIconSps = [] }
+  if (CFG.sheet < 0) { return }
+  while (P.equipIconSps.length < n) {
+    let sp = sprite_new(CFG.sheet)
+    sprite_set_hud(sp, 1)
+    sprite_set_visible(sp, 0)
+    P.equipIconSps.push(sp)
+  }
+}
+
+function equipRowY(i) {
+  let fh = text_height(CFG.font)
+  return P.ry + 8 + fh + 6 + i * (ICON_SZ + 2)
+}
+
+// Patch one slot label in place (opaque text_box). Never touches the panel border — full
+// paintEquipFast on Up/Down was wiping the rim each move and making it flicker.
+function paintEquipRow(i, selected) {
+  if (P.rx < 0) { return }
+  let font = CFG.font
+  let fh = text_height(font)
+  let pad = 8
+  let bg = col2("panel")
+  let x = P.rx
+  let w = P.rw
+  let cy = equipRowY(i)
+  let u = clanUnit(P.unitIdx)
+  let id = clanEquipGet(u, i)
+  let iconX = x + pad + 10
+  let nameW = w - (iconX - x) - ICON_SZ - pad - 4
+  if (nameW < 20) { nameW = 20 }
+  if (id < 0) {
+    // Empty slots stay dim; selection is the pointer only.
+    ui_text_box(font, iconX, cy + 2, clanSlotLabel(i), col2("dim"), nameW, 0, fh, "left", bg)
+    return
+  }
+  let it = clanItemById(id)
+  let name = "?"
+  if (it !== null) { name = it.name }
+  let col = "text"
+  if (selected > 0) { col = "selected" }
+  ui_text_box(font, iconX + ICON_SZ + 4, cy + 2, name, col2(col), nameW, 0, fh, "left", bg)
+}
+
+function paintEquipHi(prev) {
+  if (prev !== P.slot) { paintEquipRow(prev, 0) }
+  paintEquipRow(P.slot, 1)
+}
+
+// Paint EQUIP slots into the cached right box — no makeSelector layout (was the Marche-open hitch).
+function paintEquipFast() {
+  let x = P.rx
+  let y = P.ry
+  let w = P.rw
+  let h = P.rh
+  if (x < 0) { return 0 }
+  let font = CFG.font
+  let fh = text_height(font)
+  let pad = 8
+  let bg = col2("panel")
+  hideBagIcon()
+  uiHideIcons()
+  fillPanelExact(x, y, w, h, bg)
+  // ui_text — ui_text_box per row was a big slice of the Marche-open hitch.
+  ui_text(font, x + pad + 24, y + pad, "EQUIP", col2("accent"))
+
+  let u = clanUnit(P.unitIdx)
+  let n = clanSlotCount()
+  ensureEquipIcons(n)
+  let rowH = ICON_SZ + 2
+  let cy = y + pad + fh + 6
+  let bottom = y + h - pad
+  let i = 0
+  while (i < n) {
+    let sp = -1
+    if (present(P.equipIconSps) === 1) {
+      if (i < P.equipIconSps.length) { sp = P.equipIconSps[i] }
+    }
+    if (cy + rowH > bottom) {
+      if (sp >= 0) { sprite_set_visible(sp, 0) }
+      i = i + 1
+      continue
+    }
+    let id = clanEquipGet(u, i)
+    let iconX = x + pad + 10
+    let col = "text"
+    if (i === P.slot) { col = "selected" }
+    if (id < 0) {
+      if (sp >= 0) { sprite_set_visible(sp, 0) }
+      ui_text(font, iconX, cy + 2, clanSlotLabel(i), col2("dim"))
+    } else {
+      let it = clanItemById(id)
+      let name = "?"
+      let fr = 0
+      if (it !== null) { name = it.name; fr = clanItemIcon(it) }
+      if (sp >= 0) {
+        sprite_set_frame(sp, fr)
+        sprite_set_pos(sp, iconX, cy)
+        sprite_set_visible(sp, 1)
+      }
+      ui_text(font, iconX + ICON_SZ + 4, cy + 2, name, col2(col))
+    }
+    if (i === P.slot) {
+      if (present(PTR) === 1) { pointerAt(PTR, x + pad, cy + ICON_SZ / 2 - 4) }
+    }
+    cy = cy + rowH
+    i = i + 1
+  }
+  // Hide unused icon sprites past n
+  if (present(P.equipIconSps) === 1) {
+    let j = n
+    while (j < P.equipIconSps.length) {
+      sprite_set_visible(P.equipIconSps[j], 0)
+      j = j + 1
+    }
+  }
+  ui_rect(x, y, w, h, col2("border"))
+  P.listNode = { _x: x, _y: y, _w: w, _h: h, fill: "panel", border: "border", pad: pad }
+  return 1
+}
+
+function buildEquipPanel() {
+  hideBagIcon()
+  hideEquipIcons()
+  // Empty chrome only — slots drawn by paintEquipFast after layout.
+  return makePanel({
+    title: "EQUIP", titleAlign: "center", titleColor: "accent",
+    border: "border", fill: "panel", pad: 8, gap: 2, w: 118,
+    children: []
+  })
+}
+
+// Shop swapRight: replace ONLY the right panel in its cached box. Header/STATUS/footer stay.
+function swapRight(kind) {
+  cacheRightBox(P.listNode)
+  let x = P.rx
+  let y = P.ry
+  let w = P.rw
+  let h = P.rh
+  if (x < 0) {
+    renderEquip(0)
+    if (kind === "equip") { return }
+    x = P.rx
+    y = P.ry
+    w = P.rw
+    h = P.rh
+    if (x < 0) { return }
+  }
+  if (kind === "bag") {
+    P.bagIdx = 0
+    hideEquipIcons()
+    if (present(P.sel) === 1) { P.sel.clear(); P.sel.hideCursor(); P.sel = null }
+    paintBagFast()
+    // Seal menu chrome under/beside the panel (tile gaps → map bleed on town).
+    if (y + h < 158) {
+      fillPanelExact(x - 2, y + h, w + 4, 158 - (y + h), col2("bg"))
+    }
+    fillPanelExact(x - 3, y, 3, h, col2("bg"))
+    repaintFooter()
+    return
+  }
+  hideBagIcon()
+  paintEquipFast()
+  if (y + h < 158) {
+    fillPanelExact(x - 2, y + h, w + 4, 158 - (y + h), col2("bg"))
+  }
+  repaintFooter()
+}
+
+function renderEquip(stream) {
+  // Direct paint — no layout/stream. The old chrome tree + uiStreamBegin double-filled tall panels
+  // (~0.5s on Marche select) and left map bleed under unaligned borders.
+  releaseSel()
+  hideEquipIcons()
+  hideBagIcon()
+  let u = clanUnit(P.unitIdx)
+  if (P.slot >= clanSlotCount()) { P.slot = 0 }
+
+  ui_begin()
+  // Full screen is 8-aligned → one shared-solid fill (no rim work, no unique-tile storm).
+  ui_rect(0, 0, 240, 160, col2(CFG.menuBg), 1)
+
+  let font = CFG.font
+  let fh = text_height(font)
+  // Fixed FFTA chrome (pad 4 / STATUS 108 + gap 2 + EQUIP 118 @ y24 h121 — matches prior layout).
+  let lx = 4
+  let ly = 24
+  let lw = 108
+  let lh = 121
+  let rx = 114
+  let ry = 24
+  let rw = 118
+  let rh = 121
+
+  ui_text(font, 4, 4, u.name, col2("title"))
+  ui_text(font, 4, 4 + fh + 1, clanJobName(u.job) + "  Lv" + u.level, col2("text"))
+  ui_text(font, 168, 4, "HP " + u.hp + "/" + u.hpMax, col2("text"))
+  ui_text(font, 168, 4 + fh + 1, "MP " + u.mp + "/" + u.mpMax, col2("text"))
+
+  P.statusNode = { _x: lx, _y: ly, _w: lw, _h: lh, fill: "panel", border: "border", pad: 8 }
+  P.rx = rx
+  P.ry = ry
+  P.rw = rw
+  P.rh = rh
+  P.listNode = { _x: rx, _y: ry, _w: rw, _h: rh, fill: "panel", border: "border", pad: 8 }
+  P.footerNode = { _x: 4, _y: 148, _w: 232, _h: fh + 2 }
+
+  // Seal gutter + under-panel strip (incl. bottom-right jagged corner above footer).
+  fillPanelExact(lx + lw, ly, rx - (lx + lw), lh, col2(CFG.menuBg))
+  if (ly + lh < 160) {
+    fillPanelExact(0, ly + lh, 240, 160 - (ly + lh), col2(CFG.menuBg))
+  }
+
+  // stream===1 (roster→Equip): paint opaque chrome this frame, STATUS/EQUIP next frame so A
+  // leaves the roster in ~1 frame instead of blocking ~20 on one update.
+  if (stream === 1) {
+    fillPanelExact(lx, ly, lw, lh, col2("panel"))
+    ui_rect(lx, ly, lw, lh, col2("border"))
+    fillPanelExact(rx, ry, rw, rh, col2("panel"))
+    ui_rect(rx, ry, rw, rh, col2("border"))
+    ui_text(font, lx + 8, ly + 8, "STATUS", col2("label"))
+    ui_text(font, rx + 32, ry + 8, "EQUIP", col2("accent"))
+    repaintFooter()
+    P.equipPending = 1
+    P.streaming = 0
+    return
+  }
+
+  paintEquipFast()
+  paintStatusFast()
+  repaintFooter()
+  P.equipPending = 0
+  P.streaming = 0
+}
+
+function renderBagFull() {
+  // Fallback: sync equip chrome, then fast-paint bag into the right box.
+  renderEquip(0)
+  P.state = ST_BAG
+  P.bagIdx = 0
+  if (present(P.sel) === 1) { P.sel.clear(); P.sel.hideCursor(); P.sel = null }
+  paintBagFast()
+  repaintFooter()
+}
+
+
+function refreshListPanel() {
+  // Shop pattern: keep the selector; only rebuild the panel chrome around sel.view().
+  if (P.state === ST_BAG) { paintBagFast(); return }
+  let b = P.listNode
+  if (present(b) === 0) {
+    if (P.state === ST_EQUIP) { renderEquip(0); return }
+    if (P.state === ST_ITEMS) { renderItems(0); return }
+    return
+  }
+  if (present(b._x) === 0) {
+    if (P.state === ST_EQUIP) { renderEquip(0); return }
+    if (P.state === ST_ITEMS) { renderItems(0); return }
+    return
+  }
+  if (present(P.sel) === 0) { return }
+  let title = "EQUIP"
+  let titleColor = "accent"
+  let kids = [P.sel.view()]
+  if (P.state === ST_ITEMS) {
+    title = "BAG"
+    titleColor = "label"
+  } else if (P.state === ST_ROSTER) {
+    title = "ROSTER"
+    titleColor = "label"
+  }
+  let w = b._w
+  let neu = makePanel({
+    title: title, titleAlign: "center", titleColor: titleColor,
+    border: "border", fill: "panel", pad: 8, gap: 2, w: w,
+    children: kids
+  })
+  uiRelayoutInner(neu, b._x, b._y, b._w, b._h)
+  P.listNode = neu
+  if (present(PTR) === 1) { P.sel.paintCursor() }
+}
+
+function bindDeltaKids(u, kids) {
+  let bag = P.bagCache
+  if (present(bag) === 0) { bag = clanBagForSlot(P.slot) }
+  if (bag.length === 0) {
+    P.dName = { text: "(empty bag)", color: "dim" }
+    kids.push(P.dName)
+    P.dAtk = null
+    P.dDef = null
+    P.dMag = null
+    P.dSpd = null
+    return
+  }
+  let bi = 0
+  if (present(P.sel) === 1) { bi = P.sel.index() }
+  if (bi >= bag.length) { bi = bag.length - 1 }
+  let it = bag[bi]
+  let pv = clanPreviewEquip(u, P.slot, it.id)
+  P.dName = { text: it.name, color: "accent" }
+  P.dAtk = { text: "ATK" + deltaStr(pv.dAtk), color: deltaColorTok(pv.dAtk) }
+  P.dDef = { text: "DEF" + deltaStr(pv.dDef), color: deltaColorTok(pv.dDef) }
+  P.dMag = { text: "MAG" + deltaStr(pv.dMag), color: deltaColorTok(pv.dMag) }
+  P.dSpd = { text: "SPD" + deltaStr(pv.dSpd), color: deltaColorTok(pv.dSpd) }
+  kids.push(P.dName)
+  kids.push({ dir: "row", gap: 8, children: [P.dAtk, P.dDef] })
+  kids.push({ dir: "row", gap: 8, children: [P.dMag, P.dSpd] })
+  if (it.teaches !== "") {
+    kids.push({ text: "->" + clanAbilityName(it.teaches), color: "label" })
+  }
+}
+
+function patchBagDeltas() {
+  if (P.state !== ST_BAG) { return }
+  if (present(P.dAtk) === 0) { return }
+  if (present(P.dAtk._x) === 0) { return }
+  let u = clanUnit(P.unitIdx)
+  let bag = P.bagCache
+  if (present(bag) === 0) { bag = clanBagForSlot(P.slot) }
+  if (bag.length === 0) { return }
+  let bi = P.sel.index()
+  if (bi >= bag.length) { bi = bag.length - 1 }
+  let it = bag[bi]
+  let pv = clanPreviewEquip(u, P.slot, it.id)
+  uiRowText(P.dName, it.name, "accent", "panel")
+  uiRowText(P.dAtk, "ATK" + deltaStr(pv.dAtk), deltaColorTok(pv.dAtk), "panel")
+  uiRowText(P.dDef, "DEF" + deltaStr(pv.dDef), deltaColorTok(pv.dDef), "panel")
+  uiRowText(P.dMag, "MAG" + deltaStr(pv.dMag), deltaColorTok(pv.dMag), "panel")
+  uiRowText(P.dSpd, "SPD" + deltaStr(pv.dSpd), deltaColorTok(pv.dSpd), "panel")
+}
+
+function navList(bits) {
+  if (present(P.sel) === 0) { return 0 }
+  let old = P.sel.index()
+  let neu = old
+  if (uiKeyDown(bits, BTN_UP) > 0) {
+    if (old > 0) { neu = old - 1 }
+  } else if (uiKeyDown(bits, BTN_DOWN) > 0) {
+    neu = old + 1
+  } else {
+    return 0
+  }
+  if (neu === old) { return 0 }
+  // Shop doNav: select() owns moveHi; 1 = scrolled → rebuild list panel only.
+  if (P.sel.select(neu) === 1) {
+    refreshListPanel()
+  } else {
+    if (present(PTR) === 1) { P.sel.paintCursor() }
+    if (P.state === ST_BAG) { patchBagDeltas() }
+  }
+  return 1
+}
+
+function clanSlotForWeapon(t) {
+  if (t === "Sword" || t === "Blade" || t === "Saber" || t === "Knight Sword" || t === "Great Sword" || t === "Broad Sword") { return 1 }
+  if (t === "Knife" || t === "Rapier" || t === "Katana" || t === "Staff" || t === "Rod" || t === "Mace") { return 1 }
+  if (t === "Bow" || t === "Great Bow" || t === "Spear" || t === "Instrument" || t === "Knuckles" || t === "Soul" || t === "Gun") { return 1 }
+  return 0
+}
+
+function itemListNow() {
+  let all = clanBagList()
+  if (P.tab === 0) { return all }
+  let out = []
+  let i = 0
+  while (i < all.length) {
+    let t = all[i].type
+    let ok = 0
+    if (P.tab === 1) { if (t === "Item") { ok = 1 } }
+    else if (P.tab === 2) { if (clanSlotForWeapon(t) > 0) { ok = 1 } }
+    else if (P.tab === 3) {
+      if (t === "Helmet" || t === "Hat" || t === "Ribbon" || t === "Armor" || t === "Clothing" || t === "Robe" || t === "Shield" || t === "Shoes" || t === "Armlets") { ok = 1 }
+    } else if (P.tab === 4) { if (t === "Accessory") { ok = 1 } }
+    if (ok > 0) { out.push(all[i]) }
+    i = i + 1
+  }
+  return out
+}
+
+function itemCell(i) {
+  let list = itemListNow()
+  let it = list[i]
+  return {
+    dir: "row", gap: 4, align: "center", grow: 1,
+    children: [
+      { icon: clanItemIcon(it), size: ICON_SZ },
+      { text: it.name, color: "text", grow: 1 },
+      { text: "x" + it.qty, color: "dim" }
+    ]
+  }
+}
+
+function renderItems(stream) {
+  releaseSel()
+  let list = itemListNow()
+  P.sel = makeSelector({
+    cols: 1, gap: 2, h: 96, cursor: PTR, gutter: 10,
+    rowH: ICON_SZ + 2, rowBg: "panel",
+    count: () => { return itemListNow().length },
+    cell: (i) => { return itemCell(i) }
+  })
+  let tabLine = ""
+  let ti = 0
+  while (ti < ITEM_TABS.length) {
+    if (ti === P.tab) { tabLine = tabLine + "[" + ITEM_TABS[ti] + "] " }
+    else { tabLine = tabLine + ITEM_TABS[ti] + " " }
+    ti = ti + 1
+  }
+  let listPanel = makePanel({
+    title: "BAG", titleColor: "label", border: "border", fill: "panel", pad: 4, gap: 2, w: 130,
+    children: [P.sel.view()]
+  })
+  P.listNode = listPanel
+  let detailKids = [{ text: "(empty)", color: "dim" }]
+  if (list.length > 0) {
+    let it = list[0]
+    detailKids = [
+      { icon: clanItemIcon(it), size: ICON_SZ },
+      { text: it.name, color: "accent" },
+      { text: "ATK" + it.atk + " DEF" + it.def, color: "text" },
+      { text: it.desc, color: "dim", wrap: true, w: 88 }
+    ]
+  }
+  let detailPanel = makePanel({
+    title: "DETAIL", titleColor: "accent", border: "border", fill: "panel", pad: 4, gap: 2, w: 96,
+    children: detailKids
+  })
+  P.detailNode = detailPanel
+  let foot = { text: footerText(), color: "dim" }
+  P.footerNode = foot
+  let tree = {
+    dir: "col", pad: 6, gap: 3,
+    children: [
+      { text: "ITEM LIST", color: "title" },
+      { text: tabLine, color: "label" },
+      {
+        dir: "row", grow: 1, gap: 4,
+        children: [listPanel, detailPanel]
+      },
+      foot
+    ]
+  }
+  paintTree(tree, stream)
+}
+
+function patchItemDetail() {
+  let b = P.detailNode
+  if (present(b) === 0) { return }
+  if (present(b._x) === 0) { return }
+  let list = itemListNow()
+  let bi = 0
+  if (present(P.sel) === 1) { bi = P.sel.index() }
+  if (list.length === 0) { return }
+  if (bi >= list.length) { bi = list.length - 1 }
+  let it = list[bi]
+  let kids = [
+    { icon: clanItemIcon(it), size: ICON_SZ },
+    { text: it.name, color: "accent" },
+    { text: "ATK" + it.atk + " DEF" + it.def, color: "text" },
+    { text: it.desc, color: "dim", wrap: true, w: 88 }
+  ]
+  let neu = makePanel({
+    title: "DETAIL", titleColor: "accent", border: "border", fill: "panel", pad: 4, gap: 2, w: b._w,
+    children: kids
+  })
+  uiRelayoutInner(neu, b._x, b._y, b._w, b._h)
+  P.detailNode = neu
+}
+
+// ── Navigation ──────────────────────────────────────────────────────────────
+
+function go(state) {
+  let prev = P.state
+  P.state = state
+  P.idx = 0
+  P.msg = ""
+  if (state === ST_ROOT) { renderRoot(0); return }
+  if (state === ST_ROSTER) { renderRoster(1); return }
+  if (state === ST_UNIT) { renderUnit(1); return }
+  if (state === ST_EQUIP) {
+    if (prev === ST_BAG) { swapRight("equip"); return }
+    renderEquip(1)
+    return
+  }
+  if (state === ST_BAG) {
+    if (prev === ST_EQUIP) { swapRight("bag"); return }
+    renderBagFull()
+    return
+  }
+  if (state === ST_ITEMS) { renderItems(1); return }
+  if (state === ST_SYSTEM) { renderSystem(1); return }
+  if (state === ST_OPTIONS) { renderOptions(1); return }
+  if (state === ST_TITLE) { renderTitleConfirm(1); return }
+  if (state === ST_CLAN) { renderClan(1); return }
+  if (state === ST_ABIL) { renderAbilities(1); return }
+  if (state === ST_JOBS) { renderJobs(1); return }
+  if (state === ST_LEAVE) { renderLeave(1); return }
+  if (state === ST_LINK) { renderLink(1); return }
+  if (state === ST_AREAS) { renderAreas(1); return }
+  if (state === ST_FORM) { renderFormation(1); return }
+}
+
+function handleRoot(bits) {
+  if (navList(bits) > 0) { return }
+  if (uiKeyDown(bits, BTN_B) > 0) { partyClose(); return }
+  if (uiKeyDown(bits, BTN_START) > 0) { partyClose(); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let i = 0
+    if (present(P.sel) === 1) { i = P.sel.index() }
+    if (i === 0) { go(ST_ROSTER); return }
+    if (i === 1) { go(ST_CLAN); return }
+    if (i === 2) { go(ST_LINK); return }
+    if (i === 3) { go(ST_AREAS); return }
+    if (i === 4) { go(ST_SYSTEM); return }
+    partyClose()
+  }
+}
+
+function handleRoster(bits) {
+  if (navList(bits) > 0) { return }
+  if (uiKeyDown(bits, BTN_L) > 0) { P.infoCol = (P.infoCol + 1) % 4; renderRoster(0); return }
+  if (uiKeyDown(bits, BTN_R) > 0) {
+    P.sortMode = (P.sortMode + 1) % 3
+    clanSortRoster(P.sortMode)
+    renderRoster(0)
+    return
+  }
+  if (uiKeyDown(bits, BTN_START) > 0) { P.tab = 0; go(ST_ITEMS); return }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_ROOT); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    if (present(P.sel) === 1) { P.unitIdx = P.sel.index() }
+    P.slot = 0
+    go(ST_UNIT)
+  }
+}
+
+function handleUnit(bits) {
+  if (navList(bits) > 0) { return }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_ROSTER); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let i = 0
+    if (present(P.sel) === 1) { i = P.sel.index() }
+    if (i === 0) { go(ST_EQUIP); return }
+    if (i === 1) { P.abilSlot = 0; go(ST_ABIL); return }
+    if (i === 2) { go(ST_JOBS); return }
+    go(ST_LEAVE)
+  }
+}
+
+function handleEquip(bits) {
+  let n = clanSlotCount()
+  if (uiKeyDown(bits, BTN_UP) > 0) {
+    if (P.slot > 0) {
+      let prev = P.slot
+      P.slot = P.slot - 1
+      paintEquipHi(prev)
+    }
+    return
+  }
+  if (uiKeyDown(bits, BTN_DOWN) > 0) {
+    if (P.slot + 1 < n) {
+      let prev = P.slot
+      P.slot = P.slot + 1
+      paintEquipHi(prev)
+    }
+    return
+  }
+  if (uiKeyDown(bits, BTN_L) > 0) {
+    let u = clanUnit(P.unitIdx)
+    if (clanUnequip(u, P.slot) > 0) { flash("Unequipped"); paintEquipFast(); paintStatusFast() }
+    else { flash("Empty slot") }
+    return
+  }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_UNIT); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let bag = clanBagForSlot(P.slot)
+    if (bag.length === 0) { flash("No items"); return }
+    go(ST_BAG)
+  }
+}
+
+function handleBag(bits) {
+  let bag = P.bagCache
+  if (present(bag) === 0) { bag = clanBagForSlot(P.slot); P.bagCache = bag }
+  if (uiKeyDown(bits, BTN_UP) > 0) {
+    if (P.bagIdx > 0) { P.bagIdx = P.bagIdx - 1; paintBagFast() }
+    return
+  }
+  if (uiKeyDown(bits, BTN_DOWN) > 0) {
+    if (P.bagIdx + 1 < bag.length) { P.bagIdx = P.bagIdx + 1; paintBagFast() }
+    return
+  }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_EQUIP); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    if (bag.length === 0) { flash("No items"); go(ST_EQUIP); return }
+    let bi = P.bagIdx
+    if (bi >= bag.length) { bi = bag.length - 1 }
+    let u = clanUnit(P.unitIdx)
+    if (clanCanEquip(u, bag[bi].id) === 0) { flash("Cannot equip"); return }
+    if (clanEquipItem(u, bag[bi].id) > 0) { flash("Equipped " + bag[bi].name); go(ST_EQUIP) }
+    else { flash("Cannot equip") }
+  }
+}
+
+function handleItems(bits) {
+  if (uiKeyDown(bits, BTN_LEFT) > 0) { if (P.tab > 0) { P.tab = P.tab - 1; renderItems(0) }; return }
+  if (uiKeyDown(bits, BTN_RIGHT) > 0) { if (P.tab + 1 < ITEM_TABS.length) { P.tab = P.tab + 1; renderItems(0) }; return }
+  if (uiKeyDown(bits, BTN_L) > 0) { if (P.tab > 0) { P.tab = P.tab - 1; renderItems(0) }; return }
+  if (uiKeyDown(bits, BTN_R) > 0) { if (P.tab + 1 < ITEM_TABS.length) { P.tab = P.tab + 1; renderItems(0) }; return }
+  if (navList(bits) > 0) { patchItemDetail(); return }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_ROSTER); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let list = itemListNow()
+    if (list.length === 0) { flash("Empty"); return }
+    let bi = 0
+    if (present(P.sel) === 1) { bi = P.sel.index() }
+    if (bi >= list.length) { bi = list.length - 1 }
+    let it = list[bi]
+    if (it.type !== "Item") { flash("Equip from unit menu"); return }
+    let u = clanUnit(P.unitIdx)
+    if (u === null) { u = clanUnit(0) }
+    if (clanUseItem(u, it.id) > 0) {
+      flash("Used " + it.name)
+      renderItems(0)
+    } else { flash("Cannot use") }
+  }
+}
+
+function handleSystem(bits) {
+  if (navList(bits) > 0) { return }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_ROOT); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let i = 0
+    if (present(P.sel) === 1) { i = P.sel.index() }
+    if (i === 0) { partyClose(); return }
+    if (i === 1) { go(ST_OPTIONS); return }
+    go(ST_TITLE)
+  }
+}
+
+function handleOptions(bits) {
+  if (navList(bits) > 0) { return }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_SYSTEM); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let i = 0
+    if (present(P.sel) === 1) { i = P.sel.index() }
+    if (i === 0) {
+      P.msgSpeed = P.msgSpeed + 1
+      if (P.msgSpeed > 3) { P.msgSpeed = 1 }
+      renderOptions(0)
+      return
+    }
+    go(ST_SYSTEM)
+  }
+}
+
+function handleTitle(bits) {
+  if (navList(bits) > 0) { return }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_SYSTEM); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let i = 0
+    if (present(P.sel) === 1) { i = P.sel.index() }
+    if (i === 0) {
+      partyClose()
+      if (HOOKS.onTitle !== null) { HOOKS.onTitle() }
+      else { flash("Title") }
+      return
+    }
+    go(ST_SYSTEM)
+  }
+}
+
+function handleClan(bits) {
+  if (navList(bits) > 0) { return }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_ROOT); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let i = 0
+    if (present(P.sel) === 1) { i = P.sel.index() }
+    if (i === 0) { go(ST_FORM); return }
+    go(ST_ROOT)
+  }
+}
+
+function handleAbil(bits) {
+  if (uiKeyDown(bits, BTN_L) > 0) {
+    P.abilSlot = P.abilSlot - 1
+    if (P.abilSlot < 0) { P.abilSlot = 2 }
+    renderAbilities(0)
+    return
+  }
+  if (uiKeyDown(bits, BTN_R) > 0) {
+    P.abilSlot = (P.abilSlot + 1) % 3
+    renderAbilities(0)
+    return
+  }
+  if (uiKeyDown(bits, BTN_START) > 0) {
+    let u = clanUnit(P.unitIdx)
+    let teach = clanTeachFromEquip(u)
+    if (teach !== null) {
+      if (clanLearnAbility(u, teach.id) > 0) { flash("Learned " + teach.name); renderAbilities(0) }
+      else { flash("Need AP / already known") }
+    } else { flash("No teaching gear") }
+    return
+  }
+  if (navList(bits) > 0) { return }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_UNIT); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let u = clanUnit(P.unitIdx)
+    let i = 0
+    if (present(P.sel) === 1) { i = P.sel.index() }
+    if (i === 0) { clanSetAbility(u, P.abilSlot, -1); flash("Cleared"); renderAbilities(0); return }
+    let id = u.known[i - 1]
+    clanSetAbility(u, P.abilSlot, id)
+    flash("Set " + ABIL_SLOT_LABELS[P.abilSlot])
+    renderAbilities(0)
+  }
+}
+
+function handleJobs(bits) {
+  if (navList(bits) > 0) { return }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_UNIT); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let u = clanUnit(P.unitIdx)
+    let list = clanJobsForRace(u.race)
+    let i = 0
+    if (present(P.sel) === 1) { i = P.sel.index() }
+    if (i >= list.length) { return }
+    if (clanChangeJob(u, list[i].id) > 0) { flash("Job: " + list[i].name); go(ST_UNIT) }
+    else { flash("Cannot change") }
+  }
+}
+
+function handleLeave(bits) {
+  if (navList(bits) > 0) { return }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_UNIT); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let i = 0
+    if (present(P.sel) === 1) { i = P.sel.index() }
+    if (i === 0) {
+      if (clanLeaveUnit(P.unitIdx) > 0) { flash("Left clan"); P.unitIdx = 0; go(ST_ROSTER) }
+      else { flash("Cannot leave"); go(ST_UNIT) }
+      return
+    }
+    go(ST_UNIT)
+  }
+}
+
+function handleLink(bits) {
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_ROOT); return }
+  if (uiKeyDown(bits, BTN_A) > 0) { go(ST_ROOT) }
+}
+
+function handleAreas(bits) {
+  if (navList(bits) > 0) { return }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_ROOT); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let areas = clanAreas()
+    let i = 0
+    if (present(P.sel) === 1) { i = P.sel.index() }
+    if (i >= areas.length) { return }
+    let a = areas[i]
+    if (a.here > 0) { flash("Already here"); return }
+    clanAreaSetHere(a.id)
+    flash("Travel to " + a.name)
+    if (HOOKS.onTravel !== null) { HOOKS.onTravel(a.id, a.name) }
+    renderAreas(0)
+  }
+}
+
+function handleForm(bits) {
+  if (navList(bits) > 0) { return }
+  if (uiKeyDown(bits, BTN_B) > 0) { go(ST_CLAN); return }
+  if (uiKeyDown(bits, BTN_A) > 0) {
+    let i = 0
+    if (present(P.sel) === 1) { i = P.sel.index() }
+    clanFormationToggle(i)
+    renderFormation(0)
+  }
+}
+
+export function partyUpdate() {
+  if (P.active === 0) { return 0 }
+  if (P.msgT > 0) {
+    P.msgT = P.msgT - 1
+    if (P.msgT === 0) { P.msg = ""; repaintFooter() }
+  }
+  if (P.equipPending > 0) {
+    P.equipPending = 0
+    paintEquipFast()
+    paintStatusFast()
+    return 1
+  }
+  if (P.streaming > 0) {
+    if (uiStreamStep(STREAM_BUDGET) > 0) {
+      P.streaming = 0
+      cacheRightBox(P.listNode)
+      if (P.state === ST_EQUIP) {
+        paintStatusFast()
+        paintEquipFast()
+      }
+    } else {
+      // Layout writes geometry on the first step — cache early so BAG can swap without waiting.
+      cacheRightBox(P.listNode)
+      return 1
+    }
+  }
+  if (present(PTR) === 1) {
+    if (P.state === ST_BAG) {
+      if (P.rx >= 0) {
+        let fh = text_height(CFG.font)
+        let rowY = P.ry + 8 + fh + 6
+        pointerAt(PTR, P.rx + 8, rowY + ICON_SZ / 2 - 4)
+      }
+    } else if (P.state === ST_EQUIP) {
+      if (P.rx >= 0) {
+        let fh = text_height(CFG.font)
+        let rowY = P.ry + 8 + fh + 6 + P.slot * (ICON_SZ + 2)
+        pointerAt(PTR, P.rx + 8, rowY + ICON_SZ / 2 - 4)
+      }
+    } else if (present(P.sel) === 1) { P.sel.paintCursor() }
+  }
+  let bits = uiKeys()
+  if (P.state === ST_ROOT) { handleRoot(bits) }
+  else if (P.state === ST_ROSTER) { handleRoster(bits) }
+  else if (P.state === ST_UNIT) { handleUnit(bits) }
+  else if (P.state === ST_EQUIP) { handleEquip(bits) }
+  else if (P.state === ST_BAG) { handleBag(bits) }
+  else if (P.state === ST_ITEMS) { handleItems(bits) }
+  else if (P.state === ST_SYSTEM) { handleSystem(bits) }
+  else if (P.state === ST_OPTIONS) { handleOptions(bits) }
+  else if (P.state === ST_TITLE) { handleTitle(bits) }
+  else if (P.state === ST_CLAN) { handleClan(bits) }
+  else if (P.state === ST_ABIL) { handleAbil(bits) }
+  else if (P.state === ST_JOBS) { handleJobs(bits) }
+  else if (P.state === ST_LEAVE) { handleLeave(bits) }
+  else if (P.state === ST_LINK) { handleLink(bits) }
+  else if (P.state === ST_AREAS) { handleAreas(bits) }
+  else if (P.state === ST_FORM) { handleForm(bits) }
+  return 1
+}

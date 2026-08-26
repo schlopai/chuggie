@@ -1,0 +1,711 @@
+// packages/clan/state.tish — gil, bag, roster, equip + shop adapters.
+// Tables: jobs/items/abilities_gen.tish (allowlist only).
+import { CLAN_ITEMS, clanItemById, clanItemByName } from './items_gen'
+import { CLAN_JOBS, clanJobById } from './jobs_gen'
+import { CLAN_ABILITIES, clanAbilityById, clanAbilityByName } from './abilities_gen'
+
+let RACE_NAMES = ["", "Hume", "Bangaa", "Nu Mou", "Viera", "Moogle"]
+
+let SLOT_WEAPON: i32 = 0
+let SLOT_SHIELD: i32 = 1
+let SLOT_HEAD: i32 = 2
+let SLOT_BODY: i32 = 3
+let SLOT_ARMS: i32 = 4
+let SLOT_FEET: i32 = 5
+let SLOT_ACC: i32 = 6
+let SLOT_COUNT: i32 = 7
+
+let SLOT_LABEL = ["Weapon", "Shield", "Head", "Body", "Arms", "Feet", "Acc"]
+
+let FORMATION_SLOTS: i32 = 6
+
+let S = {
+  ready: 0,
+  gil: 0,
+  cp: 0,
+  name: "Clan",
+  // bag SoA: parallel arrays of item id + qty (sparse; qty 0 rows removed on change)
+  bagId: [],
+  bagQty: [],
+  roster: [],
+  formation: [],
+  areas: []
+}
+
+function pick(v, d) {
+  if (v === null) { return d }
+  return v
+}
+
+function emptyFormation() {
+  // Literal (not a loop over FORMATION_SLOTS) — avoids broken native-vec free-var lift.
+  return [-1, -1, -1, -1, -1, -1]
+}
+
+export function clanInit(cfg) {
+  S.gil = pick(cfg.gil, 500)
+  S.cp = pick(cfg.cp, 0)
+  S.name = pick(cfg.name, "Clan")
+  S.bagId = []
+  S.bagQty = []
+  S.roster = []
+  S.formation = emptyFormation()
+  S.areas = [
+    { id: 0, name: "Town Plaza", here: 1 },
+    { id: 1, name: "Cyril", here: 0 },
+    { id: 2, name: "Baguba", here: 0 }
+  ]
+  S.ready = 1
+}
+
+export function clanName() { return S.name }
+export function clanSetName(n) { S.name = n }
+export function clanCp() { return S.cp }
+export function clanAddCp(n) {
+  if (n <= 0) { return }
+  S.cp = S.cp + n
+}
+export function clanFormation() { return S.formation }
+export function clanFormationSlots() { return FORMATION_SLOTS }
+export function clanAreas() { return S.areas }
+
+export function clanFormationSet(slot, rosterIdx) {
+  if (slot < 0) { return 0 }
+  if (slot >= FORMATION_SLOTS) { return 0 }
+  S.formation[slot] = rosterIdx
+  return 1
+}
+
+export function clanFormationToggle(rosterIdx) {
+  // Remove if present; else place in first empty slot.
+  let i = 0
+  while (i < FORMATION_SLOTS) {
+    if (S.formation[i] === rosterIdx) {
+      S.formation[i] = -1
+      return 0
+    }
+    i = i + 1
+  }
+  i = 0
+  while (i < FORMATION_SLOTS) {
+    if (S.formation[i] < 0) {
+      S.formation[i] = rosterIdx
+      return 1
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+export function clanAreaSetHere(id) {
+  let i = 0
+  while (i < S.areas.length) {
+    if (S.areas[i].id === id) { S.areas[i].here = 1 }
+    else { S.areas[i].here = 0 }
+    i = i + 1
+  }
+}
+
+export function clanReady() { return S.ready }
+
+export function clanGil() { return S.gil }
+export function clanSetGil(n) { S.gil = n }
+
+export function clanBagCount() {
+  let n = 0
+  let i = 0
+  while (i < S.bagQty.length) {
+    n = n + S.bagQty[i]
+    i = i + 1
+  }
+  return n
+}
+
+export function clanBagQty(id) {
+  let i = 0
+  while (i < S.bagId.length) {
+    if (S.bagId[i] === id) { return S.bagQty[i] }
+    i = i + 1
+  }
+  return 0
+}
+
+export function clanBagAdd(id, qty) {
+  if (qty <= 0) { return }
+  let i = 0
+  while (i < S.bagId.length) {
+    if (S.bagId[i] === id) {
+      S.bagQty[i] = S.bagQty[i] + qty
+      return
+    }
+    i = i + 1
+  }
+  S.bagId.push(id)
+  S.bagQty.push(qty)
+}
+
+export function clanBagRemove(id, qty) {
+  let i = 0
+  while (i < S.bagId.length) {
+    if (S.bagId[i] === id) {
+      if (S.bagQty[i] < qty) { return 0 }
+      S.bagQty[i] = S.bagQty[i] - qty
+      if (S.bagQty[i] === 0) {
+        // compact: swap-remove
+        let last = S.bagId.length - 1
+        S.bagId[i] = S.bagId[last]
+        S.bagQty[i] = S.bagQty[last]
+        S.bagId.pop()
+        S.bagQty.pop()
+      }
+      return 1
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+// Shop + Item List bag rows (include stats for FFTA detail pane).
+export function clanBagList() {
+  let out = []
+  let i = 0
+  while (i < S.bagId.length) {
+    let it = clanItemById(S.bagId[i])
+    if (it !== null) {
+      if (S.bagQty[i] > 0) {
+        out.push({
+          id: it.id, name: it.name, icon: it.icon, price: it.sell,
+          qty: S.bagQty[i], desc: it.desc, type: it.type, teaches: it.teaches,
+          atk: it.atk, def: it.def, mag: it.mag, res: it.res,
+          spd: it.spd, eva: it.eva
+        })
+      }
+    }
+    i = i + 1
+  }
+  return out
+}
+
+export function clanShopStock() {
+  let out = []
+  let i = 0
+  while (i < CLAN_ITEMS.length) {
+    let it = CLAN_ITEMS[i]
+    if (it.buy > 0) {
+      out.push({
+        id: it.id, name: it.name, icon: it.icon, price: it.buy, desc: it.desc
+      })
+    }
+    i = i + 1
+  }
+  return out
+}
+
+export function clanGoldFn() { return S.gil }
+
+export function clanOnBuy(id, qty, cost) {
+  if (S.gil < cost) { return 0 }
+  S.gil = S.gil - cost
+  clanBagAdd(id, qty)
+  // Small CP earn on purchases (clan growth stub).
+  clanAddCp(1)
+  return 1
+}
+
+export function clanOnSell(id, qty, gain) {
+  if (clanBagRemove(id, qty) === 0) { return 0 }
+  S.gil = S.gil + gain
+  return 1
+}
+
+function emptyEquip() {
+  return [-1, -1, -1, -1, -1, -1, -1]
+}
+
+export function clanMakeUnit(cfg) {
+  let jobId = pick(cfg.job, 2)
+  let job = clanJobById(jobId)
+  let race = pick(cfg.race, 1)
+  if (job !== null) { race = job.race }
+  let name = pick(cfg.name, "Unit")
+  let level = pick(cfg.level, 1)
+  let known = pick(cfg.known, null)
+  if (known === null) { known = [] }
+  return {
+    name: name,
+    race: race,
+    job: jobId,
+    level: level,
+    hp: pick(cfg.hp, 40 + level * 8),
+    hpMax: pick(cfg.hpMax, 40 + level * 8),
+    mp: pick(cfg.mp, 10 + level * 2),
+    mpMax: pick(cfg.mpMax, 10 + level * 2),
+    atk: pick(cfg.atk, 8 + level),
+    def: pick(cfg.def, 6 + level),
+    mag: pick(cfg.mag, 5 + level),
+    res: pick(cfg.res, 5 + level),
+    mov: pick(cfg.mov, 4),
+    jmp: pick(cfg.jmp, 3),
+    eva: pick(cfg.eva, 5),
+    spd: pick(cfg.spd, 6 + (level / 2)),
+    equip: emptyEquip(),
+    ap: pick(cfg.ap, 0),
+    known: known,
+    abilA: pick(cfg.abilA, -1),
+    abilR: pick(cfg.abilR, -1),
+    abilS: pick(cfg.abilS, -1),
+    leader: pick(cfg.leader, 0)
+  }
+}
+
+export function clanJobsForRace(race) {
+  // Push fresh object rows (not CLAN_JOBS[i] refs) so codegen stays on the dynamic path.
+  let out = []
+  let i = 0
+  while (i < CLAN_JOBS.length) {
+    let j = CLAN_JOBS[i]
+    if (j.race === race) {
+      if (j.playable > 0) {
+        out.push({ id: j.id, name: j.name, race: j.race, playable: j.playable })
+      }
+    }
+    i = i + 1
+  }
+  return out
+}
+
+export function clanIsMageJob(jobId) {
+  if (jobId === 7) { return 1 }
+  if (jobId === 8) { return 1 }
+  return 0
+}
+
+export function clanCanEquip(unit, itemId) {
+  let it = clanItemById(itemId)
+  if (it === null) { return 0 }
+  let slot = clanSlotForType(it.type)
+  if (slot < 0) { return 0 }
+  let t = it.type
+  // Mage jobs: no heavy blades / plate / shields.
+  if (clanIsMageJob(unit.job) > 0) {
+    if (t === "Sword" || t === "Blade" || t === "Saber" || t === "Knight Sword" || t === "Great Sword" || t === "Broad Sword") { return 0 }
+    if (t === "Shield" || t === "Armor" || t === "Helmet") { return 0 }
+  }
+  // Martial Hume jobs: no staff/rod as primary (still can wear robes).
+  if (clanIsMageJob(unit.job) === 0) {
+    if (unit.race === 1) {
+      if (t === "Staff" || t === "Rod") { return 0 }
+    }
+  }
+  return 1
+}
+
+// Optional shop stock filter — hide gear no roster unit can equip; consumables always ok.
+export function clanCanBuy(item) {
+  let it = clanItemById(item.id)
+  if (it === null) { return 1 }
+  if (it.type === "Item") { return 1 }
+  let i = 0
+  while (i < S.roster.length) {
+    if (clanCanEquip(S.roster[i], it.id) > 0) { return 1 }
+    i = i + 1
+  }
+  return 0
+}
+
+export function clanRoster() { return S.roster }
+export function clanRosterLen() { return S.roster.length }
+export function clanUnit(i) {
+  if (i < 0) { return null }
+  if (i >= S.roster.length) { return null }
+  return S.roster[i]
+}
+
+export function clanAddUnit(unit) {
+  S.roster.push(unit)
+}
+
+export function clanRaceName(id) {
+  if (id < 0) { return "?" }
+  if (id >= RACE_NAMES.length) { return "?" }
+  return RACE_NAMES[id]
+}
+
+export function clanJobName(id) {
+  let j = clanJobById(id)
+  if (j === null) { return "?" }
+  return j.name
+}
+
+export function clanSlotLabel(slot) { return SLOT_LABEL[slot] }
+export function clanSlotCount() { return SLOT_COUNT }
+
+export function clanSlotForType(typeName) {
+  if (typeName === "Shield") { return SLOT_SHIELD }
+  if (typeName === "Helmet") { return SLOT_HEAD }
+  if (typeName === "Ribbon") { return SLOT_HEAD }
+  if (typeName === "Hat") { return SLOT_HEAD }
+  if (typeName === "Armor") { return SLOT_BODY }
+  if (typeName === "Clothing") { return SLOT_BODY }
+  if (typeName === "Robe") { return SLOT_BODY }
+  if (typeName === "Armlets") { return SLOT_ARMS }
+  if (typeName === "Shoes") { return SLOT_FEET }
+  if (typeName === "Accessory") { return SLOT_ACC }
+  if (typeName === "Item") { return -1 }
+  // weapons
+  return SLOT_WEAPON
+}
+
+export function clanEquipGet(unit, slot) {
+  return unit.equip[slot]
+}
+
+function statNum(v) {
+  // number + null → NaN in tish; treat missing props as 0 so equip sums stay visible.
+  if (v === null) { return 0 }
+  return v
+}
+
+export function clanEquipStats(unit) {
+  // Keep this object ≤8 keys when possible isn't required, but avoid null base stats.
+  let atk = statNum(unit.atk)
+  let def = statNum(unit.def)
+  let mag = statNum(unit.mag)
+  let res = statNum(unit.res)
+  let spd = statNum(unit.spd)
+  let eva = statNum(unit.eva)
+  let mov = statNum(unit.mov)
+  let jmp = statNum(unit.jmp)
+  let teach = ""
+  let s = 0
+  while (s < SLOT_COUNT) {
+    let id = unit.equip[s]
+    if (id >= 0) {
+      let it = clanItemById(id)
+      if (it !== null) {
+        atk = atk + statNum(it.atk)
+        def = def + statNum(it.def)
+        mag = mag + statNum(it.mag)
+        res = res + statNum(it.res)
+        spd = spd + statNum(it.spd)
+        eva = eva + statNum(it.eva)
+        mov = mov + statNum(it.mov)
+        jmp = jmp + statNum(it.jmp)
+        if (it.teaches !== "") { teach = it.teaches }
+      }
+    }
+    s = s + 1
+  }
+  return {
+    atk: atk, def: def, mag: mag, res: res,
+    spd: spd, eva: eva, mov: mov, jmp: jmp,
+    teach: teach
+  }
+}
+
+export function clanPreviewEquip(unit, slot, itemId) {
+  let before = clanEquipStats(unit)
+  let old = unit.equip[slot]
+  unit.equip[slot] = itemId
+  let after = clanEquipStats(unit)
+  unit.equip[slot] = old
+  return {
+    before: before, after: after,
+    dAtk: after.atk - before.atk,
+    dDef: after.def - before.def,
+    dMag: after.mag - before.mag,
+    dRes: after.res - before.res,
+    dSpd: after.spd - before.spd,
+    dEva: after.eva - before.eva,
+    teach: after.teach
+  }
+}
+
+export function clanEquipItem(unit, itemId) {
+  let it = clanItemById(itemId)
+  if (it === null) { return 0 }
+  let slot = clanSlotForType(it.type)
+  if (slot < 0) { return 0 }
+  if (clanCanEquip(unit, itemId) === 0) { return 0 }
+  if (clanBagQty(itemId) <= 0) { return 0 }
+  let prev = unit.equip[slot]
+  if (clanBagRemove(itemId, 1) === 0) { return 0 }
+  if (prev >= 0) { clanBagAdd(prev, 1) }
+  unit.equip[slot] = itemId
+  return 1
+}
+
+export function clanStripIllegalGear(unit) {
+  let s = 0
+  while (s < SLOT_COUNT) {
+    let id = unit.equip[s]
+    if (id >= 0) {
+      if (clanCanEquip(unit, id) === 0) { clanUnequip(unit, s) }
+    }
+    s = s + 1
+  }
+}
+
+export function clanChangeJob(unit, jobId) {
+  let j = clanJobById(jobId)
+  if (j === null) { return 0 }
+  if (j.race !== unit.race) { return 0 }
+  unit.job = jobId
+  clanStripIllegalGear(unit)
+  return 1
+}
+
+export function clanLeaveUnit(rosterIdx) {
+  if (rosterIdx < 0) { return 0 }
+  if (rosterIdx >= S.roster.length) { return 0 }
+  if (S.roster.length <= 1) { return 0 }
+  let u = S.roster[rosterIdx]
+  if (u.leader > 0) { return 0 }
+  // Unequip all back to bag, then remove.
+  let s = 0
+  while (s < SLOT_COUNT) {
+    clanUnequip(u, s)
+    s = s + 1
+  }
+  let last = S.roster.length - 1
+  S.roster[rosterIdx] = S.roster[last]
+  S.roster.pop()
+  // Fix formation indices.
+  let i = 0
+  while (i < FORMATION_SLOTS) {
+    if (S.formation[i] === rosterIdx) { S.formation[i] = -1 }
+    else if (S.formation[i] === last) { S.formation[i] = rosterIdx }
+    i = i + 1
+  }
+  return 1
+}
+
+export function clanUnitKnows(unit, abilId) {
+  let i = 0
+  while (i < unit.known.length) {
+    if (unit.known[i] === abilId) { return 1 }
+    i = i + 1
+  }
+  return 0
+}
+
+export function clanLearnAbility(unit, abilId) {
+  if (clanUnitKnows(unit, abilId) > 0) { return 0 }
+  let a = clanAbilityById(abilId)
+  if (a === null) { return 0 }
+  if (unit.ap < a.ap) { return 0 }
+  unit.ap = unit.ap - a.ap
+  unit.known.push(abilId)
+  return 1
+}
+
+export function clanTeachFromEquip(unit) {
+  // First equipped item with teaches: that ability id (by name).
+  let s = 0
+  while (s < SLOT_COUNT) {
+    let id = unit.equip[s]
+    if (id >= 0) {
+      let it = clanItemById(id)
+      if (it !== null) {
+        if (it.teaches !== "") {
+          let a = clanAbilityByName(it.teaches)
+          if (a !== null) { return a }
+        }
+      }
+    }
+    s = s + 1
+  }
+  return null
+}
+
+export function clanSetAbility(unit, slotKind, abilId) {
+  // slotKind: 0=A 1=R 2=S; abilId -1 clears.
+  if (abilId >= 0) {
+    if (clanUnitKnows(unit, abilId) === 0) { return 0 }
+  }
+  if (slotKind === 0) { unit.abilA = abilId; return 1 }
+  if (slotKind === 1) { unit.abilR = abilId; return 1 }
+  if (slotKind === 2) { unit.abilS = abilId; return 1 }
+  return 0
+}
+
+export function clanUseItem(unit, itemId) {
+  let it = clanItemById(itemId)
+  if (it === null) { return 0 }
+  if (it.type !== "Item") { return 0 }
+  if (clanBagQty(itemId) <= 0) { return 0 }
+  // Potion / Hi-Potion style heals by name; others consume with no effect.
+  let heal = 0
+  if (it.name === "Potion") { heal = 25 }
+  else if (it.name === "Hi-Potion") { heal = 50 }
+  else if (it.name === "Ether") {
+    unit.mp = unit.mp + 80
+    if (unit.mp > unit.mpMax) { unit.mp = unit.mpMax }
+    clanBagRemove(itemId, 1)
+    return 1
+  }
+  if (heal > 0) {
+    unit.hp = unit.hp + heal
+    if (unit.hp > unit.hpMax) { unit.hp = unit.hpMax }
+    clanBagRemove(itemId, 1)
+    return 1
+  }
+  // Antidote etc.: consume only.
+  clanBagRemove(itemId, 1)
+  return 1
+}
+
+export function clanSortRoster(mode) {
+  // mode: 0=name 1=level 2=job — insertion sort (tiny N).
+  let n = S.roster.length
+  let i = 1
+  while (i < n) {
+    let j = i
+    while (j > 0) {
+      let a = S.roster[j - 1]
+      let b = S.roster[j]
+      let swap = 0
+      if (mode === 0) { if (a.name > b.name) { swap = 1 } }
+      else if (mode === 1) { if (a.level < b.level) { swap = 1 } }
+      else { if (a.job > b.job) { swap = 1 } }
+      if (swap === 0) { break }
+      S.roster[j - 1] = b
+      S.roster[j] = a
+      j = j - 1
+    }
+    i = i + 1
+  }
+  // Formation indices invalid after reorder — clear.
+  S.formation = emptyFormation()
+}
+
+export function clanHealUnitFull(unit) {
+  unit.hp = unit.hpMax
+  unit.mp = unit.mpMax
+}
+
+export function clanClinicHeal(cost) {
+  if (S.gil < cost) { return 0 }
+  S.gil = S.gil - cost
+  let i = 0
+  while (i < S.roster.length) {
+    clanHealUnitFull(S.roster[i])
+    i = i + 1
+  }
+  return 1
+}
+
+export function clanAbilitiesCatalog() { return CLAN_ABILITIES }
+
+export function clanUnequip(unit, slot) {
+  let prev = unit.equip[slot]
+  if (prev < 0) { return 0 }
+  unit.equip[slot] = -1
+  clanBagAdd(prev, 1)
+  return 1
+}
+
+export function clanBagForSlot(slot) {
+  let out = []
+  let i = 0
+  while (i < S.bagId.length) {
+    let it = clanItemById(S.bagId[i])
+    if (it !== null) {
+      if (S.bagQty[i] > 0) {
+        if (clanSlotForType(it.type) === slot) {
+          out.push({
+            id: it.id, name: it.name, icon: it.icon, qty: S.bagQty[i],
+            desc: it.desc, type: it.type, teaches: it.teaches,
+            atk: it.atk, def: it.def, mag: it.mag, res: it.res,
+            spd: it.spd, eva: it.eva
+          })
+        }
+      }
+    }
+    i = i + 1
+  }
+  return out
+}
+
+export function clanItemsCatalog() { return CLAN_ITEMS }
+export function clanJobsCatalog() { return CLAN_JOBS }
+
+// shop32 frame by FFTA item type — kept for shop; clan menus use clan16 via it.icon.
+export function clanIconForType(typeName) {
+  if (typeName === "Item") { return 0 }
+  if (typeName === "Sword" || typeName === "Blade" || typeName === "Saber" || typeName === "Knight Sword" || typeName === "Great Sword" || typeName === "Broad Sword") { return 7 }
+  if (typeName === "Knife" || typeName === "Rapier" || typeName === "Katana" || typeName === "Spear" || typeName === "Knuckles") { return 6 }
+  if (typeName === "Mace") { return 9 }
+  if (typeName === "Staff" || typeName === "Bow" || typeName === "Great Bow" || typeName === "Instrument" || typeName === "Soul") { return 8 }
+  if (typeName === "Rod" || typeName === "Gun") { return 9 }
+  if (typeName === "Armor" || typeName === "Clothing") { return 13 }
+  if (typeName === "Robe") { return 14 }
+  if (typeName === "Helmet") { return 11 }
+  if (typeName === "Hat" || typeName === "Ribbon") { return 10 }
+  if (typeName === "Armlets") { return 17 }
+  if (typeName === "Accessory") { return 16 }
+  if (typeName === "Shoes") { return 15 }
+  if (typeName === "Shield") { return 12 }
+  return 0
+}
+
+export function clanItemIcon(it) {
+  if (it === null) { return 0 }
+  if (it.icon !== null) { return it.icon }
+  return clanIconForType(it.type)
+}
+
+// Seed a demo clan for iso-town (gil, bag staples, 3 units).
+export function clanSeedDemo() {
+  clanInit({ gil: 500, cp: 10, name: "Clan Nutsy" })
+  clanBagAdd(clanItemByName("Potion").id, 2)
+  clanBagAdd(clanItemByName("Antidote").id, 1)
+  clanBagAdd(clanItemByName("Jack Knife").id, 1)
+  clanBagAdd(clanItemByName("Feather Cap").id, 1)
+  clanBagAdd(clanItemByName("Fortune Ring").id, 1)
+  clanBagAdd(clanItemByName("Shortsword").id, 1)
+  clanBagAdd(clanItemByName("Bronze Shield").id, 1)
+  clanBagAdd(clanItemByName("Leather Garb").id, 1)
+  clanBagAdd(clanItemByName("White Staff").id, 1)
+  clanBagAdd(clanItemByName("Battle Boots").id, 1)
+
+  // Ability ids are the ROM's (see abilities_gen.tish). They used to be a wiki stub's own
+  // numbering, which made every reference here point at a different ability than it named.
+  let aid = clanAbilityByName("Item")
+  let itemsId = 67
+  if (aid !== null) { itemsId = aid.id }
+  let u0 = clanMakeUnit({
+    name: "Marche", race: 1, job: 2, level: 3, leader: 1, ap: 120,
+    known: [itemsId, 112], abilA: 112,   // Rush
+    hp: 62, hpMax: 62, mp: 12, mpMax: 12,
+    atk: 12, def: 10, mag: 6, res: 7, mov: 4, jmp: 3, eva: 6, spd: 8
+  })
+  let u1 = clanMakeUnit({
+    name: "Montblanc", race: 5, job: 0x24, level: 3, ap: 80,
+    known: [itemsId], abilA: itemsId,
+    hp: 48, hpMax: 48, mp: 22, mpMax: 22,
+    atk: 7, def: 7, mag: 11, res: 10, mov: 3, jmp: 3, eva: 8, spd: 9
+  })
+  let u2 = clanMakeUnit({
+    name: "Ritz", race: 1, job: 7, level: 2, ap: 150,
+    known: [itemsId, 1], abilA: 1,       // Cure
+    hp: 44, hpMax: 44, mp: 28, mpMax: 28,
+    atk: 6, def: 6, mag: 12, res: 11, mov: 3, jmp: 3, eva: 5, spd: 7
+  })
+  clanEquipItem(u0, clanItemByName("Shortsword").id)
+  clanEquipItem(u0, clanItemByName("Bronze Shield").id)
+  clanEquipItem(u2, clanItemByName("White Staff").id)
+  clanAddUnit(u0)
+  clanAddUnit(u1)
+  clanAddUnit(u2)
+  clanFormationSet(0, 0)
+  clanFormationSet(1, 1)
+  clanFormationSet(2, 2)
+}
+
+export function clanAbilityName(teach) {
+  if (teach === "") { return "" }
+  let a = clanAbilityByName(teach)
+  if (a === null) { return teach }
+  return a.name
+}
