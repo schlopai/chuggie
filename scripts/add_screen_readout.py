@@ -11,6 +11,12 @@ and a readout that only appears at the end leaves the ROM blank for its whole us
 updated after, so nothing new runs inside the loop under test and what each repro reproduces is
 unchanged.
 
+REFUSES a ROM that imports timer_read. "Nothing new runs inside the loop under test" is true, but
+the readout still runs a backdrop, two hud_text calls and a frame() immediately BEFORE it, and a
+bench that reads the hardware timer measures that: bench-tables came back with fill64=-64532 and a
+one-frame fill of ~-194664 ticks — a wrapped counter, not a measurement — and its SANE gate failed.
+A timing ROM is worth less with a preview than it is correct, so those keep their blank screen.
+
 Idempotent. Usage: python3 scripts/add_screen_readout.py <example> [example ...]
 """
 import json
@@ -42,6 +48,8 @@ def patch(name):
     src = open(path, encoding="utf-8").read()
     if MARK in src:
         return "already"
+    if re.search(r"\btimer_read\b", src):
+        return "reads the hardware timer — a readout would land inside its measurement"
 
     m = AGB_IMPORT.search(src)
     if not m:

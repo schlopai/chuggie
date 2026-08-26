@@ -11,17 +11,9 @@
 //
 // So: two arrays, identical in every respect, one of which is handed to a native exactly once.
 
-import { frame, log, backdrop, timer_read, hud_text } from 'cargo:tish_agb'
-import { body } from 'font:../../../assets/fonts/tinypixel.ttf@7'
+import { frame, log, backdrop, timer_read } from 'cargo:tish_agb'
 import { sumA, sumAMasked, sumB, A, handOverB } from './arrays'
 
-
-// --- screen readout (scripts/add_screen_readout.py) ---
-// Drawn up front so the ROM is never a blank screen; the measurement below is untouched.
-backdrop(0x101018)
-hud_text(0, 8, 8, "probe-arrayarg")
-hud_text(1, 8, 24, "running - numbers go to the log")
-frame()
 /// The SAME loop as `sumA`, over the SAME array — but written HERE, in the entry module, instead of
 /// inside the module that declares `A`. This is the last structural difference between
 /// `packages/dungeon.tish` (whose readers live beside its array, and are boxed) and
@@ -59,5 +51,4 @@ frame()
 handOverB()
 log("ARRAYARG bare=" + (a1 - a0) + " nativeArg=" + (b1 - b0) + " masked=" + (m1 - m0) + " here=" + (h1 - h0) + " sink=" + SINK[0])
 log("ARRAYARG DONE")
-hud_text(1, 8, 24, "done - numbers are in the log")
 while (true) { frame() }

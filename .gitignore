@@ -44,3 +44,7 @@ src/buildid.tish
 
 # compiled helper tools (build from the .c sources)
 /tools/gba-link
+
+# Editor-specific agent rules. These are per-tool instruction files that quietly steer whoever
+# opens the repo in that editor; they belong in a personal config, not in shared history.
+.cursor/

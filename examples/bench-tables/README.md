@@ -2,7 +2,6 @@
 
 > *What a generated table costs to read, and whether caching one is worth anything.*
 
-<img src="preview.png" alt="preview" width="480">
 
 This ROM was built to answer one question before any code was written against it:
 
