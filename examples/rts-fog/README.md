@@ -1,6 +1,6 @@
 # RTS FOG
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 RTS de-risk A2: fog of war as a wrapping shroud layer over a scrolling scene map, and whether the
 background budget survives it.

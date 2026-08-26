@@ -2,7 +2,7 @@
 
 > *A Street Fighter-style 1v1 fighter: frame data, hitboxes, motion commands and best-of-three rounds, with no entity system in the loop.*
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 Four fighters, best of three, ninety-nine seconds a round. Frame data, hitboxes and hurtboxes,
 blocking that depends on where you are blocking, motion specials, cancels, hit-stop and a CPU that

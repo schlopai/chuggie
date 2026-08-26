@@ -2,7 +2,7 @@
 
 > *Demonstrates a platformer with health, a hearts HUD and stompable patrol enemies.*
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 A side-scrolling platformer that exercises the reusable engine systems for
 platformer combat. The camera follows the player across a 65×14 streamed level.

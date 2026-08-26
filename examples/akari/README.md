@@ -7,7 +7,7 @@ components on the chuggie-engine engine, using the CC0 **Ninja Adventure** art p
 
 > elder hands you a training blade and sends you to cleanse it.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 It strings together every beat of a small RPG:
 

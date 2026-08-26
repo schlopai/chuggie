@@ -7,7 +7,7 @@ lens is not there: not drawn, not solid, not under your feet. You start able to 
 band. The DUSK and VOID lenses are somewhere in the building, and the last gate opens only under
 **WHITE**, with all three lit at once.
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 Built on `examples/spectra`'s chroma mechanic, rebuilt for exploration: one streamed 112×40 map
 instead of a room gauntlet, ability gates instead of a fixed order, and 60fps.

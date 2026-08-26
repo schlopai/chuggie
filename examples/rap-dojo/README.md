@@ -2,7 +2,7 @@
 
 > *A call-and-response rhythm game: fake 3D from per-scanline background bands, judged against the deck sequencer's own playhead.*
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 A call-and-response rhythm game. The master raps a bar; you rap it back.
 

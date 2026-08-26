@@ -2,7 +2,7 @@
 
 > *Demonstrates background layers, tilemaps, and scrolling.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 A world screen in tish: a tiled **background**, a **sprite** walking over it (facing
 its direction), and a **sound effect** on the A button. Exercises three asset scheme

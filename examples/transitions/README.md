@@ -1,6 +1,6 @@
 # transitions
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 Every screen transition the GBA can do, run through the real scene lifecycle.
 

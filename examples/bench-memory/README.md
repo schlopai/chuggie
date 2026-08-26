@@ -2,7 +2,7 @@
 
 > *A benchmark testing the performance of the memory subsystem.*
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 **Which subsystem does not give its heap back?**
 

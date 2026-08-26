@@ -2,7 +2,7 @@
 
 > *Demonstrates audio playback for chiptunes/music tracks.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 The GBA has two independent ways to make sound. agb only exposes one of them: the **software mixer**,
 which plays recorded samples through the Direct Sound FIFOs. This example uses the other one — the

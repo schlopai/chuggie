@@ -1,5 +1,7 @@
 # deckbuild — a deckbuilding combat, on `packages/cards.tish`
 
+<img src="preview.gif" alt="preview" width="480">
+
 Draw five, spend three energy, discard, reshuffle when the draw pile runs dry. One combat against
 the Warden, played entirely from `ui_rect` and `ui_text` — no art, no sprites, no OAM. It plays
 itself; press anything to take over.

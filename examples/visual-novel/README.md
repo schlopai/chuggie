@@ -2,7 +2,7 @@
 
 > *A branching story on `packages/cutscene-core`: choices, portraits, and a flag set three scenes earlier being read back.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 Words, a face, and two decisions that matter. The elder's last line before you leave depends on both
 of the choices you made — one of them four scenes earlier — which is the whole reason the flag store

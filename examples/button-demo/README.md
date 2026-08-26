@@ -2,7 +2,7 @@
 
 > *Demonstrates reading hardware input from the GBA buttons.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 Showcase for **`makeButton`**, **`makeButtonGroup`**, and **`makePrompt`** in [`packages/ui.tish`](../../packages/ui.tish).
 

@@ -2,7 +2,7 @@
 
 > *A farming/life-sim template (Stardew Valley style).*
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 A town built downwards. There are cellars, a forge and a dock under the street; the street itself,
 with eight buildings and the people who live in them; and a plank walk laid along the rooftops that

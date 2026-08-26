@@ -2,6 +2,8 @@
 
 > *Asteroids: a rotate-and-thrust wrap-around arena on the shmup toolkit's bullets.*
 
+<img src="preview.gif" alt="preview" width="480">
+
 The rock field, in a low-poly space-sim skin. Turn, thrust, coast on your own momentum, and break the
 rocks down one size at a time. The screen is a torus — everything that leaves an edge comes back in
 the other side, you included. Built on the same

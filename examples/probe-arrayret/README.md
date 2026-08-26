@@ -2,7 +2,7 @@
 
 > *A technical test for array returns over FFI or WASM.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 A regression probe, not a game. It exists to settle one question that decides whether a
 **data-driven cutscene / script format is possible at all**.

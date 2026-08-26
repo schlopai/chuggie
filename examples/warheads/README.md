@@ -2,7 +2,7 @@
 
 > *Pick a hull, choose a rock, and take turns dismantling the solar system it is standing on.*
 
-<img src="preview.png" width="240">
+<img src="preview.gif" width="480">
 
 Turn-based artillery in space, in the classic turn-based artillery line: three ship classes, a scrolling starfield
 strewn with planets, and shots that bend through the gravity wells on their way to the other side of

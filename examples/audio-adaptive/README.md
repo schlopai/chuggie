@@ -2,7 +2,7 @@
 
 > *Adaptive music made testable: what a pause keeps, and what the hush it replaces throws away.*
 
-<img src="preview.png" width="240">
+<img src="preview.png" width="480">
 
 ## The two things games kept getting wrong
 

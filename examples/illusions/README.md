@@ -1,6 +1,6 @@
 # illusions
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 Ten optical illusions on real GBA hardware. LEFT/RIGHT pick a page, A crosses over now; left alone
 it cycles through all ten on its own, using a different screen transition each time.

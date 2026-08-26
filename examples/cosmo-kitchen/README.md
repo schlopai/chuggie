@@ -2,7 +2,7 @@
 
 > *A complete mini-game demo (Cosmo Kitchen) showing game loop and UI.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 Campy retro-futurist **intergalactic chef** RPG music + SFX for the GBA.
 

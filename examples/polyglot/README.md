@@ -2,7 +2,7 @@
 
 > *One merchant screen, four languages, and a layout that survives all of them.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 An **internationalisation** demo, and the acceptance test for the `strings:` import scheme. This
 screen holds none of its own text: every word comes from `assets/ui.strings`. **L / R** switch

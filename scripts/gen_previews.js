@@ -7,9 +7,11 @@
 // Each clip inherits that example's own `gif` npm script — its ROM name, frame count and key
 // schedule — because those were tuned so the capture lands on something worth looking at.
 //
-// Deliberately smaller than `npm run gif`'s defaults: preview.gif is COMMITTED, so it is captured
-// at native 240x160 (matching preview.png) and capped to PREVIEW_FRAMES, which keeps a clip in the
-// tens-of-KB-to-low-hundreds range instead of the ~1MB a 480x320 clip costs.
+// Captured at native 240x160 — one GBA pixel per pixel, the smallest the file can possibly be —
+// and capped to PREVIEW_FRAMES. How BIG a clip appears on a page is a display decision, so it is
+// made once in the markup (see PREVIEW_WIDTH in scripts/gen_examples_readme.py) rather than baked
+// into every committed binary; recording at 2x doubled the repo cost for something an attribute
+// does for free.
 //
 // Usage: node scripts/gen_previews.js [--force] [example ...]
 //   --force  re-record even when preview.gif is newer than the ROM (default: skip those)

@@ -45,6 +45,11 @@ OUT = os.path.join(EXDIR, "README.md")
 DIAGNOSTIC = ("bench-", "repro-", "p0-", "probe-")
 
 
+# Display width for every committed preview, here and in the example READMEs. The assets are
+# 240x160; this is a whole-number 2x so each GBA pixel stays a crisp square block. Change it here
+# and re-run, then `python3 scripts/set_preview_width.py` for the example READMEs.
+PREVIEW_WIDTH = 480
+
 IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
 
 
@@ -123,10 +128,11 @@ def collect():
 def table(rows):
     out = ["| | example | what it is |", "|---|---|---|"]
     for name, title, tagline, shot in rows:
-        # No width= — the thumbnails are 240x160 GBA framebuffers and belong on the page at their
-        # true size. Scaling them down resamples pixel art into mush, which is the one thing a
-        # preview of a pixel-art example must not do.
-        img = f'<img src="{name}/{shot}">' if shot else "—"
+        # The previews are committed at native 240x160 — one GBA pixel per pixel, the smallest the
+        # files can be. How big they APPEAR is set here, in the markup, at the same PREVIEW_WIDTH
+        # the example READMEs use, so the display size is one decision in one place instead of
+        # something baked into 57 committed binaries.
+        img = f'<img src="{name}/{shot}" width="{PREVIEW_WIDTH}">' if shot else "—"
         desc = tagline or f"*({title})*"
         out.append(f"| {img} | **[{title}]({name}/README.md)**<br>`{name}` | {desc} |")
     return "\n".join(out)

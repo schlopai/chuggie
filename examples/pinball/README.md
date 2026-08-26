@@ -2,7 +2,7 @@
 
 > *A table with no tiles: per-pixel walls, a ball integrated in fixed point, and two flippers that actually swing.*
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 Plunge, flip, and try to keep three balls off the drain. Bumpers score and kick, the funnels feed
 the flippers, and a flipper caught on the rise throws the ball harder the closer to the tip it hits.

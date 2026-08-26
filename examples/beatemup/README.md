@@ -2,7 +2,7 @@
 
 > *A Final Fight-shaped brawler: four actors on a road with real depth, a chaining light attack, knockdowns and wave-locked arenas.*
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 Four characters on a road with real depth. A light attack that chains, a heavy that knocks down, a
 jump kick, a panic move that costs health, and three wave-locked arenas.

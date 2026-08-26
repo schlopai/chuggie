@@ -2,7 +2,7 @@
 
 > *The GBA's window registers, reachable from tish for the first time: a rectangle, a per-scanline circular iris, and darkness everywhere else.*
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 Three phases on a loop over a checkerboard: no window, then `win_rect` + `win_out_layers(0)`, then
 `win_circle` irising closed and open.

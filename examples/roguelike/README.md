@@ -3,6 +3,8 @@
 > *A dungeon generated on the cartridge from a seed — and checkable against a Python oracle, seed for seed.*
 
 
+<img src="preview.gif" alt="preview" width="480">
+
 ## What it proves
 
 `scripts/procgen/` reproduces `packages/dungeon.tish` **draw for draw** — the same LCG constants,

@@ -2,7 +2,7 @@
 
 > *Nine holes of top-down mini-golf — and the acceptance test for the engine's rigid discs.*
 
-<img src="preview.png" width="240">
+<img src="preview.gif" width="480">
 
 ## What it proves
 

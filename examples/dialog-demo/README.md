@@ -2,7 +2,7 @@
 
 > *Demonstrates text rendering and typewriter-style dialog boxes.*
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 A tour of **`packages/dialog.tish`** — the high-level chat / cutscene dialog component, built on the
 `packages/ui.tish` flex layout engine. It self-plays through the dialog styles common to console RPGs:

@@ -2,7 +2,7 @@
 
 > *Demonstrates a shop UI and inventory management.*
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 A tour of **`packages/shop.tish`** — the reusable BUY / SELL shop, built on `packages/ui.tish`
 (layout + selectable list) and `packages/dialog.tish` (the shopkeeper). The shop owns the flow and

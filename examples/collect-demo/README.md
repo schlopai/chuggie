@@ -2,7 +2,7 @@
 
 > *Demonstrates collision detection and entity collection logic.*
 
-![preview](preview.png)
+<img src="preview.png" alt="preview" width="480">
 
 Collision + events on tish_gba_game_engine: a player collects coins that vanish on
 contact. Both behaviours — the player controller and the coin's collision reaction —

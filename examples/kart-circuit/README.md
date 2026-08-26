@@ -2,7 +2,7 @@
 
 > *A Mode 7 kart racer on a real Mode 7 ground plane: drift, boost pads, off-road penalties and three rubber-banded AI opponents around a generated circuit.*
 
-![preview](preview.png)
+<img src="preview.gif" alt="preview" width="480">
 
 A Mode 7 kart racer on a real Mode 7 ground plane. Title → three laps against three AI
 opponents → results, with drift-charged mini-turbos, boost pads, an off-road penalty and rubber-band
