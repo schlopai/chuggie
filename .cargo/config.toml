@@ -35,5 +35,10 @@ rustflags = [
 # ancestor of the build directory, and those build directories all live under this repo.
 #
 # Fork: https://github.com/spacedevin/agb (branch `chuggie`) — expected as a sibling checkout of this repo.
+# Every dependency we develop alongside this repo is redirected HERE, not by a `path` in a
+# manifest. A path in a manifest cannot be satisfied by the crates-release job — it checks out this
+# repo alone — and cargo reads a path dependency's manifest even when publishing, where it strips
+# the path and uses the version anyway. Both of these broke a release that way.
 [patch.crates-io]
 agb = { path = "../agb/agb" }
+tishlang_runtime_gba = { path = "../../tish/tish/crates/tish_runtime_gba" }
