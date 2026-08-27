@@ -11,8 +11,6 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 [[package]]
 name = "agb"
 version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f10a27a7be6227fdb6558086ac12b3302202b66ee9cf179f882e7f041e6258a4"
 dependencies = [
  "agb_fixnum",
  "agb_hashmap",
@@ -20,7 +18,8 @@ dependencies = [
  "agb_macros",
  "agb_save",
  "agb_sound_converter",
- "bilge",
+ "arbitrary-int",
+ "bitbybit",
  "critical-section",
  "once_cell",
  "portable-atomic",
@@ -31,8 +30,6 @@ dependencies = [
 [[package]]
 name = "agb_fixnum"
 version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56a9e7207bfdcab85688c317f0582d70564a717b5c3a101728ab4bd4c1252c34"
 dependencies = [
  "const_soft_float",
  "num-traits",
@@ -44,8 +41,6 @@ dependencies = [
 [[package]]
 name = "agb_hashmap"
 version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14ec1be9c9856b0b23bd7c8b2123c88965ae64ee963ca90926be99c34b9cede6"
 dependencies = [
  "rustc-hash",
  "serde",
@@ -54,8 +49,6 @@ dependencies = [
 [[package]]
 name = "agb_image_converter"
 version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ad581ca4125ca246bf470912306704be0c927aa926602df5e9797bf8fccdbd3"
 dependencies = [
  "asefile",
  "fontdue",
@@ -72,8 +65,6 @@ dependencies = [
 [[package]]
 name = "agb_macros"
 version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53fde29503bff075b2ff8ebc6c0080af62119c0a09ae88e021cad89653584e72"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -83,8 +74,6 @@ dependencies = [
 [[package]]
 name = "agb_save"
 version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8283d550338b6b9f9e5efe79ad17bc3891d66223c67b50ef4e02a4a58afa8b7"
 dependencies = [
  "crc16",
  "postcard",
@@ -94,8 +83,6 @@ dependencies = [
 [[package]]
 name = "agb_sound_converter"
 version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a16ba924c2d67cfd35fdee7cff31014bb9caa0a32ab935c72ed68eb36f83a1b6"
 dependencies = [
  "hound",
  "proc-macro2",
@@ -136,23 +123,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "bilge"
-version = "0.3.0"
+name = "bitbybit"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "279c74986684d5cc7bbbd079aa448e8f852992cd385d85bb3a37e374c087b065"
+checksum = "bf218b839af0730012cc21856c4149789afde9ae6dc3078c7adaf311e8b76854"
 dependencies = [
- "arbitrary-int",
- "bilge-impl",
-]
-
-[[package]]
-name = "bilge-impl"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1176e49f42fe135cd2b56465e4f7d07038d3728f5e9f27fb2f08ed3fef75339"
-dependencies = [
- "itertools",
- "proc-macro-error2",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -244,12 +219,6 @@ name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
-
-[[package]]
-name = "either"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
 
 [[package]]
 name = "embedded-io"
@@ -382,15 +351,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -500,27 +460,6 @@ dependencies = [
  "embedded-io 0.4.0",
  "embedded-io 0.6.1",
  "serde",
-]
-
-[[package]]
-name = "proc-macro-error-attr2"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
-dependencies = [
- "proc-macro2",
- "quote",
-]
-
-[[package]]
-name = "proc-macro-error2"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802"
-dependencies = [
- "proc-macro-error-attr2",
- "proc-macro2",
- "quote",
 ]
 
 [[package]]
@@ -715,9 +654,7 @@ dependencies = [
 
 [[package]]
 name = "tishlang_builtins"
-version = "3.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdbfa80f090892860d4573af0508c24adf5b37139c51303fed75de0d7d40c573"
+version = "0.1.0"
 dependencies = [
  "indexmap",
  "tishlang_core",
@@ -726,9 +663,7 @@ dependencies = [
 
 [[package]]
 name = "tishlang_core"
-version = "3.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "966d98e42382c2c22bbd97d715bf5e8943ff65ec1b0f3a3db49af50c953cf106"
+version = "0.1.0"
 dependencies = [
  "getrandom",
  "hashbrown 0.15.5",
@@ -743,9 +678,7 @@ dependencies = [
 
 [[package]]
 name = "tishlang_runtime_gba"
-version = "3.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97a6ac749633523e9ecf86aa83e3536ca5483fba6f5df031d8797d9558c82892"
+version = "0.1.0"
 dependencies = [
  "agb",
  "tishlang_builtins",
