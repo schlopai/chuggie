@@ -14,11 +14,13 @@ repository = "https://github.com/schlopai/chuggie"
 # The GBA runtime facade — same crate instance the generated program links, so the
 # `Value` types unify. Provides Value + the gba peripheral hand-off.
 tishlang_runtime_gba = { path = "../../../../tish/tish/crates/tish_runtime_gba", version = ">=0.1" }
-# The path is the local fork (see .cargo/config.toml); the version is what a
-# CONSUMER resolves from crates.io. Without it `cargo publish` refuses the crate:
-#   "all dependencies must have a version requirement specified when publishing.
-#    dependency `agb` does not specify a version"
-agb = { path = "../../../agb/agb", version = "0.25.0" }
+# A plain registry dependency, NOT a path. `.cargo/config.toml` has
+# `[patch.crates-io] agb = { path = "../agb/agb" }`, which already redirects this to our fork for
+# every build under this repo — the path here was redundant with it, and actively harmful: cargo
+# reads a path dependency's manifest even when publishing (where it strips the path), so a publish
+# job that has not checked out the fork dies with
+#   failed to read `/home/runner/work/chuggie/agb/agb/Cargo.toml`
+agb = "0.25.0"
 
 # ── save media ───────────────────────────────────────────────────────────────
 # SRAM (32 KiB, the traditional cart) is the DEFAULT and has no feature of its own.
