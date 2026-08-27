@@ -1,5 +1,7 @@
 # Memory on this engine — what exists, what eats it, how it fails, and how to find it
 
+> **Canonical version:** https://chuggie.dev/docs/advanced/memory
+
 Everything learned about GBA memory in this repo, in one place. Written 2026-08-12 after a session
 where four separate "impossible" bugs — a boot crash, a 32-board ceiling, a battle that would not
 start, and a cutscene that would not link — all turned out to be one allocator problem wearing

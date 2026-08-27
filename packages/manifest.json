@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "description": "Machine-checkable inventory of chuggie authoring modules. See DOCUMENTATION.md.",
+  "packages": {
+    "core": ["engine", "scene", "scene_hooks", "prefs", "save", "pool", "rng", "buildid", "memdebug", "search"],
+    "genres": ["platformer", "topdown", "shmup", "beatemup", "iso", "iso_actors", "isodemo", "fighter", "boxing", "motion", "kart", "mode7", "rts", "rhythm", "dungeon", "fpview", "microgame", "party", "grid"],
+    "presentation": ["ui", "menu", "dialog", "cutscene", "cutscene-core", "title", "parallax", "shop", "feel", "fx", "transition", "chroma", "chroma-world"],
+    "audio": ["chipsfx", "deck", "music", "sfx"],
+    "game_data": ["flags", "keylock", "replay", "cards"],
+    "multiplayer": ["link"]
+  }
+}

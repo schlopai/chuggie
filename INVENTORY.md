@@ -31,7 +31,7 @@ agb 0.25                       hardware, VRAM, mixer, fixnum (Num<i32,8>), input
 ④c packages/*.tish             reusable tish sugar: engine.tish (makeEntity), shmup.tish (genre kit),
   │                            scene.tish, title.tish, cutscene.tish.
   ▼
-④d examples/*                  52 games/demos.
+④d examples/*                  125 games/demos.
 ```
 
 **The one rule (from ARCHITECTURE.md):** dependencies only point *down and toward agb*. The engine

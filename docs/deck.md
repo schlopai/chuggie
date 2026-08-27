@@ -1,5 +1,7 @@
 # deck on GBA — agent music guide
 
+> **Canonical version:** https://chuggie.dev/docs/packages/deck
+
 Author music as **deck** (`.deck`), import it with `deck:`, play it with `deckPlay`. The GBA never
 parses deck text — the host bakes a compact `DeckSong` at build time.
 

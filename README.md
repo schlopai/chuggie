@@ -2,7 +2,11 @@
 
 Write Game Boy Advance games in **[tish](https://tishlang.com/)** (a TS/JS-like
 language that transpiles to Rust), running on **[agb](https://github.com/agbrs/agb)
-0.25**. Docs and marketing: **[chuggie.dev](https://chuggie.dev)**. Two layers, both usable:
+0.25**.
+
+**Documentation for game developers:** **[chuggie.dev/docs](https://chuggie.dev/docs)** — installation, packages, engine guides, and examples. This repository holds contributor docs (`ARCHITECTURE.md`, `CONTRACT.md`, `docs/`).
+
+Two layers, both usable:
 
 - **`tish-agb`** — low-level bindings (sprites, backgrounds, input, audio, save,
   timers, rng, log). Enough to build a whole game by itself.
@@ -26,13 +30,16 @@ for everything a still cannot show — movement, animation, transitions, particl
 the traps that cost the most time, is written up in
 [`docs/agent-dev-loop.md`](./docs/agent-dev-loop.md).
 
-**Backgrounds:** there are only four layers and they are all spoken for — the budget, the priority
-rule that decides whether the player is visible at all, the one-palette-set constraint, and how to
-get more apparent depth than you have layers (per-scanline banding) are in
-[`docs/gba-backgrounds.md`](./docs/gba-backgrounds.md).
+**Contributor deep dives** (user-facing versions on chuggie.dev):
 
-**Performance:** [docs/perf-rules.md](docs/perf-rules.md) — the seven things that cost a GBA
-frame in tish, measured. `scripts/const_to_let.py` applies the biggest one in bulk.
+| Topic | Contributor doc | User doc |
+|-------|-----------------|----------|
+| Backgrounds | [`docs/gba-backgrounds.md`](./docs/gba-backgrounds.md) | [chuggie.dev/docs/engine/backgrounds](https://chuggie.dev/docs/engine/backgrounds) |
+| Performance | [`docs/perf-rules.md`](docs/perf-rules.md) | [chuggie.dev/docs/advanced/performance](https://chuggie.dev/docs/advanced/performance) |
+| Audio | [`docs/gba-audio.md`](docs/gba-audio.md) | [chuggie.dev/docs/engine/audio](https://chuggie.dev/docs/engine/audio) |
+| Memory | [`docs/MEMORY.md`](docs/MEMORY.md) | [chuggie.dev/docs/advanced/memory](https://chuggie.dev/docs/advanced/memory) |
+
+`scripts/const_to_let.py` applies the biggest perf fix in bulk (see perf-rules).
 
 ## Status
 
@@ -168,6 +175,20 @@ npm run itch -- serve shmup --port 8080
 
 See also [`templates/itch-mgba/README.md`](./templates/itch-mgba/README.md).
 
+## Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `TISH_REPO` | `../tish/tish` | Path to tish checkout for `npm run setup` |
+| `MGBA` | `mgba-qt` / `mgba` | Emulator binary |
+| `MGBA_ARGS` | _(empty)_ | Extra emulator flags |
+| `MGBA_PREFIX` | Homebrew prefix | libmgba for headless tools |
+| `ITCH_TARGET` | _(unset)_ | Butler push target |
+| `PORT` | `4173` | itch serve port |
+| `TISH` | `npx tish` | Override tish CLI in screenshot scripts |
+
+Cargo features on `tish_agb`: `save-flash-512k`, `save-flash-1m`. See `crates/tish-agb/Cargo.toml`.
+
 ## Layout
 
 ```
@@ -175,6 +196,7 @@ See also [`templates/itch-mgba/README.md`](./templates/itch-mgba/README.md).
 rust-toolchain.toml    # nightly + rust-src
 Cargo.toml             # workspace + GBA-tuned profiles (opt-level 3, fat LTO)
 CONTRACT.md            # compiler ⇄ framework interface (breaking changes tracked here)
+DOCUMENTATION.md       # where docs live and how to keep them in sync
 docs/findings/         # P0 spike results + preserved probes
 examples/p0-spike/     # P0a: hand-written "what codegen emits", builds to a ROM
 templates/itch-mgba/   # mGBA WASM HTML shell for itch HTML5 packages

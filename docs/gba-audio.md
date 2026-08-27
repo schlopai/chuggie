@@ -1,5 +1,7 @@
 # Audio on the GBA: samples vs. synth
 
+> **Canonical version:** https://chuggie.dev/docs/engine/audio
+
 The GBA makes sound two independent ways, and this repo now uses both.
 
 **Direct Sound** — two DMA-fed FIFOs playing PCM samples, mixed in software. This is all agb 0.25

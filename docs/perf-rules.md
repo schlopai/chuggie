@@ -1,5 +1,7 @@
 # The seven things that cost a GBA frame in tish
 
+> **Canonical version:** https://chuggie.dev/docs/advanced/performance
+
 A 60fps frame is **4,389 Timer2 ticks**. Everything below was measured on device in this repo, and
 each one was found the same way: bracket a suspect section with two `ticks()` reads, `log()` the
 difference, and read `.tish/gba/<name>/src/main.rs` when the number does not make sense.

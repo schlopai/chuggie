@@ -1,5 +1,7 @@
 # Backgrounds and parallax on the GBA
 
+> **Canonical version:** https://chuggie.dev/docs/engine/backgrounds
+
 Everything about the four background layers: what they cost, how `frame()` hands them out, the three
 kinds a game can build, and how to get more apparent depth than you have layers.
 

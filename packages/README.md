@@ -16,19 +16,21 @@ Every module is tish source, compiled into your ROM by `tish build --target gba`
 pre-compiled — a GBA build has no dynamic linking, so the authoring layer ships as source and the
 compiler inlines what you actually import.
 
+User-facing documentation: **[chuggie.dev/docs](https://chuggie.dev/docs)**
+
 ## What's here
 
 | Area | Modules |
 |------|---------|
-| Core | `engine` (entities, components, world step) · `scene` · `scene_hooks` · `game` · `prefs` · `save` |
-| Genres | `platformer` · `topdown` · `shmup` · `beatemup` · `iso` · `iso_actors` · `rhythm` (call-and-response, judged against the deck playhead) · `battle` (turn-based resolution) |
-| Presentation | `ui` · `menu` · `dialog` · `cutscene` · `title` · `parallax` · `shop` · `feel` (game feel: hit-stop, call-outs, presets; the screen-shake spring itself now lives in the engine as `fx_bump`) · `fx` (names for the engine's particle presets and emitter fields — **constants only, no functions**) |
-| Audio | `chipsfx` · `deck` (`.deck` soundtracks — see [@spacedevin/deck][deck]) |
+| Core | `engine` · `scene` · `scene_hooks` · `prefs` · `save` · `pool` · `rng` · `buildid` · `memdebug` |
+| Genres | `platformer` · `topdown` · `shmup` · `beatemup` · `iso` · `iso_actors` · `isodemo` · `fighter` · `boxing` · `kart` · `rts` · `rhythm` · `dungeon` · `fpview` · `microgame` |
+| Presentation | `ui` · `menu` · `dialog` · `cutscene` · `cutscene-core` · `title` · `parallax` · `shop` · `feel` · `fx` · `transition` · `grid` |
+| Audio | `chipsfx` · `deck` · `music` · `sfx` |
+| Game data | `flags` · `keylock` · `replay` · `party` · `cards` · `search` |
 | Multiplayer | `link` |
-| Game data | `clan/*` · `clansave` · `isodemo` |
-| Debug | `memdebug` |
+| World / color | `chroma` · `chroma-world` · `mode7` · `motion` |
 
-`import { … } from '@schlopai/chuggie'` is the engine entry (`engine.tish`); everything else is a subpath.
+`import { … } from '@schlopai/chuggie'` is the engine entry (`engine.tish`); everything else is a subpath (`@schlopai/chuggie/shmup`, etc.).
 
 ## The Rust half
 
