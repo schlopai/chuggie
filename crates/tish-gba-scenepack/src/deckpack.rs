@@ -663,8 +663,8 @@ pub fn build(path: &Path) -> Result<proc_macro2::TokenStream, String> {
             ));
         }
         let mut packed = [0u8; 16];
-        for i in 0..16 {
-            packed[i] = ((w.levels[i * 2] as u8) << 4) | (w.levels[i * 2 + 1] as u8);
+        for (i, byte) in packed.iter_mut().enumerate() {
+            *byte = ((w.levels[i * 2] as u8) << 4) | (w.levels[i * 2 + 1] as u8);
         }
         named_waves.insert(w.name.clone(), packed);
     }
@@ -1242,7 +1242,7 @@ mod tests {
             "pulse low is not full scale: {signed:?}"
         );
     }
-/// The whole point of adopting `wave` into the language: the two spellings are one sound. A
+    /// The whole point of adopting `wave` into the language: the two spellings are one sound. A
     /// `harmonics` line and the hex literal it resolves to must pack to byte-identical wave RAM, or
     /// a song would sound different depending only on how its table was written.
     ///
@@ -1256,20 +1256,36 @@ mod tests {
         assert!(prog.errors.is_empty(), "{:?}", prog.errors);
 
         let pack = |name: &str| -> [u8; 16] {
-            let w = prog.waves.iter().find(|w| w.name == name).expect("wave present");
+            let w = prog
+                .waves
+                .iter()
+                .find(|w| w.name == name)
+                .expect("wave present");
             assert_eq!(w.levels.len(), 32);
             let mut out = [0u8; 16];
-            for i in 0..16 {
-                out[i] = ((w.levels[i * 2] as u8) << 4) | (w.levels[i * 2 + 1] as u8);
+            for (i, byte) in out.iter_mut().enumerate() {
+                *byte = ((w.levels[i * 2] as u8) << 4) | (w.levels[i * 2 + 1] as u8);
             }
             out
         };
 
         let lit = pack("lit");
-        assert_eq!(pack("gen"), lit, "harmonics must bake to the same wave RAM as its hex literal");
-        // Every nibble is a 4-bit level, so no byte can carry a value the hardware cannot hold.
-        for b in lit {
-            assert!(b >> 4 <= 15 && (b & 0x0f) <= 15);
+        assert_eq!(
+            pack("gen"),
+            lit,
+            "harmonics must bake to the same wave RAM as its hex literal"
+        );
+        // Packing has to be lossless and high-nibble-first. Getting the order wrong still produces
+        // 16 plausible bytes, so nothing downstream would catch it — the ROM would just play a
+        // scrambled waveform.
+        let w = prog.waves.iter().find(|w| w.name == "lit").unwrap();
+        assert!(
+            w.levels.iter().all(|n| (0..=15).contains(n)),
+            "a level outside 0..=15 would overflow its nibble into the neighbouring sample"
+        );
+        for (i, b) in lit.iter().enumerate() {
+            assert_eq!(i64::from(b >> 4), w.levels[i * 2]);
+            assert_eq!(i64::from(b & 0x0f), w.levels[i * 2 + 1]);
         }
     }
 }
