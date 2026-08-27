@@ -1,5 +1,7 @@
 # The versus fighting and brawler genres
 
+> **Canonical version:** https://chuggie.dev/docs/packages/fighter
+
 `packages/fighter.tish` + `packages/motion.tish`, demonstrated by `examples/versus`; and its sibling
 `packages/beatemup.tish`, demonstrated by `examples/beatemup`. They share the input ring and the art
 pipeline (`scripts/fighter_art.py`) and nothing else — see §8 for why not.

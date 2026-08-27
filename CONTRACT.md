@@ -62,22 +62,24 @@ Promise(Rc<dyn TishPromise>) | Opaque(Rc<dyn TishOpaque>)`. Single-threaded `Rc`
 `rustc_hash::FxBuildHasher`** — NOT foldhash/ahash (both need atomics; see
 `docs/findings/P0-findings.md`).
 
-## 3. `cargo:` binding ABI (zero hand-written glue) 🔷
+## 3. `cargo:` binding ABI 🔷
 
-- Binding crates (`tish-agb`, `tish-gba-game-engine`) contain **no `Value` code**. Exports
-  are idiomatic Rust fns marked `#[tish_export]` (a marker; expansion is the item
-  itself, optionally `#[inline]`).
-- The compiler's bindgen syn-scans `#[tish_export]` items and generates, into the
-  ephemeral crate: (a) the boxed `Value::native` marshalling shim, (b) the
-  `.d.tish` declaration, (c) a machine-readable signature sidecar.
+**Current implementation:** exports are **hand-written** in Rust and declared in
+`crates/*/tish.d.tish`. There is no `#[tish_export]` macro or compiler bindgen
+scan in this tree today — the `.d.tish` files are the typed ABI contract the
+tish compiler reads at build time.
+
+- Binding crates (`tish-agb`, `tish-gba-game-engine`) expose idiomatic Rust fns
+  plus matching `declare fn` entries in `tish.d.tish`.
 - **Classifiable param/return types** at the ABI boundary:
   `i8 u8 i16 u16 i32 u32 bool`, `Fixed`, `&str`/`String`, `()`, `Option<T>` of
   those, and `Vector2D<Fixed>` (destructured to a `(x: Fixed, y: Fixed)` scalar
   pair). Anything else falls back to the explicit `fn(args: &[Value]) -> Value`
   convention, which crates MAY still hand-write where dynamic data is the point
   (e.g. `spawn(componentConfigs)`, `defineComponent(def)`).
-- `#[tish_export(init)]` marks the `fn init(gba: &mut GbaShared)`-style entry the
-  generated `agb_main` invokes for an imported module before `run()`.
+- **Future direction:** a `#[tish_export]` marker + compiler bindgen that
+  auto-generates the `.d.tish` declaration and boxed shim remains compatible with
+  this contract but is not implemented yet.
 
 ## 4. `tishlang_runtime_gba::gba` module 🔷 / 🕓
 
