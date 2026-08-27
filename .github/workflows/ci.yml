@@ -115,11 +115,16 @@ jobs:
       - uses: actions/checkout@v7
       - id: list
         run: |
-          # Every example with a build script, split into SHARDS groups.
+          # Every example with a build script — MINUS the ones the verify matrix already builds.
+          #
+          # A verifier builds its example's ROM and then emulates it, so 49 of the 125 were being
+          # compiled twice per run: once here to upload, once there to test. The verify jobs now
+          # upload what they already built, and this covers the remainder.
           SHARDS=8
           list=$(for d in examples/*/; do
                    [ -f "$d/package.json" ] || continue
                    grep -q '"build"' "$d/package.json" || continue
+                   [ -f "$d/verify.sh" ] && continue
                    basename "$d"
                  done | sort)
           echo "$list" | jq -R . | jq -sc --argjson n "$SHARDS" \
@@ -206,15 +211,33 @@ jobs:
   # One artifact for the site to fetch, rather than eight it would have to know the shape of.
   example_roms:
     name: Bundle example ROMs
-    needs: rom
+    needs: [rom, verify]
     if: always() && needs.rom.result != 'cancelled'
     runs-on: ubuntu-latest
     steps:
+      # Two sources now: the shards, and the ROMs the verifiers built.
       - uses: actions/download-artifact@v8
         with:
           pattern: example-roms-shard-*
           merge-multiple: true
           path: roms
+      # The verify artifacts are flat (<example>.gba), so they land in one directory and are sorted
+      # into <id>/<name>.gba below — the layout the site reads.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: example-roms-verify-*
+          path: verify-roms
+      - name: Fold the verifier ROMs into the same layout
+        run: |
+          shopt -s nullglob
+          for d in verify-roms/example-roms-verify-*/; do
+            ex="$(basename "$d")"; ex="${ex#example-roms-verify-}"
+            for rom in "$d"*.gba; do
+              mkdir -p "roms/$ex"
+              cp "$rom" "roms/$ex/"
+            done
+          done
+          rm -rf verify-roms
       - name: Report
         run: |
           n=$(find roms -name '*.gba' | wc -l)
@@ -301,6 +324,21 @@ jobs:
           # Some verifiers build through `npm run build`, which invokes a bare `tish`.
           export PATH="$(dirname "$TISH"):$PATH"
           ./verify.sh
+
+      # The verifier just built this example's ROM to emulate it. Keep it, rather than having the
+      # rom matrix compile the same thing again.
+      #
+      # always(): a verifier can fail on an assertion about a ROM that built perfectly well, and that
+      # ROM is still the right one to publish. if-no-files-found: ignore, because a verifier that
+      # failed BEFORE building leaves nothing, which is not an error here.
+      - name: Keep the ROM this verifier built
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: example-roms-verify-${{ matrix.example }}
+          path: chuggie/chuggie/examples/${{ matrix.example }}/*.gba
+          if-no-files-found: ignore
+          retention-days: 30
 
   discover:
     name: Discover verifiers
