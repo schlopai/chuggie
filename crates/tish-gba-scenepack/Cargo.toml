@@ -13,7 +13,7 @@ proc-macro = true
 # The `.deck` parser, generated from the same @spacedevin/deck source the Deckard host uses — so the
 # GBA bake and the host cannot disagree about what a file says. This crate keeps only the LOWERING
 # (channel allocation, wavetables, beats→frames); the grammar lives upstream.
-deckfile = "1.5.0"
+deckfile = "1.5.3"
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
