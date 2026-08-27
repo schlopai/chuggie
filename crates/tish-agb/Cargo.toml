@@ -13,7 +13,7 @@ repository = "https://github.com/schlopai/chuggie"
 [dependencies]
 # The GBA runtime facade — same crate instance the generated program links, so the
 # `Value` types unify. Provides Value + the gba peripheral hand-off.
-tishlang_runtime_gba = { path = "../../../../tish/tish/crates/tish_runtime_gba", version = ">=0.1" }
+tishlang_runtime_gba = ">=0.1"
 # A plain registry dependency, NOT a path. `.cargo/config.toml` has
 # `[patch.crates-io] agb = { path = "../agb/agb" }`, which already redirects this to our fork for
 # every build under this repo — the path here was redundant with it, and actively harmful: cargo

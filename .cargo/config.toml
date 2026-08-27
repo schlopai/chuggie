@@ -35,5 +35,13 @@ rustflags = [
 # ancestor of the build directory, and those build directories all live under this repo.
 #
 # Fork: https://github.com/spacedevin/agb (branch `chuggie`) — expected as a sibling checkout of this repo.
+# agb is redirected HERE, not by a `path` in a manifest. A path in a manifest cannot be satisfied by
+# the crates-release job — it checks out this repo alone — and cargo reads a path dependency's
+# manifest even when publishing, where it strips the path and uses the version anyway.
+#
+# tishlang_runtime_gba is redirected the same way, and it MUST be: the ROM project tish generates
+# path-depends on that exact directory, so tish_agb has to resolve to the same copy or the two see
+# different tishlang_core types and the build fails with a mismatch.
 [patch.crates-io]
 agb = { path = "../agb/agb" }
+tishlang_runtime_gba = { path = "../../tish/tish/crates/tish_runtime_gba" }
