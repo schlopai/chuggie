@@ -2,7 +2,7 @@
   "name": "@schlopai/chuggie",
   "version": "0.0.0",
   "description": "Game engine packages for writing Game Boy Advance games in tish \u2014 scenes, isoboard, platformer, top-down, shmup, versus fighting, brawler, grids, dialog, menus, save and link.",
-  "license": "MIT OR Apache-2.0",
+  "license": "MIT",
   "author": "spacedevin",
   "repository": {
     "type": "git",

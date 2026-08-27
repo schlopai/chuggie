@@ -2,7 +2,7 @@
 name = "tish_gba_game_engine"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "RPG-Maker-class game engine for tish-on-GBA: SoA entity store + fixed per-frame pipeline (imported via cargo:tish_gba_game_engine)"
 repository = "https://github.com/schlopai/chuggie"
 
