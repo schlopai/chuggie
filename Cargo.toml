@@ -17,6 +17,7 @@ exclude = [
     "crates/tish-agb-sio",
     "crates/tish-gba-game-engine",
     "crates/tish-gba-scenepack",
+    "node_modules",
 ]
 
 # GBA code is unusably slow unoptimized — opt-level 3 even in dev, matching the
