@@ -94,10 +94,49 @@ jobs:
           done
 
   # ── A real ROM, built the way a game is built. Proves the toolchain + agb linkage still work. ──
-  rom:
-    name: Build a ROM
+  # ── Every example ROM, built once and kept. ──────────────────────────────────────────────────────
+  #
+  # chuggie.dev embeds an mGBA player and offers a PLAY button for each example, but `**/*.gba` is
+  # gitignored here, so the ROMs existed only where someone had built them. The site's build scanned
+  # a sibling checkout for *.gba: on a maintainer's laptop that found 148 ROMs, and anywhere else it
+  # found none and shipped dead buttons. https://chuggie.dev/examples-roms/shmup/shmup.gba was a 404.
+  #
+  # So CI builds them and uploads them as an artifact the site can fetch.
+  #
+  # Sharded rather than one job per example: the toolchain setup (rust, agb-gbafix, freetype, the
+  # tish compiler) costs minutes and would be paid 125 times over. Each shard pays it once and then
+  # builds its slice, which is seconds per example against a warm cargo cache.
+  rom_shards:
+    name: Discover example shards
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    outputs:
+      shards: ${{ steps.list.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: list
+        run: |
+          # Every example with a build script, split into SHARDS groups.
+          SHARDS=8
+          list=$(for d in examples/*/; do
+                   [ -f "$d/package.json" ] || continue
+                   grep -q '"build"' "$d/package.json" || continue
+                   basename "$d"
+                 done | sort)
+          echo "$list" | jq -R . | jq -sc --argjson n "$SHARDS" \
+            '[range(0;$n) as $i | {shard: $i, examples: [.[range($i; length; $n)]]}] | map(select(.examples|length > 0))' \
+            > shards.json
+          echo "shards=$(cat shards.json)" >> "$GITHUB_OUTPUT"
+          echo "$(echo "$list" | wc -l) examples across $(jq length shards.json) shards"
+
+  rom:
+    name: ROMs ${{ matrix.shard.shard }}
+    needs: rom_shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.rom_shards.outputs.shards) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -129,28 +168,65 @@ jobs:
       - name: Build the tish compiler
         working-directory: tish/tish
         run: cargo build --release -p tishlang
-      - name: Build grid-demo
-        working-directory: chuggie/chuggie/examples/grid-demo
+      - name: Build this shard's ROMs
+        working-directory: chuggie/chuggie
         env:
           TISH: ${{ github.workspace }}/tish/tish/target/release/tish
+          EXAMPLES: ${{ join(matrix.shard.examples, ' ') }}
         run: |
-          "$TISH" build src/main.tish --target gba -o grid-demo.gba
-          ls -l grid-demo.gba
+          export PATH="$(dirname "$TISH"):$PATH"
+          mkdir -p "$GITHUB_WORKSPACE/roms"
+          built=0; failed=""
+          for ex in $EXAMPLES; do
+            # An example that will not build is reported at the end, not fatal here: one broken
+            # example must not cost the site every other ROM.
+            if ( cd "examples/$ex" && npm run build >/tmp/build-$ex.log 2>&1 ); then
+              rom=$(find "examples/$ex" -maxdepth 1 -name '*.gba' | head -1)
+              if [ -n "$rom" ]; then
+                mkdir -p "$GITHUB_WORKSPACE/roms/$ex"
+                cp "$rom" "$GITHUB_WORKSPACE/roms/$ex/"
+                built=$((built+1))
+              else
+                failed="$failed $ex(no-rom)"
+              fi
+            else
+              failed="$failed $ex"
+              echo "::warning::$ex failed to build"; tail -5 /tmp/build-$ex.log || true
+            fi
+          done
+          echo "shard ${{ matrix.shard.shard }}: built $built ROM(s)"
+          [ -z "$failed" ] || echo "::warning::shard ${{ matrix.shard.shard }} could not build:$failed"
       - uses: actions/upload-artifact@v7
         with:
-          name: grid-demo-rom
-          path: chuggie/chuggie/examples/grid-demo/grid-demo.gba
+          name: example-roms-shard-${{ matrix.shard.shard }}
+          path: roms/
           if-no-files-found: error
+          retention-days: 30
 
-  # ── The example verifiers: build a ROM, emulate it, and assert on what came out. ──────────────
-  #
-  # These are the real regression net — they FFT captured audio against the bpm the `.deck` file was
-  # authored at and diff rendered frames against golden PNGs, so a parse or lowering regression is
-  # caught as a wrong-sounding or wrong-looking ROM rather than a passing unit test.
-  #
-  # Matrixed one job per example with fail-fast:false, because a single ROM build is ~2 minutes and
-  # running 50 of them serially is hours. The list is DISCOVERED, not hand-maintained — a new
-  # verify.sh is picked up without editing this file.
+  # One artifact for the site to fetch, rather than eight it would have to know the shape of.
+  example_roms:
+    name: Bundle example ROMs
+    needs: rom
+    if: always() && needs.rom.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: example-roms-shard-*
+          merge-multiple: true
+          path: roms
+      - name: Report
+        run: |
+          n=$(find roms -name '*.gba' | wc -l)
+          echo "$n ROM(s) bundled"
+          [ "$n" -gt 0 ] || { echo "::error::no ROMs were produced by any shard"; exit 1; }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: example-roms
+          path: roms/
+          if-no-files-found: error
+          retention-days: 90
+
   verify:
     name: verify ${{ matrix.example }}
     needs: [crates, discover]
