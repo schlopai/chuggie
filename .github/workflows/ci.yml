@@ -340,15 +340,15 @@ jobs:
           echo "Next version: ${{ steps.sem.outputs.new_release_version }}"
 
       # The licence gate. crates.io has no delete — only yank — and npm unpublish is a 72-hour
-      # window, so an artifact published under the wrong licence is effectively permanent. The repo
-      # currently has NO LICENSE file while every crate claims "MIT OR Apache-2.0"; refuse to build a
-      # release artifact until those two agree. (This is not hypothetical: @spacedevin/deck shipped
-      # two versions under the wrong licence and both had to be yanked.)
+      # window, so an artifact published under the wrong licence is effectively permanent. Refuse to
+      # build a release artifact unless the LICENSE file the crates and the package point at is
+      # actually there. (This is not hypothetical: @spacedevin/deck shipped two versions under the
+      # wrong licence and both had to be yanked.)
       - name: Refuse to package without a licence
         if: steps.gate.outputs.continue == 'true'
         run: |
           if [ ! -f LICENSE ] && [ ! -f LICENSE.md ] && [ ! -f LICENSE.txt ]; then
-            echo "::error::No LICENSE file at the repo root, but crates/*/Cargo.toml and packages/package.json declare \"MIT OR Apache-2.0\". Add the LICENSE file, or correct the declarations, before anything is published."
+            echo "::error::No LICENSE file at the repo root, but crates/*/Cargo.toml and packages/package.json declare \"MIT\". Add the LICENSE file, or correct the declarations, before anything is published."
             exit 1
           fi
 

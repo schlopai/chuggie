@@ -2,7 +2,7 @@
 name = "tish_agb_sio"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "Serial IO (link cable) for agb, exposed to tish via cargo:tish_agb_sio"
 repository = "https://github.com/schlopai/chuggie"
 

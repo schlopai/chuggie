@@ -2,7 +2,7 @@
 name = "tish_gba_scenepack"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "Proc-macro: pack a declarative scene recipe (tile slices + autotiled ground) into a GBA background at compile time. Runs on the host (proc-macros always do), so no no_std constraint."
 repository = "https://github.com/schlopai/chuggie"
 

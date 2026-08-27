@@ -64,7 +64,7 @@ jobs:
       - name: Refuse to publish without a licence
         run: |
           if [ ! -f LICENSE ] && [ ! -f LICENSE.md ] && [ ! -f LICENSE.txt ]; then
-            echo "::error::No LICENSE file at the repo root, but every crates/*/Cargo.toml declares \"MIT OR Apache-2.0\". crates.io keeps published versions forever (yank only). Add the LICENSE file, or correct the declarations, before publishing."
+            echo "::error::No LICENSE file at the repo root, but every crates/*/Cargo.toml declares \"MIT\". crates.io keeps published versions forever (yank only). Add the LICENSE file, or correct the declarations, before publishing."
             exit 1
           fi
 

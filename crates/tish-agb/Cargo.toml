@@ -2,7 +2,7 @@
 name = "tish_agb"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "Low-level agb bindings exposed to tish (imported via cargo:tish_agb)"
 repository = "https://github.com/schlopai/chuggie"
 
