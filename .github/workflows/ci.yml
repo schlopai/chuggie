@@ -26,6 +26,8 @@ on:
 
 permissions:
   contents: write
+  # The jobs below run in ghcr.io/schlopai/chuggie-ci, which is a private package by default.
+  packages: read
 
 jobs:
   # ── Host-target crate tests. Fast, and the only job that gates on every PR path. ──────────────
@@ -36,7 +38,11 @@ jobs:
     runs-on: ubuntu-latest
     # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — is baked into
     # this image instead of rebuilt per job. See .github/docker/ci.Dockerfile.
-    container: ghcr.io/schlopai/chuggie-ci:latest
+    container:
+      image: ghcr.io/schlopai/chuggie-ci:b2e56aa7c2f0
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -99,7 +105,11 @@ jobs:
     runs-on: ubuntu-latest
     # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — is baked into
     # this image instead of rebuilt per job. See .github/docker/ci.Dockerfile.
-    container: ghcr.io/schlopai/chuggie-ci:latest
+    container:
+      image: ghcr.io/schlopai/chuggie-ci:b2e56aa7c2f0
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
@@ -137,7 +147,11 @@ jobs:
     runs-on: ubuntu-latest
     # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — is baked into
     # this image instead of rebuilt per job. See .github/docker/ci.Dockerfile.
-    container: ghcr.io/schlopai/chuggie-ci:latest
+    container:
+      image: ghcr.io/schlopai/chuggie-ci:b2e56aa7c2f0
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
