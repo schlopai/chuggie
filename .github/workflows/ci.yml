@@ -34,19 +34,26 @@ jobs:
   crates:
     name: Cargo tests (host)
     runs-on: ubuntu-latest
-    # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — comes prebuilt in
-    # this image instead of being reassembled per job. Built and published from schlopai/chuggie-ci;
-    # the tag is that Dockerfile's content hash, so the image behind it cannot change.
-    container: ghcr.io/schlopai/chuggie-ci:0b77982d1ebd
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/tish-gba-scenepack
       # freetype-sys in scenepack's host dependency tree links the system freetype.
+      - name: Install freetype
+        run: sudo apt-get update && sudo apt-get install -y libfreetype6-dev pkg-config
 
       # Only scenepack builds for the host — the rest are thumbv4t-none-eabi only and are covered by
       # the ROM job below. This is where the shared .deck conformance corpus runs: corpus_bakes and
       # gba_profile_is_honest prove this bake still agrees with @spacedevin/deck and that the `gba`
       # profile's reject list is honest rather than aspirational.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
       # Every cargo invocation in this repo resolves .cargo/config.toml's patch, which points at
       # node_modules/@tishlang/tish/crates — so node_modules must exist before ANY cargo command,
       # not just the ones that build a ROM.
@@ -98,16 +105,24 @@ jobs:
   rom:
     name: Build a ROM
     runs-on: ubuntu-latest
-    # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — comes prebuilt in
-    # this image instead of being reassembled per job. Built and published from schlopai/chuggie-ci;
-    # the tag is that Dockerfile's content hash, so the image behind it cannot change.
-    container: ghcr.io/schlopai/chuggie-ci:0b77982d1ebd
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       # The SAME pinned nightly rust-toolchain.toml names — a floating nightly changes ROM
       # codegen and shifts frame-exact verifier timings against local builds.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-22
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
       # freetype-sys in the host-side asset bake links the system freetype.
+      - name: Install freetype
+        run: sudo apt-get update && sudo apt-get install -y libfreetype6-dev pkg-config
+      - name: Install agb-gbafix (ELF -> .gba)
+        run: cargo install --locked agb-gbafix
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
       - name: Install the pinned tish compiler
         run: npm ci
       - name: Build grid-demo
@@ -137,10 +152,6 @@ jobs:
     name: verify ${{ matrix.example }}
     needs: [crates, discover]
     runs-on: ubuntu-latest
-    # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — comes prebuilt in
-    # this image instead of being reassembled per job. Built and published from schlopai/chuggie-ci;
-    # the tag is that Dockerfile's content hash, so the image behind it cannot change.
-    container: ghcr.io/schlopai/chuggie-ci:0b77982d1ebd
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -148,17 +159,44 @@ jobs:
         example: ${{ fromJSON(needs.discover.outputs.examples) }}
     steps:
       - uses: actions/checkout@v7
+      - name: Install tooling the verifiers use
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick python3-numpy python3-pil libfreetype6-dev pkg-config cmake libpng-dev zlib1g-dev
       # libmgba is built from source at the SAME version the local machines run (Ubuntu noble
       # packages 0.10.2, and the version gap shows up as emulator-timing and capture failures).
+      - name: Cache libmgba
+        id: mgba-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/mgba-prefix
+          key: mgba-0.10.5-${{ runner.os }}
+      - name: Build libmgba 0.10.5
+        if: steps.mgba-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch 0.10.5 https://github.com/mgba-emu/mgba /tmp/mgba-src
+          cmake -S /tmp/mgba-src -B /tmp/mgba-build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$HOME/mgba-prefix" -DBUILD_QT=OFF -DBUILD_SDL=OFF \
+            -DUSE_FFMPEG=OFF -DUSE_SQLITE3=OFF -DUSE_DISCORD_RPC=OFF -DUSE_EDITLINE=OFF \
+            -DUSE_ELF=OFF -DUSE_EPOXY=OFF -DBUILD_GL=OFF -DBUILD_GLES2=OFF
+          make -C /tmp/mgba-build -j"$(nproc)" install
       # The SAME pinned nightly rust-toolchain.toml names — a floating nightly changes ROM
       # codegen and shifts frame-exact verifier timings against local builds.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-22
+          components: rust-src
+      - run: cargo install --locked agb-gbafix
       # Several verifiers call tools/gba-shot (and gba-link) directly; the binaries are
       # gitignored, so build them from source here (same flags scripts/screenshot.sh uses).
       - name: Build the gba-shot/gba-link helper tools
         run: |
-          P="$MGBA_PREFIX"
+          P="$HOME/mgba-prefix"
           cc tools/gba-shot.c -o tools/gba-shot -I"$P/include" -L"$P/lib" -lmgba -lm -Wl,-rpath,"$P/lib"
           cc tools/gba-link.c -o tools/gba-link -I"$P/include" -L"$P/lib" -lmgba -lm -Wl,-rpath,"$P/lib"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
       # The compiler is a published npm package with a prebuilt binary per platform. Building it
       # from source cost ~1m20s in EVERY job that needed it, 57 per run, to produce what npm hands
       # over in seconds. It must be INSTALLED, not just downloaded: `tish` locates its own Rust
@@ -169,6 +207,7 @@ jobs:
         working-directory: examples/${{ matrix.example }}
         env:
           TISH: ${{ github.workspace }}/node_modules/.bin/tish
+          MGBA_PREFIX: /home/runner/mgba-prefix
         run: |
           # Some verifiers build through `npm run build`, which invokes a bare `tish`.
           export PATH="$(dirname "$TISH"):$PATH"
@@ -258,6 +297,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v7
+        with: { node-version: "24" }
       - name: Dry-run sem
         id: sem
         uses: tishlang/sem@v1
@@ -296,6 +337,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v7
+        with: { node-version: "24" }
 
       # WHY THIS REPO HAD NO RELEASES. sem computed v0.1.0 correctly every time and then died on
       # `Failed to create tag v0.1.0: Committer identity unknown` — a tag is a commit-shaped object
