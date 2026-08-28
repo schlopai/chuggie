@@ -61,7 +61,8 @@ still works via `chip_borrow`.
 ```text
 deck 1
 bpm <40..300>
-wave <name> <32 hex nibbles>          # optional named PSG wavetable
+wave <name> <32 hex digits>           # optional named PSG wavetable
+wave <name> harmonics <a1> [a2 …]     # …or write it as harmonic amplitudes
 track <Name> id <id> gen gameBoyDmg|gbaDirectSound [* <bars>] [layer <0..3>]
   gen <key> <val> …
   layer <0..3>                        # alias: intensity / min_intensity
@@ -73,6 +74,26 @@ track <Name> id <id> gen gameBoyDmg|gbaDirectSound [* <bars>] [layer <0..3>]
 ```
 
 Beats are quarter notes. `* N` repeats a 1-bar pattern across N bars when notes fit in one bar.
+
+### Wavetables
+
+A `wave` line names a 32-sample, 4-bit table — the LR35902's wave RAM exactly — and `wave_shape`
+selects it on a `type wave` track. The hardware has **one** wave channel, so only one track per song
+can play a named table.
+
+```text
+wave organ 8beffecbbbbaa9888776554444310014
+wave organ harmonics 1 0.5 0.33 0.2
+```
+
+Those two lines are the same table. The `harmonics` form gives amplitudes — `a1` is the fundamental,
+`a2` the octave above it, `a3` the twelfth — and the language sums them into the same 32 levels,
+normalized to fill the range, so only the ratios matter.
+
+That sum happens in the parser, at **bake time**, which is the only place it can: the device is
+`no_std` on ARM7TDMI with no FPU and no libm, so there is no `sin()` on the other side. The ROM
+still holds 16 bytes per table, copied verbatim into `WAVE_RAM`, so neither form costs anything at
+runtime and both are byte-identical in the built ROM.
 
 ## Intensifier stems (crossfading-stem-style)
 
@@ -98,7 +119,7 @@ Stay inside the channel caps (2 pulse / 1 wave / 1 noise / 2 PCM) — layers are
 ### `gameBoyDmg` params
 
 `type` pulse|wave|noise · `duty` 12_5|25|50|75 · `env_mode` step|constant|adsr · `vol` 0–15 ·
-`noise_mode` long|short · `wave_shape` saw|square|sine · `attack`/`decay`/`sustain`/`release` ·
+`noise_mode` long|short · `wave_shape` saw|square|sine or a named `wave` · `attack`/`decay`/`sustain`/`release` ·
 `vib_rate`/`vib_amt` · `arp_rate`/`arp_semis` · `pitch_drop`/`pitch_dec`
 
 **Hardware surface (LR35902 registers):**
@@ -166,11 +187,11 @@ this doc and the bake honest about each other.
 
 ### GBA extensions
 
-Two additions, registered as extensions of the shared grammar rather than a fork of it:
+Additions registered as extensions of the shared grammar rather than a fork of it. (`wave` used to
+be one of these; every host wanted it, so it is core grammar now — see the wavetable note below.)
 
 | Extension | Form |
 |-----------|------|
-| Named PSG wavetable | `wave <name> <32 hex nibbles>` (top level) |
 | Intensifier stem | `layer` / `intensity` / `min_intensity` `<0..3>` (track header or body) |
 | Sampled instrument bank | `sampleset <path-to-vgNNN.json>` (top level) |
 | Sampled instrument voice | `gen program <n>` on a `gbaDirectSound` track |

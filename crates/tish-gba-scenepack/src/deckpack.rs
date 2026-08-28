@@ -498,12 +498,8 @@ fn parse_gen_kvs(parts: &[&str], p: &mut VoiceParams) {
 fn register_gba_dialect() {
     use deckfile::Value;
 
-    // `wave <name> <32 hex nibbles>` — a named PSG wavetable. Handed back as raw tokens; the hex
-    // validation stays here so the error text keeps naming the GBA constraint.
-    deckfile::registerTopLevelStatement(
-        Value::String("wave".into()),
-        Value::native(|args: &[Value]| args.get(1).cloned().unwrap_or(Value::Null)),
-    );
+    // `wave` used to be registered here. It is core grammar now — the language resolves both the hex
+    // and `harmonics` spellings onto `program.waves` — so registering it would be ignored.
 
     // `sampleset <path>` — a voicegroup of real recorded instruments (zones, rates, loop points
     // and envelopes), as written by a voicegroup-extract tool (M4A-shaped JSON). The path is resolved
@@ -653,30 +649,24 @@ pub fn build(path: &Path) -> Result<proc_macro2::TokenStream, String> {
         return Err(format!("{file}: bpm {bpm} out of range 40..300"));
     }
 
-    // `wave <name> <32 hex nibbles>` — collected by the registered handler above.
+    // `wave <name> <32 hex digits>` or `wave <name> harmonics <a1> …`. Both are core grammar now, and
+    // the parser resolves either spelling to the same 32 levels — including the additive sum, which
+    // has to happen here at bake time regardless: the device is no_std with no FPU, so there is no
+    // sin() on the other side. All that is left is packing two levels per byte for wave RAM.
     let mut named_waves: HashMap<String, [u8; 16]> = HashMap::new();
-    for entry in program.host_statement("wave") {
-        let name = tok_str(&entry, 1).ok_or_else(|| format!("{file}: wave needs a name"))?;
-        let hex = tok_str(&entry, 2)
-            .ok_or_else(|| format!("{file}: wave `{name}` needs 32 hex nibbles"))?;
-        if hex.len() != 32 {
+    for w in &program.waves {
+        if w.levels.len() != 32 {
             return Err(format!(
-                "{file}: wave `{name}` needs 32 hex digits, got {}",
-                hex.len()
+                "{file}: wave `{}` needs 32 levels, got {}",
+                w.name,
+                w.levels.len()
             ));
         }
-        let mut nibs = [0u8; 32];
-        for (i, c) in hex.chars().enumerate() {
-            nibs[i] = c
-                .to_digit(16)
-                .ok_or_else(|| format!("{file}: wave `{name}` bad hex `{c}`"))?
-                as u8;
-        }
         let mut packed = [0u8; 16];
-        for i in 0..16 {
-            packed[i] = (nibs[i * 2] << 4) | nibs[i * 2 + 1];
+        for (i, byte) in packed.iter_mut().enumerate() {
+            *byte = ((w.levels[i * 2] as u8) << 4) | (w.levels[i * 2 + 1] as u8);
         }
-        named_waves.insert(name, packed);
+        named_waves.insert(w.name.clone(), packed);
     }
 
     // `sampleset <path>` — the real instruments, if this song plays any.
@@ -1251,5 +1241,51 @@ mod tests {
             signed.iter().any(|&v| v <= -127),
             "pulse low is not full scale: {signed:?}"
         );
+    }
+    /// The whole point of adopting `wave` into the language: the two spellings are one sound. A
+    /// `harmonics` line and the hex literal it resolves to must pack to byte-identical wave RAM, or
+    /// a song would sound different depending only on how its table was written.
+    ///
+    /// This is the hardware end of that guarantee — the 16 bytes checked here are copied verbatim
+    /// into WAVE_RAM by `psg::wave_table`.
+    #[test]
+    fn wave_harmonics_and_hex_pack_identically() {
+        let prog = deckfile::facade::parse(
+            "deck 1\nwave lit 8beffecbbbbaa9888776554444310014\nwave gen harmonics 1 0.5 0.33 0.2\n",
+        );
+        assert!(prog.errors.is_empty(), "{:?}", prog.errors);
+
+        let pack = |name: &str| -> [u8; 16] {
+            let w = prog
+                .waves
+                .iter()
+                .find(|w| w.name == name)
+                .expect("wave present");
+            assert_eq!(w.levels.len(), 32);
+            let mut out = [0u8; 16];
+            for (i, byte) in out.iter_mut().enumerate() {
+                *byte = ((w.levels[i * 2] as u8) << 4) | (w.levels[i * 2 + 1] as u8);
+            }
+            out
+        };
+
+        let lit = pack("lit");
+        assert_eq!(
+            pack("gen"),
+            lit,
+            "harmonics must bake to the same wave RAM as its hex literal"
+        );
+        // Packing has to be lossless and high-nibble-first. Getting the order wrong still produces
+        // 16 plausible bytes, so nothing downstream would catch it — the ROM would just play a
+        // scrambled waveform.
+        let w = prog.waves.iter().find(|w| w.name == "lit").unwrap();
+        assert!(
+            w.levels.iter().all(|n| (0..=15).contains(n)),
+            "a level outside 0..=15 would overflow its nibble into the neighbouring sample"
+        );
+        for (i, b) in lit.iter().enumerate() {
+            assert_eq!(i64::from(b >> 4), w.levels[i * 2]);
+            assert_eq!(i64::from(b & 0x0f), w.levels[i * 2 + 1]);
+        }
     }
 }
