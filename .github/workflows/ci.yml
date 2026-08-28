@@ -118,8 +118,19 @@ jobs:
       # freetype-sys in the host-side asset bake links the system freetype.
       - name: Install freetype
         run: sudo apt-get update && sudo apt-get install -y libfreetype6-dev pkg-config
+      # agb-gbafix is COMPILED by `cargo install`, and it was being compiled again in every job that
+      # needed it — once here and once in each of the ~90 verify jobs, to produce the same binary
+      # every time. Cache the built binary instead. Pinned to agb 0.25.0's release so the key means
+      # something; bump both together.
+      - name: Cache agb-gbafix
+        id: gbafix-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/agb-gbafix
+          key: agb-gbafix-0.25.0-${{ runner.os }}
       - name: Install agb-gbafix (ELF -> .gba)
-        run: cargo install --locked agb-gbafix
+        if: steps.gbafix-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked --version 0.25.0 agb-gbafix
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -186,7 +197,26 @@ jobs:
         with:
           toolchain: nightly-2026-07-22
           components: rust-src
-      - run: cargo install --locked agb-gbafix
+      # agb and its dependency tree are IDENTICAL across every example, and without this each of
+      # the ~90 jobs compiled all of it from scratch. One shared key, because sharding the cache per
+      # example would defeat the point.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: examples
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # agb-gbafix is COMPILED by `cargo install`, and it was being compiled again in every job that
+      # needed it — once here and once in each of the ~90 verify jobs, to produce the same binary
+      # every time. Cache the built binary instead. Pinned to agb 0.25.0's release so the key means
+      # something; bump both together.
+      - name: Cache agb-gbafix
+        id: gbafix-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/agb-gbafix
+          key: agb-gbafix-0.25.0-${{ runner.os }}
+      - name: Install agb-gbafix (ELF -> .gba)
+        if: steps.gbafix-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked --version 0.25.0 agb-gbafix
       # Several verifiers call tools/gba-shot (and gba-link) directly; the binaries are
       # gitignored, so build them from source here (same flags scripts/screenshot.sh uses).
       - name: Build the gba-shot/gba-link helper tools
