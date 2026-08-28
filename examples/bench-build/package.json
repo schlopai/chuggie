@@ -10,9 +10,6 @@
     "bench": "bash run.sh",
     "clean": "rm -rf .tish engine_only.gba with_ui.gba"
   },
-  "devDependencies": {
-    "@tishlang/tish": "3.10.3"
-  },
   "tish": {
     "rustDependencies": {
       "tish_agb": {

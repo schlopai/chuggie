@@ -10,9 +10,6 @@
     "gif": "npm run build && ../../scripts/gif.sh p0-spike.gba screenshot.gif",
     "clean": "cargo clean; rm -f p0-spike.gba p0-spike.sav"
   },
-  "devDependencies": {
-    "@tishlang/tish": "3.10.3"
-  },
   "tish": {
     "rustDependencies": {
       "tish_gba_scenepack": {

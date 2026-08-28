@@ -18,8 +18,5 @@
       }
     }
   },
-  "description": "Per-system frame attribution: what each engine system bills for N callback-free entities.",
-  "devDependencies": {
-    "@tishlang/tish": "3.10.3"
-  }
+  "description": "Per-system frame attribution: what each engine system bills for N callback-free entities."
 }

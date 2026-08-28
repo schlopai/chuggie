@@ -6,9 +6,6 @@
     "build": "TISH_FAST_NATIVE_BUILD=1 tish build src/main.tish --target gba -o repro-sprite-y.gba",
     "clean": "rm -rf .tish repro-sprite-y.gba"
   },
-  "devDependencies": {
-    "@tishlang/tish": "3.10.3"
-  },
   "tish": {
     "rustDependencies": {
       "tish_agb": {

@@ -12,9 +12,6 @@
     "assets": "python3 ../../scripts/gen_pong_link.py",
     "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
   },
-  "devDependencies": {
-    "@tishlang/tish": "3.10.3"
-  },
   "tish": {
     "rustDependencies": {
       "tish_agb": {

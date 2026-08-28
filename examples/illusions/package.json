@@ -9,9 +9,6 @@
     "gif": "npm run build && ../../scripts/gif.sh \"$npm_package_name.gba\" screenshot.gif 200",
     "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\""
   },
-  "devDependencies": {
-    "@tishlang/tish": "3.10.3"
-  },
   "tish": {
     "rustDependencies": {
       "tish_agb": {
