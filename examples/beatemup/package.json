@@ -11,6 +11,9 @@
     "assets": "python3 ../../scripts/gen_beatemup.py",
     "verify": "./verify.sh"
   },
+  "devDependencies": {
+    "@tishlang/tish": "3.10.3"
+  },
   "tish": {
     "rustDependencies": {
       "tish_agb": {

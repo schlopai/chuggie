@@ -11,9 +11,14 @@
     "verify": "./verify.sh",
     "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
   },
+  "devDependencies": {
+    "@tishlang/tish": "3.10.3"
+  },
   "tish": {
     "rustDependencies": {
-      "tish_agb": { "path": "../../crates/tish-agb" }
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      }
     }
   },
   "description": "What a generated table costs to read: a promoted array literal against the same data built with push(), each reached directly and through a state-touching accessor, plus whether a warmed copy earns its fill."

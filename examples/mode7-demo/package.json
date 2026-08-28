@@ -8,10 +8,17 @@
     "assets": "python3 ../../scripts/gen_mode7_demo.py",
     "clean": "rm -rf .tish \"$npm_package_name.gba\""
   },
+  "devDependencies": {
+    "@tishlang/tish": "3.10.3"
+  },
   "tish": {
     "rustDependencies": {
-      "tish_agb": { "path": "../../crates/tish-agb" },
-      "tish_gba_scenepack": { "path": "../../crates/tish-gba-scenepack" }
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
     }
   },
   "description": "A Mode 7 ground plane: per-scanline affine transforms driven by a 3D camera."

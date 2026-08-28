@@ -11,11 +11,20 @@
     "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png assets/*.atlas.png assets/*.map.bin",
     "verify": "./verify.sh"
   },
+  "devDependencies": {
+    "@tishlang/tish": "3.10.3"
+  },
   "tish": {
     "rustDependencies": {
-      "tish_agb": { "path": "../../crates/tish-agb" },
-      "tish_gba_game_engine": { "path": "../../crates/tish-gba-game-engine" },
-      "tish_gba_scenepack": { "path": "../../crates/tish-gba-scenepack" }
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_game_engine": {
+        "path": "../../crates/tish-gba-game-engine"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
     }
   },
   "description": "A four-colour puzzle-platformer where the lens is the level."

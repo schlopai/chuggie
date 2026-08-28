@@ -11,11 +11,20 @@
     "verify": "bash verify.sh",
     "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
   },
+  "devDependencies": {
+    "@tishlang/tish": "3.10.3"
+  },
   "tish": {
     "rustDependencies": {
-      "tish_agb": { "path": "../../crates/tish-agb" },
-      "tish_gba_game_engine": { "path": "../../crates/tish-gba-game-engine" },
-      "tish_gba_scenepack": { "path": "../../crates/tish-gba-scenepack" }
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_game_engine": {
+        "path": "../../crates/tish-gba-game-engine"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
     }
   },
   "description": "Warsong Gulch–style CTF battleground: 3v3, classic WoW classes x specs, R soft-target, A/B skills, L skill wheel, double-tap dash, AI bots."

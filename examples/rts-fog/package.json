@@ -11,11 +11,20 @@
     "verify": "bash verify.sh",
     "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
   },
+  "devDependencies": {
+    "@tishlang/tish": "3.10.3"
+  },
   "tish": {
     "rustDependencies": {
-      "tish_agb": { "path": "../../crates/tish-agb" },
-      "tish_gba_game_engine": { "path": "../../crates/tish-gba-game-engine" },
-      "tish_gba_scenepack": { "path": "../../crates/tish-gba-scenepack" }
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_game_engine": {
+        "path": "../../crates/tish-gba-game-engine"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
     }
   },
   "description": "RTS de-risk A2: fog of war as a wrapping shroud layer over a scrolling scene map, and whether the BG budget holds."

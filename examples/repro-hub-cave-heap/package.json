@@ -7,6 +7,9 @@
     "start": "npm run build && (mgba-qt repro-hub-cave-heap.gba || mgba repro-hub-cave-heap.gba)",
     "clean": "rm -rf .tish repro-hub-cave-heap.gba"
   },
+  "devDependencies": {
+    "@tishlang/tish": "3.10.3"
+  },
   "tish": {
     "rustDependencies": {
       "tish_agb": {
