@@ -26,8 +26,6 @@ on:
 
 permissions:
   contents: write
-  # The jobs below run in ghcr.io/schlopai/chuggie-ci, which is a private package by default.
-  packages: read
 
 jobs:
   # ── Host-target crate tests. Fast, and the only job that gates on every PR path. ──────────────
@@ -36,13 +34,10 @@ jobs:
   crates:
     name: Cargo tests (host)
     runs-on: ubuntu-latest
-    # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — is baked into
-    # this image instead of rebuilt per job. See .github/docker/ci.Dockerfile.
-    container:
-      image: ghcr.io/schlopai/chuggie-ci:b2e56aa7c2f0
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+    # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — comes prebuilt in
+    # this image instead of being reassembled per job. Built and published from schlopai/chuggie-ci;
+    # the tag is that Dockerfile's content hash, so the image behind it cannot change.
+    container: ghcr.io/schlopai/chuggie-ci:0b77982d1ebd
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -103,13 +98,10 @@ jobs:
   rom:
     name: Build a ROM
     runs-on: ubuntu-latest
-    # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — is baked into
-    # this image instead of rebuilt per job. See .github/docker/ci.Dockerfile.
-    container:
-      image: ghcr.io/schlopai/chuggie-ci:b2e56aa7c2f0
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+    # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — comes prebuilt in
+    # this image instead of being reassembled per job. Built and published from schlopai/chuggie-ci;
+    # the tag is that Dockerfile's content hash, so the image behind it cannot change.
+    container: ghcr.io/schlopai/chuggie-ci:0b77982d1ebd
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
@@ -145,13 +137,10 @@ jobs:
     name: verify ${{ matrix.example }}
     needs: [crates, discover]
     runs-on: ubuntu-latest
-    # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — is baked into
-    # this image instead of rebuilt per job. See .github/docker/ci.Dockerfile.
-    container:
-      image: ghcr.io/schlopai/chuggie-ci:b2e56aa7c2f0
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+    # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — comes prebuilt in
+    # this image instead of being reassembled per job. Built and published from schlopai/chuggie-ci;
+    # the tag is that Dockerfile's content hash, so the image behind it cannot change.
+    container: ghcr.io/schlopai/chuggie-ci:0b77982d1ebd
     timeout-minutes: 45
     strategy:
       fail-fast: false
