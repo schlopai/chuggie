@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "TISH_FAST_NATIVE_BUILD=1 tish build src/main.tish --target gba -o repro-hub-cave-heap.gba",
+    "build": "if [ -n \"$CHUGGIE_PREBUILT_ROM\" ] && [ -f \"$npm_package_name.gba\" ]; then echo \"using the prebuilt $npm_package_name.gba\"; else TISH_FAST_NATIVE_BUILD=1 tish build src/main.tish --target gba -o repro-hub-cave-heap.gba; fi",
     "start": "npm run build && (mgba-qt repro-hub-cave-heap.gba || mgba repro-hub-cave-heap.gba)",
     "clean": "rm -rf .tish repro-hub-cave-heap.gba"
   },

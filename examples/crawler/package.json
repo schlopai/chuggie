@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "build": "if [ -n \"$CHUGGIE_PREBUILT_ROM\" ] && [ -f \"$npm_package_name.gba\" ]; then echo \"using the prebuilt $npm_package_name.gba\"; else tish build src/main.tish --target gba -o \"$npm_package_name.gba\"; fi",
     "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
     "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png 240",
     "gif": "npm run build && ../../scripts/gif.sh \"$npm_package_name.gba\" screenshot.gif 240",
@@ -22,5 +22,5 @@
       }
     }
   },
-  "description": "A first-person grid maze drawn from rectangles — the acceptance test for packages/fpview.tish, and the genre nothing in the catalogue could do."
+  "description": "A first-person grid maze drawn from rectangles \u2014 the acceptance test for packages/fpview.tish, and the genre nothing in the catalogue could do."
 }

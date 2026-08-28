@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "assets": "python3 ../../scripts/gen_golf.py && python3 ../../scripts/gen_golf_art.py",
-    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "build": "if [ -n \"$CHUGGIE_PREBUILT_ROM\" ] && [ -f \"$npm_package_name.gba\" ]; then echo \"using the prebuilt $npm_package_name.gba\"; else tish build src/main.tish --target gba -o \"$npm_package_name.gba\"; fi",
     "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
     "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png 300",
     "gif": "npm run build && ../../scripts/gif.sh \"$npm_package_name.gba\" screenshot.gif 300",

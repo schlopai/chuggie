@@ -2,7 +2,7 @@
   "name": "repro-platformer-cost",
   "private": true,
   "scripts": {
-    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "build": "if [ -n \"$CHUGGIE_PREBUILT_ROM\" ] && [ -f \"$npm_package_name.gba\" ]; then echo \"using the prebuilt $npm_package_name.gba\"; else tish build src/main.tish --target gba -o \"$npm_package_name.gba\"; fi",
     "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
     "verify": "./verify.sh",
     "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\""
@@ -21,5 +21,5 @@
     }
   },
   "version": "0.0.0",
-  "description": "Measure where packages/platformer.tish spends its ticks: drive vs animate vs the hook dispatch itself — the numbers behind the platformer de-boxing pass."
+  "description": "Measure where packages/platformer.tish spends its ticks: drive vs animate vs the hook dispatch itself \u2014 the numbers behind the platformer de-boxing pass."
 }
