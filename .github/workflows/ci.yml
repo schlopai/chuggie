@@ -47,6 +47,14 @@ jobs:
       # the ROM job below. This is where the shared .deck conformance corpus runs: corpus_bakes and
       # gba_profile_is_honest prove this bake still agrees with @spacedevin/deck and that the `gba`
       # profile's reject list is honest rather than aspirational.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      # Every cargo invocation in this repo resolves .cargo/config.toml's patch, which points at
+      # node_modules/@tishlang/tish/crates — so node_modules must exist before ANY cargo command,
+      # not just the ones that build a ROM.
+      - name: Install the pinned tish compiler
+        run: npm ci
       - name: Test tish_gba_scenepack
         working-directory: crates/tish-gba-scenepack
         run: cargo test --locked
