@@ -96,46 +96,17 @@ jobs:
   # Sharded rather than one job per example: the toolchain setup (rust, agb-gbafix, freetype, the
   # tish compiler) costs minutes and would be paid 125 times over. Each shard pays it once and then
   # builds its slice, which is seconds per example against a warm cargo cache.
-  rom_shards:
-    name: Discover example shards
-    runs-on: ubuntu-latest
-    outputs:
-      shards: ${{ steps.list.outputs.shards }}
-    steps:
-      - uses: actions/checkout@v7
-      - id: list
-        run: |
-          # Every example with a build script — MINUS the ones the verify matrix already builds.
-          #
-          # A verifier builds its example's ROM and then emulates it, so 49 of the 125 were being
-          # compiled twice per run: once here to upload, once there to test. The verify jobs now
-          # upload what they already built, and this covers the remainder.
-          SHARDS=8
-          list=$(for d in examples/*/; do
-                   [ -f "$d/package.json" ] || continue
-                   grep -q '"build"' "$d/package.json" || continue
-                   [ -f "$d/verify.sh" ] && continue
-                   basename "$d"
-                 done | sort)
-          echo "$list" | jq -R . | jq -sc --argjson n "$SHARDS" \
-            '[range(0;$n) as $i | {shard: $i, examples: [.[range($i; length; $n)]]}] | map(select(.examples|length > 0))' \
-            > shards.json
-          echo "shards=$(cat shards.json)" >> "$GITHUB_OUTPUT"
-          echo "$(echo "$list" | wc -l) examples across $(jq length shards.json) shards"
 
+  # ── Every example ROM, built ONCE. ───────────────────────────────────────────────────────────────
+  #
+  # One job, no matrix, no shards. Every ROM is compiled exactly once in this run and published as
+  # `example-roms`; the verifiers download that artifact instead of compiling their own.
   rom:
-    name: ROMs ${{ matrix.shard.shard }}
-    needs: rom_shards
+    name: Build example ROMs
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: ${{ fromJson(needs.rom_shards.outputs.shards) }}
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
-      # The SAME pinned nightly rust-toolchain.toml names — a floating nightly changes ROM
-      # codegen and shifts frame-exact verifier timings against local builds.
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-07-22
@@ -147,81 +118,34 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-      # The compiler is a published npm package with a prebuilt binary per platform. Building it
-      # from source cost ~1m20s in EVERY job that needed it, 57 per run, to produce what npm hands
-      # over in seconds. It must be INSTALLED, not just downloaded: `tish` locates its own Rust
-      # workspace by walking up to node_modules/@tishlang/tish.
       - name: Install the pinned tish compiler
         run: npm ci
-      - name: Build this shard's ROMs
-        env:
-          TISH: ${{ github.workspace }}/node_modules/.bin/tish
-          EXAMPLES: ${{ join(matrix.shard.examples, ' ') }}
+
+      - name: Build every example ROM
         run: |
-          export PATH="$(dirname "$TISH"):$PATH"
-          mkdir -p "$GITHUB_WORKSPACE/roms"
+          mkdir -p roms
           built=0; failed=""
-          for ex in $EXAMPLES; do
-            # An example that will not build is reported at the end, not fatal here: one broken
-            # example must not cost the site every other ROM.
-            if ( cd "examples/$ex" && npm run build >/tmp/build-$ex.log 2>&1 ); then
-              rom=$(find "examples/$ex" -maxdepth 1 -name '*.gba' | head -1)
+          for d in examples/*/; do
+            ex="$(basename "$d")"
+            grep -q '"build"' "$d/package.json" 2>/dev/null || continue
+            # A single example that will not build is reported at the end, not fatal here: one
+            # broken example must not cost every other ROM.
+            if ( cd "$d" && npm run build >"/tmp/build-$ex.log" 2>&1 ); then
+              rom="$(find "$d" -maxdepth 1 -name '*.gba' | head -1)"
               if [ -n "$rom" ]; then
-                mkdir -p "$GITHUB_WORKSPACE/roms/$ex"
-                cp "$rom" "$GITHUB_WORKSPACE/roms/$ex/"
-                built=$((built+1))
+                mkdir -p "roms/$ex"; cp "$rom" "roms/$ex/"; built=$((built+1))
               else
                 failed="$failed $ex(no-rom)"
               fi
             else
               failed="$failed $ex"
-              echo "::warning::$ex failed to build"; tail -5 /tmp/build-$ex.log || true
+              echo "::warning::$ex failed to build"; tail -5 "/tmp/build-$ex.log" || true
             fi
           done
-          echo "shard ${{ matrix.shard.shard }}: built $built ROM(s)"
-          [ -z "$failed" ] || echo "::warning::shard ${{ matrix.shard.shard }} could not build:$failed"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: example-roms-shard-${{ matrix.shard.shard }}
-          path: roms/
-          if-no-files-found: error
-          retention-days: 30
+          echo "built $built ROM(s)"
+          [ -z "$failed" ] || echo "::warning::could not build:$failed"
+          [ "$built" -gt 0 ] || { echo "::error::no ROMs were produced"; exit 1; }
 
-  # One artifact for the site to fetch, rather than eight it would have to know the shape of.
-  example_roms:
-    name: Bundle example ROMs
-    needs: [rom, verify]
-    if: always() && needs.rom.result != 'cancelled'
-    runs-on: ubuntu-latest
-    steps:
-      # Two sources now: the shards, and the ROMs the verifiers built.
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: example-roms-shard-*
-          merge-multiple: true
-          path: roms
-      # The verify artifacts are flat (<example>.gba), so they land in one directory and are sorted
-      # into <id>/<name>.gba below — the layout the site reads.
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: example-roms-verify-*
-          path: verify-roms
-      - name: Fold the verifier ROMs into the same layout
-        run: |
-          shopt -s nullglob
-          for d in verify-roms/example-roms-verify-*/; do
-            ex="$(basename "$d")"; ex="${ex#example-roms-verify-}"
-            for rom in "$d"*.gba; do
-              mkdir -p "roms/$ex"
-              cp "$rom" "roms/$ex/"
-            done
-          done
-          rm -rf verify-roms
-      - name: Report
-        run: |
-          n=$(find roms -name '*.gba' | wc -l)
-          echo "$n ROM(s) bundled"
-          [ "$n" -gt 0 ] || { echo "::error::no ROMs were produced by any shard"; exit 1; }
       - uses: actions/upload-artifact@v7
         with:
           name: example-roms
@@ -231,7 +155,7 @@ jobs:
 
   verify:
     name: verify ${{ matrix.example }}
-    needs: [crates, discover]
+    needs: [crates, discover, rom]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -289,6 +213,7 @@ jobs:
         env:
           TISH: ${{ github.workspace }}/node_modules/.bin/tish
           MGBA_PREFIX: /home/runner/mgba-prefix
+          CHUGGIE_PREBUILT_ROM: "1"
         run: |
           # Some verifiers build through `npm run build`, which invokes a bare `tish`.
           export PATH="$(dirname "$TISH"):$PATH"

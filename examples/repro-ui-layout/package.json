@@ -2,7 +2,7 @@
   "name": "repro-ui-layout",
   "private": true,
   "scripts": {
-    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "build": "if [ -n \"$CHUGGIE_PREBUILT_ROM\" ] && [ -f \"$npm_package_name.gba\" ]; then echo \"using the prebuilt $npm_package_name.gba\"; else tish build src/main.tish --target gba -o \"$npm_package_name.gba\"; fi",
     "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\""
   },
   "devDependencies": {

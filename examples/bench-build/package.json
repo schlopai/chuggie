@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "tish build src/engine_only.tish --target gba -o engine_only.gba",
+    "build": "if [ -n \"$CHUGGIE_PREBUILT_ROM\" ] && [ -f \"$npm_package_name.gba\" ]; then echo \"using the prebuilt $npm_package_name.gba\"; else tish build src/engine_only.tish --target gba -o engine_only.gba; fi",
     "build:fast": "TISH_FAST_NATIVE_BUILD=1 tish build src/engine_only.tish --target gba -o engine_only.gba",
     "build:fat": "TISH_GBA_FAT_LTO=1 tish build src/engine_only.tish --target gba -o engine_only.gba",
     "build:ui": "tish build src/with_ui.tish --target gba -o with_ui.gba",

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "build": "python3 ../../scripts/stamp_build.py . && tish build src/main.tish --target gba -o \"$npm_package_name.gba\"",
+    "build": "if [ -n \"$CHUGGIE_PREBUILT_ROM\" ] && [ -f \"$npm_package_name.gba\" ]; then echo \"using the prebuilt $npm_package_name.gba\"; else python3 ../../scripts/stamp_build.py . && tish build src/main.tish --target gba -o \"$npm_package_name.gba\"; fi",
     "verify": "./verify.sh",
     "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
     "shot": "npm run build && ../../scripts/screenshot.sh \"$npm_package_name.gba\" screenshot.png 240",

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "build": "tish build src/main.tish --target gba -o \"$npm_package_name.gba\" && for v in floor v_font v_sheets v_scenes v_native v_named68 v_ui v_dialog v_engine v_packages; do tish build \"src/$v.tish\" --target gba -o \"$v.gba\" || exit 1; done",
+    "build": "if [ -n \"$CHUGGIE_PREBUILT_ROM\" ] && [ -f \"$npm_package_name.gba\" ]; then echo \"using the prebuilt $npm_package_name.gba\"; else tish build src/main.tish --target gba -o \"$npm_package_name.gba\" && for v in floor v_font v_sheets v_scenes v_native v_named68 v_ui v_dialog v_engine v_packages; do tish build \"src/$v.tish\" --target gba -o \"$v.gba\" || exit 1; done; fi",
     "bench": "./run.sh",
     "agb-floor": "cd agb-floor && cargo build --release && agb-gbafix target/thumbv4t-none-eabi/release/agb_floor -o agb-floor.gba",
     "start": "npm run build && (mgba-qt \"$npm_package_name.gba\" || mgba \"$npm_package_name.gba\")",
