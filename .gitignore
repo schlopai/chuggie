@@ -5,7 +5,10 @@ target
 
 # npm: examples reference the tish CLI (@tishlang/tish) as a normal dependency; installs are local.
 node_modules/
-package-lock.json
+# package-lock.json IS committed. It was ignored while @tishlang/tish was a `file:` link into a
+# sibling checkout, where a lockfile recorded a path that meant nothing to anyone else. The compiler
+# is a pinned published version now, and the lockfile is what pins the rest of the tree — without it
+# `npm ci` cannot run and CI resolves whatever npm feels like that day.
 # `npm run shot` / `npm run gif` write headless previews here (committed specimens are named
 # <example>.png).
 **/screenshot.png

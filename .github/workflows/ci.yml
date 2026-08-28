@@ -32,29 +32,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      # Reproduce the local sibling layout exactly: the crates carry
-      # `../../../../tish/tish/crates/...` path deps and .cargo/config.toml patches agb to
-      # `../agb/agb`, so the tree must look like
-      #   $GITHUB_WORKSPACE/chuggie/chuggie + $GITHUB_WORKSPACE/chuggie/agb
-      #   $GITHUB_WORKSPACE/tish/tish
       - uses: actions/checkout@v7
-        with:
-          path: chuggie/chuggie
-      - uses: actions/checkout@v7
-        with:
-          repository: spacedevin/agb
-          ref: chuggie
-          path: chuggie/agb
-      - uses: actions/checkout@v7
-        with:
-          repository: tishlang/tish
-          path: tish/tish
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: chuggie/chuggie/crates/tish-gba-scenepack
+          workspaces: crates/tish-gba-scenepack
       # freetype-sys in scenepack's host dependency tree links the system freetype.
       - name: Install freetype
         run: sudo apt-get update && sudo apt-get install -y libfreetype6-dev pkg-config
@@ -63,23 +47,29 @@ jobs:
       # the ROM job below. This is where the shared .deck conformance corpus runs: corpus_bakes and
       # gba_profile_is_honest prove this bake still agrees with @spacedevin/deck and that the `gba`
       # profile's reject list is honest rather than aspirational.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      # Every cargo invocation in this repo resolves .cargo/config.toml's patch, which points at
+      # node_modules/@tishlang/tish/crates — so node_modules must exist before ANY cargo command,
+      # not just the ones that build a ROM.
+      - name: Install the pinned tish compiler
+        run: npm ci
       - name: Test tish_gba_scenepack
-        working-directory: chuggie/chuggie/crates/tish-gba-scenepack
+        working-directory: crates/tish-gba-scenepack
         run: cargo test --locked
 
       - name: rustfmt (all crates)
-        working-directory: chuggie/chuggie
         run: |
           for c in tish-agb tish-agb-sio tish-gba-game-engine tish-gba-scenepack; do
             (cd "crates/$c" && cargo fmt --check) || { echo "::error::cargo fmt --check failed for $c"; exit 1; }
           done
 
       - name: clippy tish_gba_scenepack (host)
-        working-directory: chuggie/chuggie/crates/tish-gba-scenepack
+        working-directory: crates/tish-gba-scenepack
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Check and clippy the other crates (thumbv4t, no link)
-        working-directory: chuggie/chuggie
         run: |
           # rust-toolchain.toml pins the nightly (never float it — a fresh nightly means fresh
           # lints and a red CI that local checkouts cannot reproduce); this installs that pin.
@@ -144,39 +134,28 @@ jobs:
         shard: ${{ fromJson(needs.rom_shards.outputs.shards) }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          path: chuggie/chuggie
-      - uses: actions/checkout@v7
-        with:
-          repository: tishlang/tish
-          path: tish/tish
-      - uses: actions/checkout@v7
-        with:
-          repository: spacedevin/agb
-          ref: chuggie
-          path: chuggie/agb
       # The SAME pinned nightly rust-toolchain.toml names — a floating nightly changes ROM
       # codegen and shifts frame-exact verifier timings against local builds.
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-07-22
           components: rust-src
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            tish/tish
-      # freetype-sys in the host-side asset bake links the system freetype.
       - name: Install freetype
         run: sudo apt-get update && sudo apt-get install -y libfreetype6-dev pkg-config
       - name: Install agb-gbafix (ELF -> .gba)
         run: cargo install --locked agb-gbafix
-      - name: Build the tish compiler
-        working-directory: tish/tish
-        run: cargo build --release -p tishlang
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      # The compiler is a published npm package with a prebuilt binary per platform. Building it
+      # from source cost ~1m20s in EVERY job that needed it, 57 per run, to produce what npm hands
+      # over in seconds. It must be INSTALLED, not just downloaded: `tish` locates its own Rust
+      # workspace by walking up to node_modules/@tishlang/tish.
+      - name: Install the pinned tish compiler
+        run: npm ci
       - name: Build this shard's ROMs
-        working-directory: chuggie/chuggie
         env:
-          TISH: ${{ github.workspace }}/tish/tish/target/release/tish
+          TISH: ${{ github.workspace }}/node_modules/.bin/tish
           EXAMPLES: ${{ join(matrix.shard.examples, ' ') }}
         run: |
           export PATH="$(dirname "$TISH"):$PATH"
@@ -261,17 +240,6 @@ jobs:
         example: ${{ fromJSON(needs.discover.outputs.examples) }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          path: chuggie/chuggie
-      - uses: actions/checkout@v7
-        with:
-          repository: tishlang/tish
-          path: tish/tish
-      - uses: actions/checkout@v7
-        with:
-          repository: spacedevin/agb
-          ref: chuggie
-          path: chuggie/agb
       - name: Install tooling the verifiers use
         run: |
           sudo apt-get update
@@ -299,26 +267,27 @@ jobs:
         with:
           toolchain: nightly-2026-07-22
           components: rust-src
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            tish/tish
       - run: cargo install --locked agb-gbafix
       # Several verifiers call tools/gba-shot (and gba-link) directly; the binaries are
       # gitignored, so build them from source here (same flags scripts/screenshot.sh uses).
       - name: Build the gba-shot/gba-link helper tools
-        working-directory: chuggie/chuggie
         run: |
           P="$HOME/mgba-prefix"
           cc tools/gba-shot.c -o tools/gba-shot -I"$P/include" -L"$P/lib" -lmgba -lm -Wl,-rpath,"$P/lib"
           cc tools/gba-link.c -o tools/gba-link -I"$P/include" -L"$P/lib" -lmgba -lm -Wl,-rpath,"$P/lib"
-      - name: Build the tish compiler
-        working-directory: tish/tish
-        run: cargo build --release -p tishlang
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      # The compiler is a published npm package with a prebuilt binary per platform. Building it
+      # from source cost ~1m20s in EVERY job that needed it, 57 per run, to produce what npm hands
+      # over in seconds. It must be INSTALLED, not just downloaded: `tish` locates its own Rust
+      # workspace by walking up to node_modules/@tishlang/tish.
+      - name: Install the pinned tish compiler
+        run: npm ci
       - name: Run the verifier
-        working-directory: chuggie/chuggie/examples/${{ matrix.example }}
+        working-directory: examples/${{ matrix.example }}
         env:
-          TISH: ${{ github.workspace }}/tish/tish/target/release/tish
+          TISH: ${{ github.workspace }}/node_modules/.bin/tish
           MGBA_PREFIX: /home/runner/mgba-prefix
         run: |
           # Some verifiers build through `npm run build`, which invokes a bare `tish`.
@@ -336,7 +305,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: example-roms-verify-${{ matrix.example }}
-          path: chuggie/chuggie/examples/${{ matrix.example }}/*.gba
+          path: examples/${{ matrix.example }}/*.gba
           if-no-files-found: ignore
           retention-days: 30
 

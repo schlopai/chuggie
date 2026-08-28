@@ -12,13 +12,19 @@
     "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
   },
   "devDependencies": {
-    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+    "@tishlang/tish": "3.10.3"
   },
   "tish": {
     "rustDependencies": {
-      "tish_agb": { "path": "../../crates/tish-agb" },
-      "tish_gba_game_engine": { "path": "../../crates/tish-gba-game-engine" },
-      "tish_gba_scenepack": { "path": "../../crates/tish-gba-scenepack" }
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_game_engine": {
+        "path": "../../crates/tish-gba-game-engine"
+      },
+      "tish_gba_scenepack": {
+        "path": "../../crates/tish-gba-scenepack"
+      }
     }
   },
   "description": "RTS de-risk A3: cursor selection, order issue and attack-move over a live world, with a panel that repaints only on change."

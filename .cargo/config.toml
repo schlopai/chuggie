@@ -34,7 +34,14 @@ rustflags = [
 # there is nowhere in a checked-in manifest to put a `[patch]`. Cargo reads config from every
 # ancestor of the build directory, and those build directories all live under this repo.
 #
-# Fork: https://github.com/spacedevin/agb (branch `chuggie`) — expected as a sibling checkout of this repo.
+# Fork: https://github.com/spacedevin/agb, pinned to an exact rev rather than a branch or a sibling
+# checkout. A path here meant every CI job had to clone the fork first, and a branch would let the
+# ROMs change under us without a commit in this repo. cargo fetches and caches the rev itself.
+#
+# The fork carries changes that are not in the published agb 0.25.0 — vram handling, a linker change
+# putting .iwram in EWRAM, crash fixes, infinite-scroll backgrounds — so crates.io's agb cannot be
+# used directly. Publishing the fork under its own crate name would remove even this; until then a
+# pinned rev is the closest thing to a published, immutable dependency.
 # agb is redirected HERE, not by a `path` in a manifest. A path in a manifest cannot be satisfied by
 # the crates-release job — it checks out this repo alone — and cargo reads a path dependency's
 # manifest even when publishing, where it strips the path and uses the version anyway.
@@ -43,5 +50,5 @@ rustflags = [
 # path-depends on that exact directory, so tish_agb has to resolve to the same copy or the two see
 # different tishlang_core types and the build fails with a mismatch.
 [patch.crates-io]
-agb = { path = "../agb/agb" }
-tishlang_runtime_gba = { path = "../../tish/tish/crates/tish_runtime_gba" }
+agb = { git = "https://github.com/spacedevin/agb", rev = "2d0456f8e181b7011a3ebc54f36812ad378436d3" }
+tishlang_runtime_gba = { path = "node_modules/@tishlang/tish/crates/tish_runtime_gba" }
