@@ -1,5 +1,11 @@
-# Publish the engine package to npm when a GitHub release is promoted from prerelease to full
-# release. Publishes the tarball built in ci.yml — no rebuild, so what ships is what was tested.
+# Publish @schlopai/chuggie to npm when a GitHub release is promoted from prerelease to full
+# release. The publish is driven by sem's @sem/npm plugin — the same tool that computes the version,
+# writes the notes and opens the prerelease in ci.yml — not by hand-rolled npm commands.
+#
+# sem republishes automatically when a git tag exists but the version is missing from npm, which is
+# exactly the promote case: ci.yml tagged and prereleased it, promotion means ship it.
+#
+# There is no manual trigger. Promotion by a human is the only way anything publishes.
 #
 # AUTH: npm OIDC trusted publishing (no long-lived NPM_TOKEN — npm forces granular tokens to expire,
 # so OIDC is the only durable option). Requires a ONE-TIME setup on npmjs.com for `@schlopai/chuggie`:
@@ -18,121 +24,47 @@ name: NPM release
 on:
   release:
     types: [published, edited]
-  # Re-dispatch for a release the event never reached — promoting a prerelease does not always fire
-  # `edited`. Publishing is idempotent: a version already on npm is skipped rather than failing.
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Release tag to publish, e.g. v0.2.0"
-        required: true
-        type: string
 
 jobs:
   publish:
     name: Publish @schlopai/chuggie to npm
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
+    # Promote path, gated exactly as tishlang/sem's own npm-release.yml gates it.
+    if: github.event.release.draft == false && github.event.release.prerelease == false
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # to update the release body
-      id-token: write   # for npm OIDC trusted publishing
+      contents: write   # sem updates the release
+      issues: write     # @sem/github opens a failure issue rather than dying silently
+      id-token: write   # npm OIDC trusted publishing
     env:
-      # No NODE_AUTH_TOKEN — auth is via OIDC. Provenance off: the tarball was built in a different
-      # run (ci.yml), so this run cannot attest to how it was produced.
+      # Provenance off: the version being published was built in a different run (ci.yml), so this
+      # run cannot attest to how it was produced.
       NPM_CONFIG_PROVENANCE: "false"
     steps:
-      - name: Checkout
+      - name: Checkout the released tag
         uses: actions/checkout@v7
         with:
-          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          ref: refs/tags/${{ github.event.release.tag_name }}
           fetch-depth: 0
 
-      - name: Resolve the release
-        id: rel
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
-          # Look the id up by tag rather than using github.event.release.id, which is empty on a
-          # workflow_dispatch — one code path for both triggers.
-          ID=$(curl -sL -H "Authorization: Bearer $GITHUB_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" | jq -r '.id')
-          if [ -z "$ID" ] || [ "$ID" = "null" ]; then
-            echo "::error::No release found for tag $TAG"
-            exit 1
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "id=$ID" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Skip if this version is already on npm
-        id: pub
-        run: |
-          V="${{ steps.rel.outputs.version }}"
-          if npm view "@schlopai/chuggie@$V" version >/dev/null 2>&1; then
-            echo "@schlopai/chuggie@$V is already published — nothing to do."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Download the package tarball from the release
-        if: steps.pub.outputs.skip != 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Look the asset up through the API, NOT `github.event.release.assets` — that payload is a
-          # snapshot frozen when the event fired, and ci.yml creates the release BEFORE the upload
-          # finishes, so a re-run replays the same stale payload and fails identically forever.
-          # (tishlang/tish#593 — it cost tish v3.2.1 its npm publish.)
-          for attempt in $(seq 1 10); do
-            URL=$(curl -sL -H "Authorization: Bearer $GITHUB_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/${{ steps.rel.outputs.id }}/assets?per_page=100" \
-              | jq -r '.[] | select(.name == "tish-gba-npm-package.tgz" and .state == "uploaded") | .url')
-            [ -n "$URL" ] && [ "$URL" != "null" ] && break
-            echo "tarball not uploaded yet (attempt $attempt/10) — waiting 30s"
-            sleep 30
-          done
-          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
-            echo "::error::Release has no uploaded asset tish-gba-npm-package.tgz after 5 minutes"
-            exit 1
-          fi
-          curl -sL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/octet-stream" \
-            "$URL" -o tish-gba-npm-package.tgz
-
-      - name: Setup Node
-        if: steps.pub.outputs.skip != 'true'
-        uses: actions/setup-node@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
       - name: Upgrade npm for OIDC trusted publishing (needs >= 11.5.1)
-        if: steps.pub.outputs.skip != 'true'
         run: |
-          # Pinned to npm 11.x, matching tish's npm-release.yml.
           npm install -g "npm@^11"
           npm --version
 
-      - name: Publish
-        if: steps.pub.outputs.skip != 'true'
-        run: npm publish tish-gba-npm-package.tgz --access public
-
-      - name: Update release description with the npm URL
-        if: steps.pub.outputs.skip != 'true'
+      - name: Publish via sem
+        uses: tishlang/sem@v1
+        with:
+          config: |
+            branches: [main]
+            plugins:
+              - "@sem/commit-analyzer"
+              - "@sem/release-notes-generator"
+              - ["@sem/npm", { "npmPublish": true, "pkgRoot": "packages" }]
+              - "@sem/github"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          NPM_URL="https://www.npmjs.com/package/@schlopai/chuggie/v/${{ steps.rel.outputs.version }}"
-          REPO="${{ github.repository }}"
-          RELEASE_ID="${{ steps.rel.outputs.id }}"
-          CURRENT_BODY=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-            "https://api.github.com/repos/${REPO}/releases/${RELEASE_ID}" | jq -r '.body // ""')
-          NEW_BODY="${CURRENT_BODY}
-
-          ---
-          Published to npm: ${NPM_URL}"
-          curl -s -X PATCH \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${REPO}/releases/${RELEASE_ID}" \
-            -d "$(printf '%s' "$NEW_BODY" | jq -Rs '{body: .}')"
