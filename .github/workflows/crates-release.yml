@@ -3,26 +3,19 @@
 #
 # Mirrors tishlang/tish's crates-release.yml: version stamped from the tag, a hand-ordered
 # dependency list with a drift guard, rate-limit-aware retry, and skip-if-already-published so a
-# re-dispatch resumes a throttled run instead of restarting it.
+# re-run resumes a throttled run instead of restarting it.
 #
 # All four crates publish, in dependency order. tish_agb_sio, tish_agb and tish_gba_game_engine
 # depend on `tishlang_runtime_gba`; their manifests carry `version = ">=0.1"` alongside the path, so
 # they resolve it from crates.io once tishlang/tish publishes it (tishlang/tish#690 added it to that
 # release's crate list). If it is not there yet, the publish fails on the crate that needs it and
-# names it — a re-dispatch resumes, because already-published crates are skipped.
+# names it — re-running the job resumes, because already-published crates are skipped.
 
 name: Crates.io release
 
 on:
   release:
     types: [published, edited]
-  # Manual re-dispatch to RESUME a throttled run: the loop skips crates already on crates.io.
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Release tag to (re)publish, e.g. v0.2.0"
-        required: true
-        type: string
 
 permissions:
   contents: write
@@ -30,7 +23,9 @@ permissions:
 jobs:
   publish:
     name: Publish to crates.io
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
+    # Promote path, exactly as tishlang/sem's own npm-release.yml gates it: a published full
+    # release, not a draft, not a prerelease.
+    if: github.event.release.draft == false && github.event.release.prerelease == false
     runs-on: ubuntu-latest
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -45,7 +40,7 @@ jobs:
       - name: Require a crates.io token
         run: |
           if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
-            echo "::error::CARGO_REGISTRY_TOKEN is not set on this repository. Add it under Settings → Secrets and variables → Actions → New repository secret, then re-dispatch this workflow with the tag. Nothing can publish until it exists."
+            echo "::error::CARGO_REGISTRY_TOKEN is not set on this repository. Add it under Settings → Secrets and variables → Actions → New repository secret, then re-run this job. Nothing can publish until it exists."
             exit 1
           fi
           echo "crates.io token present."
@@ -53,7 +48,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          ref: refs/tags/${{ github.event.release.tag_name }}
           fetch-depth: 0
 
       - name: Install Rust
@@ -70,7 +65,7 @@ jobs:
 
       - name: Set version in all Cargo.toml
         run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          TAG="${{ github.event.release.tag_name }}"
           VERSION="${TAG#v}"
           # Only `^version = ` — the inter-crate deps use an open `version = ">=0.1"` range on the
           # same line as their `path`, so they are deliberately NOT rewritten.
@@ -112,7 +107,7 @@ jobs:
 
       - name: Publish crates (dependency order)
         run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          TAG="${{ github.event.release.tag_name }}"
           VERSION="${TAG#v}"
 
           # Dependency order. scenepack first because it is the only one with no internal deps —
@@ -162,7 +157,7 @@ jobs:
               fi
               cat "$log"
               if grep -qiE 'no matching package named .tishlang_runtime_gba|failed to select a version for .tishlang_runtime_gba' "$log"; then
-                echo "::error::$crate needs tishlang_runtime_gba on crates.io. Publish it from tishlang/tish (it is in that repo's crate list), then re-dispatch this workflow with tag=${TAG} — already-published crates are skipped, so it resumes here."
+                echo "::error::$crate needs tishlang_runtime_gba on crates.io. Publish it from tishlang/tish (it is in that repo's crate list), then re-run this job — already-published crates are skipped, so it resumes here."
                 rm -f "$log"; return 1
               fi
               if ! grep -qiE '429|too many|rate.?limit|try again (later|after)' "$log"; then
@@ -180,7 +175,7 @@ jobs:
               echo "::warning::$crate hit a crates.io rate limit (attempt ${attempt}/${max}); waiting ${wait}s then retrying"
               sleep "$wait"
             done
-            echo "::error::$crate still rate-limited after ${max} attempts. Re-dispatch (Actions → Crates.io release → Run workflow, tag=${TAG}) to resume — already-published crates are skipped."
+            echo "::error::$crate still rate-limited after ${max} attempts. Re-run this job to resume — already-published crates are skipped."
             rm -f "$log"; return 1
           }
 
@@ -199,7 +194,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          TAG="${{ github.event.release.tag_name }}"
           VERSION="${TAG#v}"
           CRATES_URL="https://crates.io/crates/tish_gba_scenepack/${VERSION}"
           RELEASE_ID="${{ github.event.release.id }}"

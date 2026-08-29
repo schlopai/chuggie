@@ -1,5 +1,5 @@
 # Publish the engine package to npm when a GitHub release is promoted from prerelease to full
-# release. Publishes the tarball built in ci.yml — no rebuild, so what ships is what was tested.
+# release. Promotion by a human is the ONLY way anything publishes — there is no manual trigger. Publishes the tarball built in ci.yml — no rebuild, so what ships is what was tested.
 #
 # AUTH: npm OIDC trusted publishing (no long-lived NPM_TOKEN — npm forces granular tokens to expire,
 # so OIDC is the only durable option). Requires a ONE-TIME setup on npmjs.com for `@schlopai/chuggie`:
@@ -18,19 +18,13 @@ name: NPM release
 on:
   release:
     types: [published, edited]
-  # Re-dispatch for a release the event never reached — promoting a prerelease does not always fire
-  # `edited`. Publishing is idempotent: a version already on npm is skipped rather than failing.
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Release tag to publish, e.g. v0.2.0"
-        required: true
-        type: string
 
 jobs:
   publish:
     name: Publish @schlopai/chuggie to npm
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
+    # Promote path, exactly as tishlang/sem's own npm-release.yml gates it: a published full
+    # release, not a draft, not a prerelease.
+    if: github.event.release.draft == false && github.event.release.prerelease == false
     runs-on: ubuntu-latest
     permissions:
       contents: write   # to update the release body
@@ -43,7 +37,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          ref: refs/tags/${{ github.event.release.tag_name }}
           fetch-depth: 0
 
       - name: Resolve the release
@@ -51,9 +45,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
-          # Look the id up by tag rather than using github.event.release.id, which is empty on a
-          # workflow_dispatch — one code path for both triggers.
+          TAG="${{ github.event.release.tag_name }}"
+          # Look the id up by tag rather than trusting github.event.release.id.
           ID=$(curl -sL -H "Authorization: Bearer $GITHUB_TOKEN" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" | jq -r '.id')
           if [ -z "$ID" ] || [ "$ID" = "null" ]; then
