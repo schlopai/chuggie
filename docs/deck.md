@@ -61,8 +61,8 @@ still works via `chip_borrow`.
 ```text
 deck 1
 bpm <40..300>
-wave <name> <32 hex digits>           # optional named PSG wavetable
-wave <name> harmonics <a1> [a2 …]     # …or write it as harmonic amplitudes
+wave <name> harmonics <a1> [a2 …]     # optional named PSG wavetable, as harmonic amplitudes
+wave <name> <32 hex digits>           # …or the resolved table written out
 track <Name> id <id> gen gameBoyDmg|gbaDirectSound [* <bars>] [layer <0..3>]
   gen <key> <val> …
   layer <0..3>                        # alias: intensity / min_intensity
@@ -82,13 +82,14 @@ selects it on a `type wave` track. The hardware has **one** wave channel, so onl
 can play a named table.
 
 ```text
-wave organ 8beffecbbbbaa9888776554444310014
 wave organ harmonics 1 0.5 0.33 0.2
+wave organ 8beffecbbbbaa9888776554444310014
 ```
 
-Those two lines are the same table. The `harmonics` form gives amplitudes — `a1` is the fundamental,
-`a2` the octave above it, `a3` the twelfth — and the language sums them into the same 32 levels,
-normalized to fill the range, so only the ratios matter.
+Those two lines are the same table. Write the harmonics form — the hex is what the table *is*, not
+how you should have to say it. The amplitudes read `a1` for the fundamental, `a2` for the octave
+above it, `a3` for the twelfth; the language sums them into the same 32 levels, normalized to fill
+the range, so only the ratios matter.
 
 That sum happens in the parser, at **bake time**, which is the only place it can: the device is
 `no_std` on ARM7TDMI with no FPU and no libm, so there is no `sin()` on the other side. The ROM
