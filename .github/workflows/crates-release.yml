@@ -1,222 +1,68 @@
-# Publish the chuggie crates to crates.io when a GitHub release is promoted from prerelease to
-# full release. Runs in parallel with the NPM release workflow.
+# Publish the chuggie crates to crates.io when a GitHub release is promoted from prerelease to full
+# release. Runs in parallel with the NPM release workflow.
 #
-# Mirrors tishlang/tish's crates-release.yml: version stamped from the tag, a hand-ordered
-# dependency list with a drift guard, rate-limit-aware retry, and skip-if-already-published so a
-# re-dispatch resumes a throttled run instead of restarting it.
+# The publish is driven by sem's @sem/cargo plugin — the same tool that computes the version, writes
+# the notes and opens the prerelease in ci.yml. sem publishes in the order given, skips crates
+# already on crates.io so a re-run resumes, and waits out crates.io rate limits.
 #
-# All four crates publish, in dependency order. tish_agb_sio, tish_agb and tish_gba_game_engine
-# depend on `tishlang_runtime_gba`; their manifests carry `version = ">=0.1"` alongside the path, so
-# they resolve it from crates.io once tishlang/tish publishes it (tishlang/tish#690 added it to that
-# release's crate list). If it is not there yet, the publish fails on the crate that needs it and
-# names it — a re-dispatch resumes, because already-published crates are skipped.
+# There is no manual trigger. Promotion by a human is the only way anything publishes.
 
 name: Crates.io release
 
 on:
   release:
     types: [published, edited]
-  # Manual re-dispatch to RESUME a throttled run: the loop skips crates already on crates.io.
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Release tag to (re)publish, e.g. v0.2.0"
-        required: true
-        type: string
-
-permissions:
-  contents: write
 
 jobs:
   publish:
     name: Publish to crates.io
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
+    # Promote path, gated exactly as tishlang/sem's own npm-release.yml gates it.
+    if: github.event.release.draft == false && github.event.release.prerelease == false
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # sem updates the release
+      issues: write     # @sem/github opens a failure issue rather than dying silently
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
-      # FIRST, before anything costly. crates.io only reports a missing token at UPLOAD — "please
-      # provide a non-empty token" — which is the very last thing the job does, so a repo without the
-      # secret spends a checkout, a rustup install, a version stamp and a patch strip to learn it.
-      # It also reads as a publish failure rather than a configuration one.
-      #
-      # No `if:` on a secret here — GitHub does not expose `secrets` to job-level `if`, and an empty
-      # env var is exactly the condition we want to catch.
-      - name: Require a crates.io token
-        run: |
-          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
-            echo "::error::CARGO_REGISTRY_TOKEN is not set on this repository. Add it under Settings → Secrets and variables → Actions → New repository secret, then re-dispatch this workflow with the tag. Nothing can publish until it exists."
-            exit 1
-          fi
-          echo "crates.io token present."
-
-      - name: Checkout
+      - name: Checkout the released tag
         uses: actions/checkout@v7
         with:
-          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          ref: refs/tags/${{ github.event.release.tag_name }}
           fetch-depth: 0
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
 
-      # Same gate as ci.yml's packaging step. crates.io cannot delete a version, only yank it, so a
-      # wrong licence is permanent — @spacedevin/deck needed two yanks for exactly this.
-      - name: Refuse to publish without a licence
-        run: |
-          if [ ! -f LICENSE ] && [ ! -f LICENSE.md ] && [ ! -f LICENSE.txt ]; then
-            echo "::error::No LICENSE file at the repo root, but every crates/*/Cargo.toml declares \"MIT\". crates.io keeps published versions forever (yank only). Add the LICENSE file, or correct the declarations, before publishing."
-            exit 1
-          fi
+      # .cargo/config.toml patches agb to a git fork and tishlang_runtime_gba to a path inside
+      # node_modules. cargo refuses to publish a crate that resolves through either, and the patch
+      # is a local-development convenience the published crates do not need: their manifests carry
+      # real version requirements alongside the path.
+      - name: Strip the local patch
+        run: rm -f .cargo/config.toml
 
-      - name: Set version in all Cargo.toml
-        run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
-          VERSION="${TAG#v}"
-          # Only `^version = ` — the inter-crate deps use an open `version = ">=0.1"` range on the
-          # same line as their `path`, so they are deliberately NOT rewritten.
-          find crates -name "Cargo.toml" -exec sed -i.bak "s/^version = .*/version = \"$VERSION\"/" {} \;
-          find crates -name "Cargo.toml.bak" -delete
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
 
-      # `.cargo/config.toml` patches crates.io's `agb` to a sibling checkout of our fork, so every
-      # example ROM builds against it. That patch must NEVER be in scope for a publish:
-      #
-      #   * this job checks out only this repo, so `../agb/agb` does not exist and cargo aborts —
-      #     "failed to read /home/runner/work/chuggie/agb/agb/Cargo.toml" — before it publishes
-      #     anything, including tish_gba_scenepack, which does not even use agb;
-      #   * and a published crate must resolve `agb` from crates.io like its consumers will, not
-      #     from a fork that only exists on our machines.
-      #
-      # Stripped explicitly and reported, rather than left to fail as an unrelated-looking file-not-
-      # found halfway through a release.
-      - name: Remove the local agb fork patch before publishing
-        run: |
-          if grep -q '^\[patch\.crates-io\]' .cargo/config.toml; then
-            echo "::notice::stripping [patch.crates-io] (local agb fork) — a publish must resolve agb from crates.io"
-            sed -i.bak '/^\[patch\.crates-io\]/,$d' .cargo/config.toml
-            rm -f .cargo/config.toml.bak
-          else
-            echo "::warning::no [patch.crates-io] found in .cargo/config.toml — has the fork patch moved? Check that a publish still resolves agb from crates.io."
-          fi
-          # Verify the CRATES WE PUBLISH, one at a time — not the workspace root.
-          #
-          # The root cannot be read here and does not need to be: its only member is
-          # examples/p0-spike, which path-depends on the agb fork directly (not via the patch), and
-          # every crate under crates/ is in the workspace `exclude` list. Running `cargo metadata`
-          # at the root just reports p0-spike's missing fork and says nothing about whether a
-          # publish will work.
-          for dir in crates/*/; do
-            [ -f "$dir/Cargo.toml" ] || continue
-            (cd "$dir" && cargo metadata --no-deps --format-version 1 >/dev/null) \
-              || { echo "::error::cargo cannot read $dir after stripping the patch — a publish from it would fail"; exit 1; }
-          done
-
-      - name: Publish crates (dependency order)
-        run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
-          VERSION="${TAG#v}"
-
-          # Dependency order. scenepack first because it is the only one with no internal deps —
-          # and currently the only one that can publish at all.
-          CRATES=(
-            tish_gba_scenepack      # deckfile + syn/quote only          — host proc-macro
-            tish_agb_sio            # tishlang_runtime_gba
-            tish_agb                # tishlang_runtime_gba
-            tish_gba_game_engine    # tish_agb
-          )
-
-          # Drift guard: a crate added under crates/ but forgotten here would otherwise surface only
-          # as a mid-publish "no matching package named" failure on a dependent. Fail early instead.
-          missing=0
-          for dir in crates/*/; do
-            [ -f "$dir/Cargo.toml" ] || continue
-            name=$(grep -m1 '^name = ' "$dir/Cargo.toml" | cut -d'"' -f2)
-            grep -q '^publish = false' "$dir/Cargo.toml" && continue
-            printf '%s\n' "${CRATES[@]}" | grep -qx "$name" \
-              || { echo "::error::publishable crate '$name' ($dir) is missing from CRATES in crates-release.yml"; missing=1; }
-          done
-          [ "$missing" -eq 0 ] || { echo "Add the crate(s) above to CRATES in dependency order, then re-run."; exit 1; }
-
-          # EVERY crate here is in the workspace `exclude` list (they build for thumbv4t; a host
-          # `cargo build` must not try to cross-compile them), so `cargo publish -p <name>` from the
-          # root fails with "package ID specification `<name>` did not match any packages" — the
-          # workspace genuinely does not contain them. Publish from inside each crate instead.
-          crate_dir() {
-            local want="$1" dir name
-            for dir in crates/*/; do
-              [ -f "$dir/Cargo.toml" ] || continue
-              name=$(grep -m1 '^name = ' "$dir/Cargo.toml" | cut -d'"' -f2)
-              if [ "$name" = "$want" ]; then printf '%s' "${dir%/}"; return 0; fi
-            done
-            echo "::error::no directory under crates/ defines package '$want'" >&2
-            return 1
-          }
-
-          # Publish one crate, retrying ONLY on a crates.io rate limit. Honours the server's
-          # "try again after" when present, else 60s, capped at 180s. Any other failure fails fast.
-          publish_with_retry() {
-            local crate="$1" max="${PUBLISH_MAX_ATTEMPTS:-6}" attempt log after tgt now wait
-            log=$(mktemp)
-            for attempt in $(seq 1 "$max"); do
-              if (cd "$(crate_dir "$crate")" && cargo publish --token "$CARGO_REGISTRY_TOKEN" --no-verify --allow-dirty) >"$log" 2>&1; then
-                cat "$log"; rm -f "$log"; return 0
-              fi
-              cat "$log"
-              if grep -qiE 'no matching package named .tishlang_runtime_gba|failed to select a version for .tishlang_runtime_gba' "$log"; then
-                echo "::error::$crate needs tishlang_runtime_gba on crates.io. Publish it from tishlang/tish (it is in that repo's crate list), then re-dispatch this workflow with tag=${TAG} — already-published crates are skipped, so it resumes here."
-                rm -f "$log"; return 1
-              fi
-              if ! grep -qiE '429|too many|rate.?limit|try again (later|after)' "$log"; then
-                echo "::error::cargo publish $crate failed (not a rate limit) — see log above"
-                rm -f "$log"; return 1
-              fi
-              after=$(grep -oiE 'try again after [^.]*(GMT|UTC)' "$log" | head -1 | sed -E 's/.*try again after //I' || true)
-              wait=""
-              if [ -n "$after" ]; then
-                now=$(date -u +%s); tgt=$(date -u -d "$after" +%s 2>/dev/null || echo "")
-                [ -n "$tgt" ] && wait=$(( tgt - now + 5 ))
-              fi
-              if [ -z "$wait" ] || [ "$wait" -lt 1 ]; then wait=60; fi
-              if [ "$wait" -gt 180 ]; then wait=180; fi
-              echo "::warning::$crate hit a crates.io rate limit (attempt ${attempt}/${max}); waiting ${wait}s then retrying"
-              sleep "$wait"
-            done
-            echo "::error::$crate still rate-limited after ${max} attempts. Re-dispatch (Actions → Crates.io release → Run workflow, tag=${TAG}) to resume — already-published crates are skipped."
-            rm -f "$log"; return 1
-          }
-
-          for crate in "${CRATES[@]}"; do
-            if curl -sSf -o /dev/null -A "tish-gba-release/1.0 (https://github.com/schlopai/chuggie)" \
-                 "https://crates.io/api/v1/crates/${crate}/${VERSION}"; then
-              echo "Skipping $crate v${VERSION} (already published)"
-            else
-              echo "Publishing $crate v${VERSION}..."
-              publish_with_retry "$crate"
-            fi
-          done
-
-      - name: Update release description with crates.io URL
-        if: github.event_name == 'release'
+      - name: Publish via sem
+        uses: tishlang/sem@v1
+        with:
+          config: |
+            branches: [main]
+            plugins:
+              - "@sem/commit-analyzer"
+              - "@sem/release-notes-generator"
+              # Dependency order: crates.io rejects a crate whose dependencies are not up yet.
+              # scenepack has no internal deps; tish_agb_sio and tish_agb take tishlang_runtime_gba
+              # from crates.io (published by tishlang/tish); tish_gba_game_engine takes tish_agb.
+              - ["@sem/cargo", {
+                    "crates": [
+                      "tish_gba_scenepack",
+                      "tish_agb_sio",
+                      "tish_agb",
+                      "tish_gba_game_engine"
+                    ]
+                  }]
+              - "@sem/github"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
-          VERSION="${TAG#v}"
-          CRATES_URL="https://crates.io/crates/tish_gba_scenepack/${VERSION}"
-          RELEASE_ID="${{ github.event.release.id }}"
-          REPO="${{ github.repository }}"
-          CURRENT_BODY=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-            "https://api.github.com/repos/${REPO}/releases/${RELEASE_ID}" | jq -r '.body // ""')
-          if [[ "$CURRENT_BODY" == *"crates.io"* ]]; then
-            echo "Release body already has crates.io link"
-          else
-            NEW_BODY="${CURRENT_BODY}
-
-          ---
-          Published to crates.io: ${CRATES_URL}"
-            curl -s -X PATCH \
-              -H "Authorization: Bearer $GITHUB_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/${REPO}/releases/${RELEASE_ID}" \
-              -d "$(printf '%s' "$NEW_BODY" | jq -Rs '{body: .}')"
-          fi

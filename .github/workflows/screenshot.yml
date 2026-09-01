@@ -1,11 +1,10 @@
 # Headless GBA screenshot in CI — proves a ROM boots and RENDERS, not just that it links.
 # Uses libmgba in-process (no display / Xvfb / screen-recording needed), so it runs on a plain
-# Linux runner. Builds a real example ROM (needs the tish compiler from the sibling repo) and
+# Linux runner. Builds a real example ROM with the published tish compiler from npm, and
 # uploads the PNG as an artifact; a golden-image compare can be layered on top for visual regression.
 name: GBA screenshot
 
 on:
-  workflow_dispatch:
   pull_request:
     paths:
       - "crates/**"
@@ -19,23 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      # Lay the repos out to mirror the local checkout layout (see ci.yml's header note):
-      #   $GITHUB_WORKSPACE/chuggie/chuggie + $GITHUB_WORKSPACE/chuggie/agb + $GITHUB_WORKSPACE/tish/tish
       - name: Checkout chuggie
         uses: actions/checkout@v7
-        with:
-          path: chuggie/chuggie
-      - name: Checkout tish compiler
-        uses: actions/checkout@v7
-        with:
-          repository: tishlang/tish
-          path: tish/tish
-      - name: Checkout the agb fork (patched in .cargo/config.toml)
-        uses: actions/checkout@v7
-        with:
-          repository: spacedevin/agb
-          ref: chuggie
-          path: chuggie/agb
 
       - name: Install tooling
         run: sudo apt-get update && sudo apt-get install -y imagemagick python3-pil libfreetype6-dev pkg-config cmake libpng-dev zlib1g-dev
@@ -60,21 +44,21 @@ jobs:
         with:
           toolchain: nightly-2026-07-22
           components: rust-src
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            tish/tish
       - name: Install agb-gbafix (ELF -> .gba)
         run: cargo install --locked agb-gbafix
 
-      - name: Build the tish compiler
-        working-directory: tish/tish
-        run: cargo build --release -p tishlang
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      # Every cargo invocation in this repo resolves .cargo/config.toml's patch, which points at
+      # node_modules/@tishlang/tish/crates — so node_modules must exist before ANY cargo command,
+      # not just the ones that build a ROM.
+      - name: Install the pinned tish compiler
+        run: npm ci
 
       - name: Build the overworld-demo ROM and capture a headless screenshot
-        working-directory: chuggie/chuggie
         env:
-          TISH: ${{ github.workspace }}/tish/tish/target/release/tish
+          TISH: ${{ github.workspace }}/node_modules/.bin/tish
           MGBA_PREFIX: /home/runner/mgba-prefix
         run: ./scripts/screenshot.sh examples/overworld-demo/src/main.tish screenshot.png 200
 
@@ -82,5 +66,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: overworld-demo-screenshot
-          path: chuggie/chuggie/screenshot.png
+          path: screenshot.png
           if-no-files-found: error

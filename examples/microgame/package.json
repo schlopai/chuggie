@@ -11,11 +11,17 @@
     "verify": "./verify.sh",
     "clean": "rm -rf .tish \"$npm_package_name.gba\" \"$npm_package_name.sav\" screenshot.png"
   },
-  "devDependencies": { "@tishlang/tish": "file:../../../../tish/tish/npm/tish" },
+  "devDependencies": {
+    "@tishlang/tish": "3.10.3"
+  },
   "tish": {
     "rustDependencies": {
-      "tish_agb": { "path": "../../crates/tish-agb" },
-      "tish_gba_game_engine": { "path": "../../crates/tish-gba-game-engine" }
+      "tish_agb": {
+        "path": "../../crates/tish-agb"
+      },
+      "tish_gba_game_engine": {
+        "path": "../../crates/tish-gba-game-engine"
+      }
     }
   },
   "description": "A WarioWare-shaped bag of four-second games, and the acceptance test for the engine's entity pool: eight props and one player created once at boot and re-armed forever, with nothing spawned or despawned for the life of the cartridge."

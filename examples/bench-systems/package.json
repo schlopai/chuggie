@@ -20,6 +20,6 @@
   },
   "description": "Per-system frame attribution: what each engine system bills for N callback-free entities.",
   "devDependencies": {
-    "@tishlang/tish": "file:../../../../tish/tish/npm/tish"
+    "@tishlang/tish": "3.10.3"
   }
 }
