@@ -223,6 +223,16 @@ fn pcm_table(waveform: &str, duty: &str, bitcrush: bool) -> Vec<u8> {
                 }
             }
             "sine" => (phase * core::f64::consts::PI * 2.0).sin(),
+            // `square` names a 50% wave and ignores `duty`, matching @spacedevin/deck-player.
+            // Without this arm it fell through to the pulse below, which *does* read `duty`, so
+            // `gen waveform square duty 25` baked a 25% pulse while the browser played 50%.
+            "square" => {
+                if phase < 0.5 {
+                    1.0
+                } else {
+                    -1.0
+                }
+            }
             _ => {
                 // pulse
                 if phase < thresh {
