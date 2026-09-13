@@ -1,0 +1,313 @@
+# Trailer — high-intensity but harmonic 16-bar cue.
+# Progression is a 4-bar i - VI - III - VII in D minor (Dm - Bb - F - C), stated four
+# times: sparse, driving, peak (melody an octave up), then a resolve that lands on a
+# suspended D so the loop point pulls back into the Dm.
+#
+# Intensifier stems (deckSetIntensity 0..3):
+#   0 bed   — wave bass + pulse pad
+#   1 heat  — pulse lead
+#   2 drums — noise hats + PCM kick
+#   3 peak  — PCM stabs
+#
+# Channel budget: 2 pulse (Pad, Lead) + 1 wave (Bass) + 1 noise (Hats) + 2 PCM
+# (Kick, Stab) — exactly at the LR35902 / PCM caps.
+deck 1
+bpm 150
+
+# Fundamental plus a decaying harmonic series — reads as a saw with the top rolled
+# off, which keeps the bass thick without fighting the lead for space.
+wave trailerbass harmonics 1 0.6 0.4 0.25 0.15
+
+track Pad id pad gen gameBoyDmg layer 0 * 16
+  gen type pulse duty 25 env_mode constant vol 5
+  gen vib_rate 3 vib_amt 6
+  # A — 5th of each chord, held
+  note 57 0 4 v 70
+  note 58 4 4 v 68
+  note 57 8 4 v 72
+  note 55 12 4 v 70
+  # B — lifts to the 7th/3rd
+  note 60 16 4 v 78
+  note 58 20 4 v 74
+  note 60 24 4 v 80
+  note 64 28 4 v 82
+  # C — top of the arc
+  note 65 32 4 v 88
+  note 62 36 4 v 84
+  note 65 40 4 v 90
+  note 67 44 4 v 92
+  # D — settles back down
+  note 69 48 4 v 86
+  note 65 52 4 v 80
+  note 65 56 4 v 78
+  note 64 60 4 v 82
+
+track Bass id bass gen gameBoyDmg layer 0 * 16
+  gen type wave wave_shape trailerbass vol 15
+  # Driving eighths on the root, octave on beat 2, fifth as the lead-in to the next bar.
+  # A — Dm
+  note 38 0 0.5 v 108
+  note 38 0.5 0.5 v 84
+  note 50 1 0.5 v 100
+  note 38 1.5 0.5 v 84
+  note 38 2 0.5 v 104
+  note 38 2.5 0.5 v 84
+  note 50 3 0.5 v 100
+  note 45 3.5 0.5 v 92
+  # Bb
+  note 34 4 0.5 v 108
+  note 34 4.5 0.5 v 84
+  note 46 5 0.5 v 100
+  note 34 5.5 0.5 v 84
+  note 34 6 0.5 v 104
+  note 34 6.5 0.5 v 84
+  note 46 7 0.5 v 100
+  note 41 7.5 0.5 v 92
+  # F
+  note 41 8 0.5 v 110
+  note 41 8.5 0.5 v 86
+  note 53 9 0.5 v 102
+  note 41 9.5 0.5 v 86
+  note 41 10 0.5 v 106
+  note 41 10.5 0.5 v 86
+  note 53 11 0.5 v 102
+  note 48 11.5 0.5 v 94
+  # C
+  note 36 12 0.5 v 110
+  note 36 12.5 0.5 v 86
+  note 48 13 0.5 v 102
+  note 36 13.5 0.5 v 86
+  note 36 14 0.5 v 106
+  note 36 14.5 0.5 v 86
+  note 48 15 0.5 v 102
+  note 43 15.5 0.5 v 96
+  # B — Dm
+  note 38 16 0.5 v 116
+  note 38 16.5 0.5 v 90
+  note 50 17 0.5 v 108
+  note 38 17.5 0.5 v 90
+  note 38 18 0.5 v 112
+  note 38 18.5 0.5 v 90
+  note 50 19 0.5 v 108
+  note 45 19.5 0.5 v 98
+  # Bb
+  note 34 20 0.5 v 116
+  note 34 20.5 0.5 v 90
+  note 46 21 0.5 v 108
+  note 34 21.5 0.5 v 90
+  note 34 22 0.5 v 112
+  note 34 22.5 0.5 v 90
+  note 46 23 0.5 v 108
+  note 41 23.5 0.5 v 98
+  # F
+  note 41 24 0.5 v 118
+  note 41 24.5 0.5 v 92
+  note 53 25 0.5 v 110
+  note 41 25.5 0.5 v 92
+  note 41 26 0.5 v 114
+  note 41 26.5 0.5 v 92
+  note 53 27 0.5 v 110
+  note 48 27.5 0.5 v 100
+  # C
+  note 36 28 0.5 v 118
+  note 36 28.5 0.5 v 92
+  note 48 29 0.5 v 110
+  note 36 29.5 0.5 v 92
+  note 36 30 0.5 v 114
+  note 36 30.5 0.5 v 92
+  note 48 31 0.5 v 110
+  note 43 31.5 0.5 v 102
+  # C block — Dm
+  note 38 32 0.5 v 127
+  note 38 32.5 0.5 v 96
+  note 50 33 0.5 v 118
+  note 38 33.5 0.5 v 96
+  note 38 34 0.5 v 122
+  note 38 34.5 0.5 v 96
+  note 50 35 0.5 v 118
+  note 45 35.5 0.5 v 108
+  # Bb
+  note 34 36 0.5 v 127
+  note 34 36.5 0.5 v 96
+  note 46 37 0.5 v 118
+  note 34 37.5 0.5 v 96
+  note 34 38 0.5 v 122
+  note 34 38.5 0.5 v 96
+  note 46 39 0.5 v 118
+  note 41 39.5 0.5 v 108
+  # F
+  note 41 40 0.5 v 127
+  note 41 40.5 0.5 v 98
+  note 53 41 0.5 v 120
+  note 41 41.5 0.5 v 98
+  note 41 42 0.5 v 124
+  note 41 42.5 0.5 v 98
+  note 53 43 0.5 v 120
+  note 48 43.5 0.5 v 110
+  # C
+  note 36 44 0.5 v 127
+  note 36 44.5 0.5 v 98
+  note 48 45 0.5 v 120
+  note 36 45.5 0.5 v 98
+  note 36 46 0.5 v 124
+  note 36 46.5 0.5 v 100
+  note 48 47 0.5 v 122
+  note 43 47.5 0.5 v 112
+  # D — Dm, opens up to quarters as the cue resolves
+  note 38 48 1 v 120
+  note 50 49 1 v 110
+  note 38 50 0.5 v 116
+  note 38 50.5 0.5 v 90
+  note 50 51 0.5 v 110
+  note 45 51.5 0.5 v 100
+  # Bb
+  note 34 52 1 v 118
+  note 46 53 1 v 108
+  note 34 54 0.5 v 114
+  note 34 54.5 0.5 v 88
+  note 46 55 0.5 v 108
+  note 41 55.5 0.5 v 98
+  # F
+  note 41 56 1 v 118
+  note 53 57 1 v 108
+  note 41 58 0.5 v 114
+  note 41 58.5 0.5 v 88
+  note 53 59 0.5 v 108
+  note 48 59.5 0.5 v 100
+  # C — last bar walks up into the loop point
+  note 36 60 1 v 120
+  note 48 61 1 v 110
+  note 36 62 0.5 v 118
+  note 40 62.5 0.5 v 100
+  note 43 63 0.5 v 112
+  note 45 63.5 0.5 v 120
+
+track Lead id lead gen gameBoyDmg layer 1 * 16
+  gen type pulse duty 50 env_mode constant vol 12
+  gen vib_rate 4 vib_amt 9
+  # A — sparse call, one phrase per chord
+  note 69 0 1 v 100
+  note 65 1 0.5 v 88
+  note 67 1.5 0.5 v 92
+  note 69 2 2 v 104
+  note 74 4 1 v 108
+  note 72 5 0.5 v 92
+  note 70 5.5 0.5 v 96
+  note 69 6 2 v 104
+  note 72 8 1 v 110
+  note 69 9 0.5 v 94
+  note 65 9.5 0.5 v 90
+  note 69 10 2 v 106
+  note 67 12 1 v 104
+  note 64 13 1 v 96
+  note 67 14 0.5 v 100
+  note 72 14.5 1.5 v 112
+  # B — eighth-note motion
+  note 74 16 0.5 v 114
+  note 72 16.5 0.5 v 104
+  note 69 17 1 v 112
+  note 65 18 0.5 v 100
+  note 69 18.5 0.5 v 108
+  note 74 19 1 v 116
+  note 77 20 1 v 120
+  note 74 21 0.5 v 106
+  note 72 21.5 0.5 v 102
+  note 70 22 1 v 112
+  note 74 23 1 v 118
+  note 72 24 0.5 v 110
+  note 74 24.5 0.5 v 114
+  note 77 25 1 v 122
+  note 74 26 0.5 v 108
+  note 72 26.5 0.5 v 104
+  note 69 27 1 v 112
+  note 76 28 1 v 122
+  note 74 29 0.5 v 108
+  note 72 29.5 0.5 v 104
+  note 67 30 1 v 110
+  note 72 31 1 v 120
+  # C — same shape an octave up, the peak of the cue
+  note 81 32 1 v 127
+  note 77 33 0.5 v 112
+  note 79 33.5 0.5 v 116
+  note 81 34 1 v 125
+  note 86 35 1 v 127
+  note 82 36 1 v 127
+  note 81 37 0.5 v 114
+  note 79 37.5 0.5 v 110
+  note 77 38 1 v 120
+  note 74 39 1 v 116
+  note 84 40 1 v 127
+  note 81 41 0.5 v 116
+  note 77 41.5 0.5 v 112
+  note 81 42 1 v 125
+  note 84 43 1 v 127
+  note 79 44 1 v 122
+  note 76 45 0.5 v 112
+  note 79 45.5 0.5 v 118
+  note 84 46 1 v 127
+  note 88 47 1 v 127
+  # D — falls back down, ends suspended on D over the C
+  note 81 48 2 v 122
+  note 77 50 1 v 110
+  note 74 51 1 v 114
+  note 77 52 2 v 118
+  note 74 54 1 v 108
+  note 70 55 1 v 104
+  note 72 56 2 v 114
+  note 69 58 1 v 104
+  note 65 59 1 v 100
+  note 67 60 1 v 110
+  note 64 61 1 v 100
+  note 67 62 0.5 v 108
+  note 74 62.5 1.5 v 120
+
+track Hats id hats gen gameBoyDmg layer 2 * 16
+  gen type noise noise_mode short vol 6 env_mode step env_step 2
+  steps x . x x x . x . x . x x x . x .
+  step_pitch 60
+
+track Kick id kick gen gbaDirectSound layer 2 * 16
+  gen waveform pulse duty 50 vol 14 bitcrush true pitch_drop -12 pitch_dec 0.06
+  adsr a 0 d 0.1 s 0 r 0.03
+  steps x . . . x . . . x . . . x . . .
+  step_pitch 34
+
+track Stab id stab gen gbaDirectSound layer 3 * 16
+  gen waveform sawtooth vol 11 bitcrush true
+  adsr a 0 d 0.08 s 0 r 0.05
+  # A — one accent per chord
+  note 50 0 0.2 v 100
+  note 46 4 0.2 v 100
+  note 53 8 0.2 v 106
+  note 48 12 0.2 v 104
+  # B — accents push against the bar line
+  note 50 16 0.2 v 112
+  note 50 18 0.15 v 96
+  note 46 20 0.2 v 110
+  note 53 24 0.2 v 116
+  note 53 26 0.15 v 100
+  note 48 28 0.2 v 114
+  note 48 31 0.25 v 120
+  # C — a hit on every beat through the peak
+  note 50 32 0.15 v 127
+  note 50 33 0.15 v 110
+  note 53 34 0.15 v 120
+  note 50 35 0.15 v 112
+  note 46 36 0.2 v 127
+  note 50 37 0.15 v 112
+  note 53 38 0.15 v 120
+  note 55 39 0.2 v 122
+  note 53 40 0.15 v 127
+  note 57 41 0.15 v 116
+  note 53 42 0.15 v 120
+  note 60 43 0.2 v 125
+  note 48 44 0.15 v 127
+  note 52 45 0.15 v 114
+  note 55 46 0.15 v 120
+  note 60 47 0.25 v 127
+  # D — back to one per chord, last hit lands on the turnaround
+  note 50 48 0.3 v 120
+  note 46 52 0.3 v 114
+  note 53 56 0.3 v 118
+  note 48 60 0.3 v 116
+  note 48 62 0.4 v 127
