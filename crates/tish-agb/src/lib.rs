@@ -780,6 +780,12 @@ pub(crate) struct GbaCtx {
     ui_row_spare: alloc::vec::Vec<(i32, i32, i32, u32)>,
     /// High-water mark of simultaneously live canvas tiles (diagnostic; see `ui_mem_report`).
     ui_peak_tiles: usize,
+    /// Cells `ui_clear_rect` blanked, as candidates for reclamation. Drained at the top of
+    /// `frame()`; see `ui_reclaim_drain` for why the mark alone is not trusted.
+    ui_reclaim: alloc::vec::Vec<u16>,
+    /// Opt-in for that reclamation (`ui_reclaim_tiles`). Off by default: a game whose canvas fits
+    /// its VRAM budget gains nothing and should not have its tile churn changed underneath it.
+    ui_reclaim_on: bool,
     /// Memoised `text_width` for the built-in FONT only ((font, text) → px). Imported `font:` fonts use
     /// baked [`FontMetrics`] advances instead (no Layout). Bounded and freed on `ui_clear`.
     tw_cache: alloc::collections::BTreeMap<(i32, alloc::string::String), i32>,
@@ -1178,6 +1184,8 @@ pub(crate) fn with_ctx<R>(f: impl FnOnce(&mut GbaCtx) -> R) -> R {
                 ui_box_scratch: alloc::vec::Vec::new(),
                 ui_row_spare: alloc::vec::Vec::new(),
                 ui_peak_tiles: 0,
+                ui_reclaim: alloc::vec::Vec::new(),
+                ui_reclaim_on: false,
                 tw_cache: alloc::collections::BTreeMap::new(),
                 gba: gba_ptr,
                 save_ready: false,
@@ -3389,6 +3397,78 @@ pub fn ui_tiles_used_typed() -> i32 {
     with_ctx(|ctx| ctx.ui_tiles.len() as i32)
 }
 
+/// `ui_reclaim_tiles(on)` — let `ui_clear_rect` hand a cell's tile back once it is genuinely
+/// blank, instead of keeping the zeroed tile forever.
+///
+/// OPT-IN, because it changes when VRAM slots move. Without it the canvas is monotone within a
+/// generation: it converges on the union of every cell painted since `ui_begin`, which is a budget
+/// a long-lived screen can outgrow. Queen's Blood is the case that forced this — one `ui_begin`
+/// for a whole match, a 600-tile board background alongside it, and a canvas that kept creeping
+/// until `tile_allocator` panicked at a turn count consistent enough to look preset.
+///
+/// A damage-gated view is the case to think about, and it is the case this survives — because of
+/// the re-verification in `ui_reclaim_drain`, not by luck. Queen's Blood repaints only the hand
+/// slots whose signature changed, and reclaim-on matched reclaim-off pixel for pixel across a
+/// sampled real match (48 frames; the two that differed at all differed by a few pixels of
+/// one-frame animation phase). A cell the view still believes in is a cell something drew into,
+/// and a cell something drew into fails the blank check.
+///
+/// The trap to avoid if you touch this: comparing two ROM builds frame by frame is only valid
+/// while their runs are in step. Two builds of this game drift a frame or two apart within a few
+/// hundred, and a hand mid-slide against a hand at rest reads exactly like deleted content. Dump a
+/// sequence from each and compare like frame with like frame.
+pub fn ui_reclaim_tiles(args: &[Value]) -> Value {
+    let on = num(args, 0) as i32 != 0;
+    with_ctx(|ctx| ctx.ui_reclaim_on = on);
+    Value::Null
+}
+
+/// See [`ui_reclaim_tiles`].
+pub fn ui_reclaim_tiles_typed(on: i32) {
+    with_ctx(|ctx| ctx.ui_reclaim_on = on != 0);
+}
+
+/// Give back the tiles of cells `ui_clear_rect` blanked, at the top of the frame that is about to
+/// commit — so the slot is returned by that commit's `VRAM_MANAGER.gc()` rather than mid-draw.
+///
+/// The hazard this has to avoid is the one in `docs/lessons.md`: agb does not return a dropped
+/// tile's VRAM until the frame boundary, so a free followed by a realloc INSIDE one frame peaks at
+/// both and is worse than never freeing. A clear-then-repaint of the same region in one frame is
+/// the common case (every modal that erases and redraws), so the mark left by `ui_clear_rect`
+/// cannot be trusted on its own.
+///
+/// So it is re-verified rather than trusted: a candidate is dropped only if its tile is STILL
+/// entirely zero at drain time. Anything repainted since the clear fails that check and keeps its
+/// tile untouched, which is also why no write path needs to know reclamation exists.
+fn ui_reclaim_drain(ctx: &mut GbaCtx) {
+    // Unconditionally: an index recorded before a `ui_begin` must not outlive it, and the list
+    // stays bounded whether or not the game opted in.
+    let pending = core::mem::take(&mut ctx.ui_reclaim);
+    if !ctx.ui_reclaim_on {
+        return;
+    }
+    ui_ensure_blank(ctx);
+    for slot in pending {
+        let idx = slot as usize;
+        match ui_tile_at(ctx, idx) {
+            Some(tile) => {
+                if tile.data_mut().iter().any(|w| *w != 0) {
+                    continue; // repainted after the clear — not ours to take
+                }
+            }
+            None => continue, // already empty, or a shared solid with no tile of its own
+        }
+        // Re-point the screenblock BEFORE the drop, exactly as `ui_blank_tiles` does: a cell may
+        // not reference a tile whose slot is about to go back to the pool.
+        let tx = (idx as i32) % UI_GRID;
+        let ty = (idx as i32) / UI_GRID;
+        if let (Some(bg), Some(blank)) = (ctx.ui_bg.as_mut(), ctx.ui_blank.as_ref()) {
+            bg.set_tile_dynamic16(Vector2D::new(tx, ty), blank, TileEffect::default());
+        }
+        ui_drop_tile(ctx, idx);
+    }
+}
+
 /// `bg_tile_map_reserve(n)` — pre-size agb's shared live-tile map ONCE, at boot, on the empty
 /// heap. OPT-IN for games whose heaviest scene plus a full-screen UI repaint holds several hundred
 /// live tiles: without it, the map's 512 -> 1024 node rehash is a 20,480-byte contiguous ask
@@ -4518,6 +4598,11 @@ pub fn ui_clear_rect(args: &[Value]) -> Value {
                     while k < d.len() {
                         d[k] = 0;
                         k += 1;
+                    }
+                    // Offer the now-blank cell up; `ui_reclaim_drain` decides at the frame
+                    // boundary, and only if it is still blank by then.
+                    if ctx.ui_reclaim_on {
+                        ctx.ui_reclaim.push(idx as u16);
                     }
                 } else if ui_cell_solid_pal(ctx.ui_cell.get(idx).copied().unwrap_or(UI_CELL_EMPTY))
                     .is_some()
@@ -9561,6 +9646,9 @@ pub fn frame(_args: &[Value]) -> Value {
         // Page streamed map tiles BEFORE taking the graphics frame: the burst needs the whole
         // ctx (audio pump) and `gfx.frame()` borrows it.
         ctx.ui_began_this_frame = false;
+        // Before this frame's drawing and before its commit: a slot released here is back in the
+        // pool by the commit's gc, and nothing has yet repainted over a cell cleared last frame.
+        ui_reclaim_drain(ctx);
         prime_stream_layers(ctx);
         let __t1;
         let __t2;

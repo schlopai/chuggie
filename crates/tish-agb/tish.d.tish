@@ -302,3 +302,7 @@ declare fn ui_tiles_used(): i32
 // Pre-size agb's shared live-tile map at boot (opt-in; see the native's doc). Games with a
 // heavy scene + full-screen UI peak of 308..614 live tiles pass 600; everyone else, nothing.
 declare fn bg_tile_map_reserve(n: i32): void
+// Let `ui_clear_rect` hand a cell's tile back once it is genuinely blank, instead of the canvas
+// growing to the union of everything it ever painted. Opt-in, for a screen that lives across many
+// frames on a tight tile budget. See `ui_reclaim_tiles` in lib.rs.
+declare fn ui_reclaim_tiles(on: i32): void
