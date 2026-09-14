@@ -125,9 +125,9 @@ dependencies = [
 
 [[package]]
 name = "deckfile"
-version = "1.6.2"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d04090fc8bc108ccb772e290cf55fa32ae8e65221b8523db5565951d0407f445"
+checksum = "275c1f51fe2e1902b55088e6df20065733072c83d516ce6b5268c6112f86ae84"
 dependencies = [
  "tishlang_runtime",
 ]
