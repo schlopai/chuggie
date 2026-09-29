@@ -22,6 +22,13 @@ on:
 
   pull_request:
 
+# One live run per PR. A push to a PR branch cancels the run for the commit it just replaced —
+# nobody reads that verdict, and the verify matrix it was still grinding through is ~250 billed
+# minutes. Pushes to main are NEVER cancelled: the run on main is what cuts the prerelease and
+# what chuggie.dev reads its ROM artifacts from, so a superseded one still has to finish.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: write
