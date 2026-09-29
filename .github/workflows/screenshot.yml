@@ -13,53 +13,44 @@ on:
       - "scripts/screenshot.sh"
       - ".github/workflows/screenshot.yml"
 
+permissions:
+  contents: read
+  # The job runs in ghcr.io/schlopai/chuggie-toolchain, same as ci.yml's container jobs.
+  packages: read
+
 jobs:
   screenshot:
     runs-on: ubuntu-latest
+    # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node, imagemagick — comes
+    # prebuilt in this image rather than being reassembled per job. Built and published from
+    # schlopai/chuggie-toolchain; the tag is that Dockerfile's content hash, so what the job runs on
+    # cannot change behind the pin. It is the SAME tag ci.yml pins — move both together.
+    #
+    # This job used to rebuild all of that itself on every PR touching crates/**: apt, a libmgba
+    # source build (cached, but only the library), a rustup nightly, `cargo install agb-gbafix`
+    # (compiled every run), setup-node. That is what the image exists to remove, and ci.yml's rom and
+    # verify jobs had already moved into it; this was the one job still paying the old way.
+    container:
+      image: ghcr.io/schlopai/chuggie-toolchain:8f52ecdbceed
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 40
     steps:
       - name: Checkout chuggie
         uses: actions/checkout@v7
 
-      - name: Install tooling
-        run: sudo apt-get update && sudo apt-get install -y imagemagick python3-pil libfreetype6-dev pkg-config cmake libpng-dev zlib1g-dev
-      - name: Cache libmgba
-        id: mgba-cache
-        uses: actions/cache@v6
-        with:
-          path: ~/mgba-prefix
-          key: mgba-0.10.5-${{ runner.os }}
-      - name: Build libmgba 0.10.5
-        if: steps.mgba-cache.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch 0.10.5 https://github.com/mgba-emu/mgba /tmp/mgba-src
-          cmake -S /tmp/mgba-src -B /tmp/mgba-build -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$HOME/mgba-prefix" -DBUILD_QT=OFF -DBUILD_SDL=OFF \
-            -DUSE_FFMPEG=OFF -DUSE_SQLITE3=OFF -DUSE_DISCORD_RPC=OFF -DUSE_EDITLINE=OFF \
-            -DUSE_ELF=OFF -DUSE_EPOXY=OFF -DBUILD_GL=OFF -DBUILD_GLES2=OFF
-          make -C /tmp/mgba-build -j"$(nproc)" install
-
-      - name: Rust nightly + rust-src (GBA build-std target)
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2026-07-22
-          components: rust-src
-      - name: Install agb-gbafix (ELF -> .gba)
-        run: cargo install --locked agb-gbafix
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
       # Every cargo invocation in this repo resolves .cargo/config.toml's patch, which points at
       # node_modules/@tishlang/tish/crates — so node_modules must exist before ANY cargo command,
       # not just the ones that build a ROM.
       - name: Install the pinned tish compiler
         run: npm ci
 
+      # MGBA_PREFIX (/usr/local/mgba) is set by the image; scripts/shot_common.sh reads it, and
+      # ensure_gba_shot compiles tools/gba-shot against it with the image's cc.
       - name: Build the overworld-demo ROM and capture a headless screenshot
         env:
           TISH: ${{ github.workspace }}/node_modules/.bin/tish
-          MGBA_PREFIX: /home/runner/mgba-prefix
         run: ./scripts/screenshot.sh examples/overworld-demo/src/main.tish screenshot.png 200
 
       - name: Upload screenshot
