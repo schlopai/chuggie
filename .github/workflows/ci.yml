@@ -19,9 +19,34 @@ name: CI (test, prerelease)
 on:
   push:
     branches: [main]
+    # Files no job here reads. A push or PR that touches ONLY these does not start a run at all —
+    # on main that also means nightly.link keeps serving the previous, complete run's ROMs.
+    #
+    # NOT in this list, on purpose: examples/**/README.md and examples/README.md (examples_index
+    # checks them), packages/README.md (ships in the npm tarball), LICENSE (the release job gates on
+    # it). `*.md` without a leading `**/` matches the ROOT only. The discover job below applies the
+    # same list when it narrows the verify matrix — keep the two in step.
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "assets/README.md"
+      - "scripts/README.md"
+      - "tools/README.md"
+      - ".vscode/**"
+      - ".mcp.json"
 
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "assets/README.md"
+      - "scripts/README.md"
+      - "tools/README.md"
+      - ".vscode/**"
+      - ".mcp.json"
 
+  # By hand: always the FULL verify matrix, whatever the last push touched (see discover).
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -147,6 +172,10 @@ jobs:
   verify:
     name: verify ${{ matrix.example }}
     needs: [crates, discover]
+    # An empty matrix is a workflow error, not a no-op. discover hands one over when a push to main
+    # touched nothing a ROM depends on; the job is then SKIPPED, and release/example_roms below know
+    # skipped from failed.
+    if: needs.discover.outputs.examples != '[]'
     runs-on: ubuntu-latest
     # The toolchain — libmgba 0.10.5, the pinned rust nightly, agb-gbafix, node — comes prebuilt
     # in this image rather than being reassembled per job. Built and published from
@@ -215,7 +244,10 @@ jobs:
     name: Discover verifiers
     runs-on: ubuntu-latest
     outputs:
-      examples: ${{ steps.list.outputs.examples }}
+      # `examples` is what verify runs. `carry` is what it does NOT run this time and example_roms
+      # must copy over from an earlier main run instead (empty unless narrow decided to narrow).
+      examples: ${{ steps.narrow.outputs.examples }}
+      carry: ${{ steps.narrow.outputs.carry }}
     steps:
       - uses: actions/checkout@v7
       - id: list
@@ -237,8 +269,72 @@ jobs:
                    grep -q '"build"' "$d/package.json" || continue
                    printf '%s\n' "$ex"
                  done | sort | jq -R . | jq -sc .)
-          echo "examples=$list" >> "$GITHUB_OUTPUT"
-          echo "Verifying $(echo "$list" | jq 'length') examples"
+          echo "all=$list" >> "$GITHUB_OUTPUT"
+          echo "$(echo "$list" | jq 'length') examples have a verifier"
+
+      # ── On a push to main, verify only what that push could have changed. ──────────────────────
+      #
+      # A PR run verifies every example; the merge then pushes the SAME tree to main and, until now,
+      # verified all 90 again — ~250 billed minutes a merge, for 44 merges a month. The re-run on
+      # main is worth having (the merge commit is not the PR head; main may have moved under it),
+      # but a change confined to examples/<a>/ and examples/<b>/ cannot alter any other ROM, so
+      # only a and b are rebuilt.
+      #
+      # Anything shared — crates/, packages/, scripts/, assets/, tools/, .cargo/, the toolchain pin,
+      # package.json / package-lock.json, this file — is an input to EVERY ROM, and one such file in
+      # the push means the full matrix. This is decided by elimination, not by a list of what is
+      # shared: every changed file must sit under some examples/<name>/, or nothing is narrowed.
+      #
+      # Examples do reach into each other (sunnyside-* import ../sunnyside/src, warforge reads
+      # ../rts-*/), so a touched example drags along every example whose files mention ../<it>/,
+      # to a fixed point. That over-includes (a mention in a comment counts); it never under-includes.
+      #
+      # PRs and workflow_dispatch always get the full matrix, and so does any push whose parent
+      # cannot be fetched (first push, a force-push whose old tip is gone).
+      - id: narrow
+        env:
+          ALL: ${{ steps.list.outputs.all }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          examples="$ALL"
+          carry='[]'
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            if [[ "$BEFORE" =~ ^0+$ ]] || ! git fetch -q --no-tags --depth=1 origin "$BEFORE"; then
+              echo "::notice::No parent to diff against (${BEFORE:0:12}) — verifying every example."
+            else
+              changed="$(git diff --name-only "$BEFORE" "$GITHUB_SHA")"
+              # The same files `paths-ignore` at the top of this file leaves out, plus the generated
+              # examples index (examples_index checks it; no ROM reads it). Keep in step with `on:`.
+              relevant="$(printf '%s\n' "$changed" \
+                | grep -Ev '^(docs/|[^/]+\.md$|assets/README\.md$|scripts/README\.md$|tools/README\.md$|\.vscode/|\.mcp\.json$|examples/README\.md$)' \
+                || true)"
+              if [ -n "$relevant" ] && printf '%s\n' "$relevant" | grep -qvE '^examples/[^/]+/'; then
+                echo "A shared file changed — verifying every example:"
+                printf '%s\n' "$relevant" | grep -vE '^examples/[^/]+/' | sed 's/^/  /'
+              else
+                touched="$(printf '%s\n' "$relevant" | sed -nE 's#^examples/([^/]+)/.*#\1#p' | sort -u)"
+                # Close over ../<name>/ references until nothing new appears.
+                while :; do
+                  pat="$(printf '%s\n' "$touched" | paste -sd'|' -)"
+                  [ -n "$pat" ] || break
+                  # `|| true`: no file mentioning it is the common case, and grep says so with exit 1.
+                  more="$(grep -rlE "\.\./($pat)/" examples --exclude-dir=node_modules --exclude-dir=.tish 2>/dev/null \
+                    | cut -d/ -f2 | sort -u || true)"
+                  next="$(printf '%s\n%s\n' "$touched" "$more" | sed '/^$/d' | sort -u)"
+                  [ "$next" = "$touched" ] && break
+                  touched="$next"
+                done
+                touched_json="$(printf '%s\n' "$touched" | sed '/^$/d' | jq -R . | jq -sc .)"
+                # Only examples that HAVE a verifier (a touched bench-* is not in $ALL); order as $ALL.
+                examples="$(jq -nc --argjson all "$ALL" --argjson t "$touched_json" '$all - ($all - $t)')"
+                carry="$(jq -nc --argjson all "$ALL" --argjson e "$examples" '$all - $e')"
+                echo "::notice::Push touched only examples/ — verifying $(jq length <<<"$examples") of $(jq length <<<"$ALL") examples; the rest are carried forward from the previous main run."
+              fi
+            fi
+          fi
+          echo "examples=$examples" >> "$GITHUB_OUTPUT"
+          echo "carry=$carry" >> "$GITHUB_OUTPUT"
+          echo "Verifying $(jq length <<<"$examples") examples: $(jq -r 'join(" ")' <<<"$examples")"
 
   # ── The examples index is GENERATED, so it cannot drift from the examples it lists. ──────────────
   # Fails on two things: an example with no README.md (nobody can find an undocumented example, and
@@ -303,7 +399,17 @@ jobs:
   # ── Green main → prerelease. Promote it by hand to publish. ───────────────────────────────────
   release:
     name: Prerelease
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Spelled out per job rather than the bare default, because `verify` may legitimately be
+    # SKIPPED on a push to main (discover narrowed it to nothing — the PR run already verified that
+    # tree) and the default `needs` rule treats a skipped dependency like a failed one. Everything
+    # else must have actually succeeded; a skipped `crates` or `rom` is still no release.
+    if: >-
+      always()
+      && github.ref == 'refs/heads/main' && github.event_name == 'push'
+      && needs.crates.result == 'success'
+      && needs.rom.result == 'success'
+      && needs.release_check.result == 'success'
+      && (needs.verify.result == 'success' || needs.verify.result == 'skipped')
     needs: [crates, rom, verify, release_check]
     runs-on: ubuntu-latest
     permissions:
@@ -408,14 +514,94 @@ jobs:
   # so is what turned this pipeline into two build paths.
   example_roms:
     name: Bundle example ROMs
-    needs: verify
-    if: always() && needs.verify.result != 'cancelled'
+    needs: [verify, discover]
+    # `verify` skipped (not failed) is a narrowed push to main that rebuilt nothing — this job still
+    # has to run then, because the carry-forward below is what keeps that run's artifacts complete.
+    if: always() && needs.discover.result == 'success' && needs.verify.result != 'cancelled'
     runs-on: ubuntu-latest
+    permissions:
+      # The carry-forward lists and downloads an EARLIER run's artifacts through the REST API.
+      actions: read
     steps:
       - uses: actions/download-artifact@v8
         with:
           pattern: example-roms-verify-*
           path: incoming
+
+      # ── Carry forward what this run did not rebuild. ───────────────────────────────────────────
+      #
+      # chuggie.dev does not read the bundle below. Its player proxies
+      #   https://nightly.link/schlopai/chuggie/workflows/ci/main/example-roms-verify-<id>.zip
+      # which is the per-example artifact of the LATEST SUCCESSFUL run of this workflow on main.
+      # When discover narrowed the matrix, this run is that run, and it uploaded only the examples it
+      # rebuilt: every other PLAY button on the site would 404 the moment it went green. So the
+      # examples this run skipped are fetched from the newest earlier main run that has them and
+      # re-uploaded here under the same names, and the latest main run always carries all 90.
+      #
+      # Skipped examples ONLY. One this run verified and failed to build gets no stale stand-in — a
+      # missing ROM there is the signal it always was.
+      #
+      # actions/upload-artifact is one artifact per step and this list is dynamic, so the upload
+      # goes through @actions/artifact, the library that action is built on, pinned. Same runtime
+      # token, same backend, same artifact.
+      - name: Install the artifact client for the carry-forward
+        if: needs.discover.outputs.carry != '[]'
+        run: npm install --no-save --no-audit --no-fund @actions/artifact@6.2.1
+      - name: Carry forward the ROMs this run did not rebuild
+        if: needs.discover.outputs.carry != '[]'
+        uses: actions/github-script@v8
+        env:
+          CARRY: ${{ needs.discover.outputs.carry }}
+          GH_TOKEN: ${{ github.token }}
+        with:
+          script: |
+            const fs = require('fs'), path = require('path');
+            const { DefaultArtifactClient } = require(path.join(process.cwd(), 'node_modules/@actions/artifact'));
+            const { owner, repo } = context.repo;
+            const wanted = new Set(JSON.parse(process.env.CARRY).map(ex => `example-roms-verify-${ex}`));
+
+            // Newest artifact per name, looking back through the last completed runs on main. A run
+            // that died before verify has none and contributes nothing; one where a verifier failed
+            // still has the ROMs it did build.
+            const found = new Map();
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner, repo, workflow_id: 'ci.yml', branch: 'main', status: 'completed', per_page: 10,
+            });
+            for (const run of runs.data.workflow_runs) {
+              if (run.id === context.runId) continue;
+              const arts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts,
+                                                 { owner, repo, run_id: run.id, per_page: 100 });
+              for (const a of arts) {
+                if (wanted.has(a.name) && !a.expired && !found.has(a.name)) found.set(a.name, { run, a });
+              }
+              if (found.size === wanted.size) break;
+            }
+            if (found.size === 0) {
+              core.setFailed('no earlier completed run on main carries example ROMs — run this workflow by hand (workflow_dispatch) to rebuild every example');
+              return;
+            }
+            for (const name of wanted) {
+              if (!found.has(name)) core.warning(`${name}: not in the last 10 main runs either — no ROM to carry`);
+            }
+
+            const client = new DefaultArtifactClient();
+            let n = 0;
+            for (const [name, { run, a }] of found) {
+              // Into incoming/<name>/ — the layout download-artifact used above — so the bundle
+              // below folds these in next to the ones this run built.
+              const dir = path.join('incoming', name);
+              await client.downloadArtifact(a.id, {
+                path: dir,
+                findBy: { token: process.env.GH_TOKEN, workflowRunId: run.id, repositoryOwner: owner, repositoryName: repo },
+              });
+              const files = fs.readdirSync(dir).filter(f => f.endsWith('.gba')).map(f => path.join(dir, f));
+              if (files.length === 0) { core.warning(`${name} from run ${run.id} holds no .gba`); continue; }
+              await client.uploadArtifact(name, files, dir, { retentionDays: 30 });
+              core.info(`${name}: carried from run ${run.id}`);
+              n++;
+            }
+            core.notice(`${n} example ROM artifact(s) carried forward from earlier main runs`);
+
       - name: Fold into <id>/<name>.gba
         run: |
           shopt -s nullglob
