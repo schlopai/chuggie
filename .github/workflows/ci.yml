@@ -49,6 +49,28 @@ jobs:
       - uses: actions/checkout@v7
       # freetype-sys in scenepack's host dependency tree links the system freetype.
 
+      # The image ships the toolchain, not a warm build: every run re-downloaded the registry and the
+      # agb fork and recompiled every dependency from scratch. Cargo lives at /usr/local/cargo in the
+      # image (CARGO_HOME there, not ~/.cargo), and these crates are excluded from the root workspace
+      # so each has its own target/ (see Cargo.toml's note and scripts/clean.sh).
+      #
+      # Keyed on the nightly pin FIRST so restore-keys never hand a different rustc's artifacts to
+      # this one (cargo would ignore them and they would only bloat the archive), then on everything
+      # that fixes the dependency graph. Sources under crates/ are path deps; cargo fingerprints those
+      # by mtime, and a fresh checkout is always newer, so they rebuild regardless — the cache is the
+      # registry, the agb fork and the compiled dependency layer under them.
+      - name: Cache cargo registry and the per-crate target dirs
+        uses: actions/cache@v6
+        with:
+          path: |
+            /usr/local/cargo/registry/index
+            /usr/local/cargo/registry/cache
+            /usr/local/cargo/git/db
+            crates/*/target
+          key: crates-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('crates/**/Cargo.lock', '.cargo/config.toml', 'package.json') }}
+          restore-keys: |
+            crates-${{ hashFiles('rust-toolchain.toml') }}-
+
       # Only scenepack builds for the host — the rest are thumbv4t-none-eabi only and are covered by
       # the ROM job below. This is where the shared .deck conformance corpus runs: corpus_bakes and
       # gba_profile_is_honest prove this bake still agrees with @spacedevin/deck and that the `gba`
@@ -114,11 +136,36 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 40
+    env:
+      # ONE cargo target dir for every ROM build in this run, and the same path in every verify job,
+      # so one cache serves all of them. `tish build` normally writes each example's build under its
+      # own .tish/gba/<pkg>/target, which no cache key could share across 90 jobs; TISH_GBA_TARGET_DIR
+      # is tish's explicit opt-in to point cargo AND its ELF lookup at one shared directory (the
+      # ambient CARGO_TARGET_DIR is scrubbed by tish for the reason rom.sh documents — do not use it).
+      # The dependency layer (core/alloc from build-std, the agb fork and everything under it) has the
+      # same fingerprint whichever example built it, so a target dir warmed by grid-demo is warm for
+      # all of them; only the path deps and the game crate itself compile per job.
+      TISH_GBA_TARGET_DIR: ${{ github.workspace }}/target/gba
     steps:
       - uses: actions/checkout@v7
       # The SAME pinned nightly rust-toolchain.toml names — a floating nightly changes ROM
       # codegen and shifts frame-exact verifier timings against local builds.
       # freetype-sys in the host-side asset bake links the system freetype.
+      #
+      # This job is the one that SAVES the ROM cache: it always runs, there is exactly one of it, and
+      # the 90 verify jobs only restore (see there). Cargo lives at /usr/local/cargo in the image.
+      # Nightly pin first in the key so a restore never crosses a rustc change.
+      - name: Cache cargo registry and the shared ROM target dir
+        uses: actions/cache@v6
+        with:
+          path: |
+            /usr/local/cargo/registry/index
+            /usr/local/cargo/registry/cache
+            /usr/local/cargo/git/db
+            target/gba
+          key: gba-target-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('.cargo/config.toml', 'package.json', 'crates/**/Cargo.toml') }}
+          restore-keys: |
+            gba-target-${{ hashFiles('rust-toolchain.toml') }}-
       - name: Install the pinned tish compiler
         run: npm ci
       - name: Build grid-demo
@@ -162,12 +209,30 @@ jobs:
       fail-fast: false
       matrix:
         example: ${{ fromJSON(needs.discover.outputs.examples) }}
+    env:
+      # The same shared target dir the rom job warms — see the note there. verify.sh scripts that
+      # `unset CARGO_TARGET_DIR` leave this alone; tish reads it itself.
+      TISH_GBA_TARGET_DIR: ${{ github.workspace }}/target/gba
     steps:
       - uses: actions/checkout@v7
       # libmgba is built from source at the SAME version the local machines run (Ubuntu noble
       # packages 0.10.2, and the version gap shows up as emulator-timing and capture failures).
       # The SAME pinned nightly rust-toolchain.toml names — a floating nightly changes ROM
       # codegen and shifts frame-exact verifier timings against local builds.
+      #
+      # RESTORE only. 90 jobs saving the same key would be 89 "cache already exists" warnings and
+      # 89 archives built for nothing; the rom job is the single writer. Same key and paths as there.
+      - name: Restore cargo registry and the shared ROM target dir
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            /usr/local/cargo/registry/index
+            /usr/local/cargo/registry/cache
+            /usr/local/cargo/git/db
+            target/gba
+          key: gba-target-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('.cargo/config.toml', 'package.json', 'crates/**/Cargo.toml') }}
+          restore-keys: |
+            gba-target-${{ hashFiles('rust-toolchain.toml') }}-
       # Several verifiers call tools/gba-shot (and gba-link) directly; the binaries are
       # gitignored, so build them from source here (same flags scripts/screenshot.sh uses).
       - name: Build the gba-shot/gba-link helper tools
