@@ -13,6 +13,12 @@ on:
       - "scripts/screenshot.sh"
       - ".github/workflows/screenshot.yml"
 
+# Same rule as ci.yml: a push to the PR cancels the run for the commit it replaced. Written the same
+# way as there (pull_request-only cancel) so the two stay in step if this ever gains a push trigger.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   screenshot:
     runs-on: ubuntu-latest
